@@ -11,36 +11,36 @@ use crate::{cli::InsertArgs, clients::memory::MemoryClient};
 use super::CommandContext;
 
 const EMBEDDING_API_ENV_VAR: &str = "EMBEDDING_API_ENDPOINT";
+const LATE_CHUNKING_PATH: &str = "/late-chunking";
 
 pub async fn handle(args: InsertArgs, ctx: &CommandContext) -> Result<()> {
-    let agent = ctx.agent_factory.build().await?;
-    let memory = Principal::from_text(&args.memory_id)
-        .context("Failed to parse canister id for insert command")?;
-    let client = MemoryClient::new(agent, memory);
+    let client = build_memory_client(&args.memory_id, ctx).await?;
+    let chunks = late_chunking(&args.text).await?;
 
     info!(
         canister_id = %client.canister_id(),
-        text = %args.text,
-        "insert command invoked"
+        chunk_count = chunks.len(),
+        tag = %args.tag,
+        "insert command prepared embeddings"
     );
 
-    let chunks = late_chunking(&args.text).await?;
-
     for chunk in chunks {
-        let text = json!({
-            "tag": args.tag,
-            "sentence": chunk.sentence
-        })
-        .to_string();
-        client.insert(chunk.embedding, &text).await?;
+        let payload = format_chunk_text(&args.tag, &chunk.sentence);
+        client.insert(chunk.embedding, &payload).await?;
     }
 
     Ok(())
 }
 
+async fn build_memory_client(id: &str, ctx: &CommandContext) -> Result<MemoryClient> {
+    let agent = ctx.agent_factory.build().await?;
+    let memory =
+        Principal::from_text(id).context("Failed to parse canister id for insert command")?;
+    Ok(MemoryClient::new(agent, memory))
+}
+
 async fn late_chunking(text: &str) -> Result<Vec<LateChunk>> {
-    let endpoint = env::var(EMBEDDING_API_ENV_VAR)?;
-    let url = format!("{endpoint}/late-chunking");
+    let url = embedding_endpoint(LATE_CHUNKING_PATH)?;
     let response = reqwest::Client::new()
         .post(url)
         .json(&LateChunkingRequest { markdown: text })
@@ -61,6 +61,17 @@ async fn late_chunking(text: &str) -> Result<Vec<LateChunk>> {
     Ok(payload.chunks)
 }
 
+fn format_chunk_text(tag: &str, sentence: &str) -> String {
+    json!({ "tag": tag, "sentence": sentence }).to_string()
+}
+
+fn embedding_endpoint(path: &str) -> Result<String> {
+    let base = env::var(EMBEDDING_API_ENV_VAR).context(format!(
+        "Set {EMBEDDING_API_ENV_VAR} to call the embedding API"
+    ))?;
+    Ok(format!("{base}{path}"))
+}
+
 #[derive(Serialize)]
 struct LateChunkingRequest<'a> {
     markdown: &'a str,
@@ -71,7 +82,6 @@ struct LateChunkingResponse {
     chunks: Vec<LateChunk>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct LateChunk {
     embedding: Vec<f32>,

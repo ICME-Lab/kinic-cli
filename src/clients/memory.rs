@@ -4,30 +4,30 @@ use ic_agent::{Agent, export::Principal};
 
 pub struct MemoryClient {
     agent: Agent,
-    memory_id: Principal,
+    canister_id: Principal,
 }
 
 impl MemoryClient {
-    pub fn new(agent: Agent, memory_id: Principal) -> Self {
-        Self { agent, memory_id }
+    pub fn new(agent: Agent, canister_id: Principal) -> Self {
+        Self { agent, canister_id }
     }
 
     pub async fn insert(&self, embedding: Vec<f32>, text: &str) -> Result<()> {
         let payload = encode_insert_args(embedding, text)?;
         let response = self
             .agent
-            .update(&self.memory_id, "insert")
+            .update(&self.canister_id, "insert")
             .with_arg(payload)
             .call_and_wait()
             .await
-            .context("Failed to call deploy_instance")?;
+            .context("Failed to call insert on memory canister")?;
 
-        Decode!(&response, u32).context("Failed to decode deploy_instance response")?;
+        Decode!(&response, u32).context("Failed to decode insert response")?;
         Ok(())
     }
 
     pub fn canister_id(&self) -> &Principal {
-        &self.memory_id
+        &self.canister_id
     }
 }
 
