@@ -26,6 +26,21 @@ impl MemoryClient {
         Ok(())
     }
 
+    pub async fn search(&self, embedding: Vec<f32>) -> Result<Vec<(f32, String)>> {
+        let payload = encode_search_args(embedding)?;
+        let response = self
+            .agent
+            .query(&self.canister_id, "search")
+            .with_arg(payload)
+            .call()
+            .await
+            .context("Failed to call search on memory canister")?;
+
+        let results =
+            Decode!(&response, Vec<(f32, String)>).context("Failed to decode search response")?;
+        Ok(results)
+    }
+
     pub fn canister_id(&self) -> &Principal {
         &self.canister_id
     }
@@ -33,4 +48,7 @@ impl MemoryClient {
 
 fn encode_insert_args(embedding: Vec<f32>, text: &str) -> Result<Vec<u8>> {
     Ok(candid::encode_args((embedding, text.to_string()))?)
+}
+fn encode_search_args(embedding: Vec<f32>) -> Result<Vec<u8>> {
+    Ok(candid::encode_one(embedding)?)
 }

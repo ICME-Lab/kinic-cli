@@ -2,6 +2,7 @@ mod agent;
 mod cli;
 pub(crate) mod clients;
 mod commands;
+mod embedding;
 
 use anyhow::Result;
 use clap::Parser;

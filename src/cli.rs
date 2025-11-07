@@ -31,6 +31,7 @@ pub enum Command {
     Create(CreateArgs),
     List(ListArgs),
     Insert(InsertArgs),
+    Search(SearchArgs),
 }
 
 #[derive(Args, Debug)]
@@ -55,4 +56,13 @@ pub struct InsertArgs {
 
     #[arg(long)]
     pub tag: String,
+}
+
+#[derive(Args, Debug)]
+pub struct SearchArgs {
+    #[arg(long)]
+    pub memory_id: String,
+
+    #[arg(long)]
+    pub query: String,
 }
