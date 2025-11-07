@@ -52,4 +52,7 @@ pub struct InsertArgs {
 
     #[arg(long)]
     pub text: String,
+
+    #[arg(long)]
+    pub tag: String,
 }

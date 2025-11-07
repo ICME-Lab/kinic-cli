@@ -7,6 +7,7 @@ use icrc_ledger_types::{
     icrc1::{account::Account, transfer::TransferError},
     icrc2::approve::{ApproveArgs, ApproveError},
 };
+use serde_json::json;
 use thiserror::Error;
 
 use crate::clients::{LAUNCHER_CANISTER, LEDGER_CANISTER};
@@ -103,7 +104,10 @@ impl LauncherClient {
 }
 
 fn encode_deploy_args(name: &str, description: &str) -> Result<Vec<u8>> {
-    let payload = format!("{{name: {name}, description: {description}}}");
+    let payload = json!({
+        "name": name,
+        "description": description})
+    .to_string();
     Ok(candid::encode_args((payload, DEFAULT_VECTOR_DIM))?)
 }
 

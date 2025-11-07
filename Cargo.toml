@@ -25,3 +25,6 @@ tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 icrc-ledger-types = "0.1.12"
 serde = { version =  "1.0", features = ["derive"] }
 thiserror = "2.0.17"
+reqwest = { version = "0.12.7", default-features = false, features = ["json", "rustls-tls"] }
+dotenvy = "0.15.7"
+serde_json = "1.0.145"
