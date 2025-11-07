@@ -51,8 +51,8 @@ Command-line companion for deploying and operating Kinic “memory” canisters.
 All commands require `--identity`. Use `--ic` to talk to mainnet; omit it (or leave false) for the local replica.
 
 ```bash
-cargo run -- --identity default list
-cargo run -- --identity default create \
+cargo run -- --identity alice list
+cargo run -- --identity alice create \
   --name "Demo memory" \
   --description "Local test canister"
 ```
@@ -60,7 +60,7 @@ cargo run -- --identity default create \
 ### Insert example
 
 ```bash
-cargo run -- --identity default insert \
+cargo run -- --identity alice insert \
   --memory-id yta6k-5x777-77774-aaaaa-cai \
   --text "# Notes\n\nHello Kinic!" \
   --tag diary_7th_Nov_2025
@@ -71,7 +71,7 @@ This calls the embedding API’s `/late-chunking` endpoint, then stores each chu
 ### Search example
 
 ```bash
-cargo run -- --identity default search \
+cargo run -- --identity alice search \
   --memory-id yta6k-5x777-77774-aaaaa-cai \
   --query "Hello"
 ```
