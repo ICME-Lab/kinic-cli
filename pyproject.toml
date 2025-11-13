@@ -35,3 +35,4 @@ exclude = ["tests"]
 target = "kinic_py._lib"
 path = "Cargo.toml"
 binding = "PyO3"
+features = ["python-bindings"]

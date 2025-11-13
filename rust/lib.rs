@@ -4,18 +4,11 @@ pub mod cli;
 pub(crate) mod clients;
 mod commands;
 mod embedding;
+#[cfg(feature = "python-bindings")]
 mod python;
 
 use anyhow::Result;
 use clap::Parser;
-use pyo3::{
-    exceptions::{PyRuntimeError, PyValueError},
-    prelude::*,
-    types::PyModule,
-    wrap_pyfunction,
-};
-use std::path::PathBuf;
-use tokio::runtime::Runtime;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::fmt;
 
@@ -24,6 +17,18 @@ use crate::{
     cli::Cli,
     commands::{CommandContext, run_command},
 };
+
+#[cfg(feature = "python-bindings")]
+use pyo3::{
+    exceptions::{PyRuntimeError, PyValueError},
+    prelude::*,
+    types::PyModule,
+    wrap_pyfunction,
+};
+#[cfg(feature = "python-bindings")]
+use std::path::PathBuf;
+#[cfg(feature = "python-bindings")]
+use tokio::runtime::Runtime;
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
@@ -43,6 +48,7 @@ pub async fn run() -> Result<()> {
     run_command(cli.command, context).await
 }
 
+#[cfg(feature = "python-bindings")]
 #[pymodule]
 fn _lib(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(greet, m)?)?;
@@ -53,11 +59,13 @@ fn _lib(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "python-bindings")]
 #[pyfunction]
 fn greet() -> PyResult<String> {
     Ok("hello!".to_string())
 }
 
+#[cfg(feature = "python-bindings")]
 #[pyfunction]
 #[pyo3(signature = (identity, name, description, ic=None))]
 fn create_memory(
@@ -75,6 +83,7 @@ fn create_memory(
     ))
 }
 
+#[cfg(feature = "python-bindings")]
 #[pyfunction]
 #[pyo3(signature = (identity, ic=None))]
 fn list_memories(identity: &str, ic: Option<bool>) -> PyResult<Vec<String>> {
@@ -82,6 +91,7 @@ fn list_memories(identity: &str, ic: Option<bool>) -> PyResult<Vec<String>> {
     block_on_py(python::list_memories(ic, identity.to_string()))
 }
 
+#[cfg(feature = "python-bindings")]
 #[pyfunction]
 #[pyo3(signature = (identity, memory_id, tag, text=None, file_path=None, ic=None))]
 fn insert_memory(
@@ -110,6 +120,7 @@ fn insert_memory(
     ))
 }
 
+#[cfg(feature = "python-bindings")]
 #[pyfunction]
 #[pyo3(signature = (identity, memory_id, query, ic=None))]
 fn search_memories(
@@ -127,6 +138,7 @@ fn search_memories(
     ))
 }
 
+#[cfg(feature = "python-bindings")]
 fn block_on_py<F, T>(future: F) -> PyResult<T>
 where
     F: std::future::Future<Output = Result<T>> + Send + 'static,
@@ -138,6 +150,7 @@ where
         .map_err(anyhow_to_pyerr)
 }
 
+#[cfg(feature = "python-bindings")]
 fn anyhow_to_pyerr(err: anyhow::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{err:?}"))
 }

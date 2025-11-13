@@ -28,7 +28,11 @@ thiserror = "2.0.17"
 reqwest = { version = "0.12.7", default-features = false, features = ["json", "rustls-tls"] }
 dotenvy = "0.15.7"
 serde_json = "1.0.145"
-pyo3 = { version = "0.27", features = ["extension-module"] }
+pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python-bindings = ["pyo3"]
 
 [lib]
 name = "_lib"
