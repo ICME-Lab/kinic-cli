@@ -215,7 +215,7 @@ Ready to deploy on mainnet? **DM https://x.com/wyatt_benno for KINIC prod tokens
 
 ## Learn More
 
-- **Blog Post**: [Trustless AI can't work without Trustless AI Memory](link-to-post)
+- **Blog Post**: [Trustless AI can't work without Trustless AI Memory](https://blog.icme.io/trustless-agents-cant-work-without-trustless-agentic-memory/)
 - **Vectune**: WASM-based vector database
 - **[JOLT Atlas](https://github.com/ICME-Lab/jolt-atlas)**: zkML framework for embedding verification
 
