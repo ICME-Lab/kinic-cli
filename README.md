@@ -1,6 +1,6 @@
 #  Kinic CLI - Trustless Agentic Memory
 
-**OPEN BETA v0.1** - upvote, share, and provide feedback :)
+**OPEN BETA v0.1** - star, share, and provide feedback :)
 
 Python bindings for the Kinic CLI core, enabling you to build AI agents with verifiable, owned memory on the Internet Computer. Give your agents the memory they can prove, own, and carry anywhere.
 
