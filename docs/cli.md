@@ -63,6 +63,8 @@ cargo run -- --identity alice create \
 cargo run -- convert-pdf --file-path ./docs/report.pdf
 ```
 
+> PDF conversion uses `pdftotext` from Poppler. Install it first (e.g., `brew install poppler` on macOS). If it is missing, the command will fail instead of falling back to a noisy extractor.
+
 ### Insert PDF (converted to markdown)
 
 ```bash

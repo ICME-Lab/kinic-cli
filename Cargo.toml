@@ -30,6 +30,7 @@ dotenvy = "0.15.7"
 serde_json = "1.0.145"
 pyo3 = { version = "0.27", features = ["extension-module", "abi3-py38"], optional = true }
 pdf-extract = "0.8"
+gag = "1.0"
 
 [features]
 default = []
