@@ -109,6 +109,33 @@ for score, payload in km.search(memory_id, "Hello"):
 
 ---
 
+## Insert a PDF (CLI + Python)
+
+CLI command (converts to markdown first):
+```bash
+cargo run -- --identity <name> insert-pdf \
+  --memory-id <memory canister id> \
+  --file-path ./docs/report.pdf \
+  --tag quarterly_report
+```
+
+Python helper (preferred: `insert_pdf_file`):
+```python
+from kinic_py import KinicMemories
+
+km = KinicMemories("<name>")  # add ic=True for mainnet
+memory_id = "<your memory canister id>"
+
+chunks = km.insert_pdf_file(memory_id, "quarterly_report", "./docs/report.pdf")
+print(f"Inserted {chunks} PDF chunks")
+```
+
+The deprecated `insert_pdf(...)` alias still works, but `insert_pdf_file(...)` is the canonical API.
+
+See `python/examples/insert_pdf_file.py` for a runnable script.
+
+---
+
 ## API Reference
 
 ### Class: `KinicMemories`
