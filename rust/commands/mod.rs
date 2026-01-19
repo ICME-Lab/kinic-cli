@@ -7,6 +7,7 @@ pub mod balance;
 pub mod config;
 pub mod convert_pdf;
 pub mod create;
+pub mod export_all;
 pub mod ii_login;
 pub mod insert;
 pub mod insert_raw;
@@ -34,6 +35,7 @@ pub async fn run_command(command: Command, ctx: CommandContext) -> Result<()> {
         Command::Search(args) => search::handle(args, &ctx).await,
         Command::SearchRaw(args) => search_raw::handle(args, &ctx).await,
         Command::TaggedEmbeddings(args) => tagged_embeddings::handle(args, &ctx).await,
+        Command::ExportAll(args) => export_all::handle(args, &ctx).await,
         Command::ConvertPdf(args) => convert_pdf::handle(args).await,
         Command::Config(args) => config::handle(args, &ctx).await,
         Command::Update(args) => update::handle(args, &ctx).await,

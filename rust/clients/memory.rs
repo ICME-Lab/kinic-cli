@@ -56,6 +56,21 @@ impl MemoryClient {
         Ok(results)
     }
 
+    pub async fn export_all(&self) -> Result<Vec<(u32, Vec<f32>, String)>> {
+        let payload = encode_export_all_args()?;
+        let response = self
+            .agent
+            .query(&self.canister_id, "export_all")
+            .with_arg(payload)
+            .call()
+            .await
+            .context("Failed to call export_all on memory canister")?;
+
+        let results = Decode!(&response, Vec<(u32, Vec<f32>, String)>)
+            .context("Failed to decode export_all response")?;
+        Ok(results)
+    }
+
     pub async fn add_new_user(&self, principal: Principal, role: u8) -> Result<()> {
         let payload = encode_add_user_args(principal, role)?;
         self.agent
@@ -98,6 +113,9 @@ fn encode_add_user_args(principal: Principal, role: u8) -> Result<Vec<u8>> {
 }
 fn encode_tagged_embeddings_args(tag: String) -> Result<Vec<u8>> {
     Ok(candid::encode_one(tag)?)
+}
+fn encode_export_all_args() -> Result<Vec<u8>> {
+    Ok(candid::encode_args(())?)
 }
 fn encode_reset_args(dim: usize) -> Result<Vec<u8>> {
     Ok(candid::encode_one(dim)?)

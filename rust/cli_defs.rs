@@ -69,6 +69,8 @@ pub enum Command {
     SearchRaw(SearchRawArgs),
     #[command(about = "Fetch embeddings for a tag from a memory canister")]
     TaggedEmbeddings(TaggedEmbeddingsArgs),
+    #[command(about = "Export all embeddings and texts from a memory canister")]
+    ExportAll(ExportAllArgs),
     #[command(about = "Manage Kinic CLI configuration")]
     Config(ConfigArgs),
     #[command(about = "Update a memory canister instance")]
@@ -215,6 +217,23 @@ pub struct TaggedEmbeddingsArgs {
 
     #[arg(long, required = true, help = "Tag to fetch embeddings for")]
     pub tag: String,
+}
+
+#[derive(Args, Debug)]
+pub struct ExportAllArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Principal of the memory canister to export"
+    )]
+    pub memory_id: String,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Write JSON output to a file instead of stdout"
+    )]
+    pub out: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]

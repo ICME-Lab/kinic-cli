@@ -2,8 +2,8 @@
     "canisters": {
         "launcher": {
             "type": "custom",
-            "candid": "https://github.com/ICME-Lab/kinic-cli/releases/download/v0.2.4-beta/service.did",
-            "wasm" : "https://github.com/ICME-Lab/kinic-cli/releases/download/v0.2.4-beta/launcher.wasm.gz"
+            "candid": "https://github.com/ICME-Lab/kinic-cli/releases/download/v0.2.5-beta/service.did",
+            "wasm" : "https://github.com/ICME-Lab/kinic-cli/releases/download/v0.2.5-beta/launcher.wasm.gz"
         },
         "icrc1_ledger_canister": {
             "type": "custom",
