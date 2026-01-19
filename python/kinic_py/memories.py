@@ -8,6 +8,7 @@ from typing import List, Sequence, Tuple
 from . import _lib as native
 
 ScoreResult = Sequence[Tuple[float, str]]
+ExportResult = Sequence[Tuple[int, List[float], str]]
 
 
 class KinicMemories:
@@ -67,6 +68,10 @@ class KinicMemories:
     def tagged_embeddings(self, memory_id: str, tag: str) -> List[List[float]]:
         """Fetch all embeddings associated with a tag."""
         return tagged_embeddings(self.identity, memory_id, tag, ic=self.ic)
+
+    def export_all(self, memory_id: str) -> ExportResult:
+        """Export all embeddings and data from a memory canister."""
+        return export_all(self.identity, memory_id, ic=self.ic)
 
     def ask_ai(
         self,
@@ -226,6 +231,15 @@ def tagged_embeddings(
     ic: bool | None = None,
 ) -> List[List[float]]:
     return native.tagged_embeddings(identity, memory_id, tag, ic=ic)
+
+
+def export_all(
+    identity: str,
+    memory_id: str,
+    *,
+    ic: bool | None = None,
+) -> ExportResult:
+    return native.export_all(identity, memory_id, ic=ic)
 
 
 def ask_ai(

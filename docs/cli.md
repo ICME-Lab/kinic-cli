@@ -125,6 +125,16 @@ cargo run -- --identity alice search \
 
 The CLI fetches an embedding for the query and prints the scored matches returned by the memory canister.
 
+### Export all entries
+
+Export all stored entries as pretty-printed JSON. Use `--out` to write to a file (omit it to print to stdout):
+
+```bash
+cargo run -- --identity alice export-all \
+  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --out ./export.json
+```
+
 ### Manage config (add user)
 
 Grant a role for a user on a memory canister:
@@ -191,6 +201,9 @@ memory_id = km.create("Demo", "Created from Python")
 # Insert / search
 km.insert_markdown(memory_id, "notes", "# Hello Kinic!")
 results = km.search(memory_id, "Hello")
+
+# Export all entries
+rows = km.export_all(memory_id)
 
 # Ask AI (returns prompt and the <answer> text only)
 prompt, answer = km.ask_ai(memory_id, "What did we say?", top_k=3, language="en")

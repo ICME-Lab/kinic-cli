@@ -135,6 +135,15 @@ pub(crate) async fn tagged_embeddings(
     client.tagged_embeddings(tag).await
 }
 
+pub(crate) async fn export_all(
+    use_mainnet: bool,
+    identity: String,
+    memory_id: String,
+) -> Result<Vec<(u32, Vec<f32>, String)>> {
+    let client = build_memory_client(use_mainnet, identity, memory_id).await?;
+    client.export_all().await
+}
+
 pub(crate) async fn ask_ai(
     use_mainnet: bool,
     identity: String,

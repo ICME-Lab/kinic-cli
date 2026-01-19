@@ -201,6 +201,15 @@ cargo run -- --identity <name> update \
   --memory-id <memory canister id>
 ```
 
+## Export all entries (CLI)
+
+Export all `(id, embedding, data)` tuples as pretty-printed JSON:
+```bash
+cargo run -- --identity <name> export-all \
+  --memory-id <memory canister id> \
+  --out ./export.json
+```
+
 ## Check token balance (CLI)
 
 Query the ledger for the current identity’s balance (base units):
@@ -253,6 +262,18 @@ Search memories with semantic similarity.
 
 **Returns:** List of `(score, payload)` tuples sorted by relevance
 
+#### `export_all(memory_id: str) -> List[Tuple[int, List[float], str]]`
+Export all stored entries from the memory canister.
+
+**Returns:** List of `(id, embedding, data_json_string)` tuples
+
+**Example:**
+```python
+rows = km.export_all(memory_id)
+for entry_id, embedding, data_json in rows:
+    print(entry_id, len(embedding))
+```
+
 #### `ask_ai(memory_id: str, query: str, top_k: int | None = None, language: str | None = None) -> Tuple[str, str]`
 Run the Ask AI flow: search, build an LLM prompt, and return `(prompt, answer)` where `answer` is the `<answer>` section from the chat endpoint.
 
@@ -274,6 +295,7 @@ Stateless alternatives available:
 - `insert_pdf_file(identity, memory_id, tag, path, ic=False)`
 - `insert_pdf(identity, memory_id, tag, path, ic=False)`
 - `search_memories(identity, memory_id, query, ic=False)`
+- `export_all(identity, memory_id, ic=False)`
 - `ask_ai(identity, memory_id, query, top_k=None, language=None, ic=False)`
 - `get_balance(identity, ic=False)`
 - `update_instance(identity, memory_id, ic=False)`
