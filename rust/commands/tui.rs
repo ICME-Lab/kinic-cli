@@ -1,12 +1,14 @@
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use std::io::{self, Write};
 
+use headless_chrome::{Browser, LaunchOptionsBuilder};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
+use url::Url;
 
 use crossterm::{
     cursor,
@@ -85,11 +87,35 @@ fn show_main_menu(samples: &[SampleItem]) -> Result<()> {
             Ok(())
         }
         "insert" => {
-            println!("TODO: insert menu is not implemented yet.");
-            Ok(())
+            show_insert_menu()
         }
         "search" => {
             println!("TODO: search menu is not implemented yet.");
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn show_insert_menu() -> Result<()> {
+    let items = ["url", "markdown", "conversation"];
+    println!();
+    let selection = Select::new()
+        .with_prompt("Insert")
+        .items(&items)
+        .default(0)
+        .interact()?;
+
+    match items[selection] {
+        "url" => {
+            handle_insert_url()
+        }
+        "markdown" => {
+            println!("TODO: insert markdown is not implemented yet.");
+            Ok(())
+        }
+        "conversation" => {
+            println!("TODO: insert conversation is not implemented yet.");
             Ok(())
         }
         _ => Ok(()),
@@ -151,6 +177,33 @@ fn show_market_menu(samples: &[SampleItem]) -> Result<()> {
             }
         }
     }
+}
+
+const READABILITY_JS: &str = include_str!("readability.js");
+
+fn handle_insert_url() -> Result<()> {
+    let raw_url = match read_line_or_esc("URL")? {
+        Some(value) => value,
+        None => return Ok(()),
+    };
+    let raw_url = raw_url.trim();
+    if raw_url.is_empty() {
+        return Ok(());
+    }
+
+    let url = Url::parse(raw_url).context("Invalid URL")?;
+    let (html, readable_html) = fetch_html_with_headless_chrome(&url)?;
+    let body_html = extract_body_html(&html)?;
+    let readable_html = match readable_html {
+        Some(content) => content,
+        None => {
+            eprintln!("Readability JS failed, falling back to body HTML");
+            body_html
+        }
+    };
+    let markdown = htmd::convert(&readable_html).context("Failed to convert HTML to Markdown")?;
+    println!("{markdown}");
+    Ok(())
 }
 
 fn truncate_results(results: &[String]) -> Result<Vec<String>> {
@@ -235,6 +288,73 @@ fn read_line_or_esc(prompt: &str) -> Result<Option<String>> {
         disable_raw_mode()?;
     }
     Ok(Some(input))
+}
+
+fn fetch_html_with_headless_chrome(url: &Url) -> Result<(String, Option<String>)> {
+    let browser = Browser::new(
+        LaunchOptionsBuilder::default()
+            .headless(true)
+            .build()
+            .context("Failed to build launch options")?,
+    )
+    .context("Failed to launch headless Chrome")?;
+
+    let tab = browser.new_tab().context("Failed to open new tab")?;
+    tab.navigate_to(url.as_str())
+        .context("Failed to navigate to URL")?;
+    tab.wait_until_navigated()
+        .context("Failed while waiting for page navigation")?;
+    let html = tab.get_content().context("Failed to read page HTML")?;
+    let readability_html = extract_readable_html_from_tab(&tab).ok();
+    let _ = tab.close(true);
+    Ok((html, readability_html))
+}
+
+fn extract_readable_html_from_tab(tab: &headless_chrome::Tab) -> Result<String> {
+    let js = r#"
+(() => {
+  try {
+    const html = document.documentElement.outerHTML;
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const article = new Readability(doc).parse();
+    return article && article.content ? article.content : "";
+  } catch (e) {
+    return "";
+  }
+})()
+"#;
+    tab.evaluate(READABILITY_JS, false)
+        .context("Failed to inject Readability.js")?;
+    let result = tab
+        .evaluate(js, true)
+        .context("Failed to execute Readability")?;
+    let content = result
+        .value
+        .and_then(|value| value.as_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    if content.trim().is_empty() {
+        return Err(anyhow!("Readability JS returned empty content"));
+    }
+    Ok(content)
+}
+
+fn extract_body_html(html: &str) -> Result<String> {
+    let lower = html.to_lowercase();
+    let body_open = lower
+        .find("<body")
+        .ok_or_else(|| anyhow!("No <body> tag found"))?;
+    let body_tag_end = lower[body_open..]
+        .find('>')
+        .ok_or_else(|| anyhow!("No closing > for <body> tag"))?
+        + body_open
+        + 1;
+    let body_close = lower
+        .rfind("</body>")
+        .ok_or_else(|| anyhow!("No </body> tag found"))?;
+    if body_close <= body_tag_end {
+        return Err(anyhow!("Malformed <body> tags"));
+    }
+    Ok(html[body_tag_end..body_close].to_string())
 }
 
 struct RawModeGuard;

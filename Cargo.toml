@@ -39,6 +39,10 @@ ic-ed25519 = "0.2.0"
 dialoguer = "0.11.0"
 crossterm = "0.28.1"
 indicatif = "0.17"
+htmd = "0.2.2"
+readability-rust = "0.1.0"
+headless_chrome = { version = "1.0.20", features = ["fetch"] }
+url = "2"
 
 [features]
 default = []
