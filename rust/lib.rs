@@ -34,6 +34,7 @@ use tokio::runtime::Runtime;
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+    let command = cli.command.unwrap_or(cli::Command::Tui(cli::TuiArgs {}));
 
     let max = match cli.global.verbose {
         0 => LevelFilter::INFO,
@@ -43,12 +44,7 @@ pub async fn run() -> Result<()> {
 
     fmt().with_max_level(max).without_time().try_init().ok();
 
-    if cli.global.ii
-        && matches!(
-            cli.command,
-            cli::Command::Create(_) | cli::Command::Balance(_)
-        )
-    {
+    if cli.global.ii && matches!(command, cli::Command::Create(_) | cli::Command::Balance(_)) {
         if !cfg!(feature = "experimental") {
             anyhow::bail!(
                 "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
@@ -56,7 +52,7 @@ pub async fn run() -> Result<()> {
         }
     }
 
-    let needs_identity_path = matches!(cli.command, cli::Command::Login(_)) || cli.global.ii;
+    let needs_identity_path = matches!(command, cli::Command::Login(_)) || cli.global.ii;
     let identity_path = if needs_identity_path {
         Some(match cli.global.identity_path.clone() {
             Some(path) => path,
@@ -66,7 +62,7 @@ pub async fn run() -> Result<()> {
         None
     };
 
-    let agent_factory = if matches!(cli.command, cli::Command::Login(_)) {
+    let agent_factory = if matches!(command, cli::Command::Login(_)) {
         AgentFactory::new(cli.global.ic, String::new())
     } else if cli.global.ii {
         let path = identity_path
@@ -74,6 +70,8 @@ pub async fn run() -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("Identity path is missing"))?;
         let delegated = identity_store::load_delegated_identity(&path)?;
         AgentFactory::new_with_identity(cli.global.ic, delegated)
+    } else if matches!(command, cli::Command::Tui(_)) {
+        AgentFactory::new(cli.global.ic, String::new())
     } else {
         let identity_suffix = cli
             .global
@@ -88,7 +86,7 @@ pub async fn run() -> Result<()> {
         identity_path,
     };
 
-    run_command(cli.command, context).await
+    run_command(command, context).await
 }
 
 #[cfg(feature = "python-bindings")]
@@ -315,12 +313,7 @@ fn update_instance(identity: &str, memory_id: &str, ic: Option<bool>) -> PyResul
 #[cfg(feature = "python-bindings")]
 #[pyfunction]
 #[pyo3(signature = (identity, memory_id, dim, ic=None))]
-fn reset_memory(
-    identity: &str,
-    memory_id: &str,
-    dim: usize,
-    ic: Option<bool>,
-) -> PyResult<()> {
+fn reset_memory(identity: &str, memory_id: &str, dim: usize, ic: Option<bool>) -> PyResult<()> {
     let ic = ic.unwrap_or(false);
     block_on_py(python::reset_memory(
         ic,

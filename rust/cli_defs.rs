@@ -13,7 +13,7 @@ pub struct Cli {
     pub global: GlobalOpts,
 
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Args, Debug)]
@@ -30,7 +30,6 @@ pub struct GlobalOpts {
     #[arg(
         long,
         conflicts_with = "ii",
-        required_unless_present = "ii",
         help = "Dfx identity name used to load credentials from the system keyring"
     )]
     pub identity: Option<String>,
@@ -51,6 +50,8 @@ pub struct GlobalOpts {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    #[command(about = "Launch the interactive TUI")]
+    Tui(TuiArgs),
     #[command(about = "Deploy a new memory canister via the launcher")]
     Create(CreateArgs),
     #[command(about = "List deployed memories and their principals")]
@@ -82,6 +83,9 @@ pub enum Command {
     #[command(about = "Login via Internet Identity and store a delegation")]
     Login(LoginArgs),
 }
+
+#[derive(Args, Debug)]
+pub struct TuiArgs {}
 
 #[derive(Args, Debug)]
 pub struct CreateArgs {
@@ -135,7 +139,11 @@ pub struct InsertRawArgs {
     )]
     pub embedding: String,
 
-    #[arg(long, required = true, help = "Text payload to store with the embedding")]
+    #[arg(
+        long,
+        required = true,
+        help = "Text payload to store with the embedding"
+    )]
     pub text: String,
 
     #[arg(long, required = true, help = "Tag metadata stored alongside the text")]

@@ -36,6 +36,9 @@ ring = "0.17.14"
 der = "0.7.10"
 pkcs8 = "0.10.2"
 ic-ed25519 = "0.2.0"
+dialoguer = "0.11.0"
+crossterm = "0.28.1"
+indicatif = "0.17"
 
 [features]
 default = []
