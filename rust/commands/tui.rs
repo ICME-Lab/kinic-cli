@@ -2,6 +2,9 @@ use anyhow::Result;
 use std::io::{self, Write};
 
 use indicatif::{ProgressBar, ProgressStyle};
+use serde::Deserialize;
+use std::fs;
+use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -16,10 +19,11 @@ use dialoguer::Select;
 use crate::commands::CommandContext;
 
 pub async fn handle(_ctx: &CommandContext) -> Result<()> {
-    run_menu()
+    let samples = load_samples("samples")?;
+    run_menu(samples)
 }
 
-fn run_menu() -> Result<()> {
+fn run_menu(samples: Vec<SampleItem>) -> Result<()> {
     let _raw_guard = RawModeGuard::new()?;
     let mut stdout = io::stdout();
     let mut buffer = String::new();
@@ -36,7 +40,7 @@ fn run_menu() -> Result<()> {
                 KeyCode::Char('/') => {
                     disable_raw_mode()?;
                     println!();
-                    show_main_menu()?;
+                    show_main_menu(&samples)?;
                     enable_raw_mode()?;
                     render_prompt(&mut stdout, &buffer)?;
                 }
@@ -65,7 +69,7 @@ fn run_menu() -> Result<()> {
     Ok(())
 }
 
-fn show_main_menu() -> Result<()> {
+fn show_main_menu(samples: &[SampleItem]) -> Result<()> {
     let items = ["explore", "create", "insert", "search"];
     println!();
     let selection = Select::new()
@@ -75,7 +79,7 @@ fn show_main_menu() -> Result<()> {
         .interact()?;
 
     match items[selection] {
-        "explore" => show_market_menu(),
+        "explore" => show_market_menu(samples),
         "create" => {
             println!("TODO: create menu is not implemented yet.");
             Ok(())
@@ -92,32 +96,41 @@ fn show_main_menu() -> Result<()> {
     }
 }
 
-fn show_market_menu() -> Result<()> {
+fn show_market_menu(samples: &[SampleItem]) -> Result<()> {
     loop {
-        let query = match read_line_or_esc("Market query")? {
+        let query = match read_line_or_esc("Explore query")? {
             Some(value) => value,
             None => return Ok(()),
         };
 
-        if query.trim().is_empty() {
+        let query = query.trim().to_string();
+        if query.is_empty() {
             return Ok(());
         }
 
-        let results = mock_market_results(&query, 12);
+        let matches = search_samples(samples, &query);
+        if matches.is_empty() {
+            println!("No results.\n");
+            continue;
+        }
+
+        let results: Vec<String> = matches
+            .iter()
+            .map(|item| format!("[$0.01] {}", item.query))
+            .collect();
         let display_results = truncate_results(&results)?;
         let mut selected_index = 0;
 
         loop {
             let selection = Select::new()
-                .with_prompt("Market results")
+                .with_prompt("\nQuery")
                 .items(&display_results)
-                .max_length(3)
+                .max_length(10)
                 .default(selected_index)
                 .interact_opt()?;
 
             match selection {
                 Some(index) => {
-                    // ここは display_results と results の index が一致している前提
                     let pb = ProgressBar::new_spinner();
                     pb.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
                     pb.set_message("Loading...");
@@ -126,8 +139,8 @@ fn show_market_menu() -> Result<()> {
                     sleep(Duration::from_secs(3));
 
                     pb.finish_and_clear();
-                    println!("Selected: {}\n", results[index]);
-
+                    println!("Premise: {}", matches[index].premise);
+                    println!("Knowledge: {}", matches[index].knowledge);
                     selected_index = index;
                     continue;
                 }
@@ -138,12 +151,6 @@ fn show_market_menu() -> Result<()> {
             }
         }
     }
-}
-
-fn mock_market_results(query: &str, count: usize) -> Vec<String> {
-    (1..=count)
-        .map(|idx| format!("{query} result #{idx}"))
-        .collect()
 }
 
 fn truncate_results(results: &[String]) -> Result<Vec<String>> {
@@ -243,4 +250,83 @@ impl Drop for RawModeGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
     }
+}
+
+#[derive(Deserialize)]
+struct SampleFile {
+    items: Vec<SampleItem>,
+}
+
+#[derive(Clone, Deserialize)]
+struct SampleItem {
+    premise: String,
+    query: String,
+    knowledge: String,
+}
+
+fn load_samples<P: AsRef<Path>>(dir: P) -> Result<Vec<SampleItem>> {
+    let mut items = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let payload = fs::read_to_string(&path)?;
+        let file: SampleFile = serde_json::from_str(&payload)?;
+        items.extend(file.items);
+    }
+    Ok(items)
+}
+
+fn search_samples<'a>(samples: &'a [SampleItem], query: &str) -> Vec<&'a SampleItem> {
+    let needle = query.to_lowercase();
+    let mut scored: Vec<(i64, &SampleItem)> = samples
+        .iter()
+        .filter_map(|item| {
+            let q_score = fuzzy_score(&needle, &item.query.to_lowercase());
+            let p_score = fuzzy_score(&needle, &item.premise.to_lowercase());
+            let score = q_score.max(p_score)?;
+            Some((score, item))
+        })
+        .collect();
+
+    scored.sort_by(|(a_score, a_item), (b_score, b_item)| {
+        b_score
+            .cmp(a_score)
+            .then_with(|| a_item.query.cmp(&b_item.query))
+    });
+
+    scored.into_iter().map(|(_, item)| item).collect()
+}
+
+fn fuzzy_score(needle: &str, haystack: &str) -> Option<i64> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let mut score: i64 = 0;
+    let mut last_idx: i64 = -1;
+    let mut hi_iter = haystack.char_indices();
+    for ch in needle.chars() {
+        let mut found = None;
+        for (idx, hch) in hi_iter.by_ref() {
+            if hch == ch {
+                found = Some(idx as i64);
+                break;
+            }
+        }
+        let idx = found?;
+        if last_idx >= 0 {
+            let gap = idx - last_idx - 1;
+            score -= gap;
+            if gap == 0 {
+                score += 3;
+            }
+        } else {
+            score += 5;
+        }
+        last_idx = idx;
+    }
+    score += 1;
+    Some(score)
 }
