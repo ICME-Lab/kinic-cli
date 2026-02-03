@@ -1,0 +1,79 @@
+{
+  "items": [
+    {
+      "knowledge": "The full benefits of AI cannot be realized unless AI systems are fully trusted, which requires them to be secure, compliant with regulations, and privacy preserving. This means that without strong privacy and security guarantees integrated throughout the AI technology stack, organizations and individuals cannot safely use, share, or benefit from AI capabilities, as risks to sensitive data and non-compliance impede widespread adoption.",
+      "premise": "Trusted AI must be secure, compliant, and privacy preserving across the technology stack.",
+      "query": "Why Trusted AI Depends on Strong Privacy Verification"
+    },
+    {
+      "knowledge": "Zero knowledge proofs (ZKPs) are privacy-preserving protocols that enable a party to prove that a statement is true without revealing any information beyond the fact that the statement is valid. This means ZKPs allow secure and trustworthy verification of claims or computations, preventing sensitive information from being disclosed during the verification process.",
+      "premise": "Zero knowledge proofs are privacy-preserving protocols used for verification.",
+      "query": "How Do Zero Knowledge Proofs Provide Privacy-Preserving Verification?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs allow AI-related computations, such as model training or inference, to be verified as correct without revealing the actual data or the details of the computation. This means that organizations can confidently validate AI outcomes and ensure compliance or correctness, even when the underlying information must remain confidential due to privacy or proprietary concerns.",
+      "premise": "ZKPs can prove the correctness of AI computations without revealing underlying data.",
+      "query": "Can AI Results Be Verified Without Exposing Confidential Information?"
+    },
+    {
+      "knowledge": "When using GPU resources from third-party providers, such as renting from a cloud vendor, zero knowledge proofs can validate the integrity of the AI training process without revealing the data or algorithms. This means external providers cannot access sensitive details, ensuring privacy and security for organizations training AI in external or shared environments.",
+      "premise": "Cloud GPUs often process sensitive data and algorithms from third parties.",
+      "query": "How Can ZKPs Secure External GPU Use in AI Training?"
+    },
+    {
+      "knowledge": "In shared, multi-tenant computing environments, zero knowledge proofs ensure that each tenant’s operations remain isolated and secure by verifying that processes only access their allocated memory. This means that one user cannot improperly access another’s sensitive information, enhancing privacy and security within cloud and enterprise infrastructures.",
+      "premise": "CPUs and memory are shared resources in multi-tenant environments.",
+      "query": "Can Multi-Tenant Systems Prevent Data Leaks With ZKPs?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs allow organizations to demonstrate that encrypted data has not been tampered with or that deduplication processes have preserved data integrity, all without exposing the contents of the data. This means storage providers can offer verifiable integrity assurances to clients while fully preserving confidentiality.",
+      "premise": "Storage systems must verify data integrity without exposing contents.",
+      "query": "How Can ZKPs Ensure Storage Integrity Without Revealing Data?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs provide a way for different organizations to prove that they have correctly contributed to collaborative AI model training without exposing their private or sensitive data. This means entities like hospitals can jointly build models, such as for medical diagnosis, while strictly preserving patient confidentiality and complying with privacy regulations.",
+      "premise": "Collaborative AI training requires verification without sensitive data sharing.",
+      "query": "How Do ZKPs Enable Privacy in Collaborative Model Training?"
+    },
+    {
+      "knowledge": "Generative AI models, such as GANs or transformers, can use zero knowledge proofs to verify compliance with requirements—like ensuring generated content does not include sensitive information—without exposing the underlying data. This means creators can confidently prove regulatory compliance and data safeguards, even as they generate new content.",
+      "premise": "Generative AI models must comply with standards without exposing data.",
+      "query": "Can Generative AI Prove Compliance Without Disclosing Inputs?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs make it possible to verify that AI algorithms only access permitted, anonymized parts of datasets according to privacy laws such as GDPR or executive orders. This means organizations can audibly prove compliance with regulatory data access restrictions while training their AI models, without revealing unauthorized data to auditors or the public.",
+      "premise": "AI datasets must follow strict privacy rules and regulations.",
+      "query": "How Do ZKPs Ensure AI Datasets Are Used Within Privacy Rules?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs allow organizations to verify data preparation steps, such as cleansing or augmentation, were performed correctly without exposing the underlying personal or sensitive information. This means that data pipelines can be audited for proper anonymization or compliance, maintaining transparency and privacy simultaneously.",
+      "premise": "AI data preprocessing must verify proper implementation without exposing raw data.",
+      "query": "How Can Data Preparation Be Verified Without Compromising Privacy?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs enable AI development tools, like Jupyter Notebooks and MLflow, to securely verify experimental outcomes, model performance, and results without revealing proprietary data or algorithms. This means teams can share evidence of results and progress with external parties while fully protecting sensitive research and intellectual property.",
+      "premise": "Development tools manage machine learning experiments and results.",
+      "query": "How Do ZKPs Secure Model Development and Results Sharing?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs can verify the integrity and identity of containers and services, such as those managed by Kubernetes or Docker, throughout the AI deployment pipeline. This means organizations can ensure that end users interact only with the intended, unaltered models and that any unauthorized changes are detectable without revealing the model’s confidential details.",
+      "premise": "Deployment systems must ensure that AI models are untampered from creation to user.",
+      "query": "How Can ZKPs Guarantee AI Models Remain Untampered After Deployment?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs can generate non-repudiable, secure logs that verify an action or event took place at a specific time by a specific entity, without revealing the action’s specifics. This means that AI systems in regulated industries can be monitored and audited effectively, ensuring accountability while protecting proprietary or sensitive operational details.",
+      "premise": "Effective AI monitoring and compliance require secure, verifiable logs.",
+      "query": "How Do ZKPs Create Tamper-Proof Logs Without Exposing Details?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs allow data access control systems to confirm that a user is authorized to access or modify specific data without exposing the user’s credentials or the data itself. This means organizations can enforce strict access policies and prove compliance with standards while keeping both passwords and sensitive data confidential.",
+      "premise": "Data access control must validate permissions without exposing secrets.",
+      "query": "How Does ZKP-Based Access Control Enhance Data Privacy?"
+    },
+    {
+      "knowledge": "Zero knowledge proofs can be integrated into online courses, conferences, and workshops to verify learner submissions and participation without exposing the actual solutions or proprietary training content. This means educational platforms can ensure fair evaluation and protect the intellectual property of course materials, fostering secure and trustworthy remote learning environments.",
+      "premise": "Online education platforms evaluate submissions and verify participation.",
+      "query": "How Can ZKPs Protect Integrity in Online Learning?"
+    }
+  ]
+}

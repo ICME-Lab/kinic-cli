@@ -1,0 +1,89 @@
+{
+  "items": [
+    {
+      "knowledge": "AI systems are now trusted with actions such as moving money, impacting patient health, and operating autonomous agents. This means verifying that these systems perform as promised, without errors or malicious behavior, has become not just desirable but essential to avoid costly and dangerous failures across industries.",
+      "premise": "AI systems increasingly make important decisions in finance, healthcare, and autonomous control.",
+      "query": "Why Verifying AI Decisions Is Critical Now"
+    },
+    {
+      "knowledge": "Zero-knowledge machine learning, or ZKML, leverages zero-knowledge proofs so that an AI model's computation can be verified mathematically. This means that parties can confirm a computation was performed correctly, using the correct model, and without exposure of sensitive data or reliance on intermediaries, fundamentally increasing trust in AI-driven decisions and workflows.",
+      "premise": "Zero-knowledge machine learning (ZKML) uses mathematical proofs to confirm computations without leaking information.",
+      "query": "How ZKML Enables Trustless AI Verification"
+    },
+    {
+      "knowledge": "ZKML produces a situation where generating a proof of computation is resource-intensive, but verifying the proof is cheap and fast. This asymmetry means that even devices with limited power, such as smartphones, can quickly verify complex computations performed elsewhere. This unlocks workflows where multiple agents, potentially across organizations or blockchains, can pass proofs instead of trust, enabling efficient and secure agent coordination.",
+      "premise": "Computation in ZKML is expensive, but verification is extremely efficient.",
+      "query": "How ZKML Achieves Cheap Verification of Heavy Computations"
+    },
+    {
+      "knowledge": "Zero-knowledge proofs in ZKML ensure that while the correctness of a computation is publicly proven, no underlying data or model parameters are revealed. This means hospitals can prove regulatory compliance without exposing patient information, and banks can demonstrate proper fraud detection without leaking private models or client data. The implication is that privacy can be securely maintained even with external verification.",
+      "premise": "Zero-knowledge proofs reveal nothing about the input data or the model's internal details.",
+      "query": "How ZKML Keeps Both Data and Model Private"
+    },
+    {
+      "knowledge": "With the advent of standards like x402 and ERC-8004, autonomous AI agents are handling payments and transactions. ZKML is crucial because it provides cryptographic proofs that the agent performed the agreed computation correctly, ensuring that valuable assets are only moved based on secure, verifiable results, without requiring trust in the agent. This means economic activities between agents can scale safely and automatically.",
+      "premise": "Emerging cryptographic standards enable autonomous agents to transact programmable money.",
+      "query": "Why Programmable Money Depends on ZKML Proofs"
+    },
+    {
+      "knowledge": "ZKML has rapidly evolved from a speculative research area in 2022 to producing practical, verifiable models by 2025. Early projects like Modulus Labs and EZKL demonstrated proof-of-concept systems, and later frameworks improved performance and usability. This means that ZKML is moving beyond academic prototypes and into production infrastructure, supporting real applications in fields like DeFi, healthcare, and gaming.",
+      "premise": "ZKML became feasible for real-world use between 2022 and 2025 after significant technical breakthroughs.",
+      "query": "How ZKML Progressed from Concept to Industry-Ready"
+    },
+    {
+      "knowledge": "Quantization involves converting floating-point operations in machine learning models to finite field arithmetic so they can be handled in zero-knowledge proof systems. This process is necessary for ZKML but can cause losses in model accuracy. Different frameworks use various methods to balance speed and precision, and no perfect solution has emerged yet. This means that ZKML users must consider accuracy tradeoffs as an intrinsic part of deploying provable AI.",
+      "premise": "Quantization is needed to make ML models compatible with zero-knowledge proofs but introduces accuracy tradeoffs.",
+      "query": "Why Quantization Is Both a Challenge and a Necessity in ZKML"
+    },
+    {
+      "knowledge": "ZKML frameworks often struggle with supporting the full range of operations (operators) found in production-grade machine learning models, with many supporting less than half of the ONNX specification. This means that models often need to be refactored to use only compatible operators, which can be a significant engineering constraint and influence which models can be used for verifiable AI today.",
+      "premise": "Most ZKML frameworks support only a limited subset of ML operators due to technical constraints.",
+      "query": "What Operator Coverage Gaps Mean for ZKML Adoption"
+    },
+    {
+      "knowledge": "Activation functions like ReLU, sigmoid, tanh, and softmax are crucial for modern neural networks but translate poorly to the arithmetic circuits used in zero-knowledge proofs. These functions require complex computations in finite fields, increasing circuit size and proof generation time. This means model designers must carefully choose or approximate activation functions to avoid prohibitively expensive ZKML proofs, limiting some advanced architectures.",
+      "premise": "Activation functions are essential in machine learning but are computationally expensive in ZKML circuits.",
+      "query": "Why Nonlinear Activations Are Costly in ZKML"
+    },
+    {
+      "knowledge": "ZKML is justified when the cost of trust failure—such as financial loss, regulatory breach, or safety hazards—outweighs the substantial computational overhead of proof generation. This means applications in finance, healthcare, legal, or adversarial environments are prime candidates, while low-stakes, non-sensitive use cases generally do not merit the extra effort.",
+      "premise": "Certain high-stakes problems gain more from verifiable ML than they lose to computational overhead.",
+      "query": "When Does ZKML Make Sense Despite High Costs?"
+    },
+    {
+      "knowledge": "In decentralized finance, ZKML enables price oracles and trading agents to prove their computations cryptographically without exposing proprietary models or confidential data. This prevents manipulation, reduces reliance on trusted intermediaries, and allows financial products to automate based on verifiable inputs. This means DeFi protocols gain transparency, security, and privacy—simultaneously—for high-value applications.",
+      "premise": "DeFi applications require trusted computation for financial transactions and oracles, often among adversarial parties.",
+      "query": "How ZKML Makes DeFi Oracles and Agents Trustless"
+    },
+    {
+      "knowledge": "ZKML lets hospitals and researchers prove to regulators that authorized ML models were applied to patient data without revealing the data or the model weights. Similarly, collaborative research can occur across institutions without sharing raw data. This means healthcare organizations can achieve both regulatory compliance and practical privacy, enabling safer automation in clinical workflows and studies.",
+      "premise": "Healthcare relies on ML models but is tightly regulated around data privacy and auditability.",
+      "query": "How ZKML Solves Healthcare’s Privacy and Audit Challenges"
+    },
+    {
+      "knowledge": "By generating cryptographic proofs that each AI decision or matchmaking algorithm in a game used only permitted data and models, ZKML prevents cheating and ensures that players face legitimate AI opponents and fair pairings. This means gaming environments—particularly those involving prizes or wagers—can offer transparency and build trust with their player base.",
+      "premise": "In competitive or monetary gaming, provable fairness is vital to combat cheating and maintain trust.",
+      "query": "How ZKML Brings Provable Fairness to Gaming"
+    },
+    {
+      "knowledge": "With ZKML, each API response or AI service output carries a verifiable proof that the result came from a specific model and parameter set. This eliminates the possibility of service providers swapping in cheaper or weaker models undetectably. This means users and clients can pay for, and enforce, contractual guarantees about the level of AI service they receive.",
+      "premise": "Model marketplaces currently rely on trust that the provided service matches the advertised model tier.",
+      "query": "How ZKML Powers Verified AI APIs and Model Marketplaces"
+    },
+    {
+      "knowledge": "Despite major advances, ZKML cannot yet deliver fast, real-time proofs for cutting-edge large language models or self-driving scenarios, nor can it efficiently prove model training at scale. Many complex ML architectures, such as those with dynamic control flow or advanced attention mechanisms, are just starting to become feasible. This means that while inference verification is possible for a growing set of models, certain high-demand use cases remain out of reach for ZKML in 2025.",
+      "premise": "As of 2025, ZKML still faces significant limitations in areas like real-time processing, large model support, and training verification.",
+      "query": "What ZKML Still Can’t Do—and Why"
+    },
+    {
+      "knowledge": "Upcoming improvements in ZKML include GPU-optimized algorithms, parallel and multi-machine proof generation, and better field arithmetic, which will lead to 5-10x speedups and lower costs. Additionally, advances in proof folding and streaming proofs, along with broader operator coverage for transformers and other architectures, will make large, real-time, and more diverse ML models provable. This means ZKML will become practical for more mainstream, real-time, and high-value AI applications as early as 2026.",
+      "premise": "ZKML is expected to achieve significant gains in 2026 due to hardware optimization, improved algorithms, and more operator support.",
+      "query": "What Will Drive the Next Leap in ZKML Capabilities?"
+    },
+    {
+      "knowledge": "As ZKML moves from experimental prototypes to scalable infrastructure, the pace of work has shifted towards optimization, bug-fixing, and incremental improvements rather than headline-grabbing breakthroughs. This means that the technology is maturing as it gets closer to broad, reliable adoption, following the classic pattern seen in widely adopted foundational technologies.",
+      "premise": "The initial novelty of ZKML is giving way to routine engineering and adoption.",
+      "query": "Why Boring Progress in ZKML Signals Maturity"
+    }
+  ]
+}

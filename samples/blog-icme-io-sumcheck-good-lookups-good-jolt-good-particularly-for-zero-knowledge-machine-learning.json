@@ -1,0 +1,69 @@
+{
+  "items": [
+    {
+      "knowledge": "JOLT’s lookup-heavy design enables zero-knowledge machine learning workloads to forgo the expensive field arithmetic typically required to represent non-linear functions like ReLU and SoftMax. This means that instead of encoding complicated operations into circuits, JOLT leverages lookup tables to efficiently verify these computations, leading to dramatically reduced proving costs and making zero-knowledge proofs more practical for real-world neural network inference.",
+      "premise": "JOLT's lookup-based architecture avoids expensive circuit representations for non-linear functions.",
+      "query": "How Does Lookup-Heavy Architecture Revolutionize zkML Efficiency?"
+    },
+    {
+      "knowledge": "JOLT was built from first principles to use only lookup arguments, whereas other proving schemes often try to retrofit lookups onto their existing systems. This foundational difference means that JOLT achieves lower complexity and higher performance since alternative frameworks face inherent limitations and inefficiencies when attempting to add lookup support after the fact. This results in a fundamental and persistent performance edge for systems like JOLT that natively embrace lookups.",
+      "premise": "Integrating lookups from the outset creates intrinsic efficiency advantages in proving schemes.",
+      "query": "Why Is Native Lookup Integration a Lasting Advantage in Proving Systems?"
+    },
+    {
+      "knowledge": "JOLT 'Atlas' leverages a highly efficient batched sumcheck protocol along with a lookup-centric architecture and sparse polynomial commitments to natively exploit sparsity in matrix-vector multiplication, a dominant cost in machine learning workloads. This means JOLT can achieve high performance in zkML without needing additional sparsity-aware optimization layers, unlike approaches that rely on retrofitted techniques like SpaGKR, simplifying the proving stack and reducing processing overhead.",
+      "premise": "Matrix-vector multiplication dominates costs in machine learning and benefits from sparsity.",
+      "query": "How Does JOLT Exploit Sparsity in Machine Learning Workloads?"
+    },
+    {
+      "knowledge": "JOLT never materializes its full lookup tables, as the tables are structured implicitly rather than explicitly stored. This design allows JOLT to theoretically support flexible quantization and potentially extend to floating-point operations, whereas other zkML projects that fully materialize their tables become locked into specific quantization schemes due to preprocessing constraints. This means JOLT can adapt more easily to varying model requirements and future advancements in quantization techniques.",
+      "premise": "Materializing large lookup tables can constrain quantization schemes.",
+      "query": "How Does Avoiding Materialized Lookup Tables Enable Flexible Quantization?"
+    },
+    {
+      "knowledge": "With the Twist and Shout optimization, JOLT no longer needs to decompose operations into smaller subtables, as long as their evaluation tables are MLE-structured. This means operations can now be added as primitive instructions or virtual sequences, greatly expanding the range of supported operations and making it possible to precompile instructions that were previously infeasible. This directly enhances JOLT Atlas’s extensibility and operational efficiency.",
+      "premise": "Operations on lookup tables previously required decomposing tables into smaller subtables.",
+      "query": "What Does Twist and Shout Unlock for JOLT’s Instruction Set?"
+    },
+    {
+      "knowledge": "In end-to-end tests on a multiclass model, zkml-jolt completed preprocessing, proving, and verification in approximately 0.7 seconds, outperforming mina-zkml (about 2.0 seconds) and markedly beating ezkl (4-5 seconds). Some libraries, such as deep-prove and zk-torch, did not support required operations and could not complete the test. This means zkml-jolt delivers leading practical performance across current zkML solutions, validating the efficiency of its architectural choices.",
+      "premise": "Benchmarking different zkML libraries provides practical performance comparisons.",
+      "query": "How Does zkML-JOLT Benchmark Against Competing Systems?"
+    },
+    {
+      "knowledge": "Many claimed performance improvements, such as '1000x speedups', may refer to theoretical peaks achievable with specialized hardware rather than practical, deployment-ready results. Realistic performance evaluations must compare zkML frameworks on the same hardware configuration to fairly assess their capabilities. This means that raw benchmark numbers are only meaningful when the underlying system architectures and hardware backgrounds are made equivalent.",
+      "premise": "Performance claims in zkML can be either theoretical or practical and depend on hardware.",
+      "query": "Why Are Apples-to-Apples Hardware Comparisons Crucial in zkML?"
+    },
+    {
+      "knowledge": "Many zkML frameworks claiming ONNX compatibility lack memory consistency checks, which are essential for proving that memory was not tampered with during execution. Without these safeguards, such frameworks cannot claim true ONNX support, as memory manipulation could invalidate proof integrity or correctness. This means robust ONNX verification requires not just function compatibility but also security measures to ensure sound execution.",
+      "premise": "Verifying ONNX models requires checking for memory consistency during execution.",
+      "query": "Why Are Memory Consistency Checks Essential for Full ONNX Support?"
+    },
+    {
+      "knowledge": "JOLT Atlas is designed to prioritize verifiable correctness along with high performance, ensuring that speed advantages do not compromise the security or completeness of zero-knowledge machine learning proofs. This means that JOLT Atlas users can expect both practical speeds and trustworthy cryptographic guarantees, but as an evolving project, cautious adoption is still recommended to account for possible engineering or research gaps.",
+      "premise": "Succeeding in both performance and verified correctness is key for zkML adoption.",
+      "query": "How Does JOLT Atlas Balance Speed and Security in zkML?"
+    },
+    {
+      "knowledge": "zkML-JOLT achieves the throughput necessary for real-world verifiable AI deployments, maintaining mathematical correctness guarantees essential for applications in sensitive areas like healthcare, financial services, and trusted AI agent verification. This means zkML-JOLT bridges the gap between theoretical advances in zero-knowledge proofs and the stringent auditability and trust requirements of practical AI.",
+      "premise": "Verifiable AI requires performance for real-world deployment and mathematical guarantees.",
+      "query": "What Makes Verifiable AI Practically Deployable with zkML-JOLT?"
+    },
+    {
+      "knowledge": "Most existing zkML and zkVM projects provide succinct verifiability but do not guarantee privacy over inputs, outputs, witness, or intermediate computations. JOLT's architecture, by using folding schemes inspired by the HyperNova paper, achieves true zero-knowledge privacy alongside verifiable computation. This means that zkML proofs can now ensure both correctness and input/output privacy, which is vital for inter-personal and inter-company AI agent scenarios.",
+      "premise": "Zero-knowledge requires both verifiable computation and privacy preservation.",
+      "query": "How Do Folding Schemes Bring True Zero-Knowledge to zkML?"
+    },
+    {
+      "knowledge": "JOLT’s efficiency improvements with folding allow for dynamic tuning of the memory-speed tradeoff, accommodating a range of deployment scenarios from powerful servers to resource-constrained personal devices. Multi-folding with continuations enables massive parallel processing of zkML workloads, unlocking previously infeasible applications. This means JOLT can support practical zero-knowledge proofs in environments with vastly divergent hardware capabilities.",
+      "premise": "Folding and multi-folding can offer memory-use flexibility and parallelization.",
+      "query": "Why Is JOLT’s Folding Approach a Game-Changer for Device Diversity?"
+    },
+    {
+      "knowledge": "Planned enhancements for JOLT include streaming support, advanced Fiat-Shamir transformations, further optimization of the sumcheck protocol, and GPU acceleration, all of which are expected to deliver significant future performance gains. Concurrent research on lattice-based polynomial commitment schemes and advanced folding methods aims to enable smaller field arithmetic, plausible post-quantum security, pay-per-bit costing, and dynamic public parameter generation. This means JOLT is positioning itself for both near-term and long-term breakthroughs in scalable, secure zkML.",
+      "premise": "JOLT’s research agenda aligns with active development in sumcheck protocols, polynomial commitment schemes, and GPU acceleration.",
+      "query": "What Future Upgrades Are Poised to Advance JOLT’s Performance?"
+    }
+  ]
+}

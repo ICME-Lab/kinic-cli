@@ -1,0 +1,84 @@
+{
+  "items": [
+    {
+      "knowledge": "ERC-8004 tackles the agent coordination problem in blockchains by introducing three minimal registries—identity resolution, reputation aggregation, and execution validation—rather than relying on consensus mechanisms or token economic models. This means that it provides agents with censorship-resistant identities, enables sophisticated reputation systems with verifiable attestations, and supports flexible execution validation, allowing autonomous agents to discover, evaluate, and interact across organizational boundaries in a trustless way.",
+      "premise": "ERC-8004 introduces a new method for coordinating autonomous agents on blockchains without relying on traditional consensus mechanisms or token economics.",
+      "query": "How Does ERC-8004 Coordinate Autonomous Agents?"
+    },
+    {
+      "knowledge": "The ERC-8004 Identity Registry gives every agent a portable, censorship-resistant handle that can be resolved on-chain to an off-chain AgentCard, following RFC 8615 principles and supporting CAIP-10 cross-chain compatibility. This means agents have globally unique, interoperable identifiers that are resistant to censorship and can be used seamlessly across multiple blockchain networks and organizations.",
+      "premise": "The Identity Registry in ERC-8004 provides agents with on-chain, portable identifiers linked to off-chain profile data.",
+      "query": "What Makes ERC-8004 Identity Registry Censorship-Resistant?"
+    },
+    {
+      "knowledge": "ERC-8004's Reputation Registry keeps attestations (statements about agent behavior) on-chain but pushes reputation calculations off-chain. This enables verifiable, tamper-resistant raw data while allowing for advanced, customizable off-chain reputation algorithms. This means specialized services like scoring systems and insurance pools can build on standardized, reliable data, balancing verifiability and sophisticated reputation management.",
+      "premise": "The Reputation Registry separates posting/fetching attestations (on-chain) from reputation calculations (off-chain).",
+      "query": "How Does ERC-8004 Separate Attestation and Reputation?"
+    },
+    {
+      "knowledge": "ERC-8004's Validation Registry provides generic hooks that allow any validation protocol to be integrated, whether it uses economic staking or cryptographic proofs. This supports a wide range of validation methods, from basic computation re-execution to advanced zero-knowledge proofs, meaning the system can evolve and adopt new validation paradigms without protocol changes, enhancing adaptability and trustless agent interactions.",
+      "premise": "The Validation Registry in ERC-8004 defines a generic interface for integrating various validation protocols, including both economic and cryptographic proofs.",
+      "query": "How Does ERC-8004 Enable Flexible Validation Approaches?"
+    },
+    {
+      "knowledge": "ERC-8004 supports multiple trust models for agent validation: reputation-based (using historical performance data for quick, user-friendly validation but prone to gaming and cold-start issues), crypto-economic (requiring validators to stake value and re-execute computations for strong security but with scalability and cost challenges), and hardware-based (using trusted execution environments for hardware-backed validation at near-native speeds, but introducing hardware provider trust and vulnerability concerns). This means agents and users can choose the security and performance tradeoffs that best suit their needs.",
+      "premise": "There are multiple trust models for validating agent actions, including reputation-based, crypto-economic, and hardware-based validation.",
+      "query": "What Are the Main Trust Models in ERC-8004?"
+    },
+    {
+      "knowledge": "Trusted execution environments (TEEs) are used in hardware-based validation to provide cryptographic proofs of computation, offering near-native speed and privacy assurances. However, TEEs introduce significant security risks—including side-channel attacks and hardware trust assumptions—such as Meltdown, Spectre, Foreshadow, and SgxPectre exploits, as well as TrustZone bypasses and electromagnetic side-channel risks. This means that relying on TEEs requires trusting hardware vendors and operators, and no existing TEE can fully protect against sophisticated or physical attacks, making them an imperfect solution for trustless computation.",
+      "premise": "TEE-based validation leverages trusted hardware to provide attestation proofs of computation integrity, but introduces hardware trust and attack surface concerns.",
+      "query": "What Are the Security Risks of TEE-Based Validation?"
+    },
+    {
+      "knowledge": "GPU TEEs, such as those found in NVIDIA H100 GPUs, enable confidential AI computing by partitioning device memory, encrypting CPU-GPU data transfers, and providing remote attestation. While they achieve impressive performance with less than 5 percent overhead for typical LLM queries, they also introduce new attack surfaces, including vulnerabilities in encrypted bounce buffers, reliance on proprietary GPU firmware, and potential side-channel attacks during CPU-GPU communication. This means that GPU TEEs extend trust assumptions from CPU manufacturers to GPU vendors and their proprietary stacks, adding complexity and risk, especially given the early stage of this technology.",
+      "premise": "GPU-accelerated TEEs are a recent development for supporting AI workloads but introduce new attack surfaces and trust dependencies.",
+      "query": "How Do GPU TEEs Change the Security Landscape for AI?"
+    },
+    {
+      "knowledge": "CPU-based TEEs like Intel SGX are widely available, but newer GPU TEEs are mostly limited to NVIDIA H100/H200 series, which have high acquisition costs ($25,000 to $40,000 per unit) and hourly cloud use rates. This makes TEE-based validated trustless agent deployments expensive and often only feasible for well-funded organizations, potentially centralizing AI infrastructure and limiting local-first or mass-market use cases. This means that hardware-based trust models risk excluding ordinary users and enterprises without significant resources.",
+      "premise": "TEE adoption is influenced by hardware availability and costs, and access varies widely among consumer and enterprise users.",
+      "query": "How Do TEE Availability and Costs Affect Decentralized Agents?"
+    },
+    {
+      "knowledge": "Trusted execution environments (TEEs) are not a silver bullet for security; extensive research has shown that they have been compromised multiple times through techniques such as speculative execution attacks (Meltdown, Spectre), TEE-specific exploits (Foreshadow, SgxPectre), TrustZone bypasses, and side-channel analyses like electromagnetic and cache timing attacks. This means that even with advanced hardware protections, TEEs cannot fully defend against determined attackers, especially those with physical access.",
+      "premise": "TEE technologies have proven vulnerable to a variety of attacks, undermining claims of guaranteed security.",
+      "query": "Why Aren't TEEs a Complete Security Solution?"
+    },
+    {
+      "knowledge": "Zero-knowledge machine learning (zkML) allows agents to execute machine learning tasks and generate succinct proofs of correct execution, all while keeping model parameters and input data completely private. Unlike hardware-based approaches, zkML proofs can be generated on consumer hardware, democratizing verifiable AI and avoiding reliance on costly, proprietary chips. This means both privacy and computational integrity are possible for AI agents without centralization or special hardware, although practical performance for large models is still evolving.",
+      "premise": "Zero-knowledge machine learning (zkML) enables privacy-preserving computation with provable correctness guarantees without requiring trusted hardware.",
+      "query": "How Can zkML Transform Verifiable AI Without Hardware Dependence?"
+    },
+    {
+      "knowledge": "Zero-knowledge proof technologies, while not yet fast enough for large language model inference in real time, can support practical local use cases such as document classification for privacy screening or small financial models for market analysis. This means that even though users may need to wait minutes for more complex tasks, many straightforward AI agent actions can already be proven verifiably and privately with zkML, offering immediate benefits for data-sensitive or decentralized contexts.",
+      "premise": "zkML is practical today for smaller models or specific tasks even though large model proving remains slow.",
+      "query": "Are There Real-World Use Cases for zkML Today?"
+    },
+    {
+      "knowledge": "JOLT-Atlas optimizes zero-knowledge virtual machine design by verifying CPU or ML instructions via structured lookup tables and the sum-check protocol, rather than using inefficient arithmetic constraints for every operation. This leads to significant proof-generation speedups, particularly for operations common in ML like matrix multiplication and activation functions, and allows for efficient integration of privacy-preserving computations. This means agents can prove complex computations on standard hardware, making zkML vastly more practical for decentralized agent architectures.",
+      "premise": "The JOLT-Atlas zkVM architecture replaces traditional arithmetic constraint encoding with lookup tables for efficiency in zero-knowledge machine learning.",
+      "query": "What Makes JOLT-Atlas a Breakthrough for zkML?"
+    },
+    {
+      "knowledge": "JOLT-Atlas achieves high performance in zkML by treating common ML operations as primitive lookups, exploiting natural model sparsity to avoid unnecessary computation, and integrating precompiles for ML-specific functions. These features drastically reduce proof generation time and resource requirements compared to prior zero-knowledge systems. This means that proof-based validation of ML inference can be both fast and privacy-preserving, enabling real-time or near-real-time verifiable AI tasks.",
+      "premise": "JOLT-Atlas leverages lookup-optimized primitives, sparsity, and precompiles to accelerate ML proof generation.",
+      "query": "How Does JOLT-Atlas Achieve Fast zkML for Complex Models?"
+    },
+    {
+      "knowledge": "With JOLT-Atlas generating zero-knowledge proofs of ML inference, and the ERC-8004 Validation Registry verifying these proofs on-chain, agent actions can be validated with pure mathematical certainty—without needing to trust any economic or hardware incentives. This leads to agent coordination systems where actions are verified or rejected based solely on cryptographic reality, eliminating ambiguity, trust committee decisions, or attacks based on economic manipulation. This means that decentralized AI systems become more robust and impartial, supporting new business and governance models based on verifiable computation.",
+      "premise": "The integration of JOLT-Atlas with ERC-8004's validation registry enables mathematical proof-based validation of agent actions on-chain.",
+      "query": "How Do ERC-8004 and JOLT-Atlas Enable Trustless AI Validation?"
+    },
+    {
+      "knowledge": "Combining ERC-8004 coordination primitives with JOLT-Atlas verification primitives allows autonomous agents to interact trustlessly with verifiable integrity and privacy. This means AI agents can compete in open marketplaces based on provable behavior rather than relying on centralized platforms or proprietary advantage, enabling innovation, transparency, and equitable access to advanced AI capabilities.",
+      "premise": "The shift from trusting platforms to verifying computation marks a qualitative change in AI agent infrastructure.",
+      "query": "Why Is Verification the Future for Autonomous Agents?"
+    },
+    {
+      "knowledge": "Just as Ethereum's real-time block proving became possible through rapid engineering advances in zkVMs (with most blocks now provable in under 12 seconds), zkML solutions like JOLT-Atlas are following a similar performance improvement trajectory. This means that what seemed infeasible for securely validating complex computations is now practical, and real-time or near-real-time proof-based validation for AI inference is soon likely, paralleling Ethereum’s progress in decentralized verification.",
+      "premise": "Proving Ethereum blocks in near real time demonstrates the rapid evolution of zkVM performance, which informs expectations for zkML.",
+      "query": "What Can zkML Learn from Real-Time Ethereum Proving?"
+    }
+  ]
+}

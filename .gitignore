@@ -26,6 +26,10 @@ pip-wheel-metadata/
 # PyLate/ColBERT artifacts
 pylate-index/
 
+# memories contents (keep directory)
+memories/*
+!memories/
+
 # editor / OS cruft
 .DS_Store
 .idea/

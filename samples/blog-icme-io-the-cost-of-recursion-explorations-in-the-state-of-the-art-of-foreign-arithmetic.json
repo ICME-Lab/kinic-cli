@@ -1,0 +1,54 @@
+{
+  "items": [
+    {
+      "knowledge": "Foreign field arithmetic refers to performing operations on elements that belong to a finite field that is different from the native finite field of a given zero knowledge proof system, such as doing arithmetic from Fq inside a circuit natively defined over Fp. This means that representing and operating with foreign field elements is costly in terms of circuit constraints, making such tasks a major bottleneck for proof composition and increasing gas fees in blockchain applications.",
+      "premise": "Foreign field arithmetic involves operating on elements from a different finite field than the native field of a ZKP system.",
+      "query": "Why Is Foreign Field Arithmetic Hard in Zero Knowledge Proofs?"
+    },
+    {
+      "knowledge": "Proof composition in zero knowledge proof systems involves verifying proofs that themselves verify other proofs, which requires operating in multiple fields. This means that protocols must often perform arithmetic in foreign fields, such as executing a verifier circuit from one proof system inside another. As a result, the need to handle non-native field arithmetic leads to a massive increase in circuit constraints and costs, which negatively impacts practical scalability and the efficiency of on-chain verification.",
+      "premise": "Proof composition in zero knowledge proofs often requires using multiple fields and verifying proofs about proofs.",
+      "query": "What Makes Proof Composition in ZKPs So Expensive?"
+    },
+    {
+      "knowledge": "In proof composition scenarios like running Lasso over the Grumpkin curve and composing with Groth16, the verifier circuit must execute steps like multi-scalar multiplication (MSM) over the Grumpkin base field (Fq), while its scalar operations are over a distinct field (Fr). Using existing libraries such as Arkworks’ NonNativeFieldVar can implement these operations in circuit, but they result in a very large increase (up to 500x overhead) in the number of constraints, meaning the resource requirements and costs grow dramatically, making such approaches often impractical for real-world usage.",
+      "premise": "Popular proving systems like Lasso, Nova, and Groth16 require non-native field arithmetic for specific steps such as multi-scalar multiplication and sum-check verification.",
+      "query": "How Do Popular ZKP Systems Handle Non-Native Field Tasks?"
+    },
+    {
+      "knowledge": "Switching to polynomial commitment schemes (PCS) with logarithmic verifier costs, such as HyperKZG or Zeromorph, can reduce the costs associated with verifying parts of ZKP circuits (like those for the Lasso verifier), lowering on-chain gas fees. This means that while using these PCS variants can ease the cost of verifying commitments on-chain, they do not fully eliminate non-native field arithmetic issues throughout the rest of the verifier circuit, and other places in the circuit may still incur high constraint costs that undermine overall efficiency.",
+      "premise": "Polynomial commitment schemes with logarithmic verifier cost can reduce the costs of certain ZKP verification steps.",
+      "query": "Can Polynomial Commitment Schemes Lower Verifier Costs?"
+    },
+    {
+      "knowledge": "The recent paper 'Beyond the circuit: How to Minimize Foreign Arithmetic in ZKP Circuits' introduces three notable concepts: (1) a protocol using rejection sampling to prove equality of discrete logarithms across different groups, thereby avoiding the embedding of foreign group arithmetic; (2) a Σ-protocol that allows elliptic curve scalar multiplication to be performed outside the circuit and connected back to the circuit with a hash function, greatly reducing in-circuit costs; (3) an algorithm for proving knowledge of an AES encryption using a single lookup argument, eliminating the need for in-circuit boolean arithmetic. This means that these protocols provide new ways to sidestep or minimize expensive non-native field arithmetic, improving the practicality of ZKP circuits.",
+      "premise": "Recent academic work has introduced new protocols to address the challenges of non-native field arithmetic in ZKP circuits.",
+      "query": "What Are the Latest Protocols for Managing Foreign Field Work in ZKPs?"
+    },
+    {
+      "knowledge": "A Σ-protocol described in the latest research allows expensive arithmetic, such as elliptic curve scalar multiplication, to be performed by the proof generator outside the circuit, with the result tied back into the circuit using a hash function like Poseidon. This means the circuit avoids performing costly non-native field arithmetic directly, only checking a hash, which hash functions can do efficiently in-circuit. As a result, this approach relocates heavy computational work from the constrained circuit to the prover, simplifying the verification costs and improving proof scalability.",
+      "premise": "Hash functions can efficiently tie together off-circuit computations with ZKP circuits.",
+      "query": "How Do Σ-Protocols Use Hashes to Reduce Circuit Complexity?"
+    },
+    {
+      "knowledge": "While methods like delegating work outside the circuit using Σ-protocols and hash functions can eliminate non-native field arithmetic from ZKP circuits, this changes where the computational cost appears, often moving it to the verifier. This means that, depending on the complexity of the verification task—such as checking matrix-vector products or multi-scalar multiplications—the verifier in an on-chain setting could still face prohibitive costs. Thus, while circuits become more efficient, verifying complex off-circuit claims may still be costly and limit practical deployment.",
+      "premise": "Eliminating non-native field arithmetic from circuits typically offloads work to the verifier, but this can come at a cost.",
+      "query": "What Tradeoffs Arise When Removing Foreign Fields from Circuits?"
+    },
+    {
+      "knowledge": "A promising direction for handling foreign field arithmetic in proof composition is to use the Σ-protocol to move expensive computations outside the circuit and then employ an in-circuit sum-check verifier for equality checks. By combining these approaches—along with proof aggregation tools like SnarkPack for Groth16 proofs—it is possible to produce compact, performant circuits that require no non-native field arithmetic, while still supporting succinct and practical proofs for on-chain verification. This means both circuit and verifier costs can be kept low, enabling more scalable and modular zero knowledge proof systems.",
+      "premise": "Combining Σ-protocols with sum-check verification and proof aggregation can create efficient, modular ZKP solutions.",
+      "query": "How Can SigmaKit and Sum-Check Be Combined for Better ZKP Composition?"
+    },
+    {
+      "knowledge": "Despite advances aiming to reduce or relocate non-native field arithmetic, many real-world zero knowledge proof tasks will always require foreign field work at some layer, such as when composing proofs from systems using distinct field parameters. This means that totally eliminating foreign field arithmetic is not realistic, but new protocols and system designs continue to look for ways to minimize its impact and make practical deployments more efficient.",
+      "premise": "Foreign field arithmetic will remain fundamentally necessary for certain ZKP applications.",
+      "query": "Will Foreign Field Arithmetic Ever Disappear from ZKPs?"
+    },
+    {
+      "knowledge": "Efforts are underway to build and integrate modular tool suites—such as SigmaSuite based on techniques from SigmaKit—into widely used ZKP libraries like Arkworks and Bellperson. This means that developers will increasingly be able to access state-of-the-art tools for handling non-native field arithmetic tasks, making ZKP development more accessible and improving the efficiency of complex proof systems across the ecosystem.",
+      "premise": "Open-source projects are integrating advanced foreign field handling techniques into ZKP toolkits.",
+      "query": "How Are ZKP Libraries Evolving with Non-Native Field Tools?"
+    }
+  ]
+}

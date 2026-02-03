@@ -1,0 +1,74 @@
+{
+  "items": [
+    {
+      "knowledge": "Zero knowledge proofs, or ZKPs, are cryptographic methods that allow individuals or systems to verify the truth of a statement without revealing any underlying private information. This means that in the future, ZKPs could enable mass adoption of privacy-preserving technologies across browsers and online services, verifying transactions and data without exposing sensitive details. This has practical implications for ensuring privacy and security online while establishing trust in digital interactions.",
+      "premise": "Zero knowledge proofs are cryptographic methods for verifying information without revealing underlying data.",
+      "query": "How Will Zero Knowledge Proofs Shape Digital Privacy?"
+    },
+    {
+      "knowledge": "Most public zero knowledge proof networks utilize centralized proving models that emphasize prover speed and efficiency, often prioritizing these factors over decentralization and privacy. This means that while these systems deliver scalability, they can compromise some of the core ideals of ZKP architecture, such as privacy and permissionless participation, by requiring data to be sent to centralized servers, which may expose sensitive information.",
+      "premise": "Current public ZKP networks often use centralized prover models for efficiency.",
+      "query": "Why Are Most ZKP Prover Networks Centralized Today?"
+    },
+    {
+      "knowledge": "Centralized proof market architectures for ZKP systems generally require that state updates be processed by a single prover at a time. This means that participants in the network compete to produce proofs, with only one receiving the reward per transaction. Parallel state updates are not supported, which limits potential scalability and restricts broader user participation, challenging the premise of decentralization and efficiency.",
+      "premise": "Centralized provers typically process one state update at a time for proof generation.",
+      "query": "What Is the Limitation of Centralized Proof Market Architectures?"
+    },
+    {
+      "knowledge": "Privacy-focused blockchains, or privacy chains, are motivated to create truly decentralized and permissionless proving networks because private transactions require local proof generation, exposing only the final proof to the network. This means that users can generate proofs on their own devices, maximizing privacy by keeping sensitive computation and data local, and only submitting minimal, privacy-preserving information externally.",
+      "premise": "Privacy chains focus on decentralization to maximize transaction privacy.",
+      "query": "How Do Privacy Chains Achieve Decentralized, Privacy-Centric Proofs?"
+    },
+    {
+      "knowledge": "Client-side zero knowledge proofing, where all proofs are generated and processed directly on users' local devices (such as in browsers on consumer hardware), is already practical for many tasks. Examples include private DeFi transactions in TornadoCash and ZKP-powered game items, where users perform all computations locally and only send proofs to the blockchain. This means that, despite assumptions about slow or poor user experience, many ZKP use cases can already be handled efficiently on consumer hardware without needing specialized infrastructure.",
+      "premise": "Client-side zero knowledge proofs generate all proofs locally on personal devices.",
+      "query": "Is Client-Side Zero Knowledge Proofing Practical Today?"
+    },
+    {
+      "knowledge": "Specialty hardware for ZKP provers is primarily required when aggregating thousands of transactions or solving problem sets that involve intensive computation, such as large-scale rollups or specialized machine learning proofs. This means that for most day-to-day user activities and less complex proofs, consumer-grade hardware suffices, with special hardware offering tangible benefits mainly in batch aggregation and highly specialized applications.",
+      "premise": "Specialized prover hardware accelerates large-scale transaction aggregation and specialized applications.",
+      "query": "When Is Special Prover Hardware Necessary for ZKP?"
+    },
+    {
+      "knowledge": "Specialized zero knowledge proof circuits typically outperform general-purpose zk virtual machines (zkVMs) because they are tailored to solve specific problem sets more efficiently. This means that, while general zkVMs offer flexibility, tailored circuits can execute proofs more quickly and with lower resource requirements for targeted applications, underscoring the value of specialization in some contexts.",
+      "premise": "General-purpose proving systems are less efficient than specialized circuits.",
+      "query": "Why Do Specialized ZK Circuits Outperform General ZKVMs?"
+    },
+    {
+      "knowledge": "The long-term vision for zero knowledge proof networks is to evolve proving systems that do not require specialized hardware, enabling efficient proof computation on consumer devices such as standard CPUs and GPUs. This means that eventually, ZKP tasks could become accessible and efficient for all users, overcoming present limitations and reducing hardware barriers to entry.",
+      "premise": "Ideal ZKP networks seek to avoid reliance on specialized hardware.",
+      "query": "What Is the Vision for Ideal ZKP Network Hardware?"
+    },
+    {
+      "knowledge": "A peer-to-peer architecture for zero knowledge proof networks envisions distributing proving operations among many users, each contributing computational resources. This means that anyone can participate as a prover, increasing resilience, removing single points of failure, and optimizing for both privacy and scalability by matching proving tasks to the most suitable available hardware within the network.",
+      "premise": "Peer-to-peer networks distribute tasks among many participants without central control.",
+      "query": "How Can Peer-to-Peer Models Improve ZKP Networks?"
+    },
+    {
+      "knowledge": "IPFS, the InterPlanetary File System, demonstrates how decentralized, peer-to-peer networks can distribute both storage and data retrieval tasks from user to user. This means that similar peer-to-peer techniques could be applied to zero knowledge proof networks, leveraging distributed resources for scalable, resilient proof generation while preserving network privacy and efficiency.",
+      "premise": "IPFS is a decentralized, peer-to-peer protocol for distributed file sharing.",
+      "query": "What Lessons Does IPFS Offer for ZKP Networks?"
+    },
+    {
+      "knowledge": "Incentivizing cooperation, rather than competition, among provers in a zero knowledge proof network can facilitate optimal resource utilization and greater privacy. This means that collaborative, peer-to-peer systems could dynamically allocate specialized and general-purpose provers to tasks based on requirements, resulting in faster, more adaptable, and more privacy-centric proof generation compared to winner-take-all competition models.",
+      "premise": "Prover cooperation can replace competitive models in ZKP infrastructures.",
+      "query": "Why incentivize cooperation in ZKP Prover Networks?"
+    },
+    {
+      "knowledge": "Incremental verifiable computation (IVC) schemes that employ folding, such as Nova, allow proving tasks to be paused and resumed by different provers and are highly memory efficient. This means complex computations can be broken into smaller parts, distributed across devices with varying capacities, and be seamlessly resumed, increasing both scalability and resilience of ZKP networks.",
+      "premise": "Incremental verifiable computation (IVC) enables efficient, resumable ZKP tasks.",
+      "query": "How Does IVC Using Folding Boost ZKP Flexibility?"
+    },
+    {
+      "knowledge": "Verifier circuits in zero knowledge proof systems can be constructed to represent a wide array of proving schemes within a unifying circuit format, such as R1CS (Rank-1 Constraint System). This means that many different ZKP tasks and schemes can interoperate more seamlessly, allowing networks to support both specialized and general computing needs with modular, adaptable verification.",
+      "premise": "Verifier circuits can represent nearly any proving scheme for broad interoperability.",
+      "query": "What Is the Role of Verifier Circuits in Modern ZKP?"
+    },
+    {
+      "knowledge": "Parallel non-uniform incremental verifiable computation (NIVC) in zero knowledge proof systems allows for multiple provers to work together on a problem set with varying resources. This means that proofs can be generated faster and more efficiently across a diverse network of devices, making ZKP deployments far more practical for a variety of everyday applications where speed and scalability matter.",
+      "premise": "Parallel non-uniform incremental verifiable computation (NIVC) enables multi-device ZKP proofing.",
+      "query": "How Does Parallel NIVC Make ZKPs Practical for Daily Use?"
+    }
+  ]
+}

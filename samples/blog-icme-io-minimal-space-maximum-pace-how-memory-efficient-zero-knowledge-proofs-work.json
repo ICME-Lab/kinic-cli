@@ -1,0 +1,69 @@
+{
+  "items": [
+    {
+      "knowledge": "Local verifiable compute refers to the practice of running zero-knowledge proofs (ZKPs) on a user's own device rather than on third-party servers. This means that sensitive information does not leave the user's control during computation. This is fundamentally important for privacy, as transmitting data to third parties risks exposing confidential information, even if only temporarily. By keeping ZKP operations local, users can prove statements about their data without sharing the data itself, ensuring a much higher degree of privacy and trust. This means that local verifiable compute enables privacy-preserving technologies to function on resource-limited devices, expanding their usability to a wider range of real-world settings.",
+      "premise": "Zero-knowledge proofs can be executed on local user devices to improve privacy.",
+      "query": "Why Is Local Verifiable Compute Critical for Privacy?"
+    },
+    {
+      "knowledge": "The Groth16 protocol, introduced in 2016, was a major step forward for zero-knowledge SNARK proofs due to its extremely small proof size (just 3 group elements) and very efficient verification, requiring only a small, constant number of cryptographic operations. This made Groth16 well suited to blockchain use, where bandwidth and computation are limited. However, each unique circuit requires a distinct trusted setup ceremony to establish parameters, which poses severe adaptability and trust issues in applications that frequently change circuits. This means Groth16 offers efficiency and succinctness at the cost of flexibility and ease of deployment.",
+      "premise": "Groth16 is a zero-knowledge proof system known for small proofs and efficient verification but requires trusted setup for each circuit.",
+      "query": "What Made Groth16 a Breakthrough in zk-SNARKs?"
+    },
+    {
+      "knowledge": "Circom is a high-level domain-specific language and compiler that lets developers create arithmetic circuits for zero-knowledge proof systems like Groth16. It compiles these descriptions into suitable cryptographic constraints, with toolkits to generate and verify proofs directly in JavaScript or WASM. This design enables client-side ZK proofs to be generated entirely within a web browser, letting users prove statements without transmitting private data. This means developers can embed privacy features directly into web applications, broadening access to ZK privacy solutions beyond server-side or blockchain environments.",
+      "premise": "Circom is a tool for building and compiling arithmetic circuits into zero-knowledge proof systems, especially for the browser.",
+      "query": "How Did Circom Enable Browser-Based ZK Proofs?"
+    },
+    {
+      "knowledge": "Tornado Cash, launched in 2019, enabled private Ethereum transactions by letting users deposit ETH into a smart contract and generate a zero-knowledge SNARK proof in their browser to prove ownership of a deposit without revealing its origin. The user could withdraw funds to a new address, with no on-chain evidence connecting deposit and withdrawal. This system showcased how client-side ZK technology can break transaction linkability and enhance privacy in decentralized financial systems. This means user privacy was improved without requiring trust in any centralized intermediary.",
+      "premise": "Tornado Cash used client-side zero-knowledge proofs to enhance privacy in Ethereum transactions by severing links between source and destination addresses.",
+      "query": "How Did Tornado Cash Use Client-Side ZK for Privacy?"
+    },
+    {
+      "knowledge": "Generating zero-knowledge SNARK proofs within browsers presents major usability challenges. Proof generation is often slow on typical client hardware, and the process can consume significant memory, which is particularly problematic for mobile devices or embedded systems. Additionally, SNARKs like Groth16 necessitate trusted setups for each circuit, hindering adaptability. This means that despite strong privacy features, client-side ZK requires technical advances in speed and space efficiency to be practical for widespread adoption.",
+      "premise": "Running zero-knowledge proof generation on client devices can be slow and require large amounts of memory, especially with older SNARK protocols.",
+      "query": "What Are the Practical Challenges of Browser ZK Proofs?"
+    },
+    {
+      "knowledge": "Holographic or preprocessing SNARKs, exemplified by systems like Spartan, enable most of the computational work required to generate a zero-knowledge proof to be offloaded to powerful, potentially untrusted provers, while only privacy-critical components are kept on the user's device. In practice, the costliest parts—such as proving sparse polynomial evaluations, which can take up over 90 percent of computation—are outsourced, leaving only the core witness computations locally. This approach lets devices with constrained resources participate in ZK workflows while preserving privacy. This means offloading enables a balance between performance and privacy, but key computations still scale with the original problem size.",
+      "premise": "Holographic SNARKs allow splitting the proving task between a local device and an untrusted prover, with preprocessing techniques.",
+      "query": "How Do Holographic SNARKs Offload ZK Proving Work?"
+    },
+    {
+      "knowledge": "A new family of algorithms for the multilinear sumcheck protocol lets users adjust a parameter k to decrease memory consumption in exchange for longer computation time. For example, with k=2, the prover achieves O(N) running time using just O(√N) space, compared to traditional approaches which required linear space or much more time. At one end, setting k=1 yields linear time and space; at the other, setting k equal to the number of variables allows for logarithmic space but at the cost of superlinear running time. This means that such algorithms enable zero-knowledge proofs to run on hardware with varying memory limitations by tuning resources to task needs.",
+      "premise": "Recent algorithms for the multilinear sumcheck protocol offer tunable tradeoffs between memory usage and running time.",
+      "query": "How Do New Sumcheck Protocols Balance Memory and Speed?"
+    },
+    {
+      "knowledge": "Ligetron is a zero-knowledge proof system based on the Ligero protocol, optimized for memory efficiency by translating computation into the WebAssembly (WASM) format. Its key innovation is a garbage collection mechanism that tracks only 'live' values needed for current computation steps and discards unneeded data in real time. This prevents the system from having to store the entire circuit in memory. As a result, Ligetron demonstrated the ability to handle massive circuits—up to billions of gates—with only a few hundred megabytes, especially for structured computations. This means Ligetron enables large, privacy-preserving computations on ordinary devices without overwhelming local memory resources.",
+      "premise": "Ligetron uses a WASM intermediate representation and aggressive garbage collection to minimize memory during ZKP generation.",
+      "query": "What Makes Ligetron So Memory Efficient for ZKPs?"
+    },
+    {
+      "knowledge": "Despite being designed for space efficiency, Ligetron also achieves competitive speeds, generating single-instance proofs at around 500 nanoseconds per circuit gate and even faster in batched modes (about 65 nanoseconds per gate). This means Ligetron does not sacrifice practicality or responsiveness to achieve its reduced memory footprint—a key requirement for real-world deployment on constrained hardware. This means Ligetron proves that aggressive space-saving does not necessarily require unacceptable speed penalties in ZKP systems.",
+      "premise": "Ligetron achieves high speed in proof generation even while dramatically reducing memory usage compared to prior systems.",
+      "query": "How Fast Is Ligetron Despite Its Low Memory Use?"
+    },
+    {
+      "knowledge": "Recursive zero-knowledge proof schemes, such as Nova and Plonky2, allow developers to split complex computations into smaller steps, each verified sequentially with minimal memory usage per step. Nova's folding scheme, for example, can reduce per-step memory usage to about 50MB, making ZKP practical on low-resource devices. The system's step size is selectable, allowing larger steps for powerful machines and minimal steps for constrained devices. This means that recursion gives granular control over the memory footprint, enabling scalable ZKPs for a broad array of hardware from servers to edge devices.",
+      "premise": "Recursive proof schemes like Nova and Plonky2 allow step size selection and only require memory for a single circuit step at a time.",
+      "query": "How Do Recursive ZKPs Control Memory with Step Size?"
+    },
+    {
+      "knowledge": "Plonky2 is a recursive ZKP system that combines techniques from PLONK and FRI protocols to optimize both speed and proof size. FRI-based systems can generate proofs quickly but the proof sizes grow larger at high speeds. Plonky2 tunes parameters to find a balance, accepting a bit more recursive overhead for minimal speed loss and manageable proof sizes. This means that Plonky2 offers a practical compromise between rapid proof generation and network efficiency, aiding systems that value both constraints.",
+      "premise": "PLONK and FRI are used in recursive STARK-style systems like Plonky2 to trade off proof size and speed.",
+      "query": "How Does Plonky2 Blend Speed and Proof Size?"
+    },
+    {
+      "knowledge": "State of the art zero-knowledge proof platforms such as NovaNet leverage a combination of recursive and non-recursive memory saving techniques, together with economic game theory concepts like Shapley value tracking, to orchestrate efficient distributed proving. By allowing devices to contribute only portions of computational work—a la carte—and aggregating results through more capable machines, the system incentivizes optimal coalition formation and ensures rewards are distributed according to relative contributions. This modularity allows Ligetron for local proofs, with later aggregation by Nova-like provers. This means hybrid approaches can bring scalable, privacy-preserving computation to a vast array of devices and use cases, from DePIN to finance or healthcare.",
+      "premise": "Combining recursive and non-recursive techniques along with game theoretic optimization enables highly efficient and flexible proof systems like NovaNet.",
+      "query": "What Happens When ZKP Efficiency Techniques Are Combined?"
+    },
+    {
+      "knowledge": "Memory efficiency in zero-knowledge proof systems makes private, verifiable computation accessible on low-memory devices such as mobile phones, IoT gadgets, and browsers. Without minimizing memory usage, most users and applications cannot feasibly use ZKP technology at scale. State-of-the-art designs enable these proofs to run fast and privately on minimal hardware, supporting decentralized networks and privacy across a much broader spectrum of real-world workflows. This means memory efficiency is the linchpin for widespread adoption of zero-knowledge privacy technologies throughout the global web3 ecosystem.",
+      "premise": "Locally verifiable compute is essential for privacy-preserving applications on resource constrained devices and web platforms.",
+      "query": "Why Is Memory Efficient ZK the Key to Mass Adoption?"
+    }
+  ]
+}

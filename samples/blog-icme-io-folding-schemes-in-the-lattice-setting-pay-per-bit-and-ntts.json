@@ -1,0 +1,74 @@
+{
+  "items": [
+    {
+      "knowledge": "Lattice cryptography provides a way to construct cryptographic primitives where the security relies on the computational hardness of lattice-based problems, such as Module Short Integer Solution (MSIS). This means that cryptographic protocols utilizing lattice assumptions, like Ajtai commitments, can potentially resist quantum attacks and provide post-quantum security, but they require that elements being committed to have a small mathematical norm, impacting practical commitment schemes.",
+      "premise": "Lattice cryptography is based on the hardness of structured mathematical lattice problems like Module-SIS, and Ajtai commitments require committing to elements with small norm.",
+      "query": "How Lattice Cryptography Empowers Secure Commitments"
+    },
+    {
+      "knowledge": "Ajtai's commitment scheme, fundamental in lattice-based cryptography, requires that all elements being committed to are of small norm. This means that in practice, committers must prove not only the validity of the message but also that its numeric values (the witnesses) remain within strict bounds. This additional norm constraint complicates the design of efficient zero-knowledge proofs based on lattice assumptions, especially when compared to discrete logarithm-based schemes that lack such requirements.",
+      "premise": "Ajtai's commitment scheme needs all committed elements to have small norm, which introduces extra steps.",
+      "query": "Why Are Small Norms a Challenge for Lattice Commitments?"
+    },
+    {
+      "knowledge": "Lattice-based commitment schemes, unlike discrete logarithm-based schemes such as KZG, require proof that all committed elements have a small norm. This means that while discrete-logarithm-based systems can directly commit to messages without extra constraints, lattice-based systems must conduct additional checks to ensure element sizes stay small, increasing the complexity and computational overhead of protocols.",
+      "premise": "Traditional discrete-log-based commitment schemes like KZG do not require norm-checking, whereas lattice-based schemes do.",
+      "query": "How Do Lattice Commitments Differ from Discrete Logarithm Commitments?"
+    },
+    {
+      "knowledge": "LatticeFold, a protocol for lattice-based commitments, leverages Number Theoretic Transforms (NTTs) to embed elements from finite fields into cyclotomic polynomial rings. This enables the batching of multiple instance-witness pairs into a single relation, substantially improving efficiency when proving many constraints. However, NTTs introduce extra computational cost and limit the protocol to specific field types, complicating practical deployment and support for some cryptographically relevant fields.",
+      "premise": "LatticeFold uses Number Theoretic Transforms (NTTs) to encode field elements into polynomial rings, enabling batching but adding computational complexity.",
+      "query": "How LatticeFold Uses NTTs to Batch and Encode Commitments"
+    },
+    {
+      "knowledge": "LatticeFold requires the prime q and the embedding strategy to be compatible with specific cyclotomic polynomials, notably of the form X^d + 1 for d a power of two. This constraint means that only finite fields with certain properties, such as supporting enough primitive roots of unity, can be used. As a result, LatticeFold cannot be instantiated over some fields like the Goldilocks or Mersenne61 primes, limiting its versatility compared to other schemes.",
+      "premise": "The choice of cyclotomic polynomial and NTT-based embedding in LatticeFold imposes restrictions on the compatible finite fields.",
+      "query": "What Fields Can LatticeFold Operate On, and Why Are There Limits?"
+    },
+    {
+      "knowledge": "LatticeFold embeds field elements into polynomial rings in NTT form, rather than as straightforward polynomial coefficients. This design ensures that when batching multiple constraint systems using polynomial operations, the algebraic relationships (like multiplication and equality) hold as expected across each constraint in the batch. This means that directly embedding as coefficients would break necessary relationships, but NTT-based embedding preserves them, crucial for the correctness of batched proofs.",
+      "premise": "LatticeFold's embedding uses NTT form instead of direct coefficient embedding to ensure certain algebraic properties in constraints across batched instances.",
+      "query": "Why Embed Field Elements in NTT Form in LatticeFold?"
+    },
+    {
+      "knowledge": "While LatticeFold's NTT-based embedding allows multiple field relations to be batched into one polynomial ring equation, the inverse NTT does not preserve the maximum norm of the elements involved. This means that even if original field elements are of low norm, their inverse-transformed ring representations might not be, complicating the application of Ajtai's norm constraint and necessitating more complex norm-bounding proofs in practice.",
+      "premise": "Embedding elements as NTT evaluations in LatticeFold allows batching but does not guarantee the preservation of low norm after inverse transforms.",
+      "query": "How Does Norm Growth Affect Lattice-Based Proofs in LatticeFold?"
+    },
+    {
+      "knowledge": "To enforce the Ajtai commitment scheme's requirement that witness vectors have small norm, LatticeFold constructs a grand-product argument on the NTT representation of the vector. This approach allows efficient checks of whether the norm constraint is satisfied by leveraging algebraic sum-check protocols on the decomposed polynomial representations. This means the protocol can reduce checking the norm bound to a simpler mathematical relation, improving its efficiency for proving correctness.",
+      "premise": "LatticeFold's norm bounds are enforced via a grand-product argument on the NTT domain to facilitate sum-check protocols.",
+      "query": "How Is the Norm Bound Enforced in LatticeFold Commitments?"
+    },
+    {
+      "knowledge": "Neo, a successor to LatticeFold, avoids using computationally expensive Number Theoretic Transforms by embedding each field element into a polynomial ring through its b-ary (such as binary) coefficient decomposition. This guarantees that the resulting ring elements always have low norm, making them directly suitable for Ajtai commitments. Additionally, the cost of commitment is proportional to the bit-width of the underlying elements (pay-per-bit), making Neo especially efficient for small elements, in contrast to LatticeFold's norm-loss challenges.",
+      "premise": "Neo avoids NTTs by using a coefficient-based embedding with b-ary decomposition, ensuring low-norm and compatible commitments.",
+      "query": "How Does Neo Achieve NTT-Free Pay-Per-Bit Commitments?"
+    },
+    {
+      "knowledge": "Neo employs rotation matrices, mathematical constructs derived from cyclotomic polynomial rings, to realize homomorphic properties in its commitment schemes. By rewriting the multiplication of ring elements as matrix operations, Neo ensures that commitments can be manipulated algebraically, keeping both security and efficiency. This means that operations on the committed values can be performed directly via matrix algebra, streamlining proof construction and verification.",
+      "premise": "Neo translates field elements into low-norm polynomials and uses rotation matrices to maintain homomorphic properties in commitments.",
+      "query": "What Role Do Rotation Matrices Play in Neo's Commitment Scheme?"
+    },
+    {
+      "knowledge": "Neo's commitment scheme is termed pay-per-bit because it uses b-ary (such as binary) decompositions of field elements for embedding them into ring elements. Each coefficient in the polynomial is a single bit (or digit), so the work done and data committed scales linearly with the number of bits of the witness, not the field size. This means the protocol is highly efficient when committing to small field elements, as each additional bit only marginally increases computational cost.",
+      "premise": "Binary or b-ary decomposition in Neo ensures each committed polynomial coefficient remains small, making protocol costs linear in bit-width.",
+      "query": "Why Is Neo's Commitment Scheme Called Pay-Per-Bit?"
+    },
+    {
+      "knowledge": "Neo's method for encoding field elements into low-norm polynomials is fully compatible with the improved range proof mechanism proposed in the LatticeFold+ protocol. This compatibility means that the efficient, flexible field embedding and pay-per-bit property of Neo can be combined with LatticeFold+'s range checks, resulting in more efficient and streamlined lattice-based folding schemes for succinct zero-knowledge proofs.",
+      "premise": "Neo's low-norm embedding and rotation matrix technique are compatible with the advanced range proofs proposed in LatticeFold+.",
+      "query": "How Does Neo Enhance LatticeFold+ Efficiency?"
+    },
+    {
+      "knowledge": "Cyclotomic polynomials define the specific algebraic structure, namely cyclotomic polynomial rings, on which Ajtai commitments are based. Their unique irreducibility properties and the nature of their roots of unity allow complex constraint systems to be encoded and batch-processed using ring operations. This means that cyclotomic polynomials are essential in supporting key protocol features, such as efficient batching, norm checking, and algebraic homomorphisms within lattice-based cryptographic schemes.",
+      "premise": "Cyclotomic polynomials underpin the algebraic structure used in Ajtai commitments and thus affect protocol design.",
+      "query": "What Makes Cyclotomic Polynomials Crucial for Lattice Commitments?"
+    },
+    {
+      "knowledge": "Neo converts ring-based (polynomial) representations of field elements into matrices over small fields to facilitate Ajtai commitments and maintain compatibility with standard linear algebra operations. This modular design allows for more general and efficient proof systems by leveraging both the structural benefits of polynomials and the computational familiarity of matrices, making protocol design and implementation more flexible and accessible.",
+      "premise": "Reducing constraints from Rq-modules to matrix operations in Fq makes scheme design more general and modular.",
+      "query": "Why Does Neo Convert Between Polynomials and Matrices?"
+    }
+  ]
+}

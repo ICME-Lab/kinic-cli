@@ -1,0 +1,74 @@
+{
+  "items": [
+    {
+      "knowledge": "Agentic commerce describes a new reality where AI agents transact autonomously at machine speed with no humans monitoring or approving transactions in real time. This means that traditional security approaches, which depend on human review and intervention, are ineffective, as attacks and breaches can occur and propagate thousands of times faster than human operators can respond. This fundamentally changes the threat landscape, making reactive investigation and manual oversight obsolete in financial systems involving autonomous agents.",
+      "premise": "AI agents may execute financial transactions autonomously without human oversight in systems called agentic commerce.",
+      "query": "What Makes Agentic Commerce a New AI Security Challenge?"
+    },
+    {
+      "knowledge": "When both the AI agent and its guardrail are large language models, they share the same fundamental weaknesses, such as susceptibility to prompt injection attacks. This means that a carefully crafted malicious prompt that tricks the main AI agent can often trick the guardrail as well, allowing coordinated bypasses of safety mechanisms. This state, known as 'same model, different hat,' represents a significant loophole in current AI security methods because both systems can be manipulated through similar techniques. The practical implication is that relying on LLM-based judges does not significantly increase security and can actually introduce compounding vulnerabilities.",
+      "premise": "Large language models can be used to both generate content and judge the safety of outputs, introducing a single point of vulnerability.",
+      "query": "Why LLM-Based Guardrails Can Be Easily Bypassed"
+    },
+    {
+      "knowledge": "The traditional three-pillar AI security approach—comprising guardrails (content filters), observability (monitoring of agent behavior), and policy enforcement (rule checks)—was designed for scenarios where humans are in the loop and can react to incidents. However, in autonomous or agentic commerce, these approaches are insufficient because alerts and logs are only useful if a human can respond quickly enough. At machine speeds, exploits can be executed and repeated thousands of times before any human is aware of an issue, rendering delayed investigation or after-the-fact log analysis ineffective. This means that the foundational security approach for AI systems must be rethought for autonomous settings with significant financial stakes.",
+      "premise": "Guardrails, observability, and policy enforcement have served as the pillars of AI security, especially for human-supervised systems.",
+      "query": "What's Wrong With Today’s Three-Pillar AI Security Model?"
+    },
+    {
+      "knowledge": "Automated Reasoning converts human-defined policies from natural language into enforceable formal logic, allowing for deterministic validation of AI decisions. By expressing rules and parameters mathematically, Automated Reasoning can validate outputs—such as ensuring an AI does not approve a mortgage for someone with a credit score below a certain threshold—with claimed accuracy rates as high as 99 percent. This determinism catches many forms of AI errors and hallucinations. In practical terms, Automated Reasoning significantly increases trust in high-value processes by making policy enforcement verifiable and less prone to subjective failure, though it still requires comprehensive rule definitions from humans.",
+      "premise": "Automated Reasoning uses formal logic to enforce policy rules in AI systems with high accuracy.",
+      "query": "How Does Automated Reasoning Improve Policy Enforcement?"
+    },
+    {
+      "knowledge": "Automated Reasoning assumes that policy rules are public and that the system executing the decisions followed those published rules. However, it cannot generate irrefutable evidence that a particular model ran on a specific dataset with defined policy rules unless the execution is also verifiably recorded. Proofs created by Automated Reasoning can be large and require trust in the provider. This means that, while deterministic rule checking is possible, users and third parties still lack cryptographic certainty about what actually occurred during decision-making, highlighting a key limitation in high-speed, trustless environments where such proof is crucial.",
+      "premise": "Automated Reasoning can check for compliance at the rule level, but cannot prove which policies and models were actually used after the fact.",
+      "query": "What Are the Limits of Automated Reasoning in Agentic Commerce?"
+    },
+    {
+      "knowledge": "If an AI system checks each transaction individually against a policy (such as a maximum of 100 USD per transaction), an attacker can use prompt injection to instruct the agent to split a large transfer into many microtransactions (e.g., one hundred 10 USD transactions for a total of 1,000 USD). Each small transaction passes the rule check, and by the time pattern detection flags the suspicious activity, the money has already left the system. This means that formal logic enforcement may work as intended at the micro level but still fail to uphold the intended policy objective when attackers exploit overlooked behavioral loopholes.",
+      "premise": "A real-world policy intended to limit individual transaction size can be bypassed by splitting a large amount into many small transactions.",
+      "query": "How Can Attackers Circumvent Financial Guardrails Using Microtransactions?"
+    },
+    {
+      "knowledge": "In traditional finance, fraud has natural friction points—such as manual approvals and human response times—that slow down the impact of exploits, giving teams time to detect and respond to threats. In agentic commerce, autonomous AI systems can execute thousands of transactions per second, so when a vulnerability is exploited, the resulting damage can be exponentially greater before humans ever notice. For example, if a system processes 1,000 transactions a second and response takes one minute, 60,000 fraudulent actions can occur in that window. This means that machine speed in commerce makes security breaches dramatically more damaging and exposes the inadequacy of human-dependent security practices.",
+      "premise": "The speed of autonomous AI transactions removes normal friction points found in traditional cybersecurity and fraud detection.",
+      "query": "Why Does Machine Speed Magnify AI Security Risks?"
+    },
+    {
+      "knowledge": "Financial systems such as payment processors, banking, and blockchains rely on cryptography to provide guarantees that transactions have occurred as claimed, without requiring trust or direct observation. For example, Visa and banks use cryptographic checks rather than trusting transaction participants or systems. In autonomous commerce with AI agents, cryptographic primitives can likewise certify that rules were followed and actions were legitimate, regardless of attacks like prompt injection or social engineering. This means that cryptographic verification provides the mathematical certainty required for fast-paced, high-value, and adversarial environments, transforming trust-based problems into mathematically provable ones.",
+      "premise": "Mathematical proof and cryptography underpin high-value, trustless systems like payment processing and blockchain networks.",
+      "query": "Why Is Cryptography Key to Securing Autonomous Commerce?"
+    },
+    {
+      "knowledge": "AI agents not only need guardrails but can also play an active role in designing more effective rules by automatically generating test cases, identifying behavioral loopholes, and refining policies in response to new threats and real-world feedback. Humans define high-level intentions (e.g., preventing unauthorized large transfers), but agents excel at enumerating edge cases and automating rule discovery—covering scenarios like currency conversion and aggregate limits. This feedback loop means that agentic systems can adaptively improve guardrails, reduce overlooked vulnerabilities, and achieve more comprehensive security without relying solely on manual human effort.",
+      "premise": "AI agents can be trained to propose, test, and improve formal guardrail policies based on observed attack patterns and operational data.",
+      "query": "How Can Agents Help Humans Design Stronger AI Guardrails?"
+    },
+    {
+      "knowledge": "Zero-knowledge machine learning (zkML) leverages zero-knowledge succinct non-interactive arguments of knowledge (zkSNARKs) so that every computation—for example, an ML inference—produces a succinct cryptographic proof. This proof reveals which specific model (down to exact weights and version) executed on which inputs (which may remain private), and can be verified by anyone in under a second, regardless of how complex the computation was. This means that zkML acts as a mathematical receipt for AI actions, allowing stakeholders to verify the integrity and correctness of model execution without trusting any party or exposing sensitive details. zkML thus enables secure, privacy-preserving, and trustless verification in high-speed agentic systems.",
+      "premise": "Zero-knowledge machine learning uses cryptographic proofs to provide verifiable evidence of AI execution without exposing underlying data or models.",
+      "query": "What Is zkML and How Does It Secure AI Workflows?"
+    },
+    {
+      "knowledge": "When Automated Reasoning checks AI outputs using formal logic, zkML can wrap this process in a succinct cryptographic proof, so that every decision is accompanied by a verifiable receipt of policy compliance, model integrity, and input authenticity. This allows any agent or system to verify, in under a second, that the correct guardrail model executed the correct checks on the right data, with no need to trust the provider or re-run the computation. This fundamentally transforms AI security from best-effort monitoring to mathematical certainty, ensuring that guardrails function as intended even at machine speed, and malicious actions trigger immediate, automated enforcement.",
+      "premise": "Combining formal logic enforcement with zkML provides end-to-end verifiable AI decision-making with cryptographic guarantees.",
+      "query": "How Does zkML Enable Trustless Guardrails for AI Agents?"
+    },
+    {
+      "knowledge": "In traditional AI security, observability relies on monitoring logs, traces, and behavioral anomalies, which require interpretation and investigation after something suspicious occurs—a process that is slow and human-dependent. With zkML and Automated Reasoning-verified guardrails, every action is accompanied by a cryptographic proof, making violations mathematically provable and instantly enforceable by automated agents. This proactive observability means monitoring agents verify proofs in real-time and trigger automatic enforcement. The shift is from a reactive, human-in-the-loop approach to one where mathematical verification operates continuously and autonomously at machine speed, reducing human intervention and investigation overhead.",
+      "premise": "Traditional AI security observability depends on after-the-fact analysis, while zkML allows mathematical real-time enforcement.",
+      "query": "How Does Observability Change with zkML-Enabled Systems?"
+    },
+    {
+      "knowledge": "zkML transforms the three foundational pillars of AI security as follows: Guardrails shift from probabilistic filtering to cryptographic proof of policy execution, meaning stakeholders receive verifiable receipts of compliance; Observability moves from reactively analyzing suspicious behavior patterns to proactively verifying mathematical proofs of all actions; Policy enforcement is no longer reliant on logs or provider trust, but instead, every decision carries a succinct proof of the rules, data, and model applied. This means that agentic commerce at scale becomes possible without human oversight, based on mathematical guarantees instead of trust, enabling robust and autonomous AI economies.",
+      "premise": "zkML shifts all three traditional pillars of AI security—guardrails, observability, and policy enforcement—from trust-based to proof-driven approaches.",
+      "query": "How Does zkML Transform the Core Pillars of AI Security?"
+    },
+    {
+      "knowledge": "Prompt injection attacks appear in over 73 percent of production AI deployments, with some techniques achieving full bypass of existing guardrails. Because these attacks operate at the natural language or input level and can be rapidly and repeatedly exploited at machine speed, human-driven approaches and conventional guardrails are often ineffective at preventing high-value losses. This means that unless security systems shift to mathematically enforced proofs and automated response, prompt injection remains an existential risk for autonomous AI systems handling sensitive or financial operations.",
+      "premise": "Prompt injection attacks have a high success rate in bypassing AI guardrails and are difficult to mitigate with traditional monitoring.",
+      "query": "Why Are Prompt Injection Attacks a Critical Threat in Production AI?"
+    }
+  ]
+}

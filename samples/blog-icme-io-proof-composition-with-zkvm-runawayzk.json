@@ -1,0 +1,69 @@
+{
+  "items": [
+    {
+      "knowledge": "Composing zero-knowledge proof systems to achieve traits like privacy or improved verification commonly requires cryptographic experts to convert the verifier of one system into an arithmetic circuit for use in another system. This process is labor-intensive, proprietary, and reliant on closed-source or obfuscated code. This means that for most developers or researchers, understanding or replicating the composition process is a significant barrier, resulting in slow adoption and limited innovation in zero-knowledge proof composition.",
+      "premise": "Zero-knowledge proof systems often need to compose with other ZKP systems, usually requiring expert circuit conversion.",
+      "query": "Why Is ZKP System Composition Traditionally So Difficult?"
+    },
+    {
+      "knowledge": "A zero-knowledge virtual machine (zkVM) allows any developer to create zero-knowledge proofs using familiar programming languages, which can then be compiled to WebAssembly or RISC-V. This eliminates the need for specialized cryptographic expertise, enabling more people to build and experiment with ZKP systems. This means that zero-knowledge proof development can become as approachable as conventional programming, vastly broadening the participant base and accelerating innovation.",
+      "premise": "A zero-knowledge virtual machine enables ZKP generation using familiar programming languages and compiles to WASM or RISC-V.",
+      "query": "How Can zkVMs Make ZKP Development Accessible to All Developers?"
+    },
+    {
+      "knowledge": "Many zkVM libraries include specialized 'precompiles' for standard cryptographic operations—such as keccak256 hashing for Ethereum scaling—but offer no precompiles for enabling arbitrary ZKP schemes to be used as verifier circuits in larger proving networks. This means that while common building blocks are accessible and optimized, developers are blocked from easily composing novel or custom ZKP schemes within general zkVMs, limiting rapid iteration and integration of new research.",
+      "premise": "Specialized precompiles exist for common cryptographic operations in many zkVMs but not for general proof composition.",
+      "query": "What Is Missing From Current zkVMs’ Precompile Libraries?"
+    },
+    {
+      "knowledge": "When zero-knowledge virtual machines are combined with Non-Uniform Incremental Verifiable Computation (NIVC) systems, researchers and developers are incentivized to create highly efficient zk-components for a flexible proving network. This means that both general-purpose and specialized use-cases, such as zero-knowledge machine learning or browser-based ZKPs, can benefit from rapid benchmarking and integration, pushing the field toward more advanced and customized applications.",
+      "premise": "NIVC-based systems allow zero-knowledge virtual machines to be used in proof composition networks.",
+      "query": "How Can NIVC-Based zkVMs Accelerate ZKP Specialization?"
+    },
+    {
+      "knowledge": "While manually crafted circuits for composing one proof system into another can outperform general-purpose zkVMs—even those with specialized precompiles—the significant human capital and specialized knowledge required makes them impractical for widespread adoption. This means that despite technical superiority, handcrafted solutions may remain underutilized, as high complexity and labor requirements create a large barrier to practical implementation.",
+      "premise": "Handcrafted proof system circuits are more efficient but less accessible than zkVM-composed proofs.",
+      "query": "Is Handcrafting ZKP Compositions Always Worth the EFFORT?"
+    },
+    {
+      "knowledge": "If the zkVM (e.g., NovaNet’s zkEngine) is designed to facilitate composition with schemes like Groth16 for on-chain proofs, any new proving system that converts its verifier into a circuit or WebAssembly for the zkVM can leverage this integration without repeated effort. This means developers can quickly bring new proof systems into broader networks, encouraging ecosystem-wide improvements and reducing duplication of complex engineering work.",
+      "premise": "Making proof composition a function of the zkVM means the work for integrating new proving schemes only needs to be done once.",
+      "query": "How Does Centralizing Proof Composition in zkVMs Save Effort?"
+    },
+    {
+      "knowledge": "Although zero-knowledge virtual machines introduce computational overhead compared to circuits meticulously handcrafted by experts, this trade-off becomes less relevant when considering the vastly improved usability and accessibility. This means more novel proving schemes from research or smaller teams can be rapidly integrated and used, promoting widespread experimentation and faster progress in ZKP technology—even if there is some performance cost.",
+      "premise": "General zkVMs traditionally introduce overhead compared to handcrafted circuits.",
+      "query": "Does zkVM Overhead Matter If Accessibility Grows?"
+    },
+    {
+      "knowledge": "Integrating a verifier circuit for a fast privacy-focused browser-based proving scheme into a zkVM network using NIVC folding allows all user proofs to be aggregated via the network before posting to the main ledger, amortizing posting costs. Because the zkVM handles the complexity of aggregation, all users benefit from optimization, contrasting with less integrated approaches that require individual proof submissions or depend on universal aggregation circuits. This means scalable and efficient aggregation is built-in by design, simplifying developer workloads and improving system efficiency.",
+      "premise": "NIVC folding enables aggregation of proofs at the zkVM level, benefiting all users in the network.",
+      "query": "How Does NIVC Folding Streamline Proof Aggregation in zkVMs?"
+    },
+    {
+      "knowledge": "Aggregation in zkVMs leveraging NIVC folding benefits from the fact that most NIVC-based proof schemes are transparent and do not need a trusted setup. This contrasts with traditional SNARK-based aggregation, which often requires a costly and trust-dependent setup phase. This means greater security and convenience for developers and end-users, as they avoid the complexity and risk associated with generating and securing secret setup parameters.",
+      "premise": "Most NIVC schemes do not require a trusted setup, increasing transparency.",
+      "query": "How Do NIVC zkVM Aggregation Schemes Avoid Trusted Setup?"
+    },
+    {
+      "knowledge": "Many modern zero-knowledge virtual machines do not natively provide privacy guarantees, so they incorporate privacy by composing with external privacy ZKP schemes such as Groth16 or similar zkSNARKs. Privacy can also be introduced directly at the zkVM level if privacy is enforced during proof aggregation (folding). This means that zkVM systems remain flexible: privacy can either be modularly attached as needed or provided by the folding mechanism itself in applications where local privacy is essential.",
+      "premise": "Some zkVMs are not inherently privacy-enabled and must integrate privacy externally.",
+      "query": "How Can Privacy Be Added to Non-Private zkVMs?"
+    },
+    {
+      "knowledge": "A proof composition model centered around a specialized zkEngine—where integration and composition occur at the virtual machine layer rather than the circuit level—lowers barriers for developers, increases system flexibility, encourages competition and innovation among proving schemes, and moves the ecosystem toward standardized interfaces. This means that zero-knowledge proof adoption can be accelerated across diverse applications, with fast iteration and modular specialization, even at the cost of some raw performance.",
+      "premise": "The zkEngine approach promotes accessibility, flexibility, competition, and standardization in proof composition.",
+      "query": "What Systemic Benefits Does the zkEngine Model Offer for ZKPs?"
+    },
+    {
+      "knowledge": "Handling proof composition at the zkVM level through specialized precompiles or generic opcodes allows proof specialization to become a convenient, reusable platform feature rather than bespoke circuit engineering. Additionally, if the zkVM folding operation is zk-enabled, privacy functionalities can also be handled directly within the virtual machine for certain use-cases. This means proof composition and privacy tools become modular, opening new ways for network and incentive design across a spectrum of zero-knowledge applications.",
+      "premise": "Proof composition can be built into the zkVM as specialized opcodes or precompiles, moving it away from the circuit level.",
+      "query": "Can Specialized zkVM OpCodes Replace Circuit-Level Proof Composition?"
+    },
+    {
+      "knowledge": "RunawayZK is a concept describing the exponential growth potential in zero-knowledge proof innovation when barriers to entry and composition are lowered through accessible and non-proprietary approaches like zkVM-based proof composition. This means that as more developers and researchers can easily compose and deploy new proving systems, innovation in privacy, scalability, and efficiency proliferates rapidly, leading to a more vibrant and competitive zero-knowledge ecosystem.",
+      "premise": "The concept of RunawayZK represents exponential ZKP innovation fueled by accessible composition.",
+      "query": "What Is RunawayZK, and How Can It Transform ZKP Innovation?"
+    }
+  ]
+}

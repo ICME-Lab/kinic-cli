@@ -1,0 +1,69 @@
+{
+  "items": [
+    {
+      "knowledge": "Zero-knowledge machine learning (zkML) leverages zero-knowledge proofs to allow a prover to demonstrate that a machine learning model was executed correctly without revealing sensitive input data or requiring the verifier to recompute the output. This means that zkML ensures machine learning inference can be both privacy-preserving and trustless, making it particularly suitable for decentralized finance, privacy-preserving AI, and secure blockchain applications where transparency and confidentiality are necessary.",
+      "premise": "Zero-knowledge machine learning combines zero-knowledge proofs with machine learning models.",
+      "query": "How Does zkML Make Machine Learning Both Private and Verifiable?"
+    },
+    {
+      "knowledge": "JOLT employs a technique called the lookup singularity, where every CPU instruction is checked against a giant precomputed table of valid outcomes using a fast lookup argument known as Lasso or Shout. This means instead of representing operations like addition, multiplication, or bitwise logic with heavy algebraic constraints, proof generation involves simply verifying lookups in this table. As a result, JOLT dramatically reduces the complexity of creating zero-knowledge proofs for arbitrary programs, including all types of machine learning models, making even low-level tasks efficient and scalable.",
+      "premise": "JOLT is a zero-knowledge virtual machine using massive lookup tables to prove RISC-V program execution.",
+      "query": "Why Is JOLT’s Lookup Singularity a Game-Changer for zkML?"
+    },
+    {
+      "knowledge": "EZKL translates each layer of a neural network into arithmetic constraints that can be solved by a Halo2 SNARK circuit, optimizing for specific neural network structures. Non-polynomial functions are handled through lookup arguments, but large operations require the system to split big tables into manageable chunks, increasing circuit complexity. This means EZKL is inherently model-aware, allowing optimizations like pruning or quantizing weights for efficiency, but at the cost of potentially needing new circuits or custom constraints for each novel model or operation.",
+      "premise": "EZKL compiles neural network computation graphs into polynomial constraint systems using Halo2 SNARK circuits.",
+      "query": "How Does EZKL Use Traditional SNARKs for Model-Aware zkML?"
+    },
+    {
+      "knowledge": "DeepProve applies the GKR protocol to represent a neural network’s forward pass as a layered arithmetic circuit, using an interactive sum-check protocol to prove correctness. This approach allows the prover’s computational complexity to scale linearly with circuit size, resulting in significantly faster proof generation than traditional SNARK-based methods, especially for large models. This means DeepProve can provide verifiable proofs for deep or large-scale machine learning models with only a modest increase in computation time compared to standard unverified execution.",
+      "premise": "DeepProve uses the GKR (Goldwasser–Kalai–Rotblum) protocol to prove layered computations efficiently.",
+      "query": "How Does DeepProve Leverage GKR for Lightning-Fast zkML Proofs?"
+    },
+    {
+      "knowledge": "JOLT offers unmatched flexibility and ease of use because it can prove correctness for any program with minimal need for custom circuits. EZKL excels in leveraging widely adopted SNARK tooling and supports established verification ecosystems and user-friendly integrations, but is challenged by scaling issues for large models. DeepProve delivers exceptional speed for large, structured models via its linear-scaling GKR protocol, but is less adaptable to irregular computations and can generate larger proofs. This means choosing a zkML framework depends on the model’s size, structure, flexibility needs, and the performance required for proof generation and verification.",
+      "premise": "Each zkML framework—JOLT, EZKL, and DeepProve—has unique strengths due to their proof generation techniques.",
+      "query": "What Are the Core Trade-Offs Between JOLT, EZKL, and DeepProve?"
+    },
+    {
+      "knowledge": "DeepProve’s use of the GKR protocol ensures that the prover’s workload remains proportional to the number of operations, even as model layers and parameters scale up. Since many operations in large neural networks can be batched or parallelized, DeepProve is particularly advantageous for cloud-scale or on-chain proofs of models with millions of parameters. This means DeepProve’s architecture uniquely positions it for efficient, large-scale deployments of verifiable machine learning where scaling is crucial.",
+      "premise": "GKR-based zkML frameworks like DeepProve scale linearly with model size and support efficient parallelization.",
+      "query": "Why Is DeepProve Especially Suited for Large-Scale Neural Networks?"
+    },
+    {
+      "knowledge": "JOLT treats any machine learning model as executable code targeting the RISC-V instruction set and proves program correctness through table lookups, rather than custom-designed circuits. This means developers can use existing programming languages or model formats without in-depth cryptographic knowledge, compiling directly to RISC-V with immediate proof support for diverse architectures, including CNNs, RNNs, or decision trees. As a result, JOLT dramatically expands the accessibility and flexibility of zkML for both developers and auditors, reducing development overhead and deployment risk.",
+      "premise": "JOLT’s lookup-based zkVM abstracts proof complexity regardless of model architecture.",
+      "query": "How Does JOLT Enable Universal zkML Without Custom Circuits?"
+    },
+    {
+      "knowledge": "Non-linear operations common in machine learning models, such as ReLU or Sigmoid activations, require different zkML frameworks to deploy special techniques. EZKL encodes these as polynomial constraints or via multiple tiered lookups, increasing circuit complexity. JOLT natively supports branching logic by representing it as RISC-V instructions proved via simple table lookups, maintaining efficiency. DeepProve incorporates non-linear functions within its arithmetic circuits but most efficiently handles piecewise-linear types. This means each framework’s handling of non-linearity directly impacts its efficiency and suitability for various ML workloads.",
+      "premise": "Handling non-linear functions is a central challenge for efficient zkML proof systems.",
+      "query": "How Do zkML Provers Tackle Non-Linear Neural Network Operations?"
+    },
+    {
+      "knowledge": "JOLT’s reliance on massive but virtual lookup tables through Lasso allows it to verify complex operations, such as bitwise logic or matrix arithmetic, as single O(1) steps. Early benchmarking shows Lasso achieving more than 10× the speed of Halo2’s lookup method, with potential for 40× improvements. This means previously time-prohibitive proof operations for machine learning, like big-field arithmetic or control-heavy logic, become feasible for near-real-time or interactive use, even on local devices like smartphones or laptops.",
+      "premise": "JOLT’s design delivers significant speed advantages over traditional SNARK-based ML proving systems.",
+      "query": "What Drives JOLT’s Substantial zkML Prover Speedups?"
+    },
+    {
+      "knowledge": "JOLT enhances auditability by proving the execution of a standard instruction set architecture (RISC-V) using well-defined lookup tables, making the correctness trail of an ML model more transparent and easier to independently verify. Compared to bespoke circuit systems that require intricate manual verification, JOLT’s approach allows ordinary program traces to be inspected and audited step-by-step. This means that in high-stakes environments such as legal or medical applications, JOLT provides higher confidence and clarity in proof verification than traditional monolithic circuits.",
+      "premise": "The auditability of machine learning proof systems impacts their practical trust and adoption.",
+      "query": "How Does JOLT Improve Transparency and Auditability in zkML?"
+    },
+    {
+      "knowledge": "JOLT and EZKL typically output succinct SNARK proofs—a few kilobytes in size—that can be verified quickly, often using standard cryptographic primitives. DeepProve, based on GKR and STARK techniques, produces larger proofs (tens to hundreds of kilobytes) but achieves exceptionally fast verification compared to recomputing the model, with practical examples reducing verification from several seconds or minutes to half a second. This means that although DeepProve’s proofs may require more bandwidth, it dramatically lowers the computational barrier to first-order verification for large models.",
+      "premise": "Proof size and verification complexity differ between zkML architectures.",
+      "query": "How Do Proof Sizes and Verification Times Compare in JOLT, EZKL, and DeepProve?"
+    },
+    {
+      "knowledge": "DeepProve excels in cloud-scale or server-side verification due to its linear scaling and ability to parallelize large computations, making it suitable for large, regularly-structured neural networks. JOLT is well-suited for both cloud and edge deployment thanks to its all-purpose, low-overhead approach, potentially enabling real-time or on-device proving for small to moderately sized models. EZKL offers practicality through wide SNARK support, but is better suited for moderate-sized models or offline proving given its higher overhead. This means the optimal choice of zkML framework is influenced by deployment environment, model scale, and response time requirements.",
+      "premise": "Efficient zkML requires balancing performance across diverse environments and application scales.",
+      "query": "Which zkML Frameworks Are Optimal For Cloud, Edge, and Real-Time Use?"
+    },
+    {
+      "knowledge": "JOLT allows developers to write programs in high-level languages, compile to RISC-V, and obtain zero-knowledge proofs for model inference without needing deep expertise in SNARK circuit design. With planned ONNX support and drop-in libraries for common ML tasks, JOLT makes it feasible for ordinary machine learning practitioners to deploy privacy-preserving and verifiable models. This means zkML can become part of everyday application development, accelerating adoption beyond expert cryptography circles.",
+      "premise": "JOLT reduces zero-knowledge ML development to standard programming and compilation tasks.",
+      "query": "How Does JOLT Lower the Barrier to zkML Adoption?"
+    }
+  ]
+}

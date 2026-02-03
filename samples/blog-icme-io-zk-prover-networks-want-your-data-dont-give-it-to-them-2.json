@@ -1,0 +1,79 @@
+{
+  "items": [
+    {
+      "knowledge": "Zero-knowledge proofs are widely assumed to provide privacy by default due to the term zero-knowledge, but in practice, many large-scale zero-knowledge proving networks do not guarantee user privacy. Instead, most focus on speed, throughput, and economic incentives, frequently requiring users to send their private witness data in the clear to an untrusted prover. This means that simply using zero-knowledge proofs does not ensure that your data remains confidential, and users must be cautious about privacy assumptions when selecting proving solutions.",
+      "premise": "Zero-knowledge proofs are commonly misunderstood as inherently private.",
+      "query": "Do Zero-Knowledge Proofs Always Guarantee Privacy?"
+    },
+    {
+      "knowledge": "Many contemporary zero-knowledge proving networks operate by optimizing for speed, cost reduction, and scalability, often at the expense of privacy. These systems typically require users to submit their sensitive witness data directly to untrusted provers who may use cloud clusters or specialized hardware. As a result, unless privacy is specifically protected, a user's private data is exposed to whoever operates the prover, making privacy a secondary consideration to operational efficiency in most existing networks.",
+      "premise": "Most current proving networks prioritize performance and cost over privacy.",
+      "query": "How Do Modern ZK Prover Networks Trade Privacy for Efficiency?"
+    },
+    {
+      "knowledge": "In use cases where witness data is already public or not sensitive, such as scaling blockchains, gaming proofs, or certain DeFi transactions, delegating proof generation to untrusted networks can be advantageous. By outsourcing these computations, organizations can significantly lower costs, speed up proving times, and reduce the need for local resources, since privacy is not a concern. This means that in non-sensitive scenarios, efficiency gains from untrusted external proving can outweigh privacy considerations.",
+      "premise": "Some zero-knowledge applications do not require data privacy.",
+      "query": "When Is Data Exposure Acceptable in Zero-Knowledge Proofs?"
+    },
+    {
+      "knowledge": "When users delegate zero-knowledge proof generation involving sensitive data to untrusted or centralized proving networks, they risk exposing their private information. This occurs because many infrastructure providers require that you send your raw data to them for processing, with little to no guarantees about how the data will be handled or erased. If privacy is important, this model can result in leakage of personal, financial, or regulated information, thereby undermining the supposed confidentiality benefits of using zero-knowledge proofs in the first place.",
+      "premise": "Sending sensitive witness data to untrusted provers can be a serious security risk.",
+      "query": "What Makes Blind Delegation of ZKP Work Dangerous for Privacy?"
+    },
+    {
+      "knowledge": "Client-side zero-knowledge proof generation models ensure that sensitive witness data never leaves the user's device, as the entire proof is generated locally. This approach eliminates the risk of data leaks to external provers and maintains both privacy and user control. Locally verifiable compute is considered the ideal for privacy-preserving zero-knowledge applications, as it safeguards data even from potentially compromised or malicious external infrastructure.",
+      "premise": "Local, client-side proving prevents sensitive data from leaving user devices.",
+      "query": "Why Is Client-Side ZKP Proving Considered the Gold Standard for Privacy?"
+    },
+    {
+      "knowledge": "Private delegated proving protocols allow users to offload heavy zero-knowledge proof computations to external provers without exposing their underlying witness data. These protocols are designed so that the user's sensitive information remains confidential even from the parties doing the computation. This approach enables efficient scaling and supports users on low-powered devices, such as smartphones or edge devices, while preserving the core privacy ideals of zero-knowledge proofs. The significance lies in achieving both efficiency and privacy, which are typically seen as competing goals.",
+      "premise": "Private delegated proving enables outsourcing computation while protecting witness privacy.",
+      "query": "How Does Private Delegated Proving Combine Efficiency with Data Security?"
+    },
+    {
+      "knowledge": "In the standard model of delegated SNARKs, users send their witness data in plaintext to an untrusted prover who computes the proof and returns it. This setup is inherently risky because any compromised or malicious prover can view, store, or misuse the exposed data. It also introduces centralization risks when relying on large cloud providers and lacks auditability for verifying data disposal. This means that, except in situations where privacy is not a concern, such as for public data, this approach can critically endanger user data confidentiality.",
+      "premise": "The standard model of delegated SNARKs exposes the user's witness data to external parties.",
+      "query": "What Privacy Risks Exist in Standard Untrusted Delegated SNARKs?"
+    },
+    {
+      "knowledge": "zk-SNARKs as a Service, or zkSaaS, improves privacy over single-prover models by dividing the witness across many untrusted parties, usually via secret sharing. A single server cannot reconstruct the whole witness, mitigating individual compromise risk. However, if a majority of servers collude, they can recover the private data. This approach offers intermediate privacy benefits but still relies on trusting that infrastructure providers do not collude, making it unsuitable for applications requiring full data confidentiality.",
+      "premise": "zk-SNARKs as a Service (zkSaaS) splits the witness among multiple provers rather than a single one.",
+      "query": "Does Splitting Witnesses Across Multiple Provers Make ZKPs Private?"
+    },
+    {
+      "knowledge": "Oblivious issuance of proofs requires the user and verifier to interact during proof generation. In this model, the issuer never learns the user's underlying witness, keeping sensitive data fully private and enabling proofs that are unlinkable to specific interactions. This technique is particularly useful for anonymous credentials, privacy-focused authentication, and regulatory compliance. However, it does require interactive setup and is specialized for certain use cases, meaning it is not always broadly applicable.",
+      "premise": "Oblivious issuance techniques use interactive protocols to keep witnesses fully secret.",
+      "query": "How Does Oblivious Issuance Preserve ZKP User Privacy?"
+    },
+    {
+      "knowledge": "CoSNARKs—collaborative SNARKs—enable delegated proof generation by splitting computation across multiple distrustful parties, each receiving only secret-shared, encrypted fragments of the witness. This architecture ensures that no individual prover, even if malicious, can reconstruct or extract information about the user's witness, provided that not all provers collude. CoSNARKs offer both strong privacy guarantees and scalability, though they demand higher network communication and are less efficient in low-prover or high-latency scenarios. Their security, however, depends on the assumption that a majority of provers will behave honestly.",
+      "premise": "CoSNARKs allow collaborative proof generation using secret sharing and multiple provers.",
+      "query": "What Makes CoSNARKs a Private and Scalable Delegated ZKP Solution?"
+    },
+    {
+      "knowledge": "The delegated Spartan model for zero-knowledge proofs uses a holographic SNARK to split the proof process, allowing the heaviest computational step—sparse polynomial evaluation—to be performed by an untrusted helper. Critically, the helper never sees or recovers the witness information, eliminating privacy risks. This process can result in proving speeds more than ten times faster than traditional methods, supports batching for further efficiency, and carries no trust assumptions for the helper. Nevertheless, proving depends on helper availability and has device scaling limitations for particularly large computations.",
+      "premise": "Delegated Spartan offloads most heavy proving work while preserving user privacy.",
+      "query": "How Does Delegated Spartan Enable Efficient and Private ZKP Proving?"
+    },
+    {
+      "knowledge": "Many prover networks and zero-knowledge virtual machines currently advertised as secure or privacy-preserving are, in fact, built for speed and scale, often using hardware and technologies that do not support real zero-knowledge privacy. These systems routinely leak witness data to untrusted provers, and their marketing materials can mislead users into assuming inherent confidentiality. This discrepancy means users must actively ensure that the proving technology offered genuinely supports privacy use cases, rather than assuming all 'zero-knowledge' solutions provide protection by default.",
+      "premise": "Some zkVMs and prover networks are marketed as private but do not guarantee data confidentiality.",
+      "query": "Are zkVMs and Prover Networks Truly Private?"
+    },
+    {
+      "knowledge": "The unique power of zero-knowledge proofs lies not just in enabling privacy, but also in supporting scalable, general-purpose, verifiable computation. This capability allows anyone to verify computations or data without requiring trust in underlying infrastructure, paving the way for trustless systems, decentralized AI verification, and seamless protocol interoperability. As a result, ZKPs can drive innovation far beyond private transactions, fostering new applications and models of computing that prioritize efficiency and verifiability.",
+      "premise": "Zero-knowledge proofs offer benefits beyond privacy alone.",
+      "query": "What Broader Potential Does Zero-Knowledge Proof Technology Unlock?"
+    },
+    {
+      "knowledge": "Enabling users to generate zero-knowledge proofs locally on their own devices—without depending on centralized infrastructure—reduces costs, increases security, and supports participation from low-power hardware. Memory-efficient proving models make it possible for anyone, anywhere, to verify or generate proofs, increasing decentralization and reducing systemic risks associated with large, centralized prover networks. This shift expands the practical usability and security of zero-knowledge-based systems.",
+      "premise": "Running zero-knowledge proofs locally is key to efficiency and accessibility.",
+      "query": "Why Is Memory-Efficient Local Proving Crucial for Scalable ZKPs?"
+    },
+    {
+      "knowledge": "Instead of acting solely as remote computation providers, zero-knowledge prover networks are better positioned as layers for aggregation and proof composition. In this emerging model, users locally generate their own proofs, and prover networks efficiently bundle or compress many of these into a single, easily verifiable aggregate proof for posting to blockchains or other verify-once systems. This model encourages both security and scalability, reducing centralization and ensuring that privacy and efficiency both remain core priorities as zero-knowledge technology matures.",
+      "premise": "The future role of prover networks is evolving from computation to aggregation.",
+      "query": "How Should Prover Networks Adapt for Secure, Decentralized ZKP Scaling?"
+    }
+  ]
+}

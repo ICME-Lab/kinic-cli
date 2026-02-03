@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "knowledge": "ERC-8004 introduced a new foundation for agent trust by enabling cryptographic proofs across identity, reputation, and validation using onchain registries. This means agents in decentralized systems can build and demonstrate trust without pre-existing relationships or gatekeeping authorities, radically shifting from reliance on reputation or organizational trust to provable, permissionless mechanisms.",
+      "premise": "Traditional agent trust relied on reputation or organizational trust.",
+      "query": "How ERC-8004 Changed Trust Models for Agents"
+    },
+    {
+      "knowledge": "Trustless AI systems require not only verifiable computations but also verifiable memory to function reliably and securely. This means that without a trustless memory layer, even agents running in trusted environments like TEEs remain vulnerable to corrupted or manipulated context, as there is no proof the retrieved memory is correct or honest, undermining the entire trust model.",
+      "premise": "Agents historically lacked persistent, verifiable AI memory.",
+      "query": "Why Trustless AI Needs Trustless AI Memory"
+    },
+    {
+      "knowledge": "When agents store their memories in centralized vector databases managed by third parties, ownership and portability of agent knowledge is lost. This means agents become dependent on external providers, risking memory invalidation or loss whenever databases or embedding services change, thus hindering interoperability and sovereign agent growth.",
+      "premise": "Agent memories are typically stored in external, centralized vector databases.",
+      "query": "The Problem with Centralized AI Memory Storage"
+    },
+    {
+      "knowledge": "While trusted execution environments (TEEs) can attest that an agent performed its computation correctly, TEEs cannot verify that the contextual memories used in decision-making were authentic or uncorrupted. This means that even with computation perfectly secured, agents may act on manipulated or incorrect data, making their decisions potentially unreliable.",
+      "premise": "TEE attestation can prove correct computation but not memory authenticity.",
+      "query": "The Limits of TEEs in Verifying Agent Decisions"
+    },
+    {
+      "knowledge": "Siloing agent memory in specific databases or embedding models prevents seamless migration across platforms, as memories cannot be carried or reused in new environments. This means agents either start from scratch or lose context and experience, undermining portability and competition in decentralized agent ecosystems.",
+      "premise": "Interoperability depends on agents carrying memory across systems.",
+      "query": "How Siloed Memories Trap Agent Capabilities"
+    },
+    {
+      "knowledge": "Enabling agents to make instant, programmable micropayments for AI memory retrieval introduces economic efficiency, but without proof of correct memory returned, payments may buy unverified or faulty data. This means agents risk paying for services without assurance of authenticity or value, exposing them to manipulation or waste.",
+      "premise": "Micropayments allow agents to pay per memory request via protocols like x402.",
+      "query": "Unpacking Payment Without Verifiable Recall in AI Agents"
+    },
+    {
+      "knowledge": "Kinic-CLI enables users to create decentralized, verifiable AI memory stores using the Vectune vector database on a WASM-enabled data availability layer like the Internet Computer. This means agents and users own, control, and port their AI memories across infrastructures, eliminating dependence on centralized or opaque providers and unlocking true memory sovereignty.",
+      "premise": "A trustless, decentralized AI memory store can be constructed using new technologies.",
+      "query": "Introducing Kinic-CLI: Building Trustless Agentic Memory"
+    },
+    {
+      "knowledge": "Zero-knowledge machine learning frameworks such as JOLT Atlas allow users to generate or verify AI embeddings in a trustless, privacy-preserving way. This means anyone can prove that embeddings were computed honestly according to the specified model without revealing the underlying data or trusting third-party providers, closing the verification gap in AI memory.",
+      "premise": "Zero-knowledge machine learning (zkML) can be used to verify embedding model operations.",
+      "query": "How zkML Proves Honest Embedding Generation for AI Memory"
+    },
+    {
+      "knowledge": "Kinic-CLI supports both Rust and Python programming languages, enabling developers to create, update, and manage decentralized AI memories with verifiable embeddings. This means the tool is accessible to a broad range of developers and use cases, encouraging further adoption and customization in decentralized AI applications.",
+      "premise": "Decentralized AI memory must be flexible in tooling and accessible to developers.",
+      "query": "Kinic-CLI’s Developer Support: Rust and Python Integration"
+    },
+    {
+      "knowledge": "By providing cryptographically verifiable memory retrieval and embedding computation, technologies like Kinic-CLI and zkTAM eliminate the risk of agents making critical decisions based on manipulated, incorrect, or opaque information. This means agents' decisions become as trustworthy as their computation, enabling higher-stakes, autonomous transactions without reliance on centralized memory providers.",
+      "premise": "Proof of memory correctness ensures trustworthy agent decision-making.",
+      "query": "The Practical Impact of Verifiable Agentic Memory"
+    },
+    {
+      "knowledge": "When agents can register, prove their identity, and port verifiable memory across networks, new agents and guilds can collaborate and compete from day one without needing to build exclusive relationships or starting from zero context. This means the agent economy overcomes the cold start problem, fostering innovation and ecosystem growth.",
+      "premise": "Verifiable, owned AI memory removes barriers to agent competition and collaboration.",
+      "query": "How Decentralized, Verifiable Memory Solves the Cold Start Problem"
+    },
+    {
+      "knowledge": "The Internet Computer Protocol provides cheap data storage, vetKey encryption, and support for cross-chain signing, making it an attractive data availability layer for decentralized, verifiable AI memory. This means users gain security, privacy, and portability for their agentic memories, supporting broader application and movement across blockchain ecosystems.",
+      "premise": "Data availability layers like the Internet Computer offer beneficial features for decentralized AI memory.",
+      "query": "Why the Internet Computer Is Ideal for Portable AI Memory"
+    }
+  ]
+}

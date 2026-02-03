@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "knowledge": "Fully Homomorphic Encryption, or FHE, allows users to perform computations directly on encrypted data so that the data remains secure at all times. This means encrypted data can be sent to a third party for processing without the original information being exposed, allowing privacy to be maintained even during data analysis.",
+      "premise": "Fully Homomorphic Encryption allows computations to be performed on data without decrypting it.",
+      "query": "How does computation work on encrypted data with FHE?"
+    },
+    {
+      "knowledge": "In 1979, researchers discovered that multiplying two numbers, each RSA encrypted with the same keys, yields a result equivalent to multiplying the plaintext values before encryption. This means that certain mathematical operations performed on encrypted data can correspond to the same operations on the unencrypted data, setting a foundational concept for future homomorphic encryption methods.",
+      "premise": "RSA encryption can multiply ciphertexts with specific properties.",
+      "query": "What did researchers discover about RSA encryption in 1979?"
+    },
+    {
+      "knowledge": "Breakthroughs like the CKKS (Cheon-Kim-Kim-Song) scheme have improved Fully Homomorphic Encryption by enhancing noise reduction and computational efficiency. This means that encrypted computations can be carried out more accurately and efficiently than before, making FHE more practical for real-world applications.",
+      "premise": "Different encryption schemes improve Fully Homomorphic Encryption efficiency.",
+      "query": "Which recent advancements have improved FHE performance?"
+    },
+    {
+      "knowledge": "Since FHE separates data access from data processing, it allows organizations to share and compute on encrypted data without revealing the underlying information. For example, startups could compare encrypted performance data in a shared pool to gain business insights without disclosing their confidential metrics to each other. This means privacy can be maintained even in collaborative analytics.",
+      "premise": "FHE allows data processing and access to occur separately.",
+      "query": "How does FHE enable new privacy-preserving use cases?"
+    },
+    {
+      "knowledge": "Each multiplication operation performed using Fully Homomorphic Encryption generates a form of noise in the encrypted data, and if a computation involves too many such operations, the accumulated noise can render the encrypted result undecipherable. This means complex computations may not be possible with FHE until further noise management improvements are developed.",
+      "premise": "FHE adds noise to data with each multiplication operation.",
+      "query": "Why are some computations still non-feasible with FHE?"
+    },
+    {
+      "knowledge": "Because Fully Homomorphic Encryption is a relatively new cryptographic technology with few libraries and resources, it is challenging for most developers to implement FHE in their applications. This means that despite its potential, FHE's wider adoption is slowed due to the technical and tooling barriers.",
+      "premise": "FHE is new and lacks widespread tools and resources.",
+      "query": "Why do developers struggle to adopt FHE technology?"
+    },
+    {
+      "knowledge": "Fully Homomorphic Encryption leverages lattice-based post-quantum cryptography techniques, which current research suggests are not vulnerable to attacks by quantum computers. This means that data encrypted and processed with FHE remains secure even as quantum technologies advance.",
+      "premise": "FHE uses lattice-based post-quantum cryptography.",
+      "query": "What makes FHE resistant to quantum computing attacks?"
+    },
+    {
+      "knowledge": "Despite limitations in processing large or complex computations, Fully Homomorphic Encryption remains usable for many data processing tasks where privacy is crucial and the operations are not overly intricate. This means organizations can already leverage FHE for a range of practical, privacy-preserving applications.",
+      "premise": "FHE remains usable for many tasks despite current limitations.",
+      "query": "Is FHE practical for any real applications today?"
+    },
+    {
+      "knowledge": "Application templates being developed by ICME make it easier to use Fully Homomorphic Encryption for processing sensitive data, such as comparing user sales data with that of similar projects to optimize web3 strategies. This means users can gain valuable insights without exposing private data, thanks to ready-to-use, privacy-preserving solutions.",
+      "premise": "ICME is developing application templates for processing encrypted data.",
+      "query": "How can templates simplify FHE-based data processing?"
+    },
+    {
+      "knowledge": "Connecting to a third-party API using Fully Homomorphic Encryption allows sensitive user data to be processed in combination with external data sources while keeping all details encrypted. The final result can be re-encrypted and shared with the rightful recipient only, meaning confidential information remains hidden throughout the process.",
+      "premise": "Third-party APIs can process private data with FHE.",
+      "query": "What privacy benefits do FHE-enabled third-party APIs offer?"
+    },
+    {
+      "knowledge": "By combining Fully Homomorphic Encryption with zero knowledge proof modules, developers can enable advanced privacy-preserving web3 scenarios such as hidden trait NFT computation or private orderbook decentralized exchanges. This means the next generation of web3 applications can offer powerful features while protecting sensitive data and transaction information.",
+      "premise": "Combining FHE with zero knowledge proofs enhances privacy-preserving applications.",
+      "query": "What new web3 scenarios are possible by merging FHE and ZKP?"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "items": [
+    {
+      "knowledge": "Floating-point numbers are used in computer systems to represent real numbers through two main components, the significand (for precision) and the exponent (for scale). This means that computers can handle both very large and very small real numbers in a standardized way, enabling accurate scientific, engineering, and AI computations.",
+      "premise": "Floating-point numbers allow computers to represent a wide range of real numbers with finite bits.",
+      "query": "How Do Computers Store Real Numbers?"
+    },
+    {
+      "knowledge": "The IEEE 754 Floating Point Standard sets the format, arithmetic operations, and rounding rules for floating-point numbers in computers. This means that mathematical operations on floating-point numbers produce consistent and predictable results across different programming languages and hardware architectures, simplifying software portability and reliability.",
+      "premise": "The IEEE 754 standard defines how floating-point numbers are represented and calculated.",
+      "query": "What Makes Floating-Point Arithmetic Consistent Across Systems?"
+    },
+    {
+      "knowledge": "Zero-knowledge systems typically rely on finite fields, which makes direct representation and efficient processing of floating-point numbers very difficult. This means that conventional floating-point arithmetic cannot be easily implemented within these systems, leading to challenges for tasks requiring real number computation.",
+      "premise": "Zero-knowledge systems often operate within finite mathematical fields.",
+      "query": "Why Are Floating-Point Numbers Hard to Use in Zero-Knowledge Proofs?"
+    },
+    {
+      "knowledge": "Current approaches to simulating floating-point numbers in zero-knowledge systems, such as circuit quantization and bit decomposition, lead to computational inefficiencies and reduced numerical accuracy. This means that proof generation becomes slower, and there is a measurable loss of precision in calculated results, which affects scientific and AI applications.",
+      "premise": "Quantization and bit decomposition are methods used to support floating-point-like behavior in zero-knowledge systems.",
+      "query": "What Are the Downsides of Current Floating-Point Alternatives in ZK?"
+    },
+    {
+      "knowledge": "Accurate and efficient floating-point computation is necessary for zero-knowledge use cases in fields like machine learning, signal processing, and scientific research. This means that without robust support for floating-point numbers, zero-knowledge proofs are not viable for a large class of modern, high-precision applications.",
+      "premise": "Emerging AI and scientific applications in zero-knowledge proofs need accurate floating-point computation.",
+      "query": "Why Are Floating-Point Numbers Essential for ZK Applications in AI?"
+    },
+    {
+      "knowledge": "EZKL converts floating-point model outputs to lower-precision numbers by scaling and truncating, making it easier for users to integrate models into ZKML systems. However, this process reduces numerical accuracy and introduces potential quantization errors, which means model performance may degrade and some AI tasks could become unstable or less precise.",
+      "premise": "EZKL employs number scaling and truncation in its approach to ZKML.",
+      "query": "How Does EZKL Handle Floating-Point Numbers for Machine Learning in ZK?"
+    },
+    {
+      "knowledge": "By using pre-quantized machine learning models tailored for specific tasks, Daniel Kang's group achieves high efficiency in zero-knowledge proofs with systems like Halo2. This means that for targeted applications, ZKML can be both fast and accurate, such as achieving notable accuracy in trustless ImageNet verification, though the approach requires adaptation for each unique problem.",
+      "premise": "Daniel Kang's group uses pre-quantized models and Halo2 for machine learning in ZK.",
+      "query": "What Advantages Do Pre-Quantized Models Bring to ZKML?"
+    },
+    {
+      "knowledge": "Pre-quantized model techniques in zero-knowledge machine learning need models and supporting circuits to be specifically designed or adapted for each use case. This means that while they provide efficiency for targeted problems, they are not practical for generic or widely-used AI models, and any loss of precision may severely degrade output quality in such cases.",
+      "premise": "The pre-quantized model approach requires customization for different problems.",
+      "query": "What Are the Limitations of Pre-Quantized Models in ZKML?"
+    },
+    {
+      "knowledge": "Zero Gravity leverages Weightless Neural Networks, which completely avoid the use of weights and floating-point numbers by representing neural logic as combinatorial circuits and utilizing Bloom filters for memory cells. This means computation is simplified and space-efficient, but security risks arise if inputs can be manipulated, since Bloom filter false positives can be exploited unless cryptographically low error rates are enforced, which is costly.",
+      "premise": "The Zero Gravity project uses Weightless Neural Networks and Bloom filters instead of weights or floating-point numbers.",
+      "query": "How Does Zero Gravity Avoid Floating-Point Arithmetic in Neural Networks?"
+    },
+    {
+      "knowledge": "The use of Bloom filters in Weightless Neural Networks, such as in Zero Gravity, can create vulnerabilities if a prover can choose the neural network input. This means that unless the filter's false-positive rate is made cryptographically low, malicious actors could craft inputs that yield incorrect proof validation, and achieving such error rates is often impractical due to high resource demands.",
+      "premise": "Bloom filters in security-sensitive neural network settings can lead to vulnerabilities if not finely tuned.",
+      "query": "What Security Risks Do Bloom Filters Pose in Zero-Knowledge Neural Networks?"
+    },
+    {
+      "knowledge": "Soft-float emulates floating-point arithmetic with integer operations in software, as done by systems like Risc0. This means that although floating-point computation can be simulated, performance is significantly slower compared to hardware or direct support, making it unsuitable for demanding applications such as ZKML.",
+      "premise": "Soft-float methods emulate floating-point arithmetic through integer operations in software.",
+      "query": "Why Is Soft-Float Slow For Zero-Knowledge Virtual Machines?"
+    },
+    {
+      "knowledge": "Domain-Specific Languages for zero-knowledge proofs, such as Circom, use methods like scaling numbers and applying floor operations, or fixed-point representations, to mimic floating-point behavior. This means there is an unavoidable loss of precision and accuracy, which undermines the viability of zero-knowledge proofs for many scientific and AI tasks without further innovation.",
+      "premise": "Circuit quantization and fixed-point encoding lose accuracy when simulating floating-point numbers.",
+      "query": "Why Do ZK Domain-Specific Languages Struggle With Floating-Point Numbers?"
+    },
+    {
+      "knowledge": "A 2022 research article introduced a novel ZK-FP system using batch range proofs to validate floating-point results, allowing for some bounded error. This means the method is about fifty-seven times faster than previous, bit-decomposition-based approaches, providing much-improved verification times while maintaining reasonable accuracy, though with a slightly increased soundness error.",
+      "premise": "Recent research proposes batch range proofs for efficient floating-point computation in ZK.",
+      "query": "What Breakthroughs Have Improved Floating-Point Speed in ZK?"
+    },
+    {
+      "knowledge": "Lookup arguments enable zero-knowledge systems to efficiently verify that a value or computation belongs to a specific set or matches a lookup table, which compresses specific kinds of operations. This means that integrating lookup arguments may substantially boost the practical efficiency of floating-point proofs for complex operations in zero-knowledge contexts.",
+      "premise": "Lookup arguments can efficiently prove membership and correctness in ZK systems.",
+      "query": "How Can Lookup Arguments Enhance Floating-Point Support in ZK?"
+    },
+    {
+      "knowledge": "Continuous research and advancements in techniques like lookup arguments and batch range proofs are expected to make floating-point computations more practical in zero-knowledge systems. This means that projects such as ZKWasm are striving for optimal floating-point support, which could soon enable a wider range of scientific and AI applications to utilize zero-knowledge proofs without severe trade-offs in speed or accuracy.",
+      "premise": "Research and open-source development are ongoing to improve floating-point support in ZK systems.",
+      "query": "What Is The Future of Floating-Point Numbers in Zero-Knowledge Computing?"
+    }
+  ]
+}

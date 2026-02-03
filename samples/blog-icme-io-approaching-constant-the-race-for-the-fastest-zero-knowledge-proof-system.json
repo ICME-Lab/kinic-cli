@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "knowledge": "Humans are fundamentally driven by a desire for faster solutions, which extends into zero-knowledge proof (ZKP) systems where minimizing prover times is a significant goal. This means that developments allowing proofs to be produced as quickly as the programs they verify are highly valued, driving research efforts aimed at optimizing these systems for both speed and efficiency in real-world, interconnected applications.",
+      "premise": "Speed has always been a major human pursuit, extending into technology and computation.",
+      "query": "Why Is Speed So Crucial in Zero-Knowledge Proofs?"
+    },
+    {
+      "knowledge": "ZKP systems such as Plonky and RISC Zero utilize small finite fields and hash-based techniques to increase prover speed. This means that by restricting field sizes, the operations required for proof generation are made faster, resulting in quicker verification without sacrificing correctness, and thus significantly improving the practicality of zero-knowledge proofs.",
+      "premise": "Small finite fields can be used to accelerate zero-knowledge proof system provers.",
+      "query": "How Do Small Fields Boost ZKP Proving Speed?"
+    },
+    {
+      "knowledge": "Elliptic curve-based ZKP systems require large prime fields to maintain their cryptographic security. This means that, unlike hash-based ZKP systems which can leverage small field sizes for faster computations, elliptic curve-based systems face inherently more expensive operations because their committed scalars must be from a large field, limiting their ability to match the computation speed of systems using small fields.",
+      "premise": "Elliptic curve-based systems need large prime fields for security.",
+      "query": "Why Can’t Elliptic Curve ZKPs Use Small Fields for Speed?"
+    },
+    {
+      "knowledge": "Enhancements in polynomial commitment schemes directly result in faster prover speeds for zero-knowledge proofs. This means that any innovation or optimization within PCS will yield performance gains throughout the entire ZKP process, making PCS advancements a universal lever for faster proving and verifying.",
+      "premise": "Polynomial commitment schemes (PCS) are integral to zero-knowledge proof systems.",
+      "query": "How Do PCS Improvements Speed Up ZKPs?"
+    },
+    {
+      "knowledge": "Parallelization allows ZKP provers to split the workload across several machines, sometimes yielding orders-of-magnitude improvements in speed for large proving tasks. However, this method is not universally suitable, as it can expose private witness data to multiple remote provers and is only effective for problems that can be efficiently parallelized. This means that while parallelization can be transformative in some cases, it has important trade-offs and limitations regarding privacy and suitability.",
+      "premise": "Parallelization divides computational work among multiple machines.",
+      "query": "What Are the Pros and Cons of Parallelizing ZKP Provers?"
+    },
+    {
+      "knowledge": "Precompiles in zero-knowledge proof virtual machines enable faster circuit execution by pre-optimizing common operations, such as frequently used hash functions. However, each precompile requires expert creation and maintenance, introduces a potential security risk since not all precompiles can be fully audited, and thus represents a complex trade-off between performance and security. This means that while precompiles offer significant execution speedups, they also contribute nontrivial complexity and risk to ZKP system maintenance.",
+      "premise": "Precompiles optimize recurring code segments before they are compiled in zkVMs.",
+      "query": "How Do Precompiles Optimize ZK Proofs, and What Risks Do They Bring?"
+    },
+    {
+      "knowledge": "NIVC enables zkVMs to use circuits of varying sizes tailored to the memory and privacy preferences of different machines. This means powerful computers can process large steps quickly, while privacy-focused or lower-memory devices can choose smaller steps. NIVC allows recurring code patterns to be optimized automatically on the fly, eliminating the need for manually created precompiles and providing decentralized, adaptable performance optimization for ZK systems without compromising privacy or flexibility.",
+      "premise": "Non-uniform incremental verifiable computation (NIVC) adapts circuit sizes to prover capabilities.",
+      "query": "How Does NIVC Make ZK Systems Both Faster and More Flexible?"
+    },
+    {
+      "knowledge": "NIVC-based zero-knowledge proving systems currently utilize elliptic curve-based polynomial commitment schemes because of their homomorphic properties, which are essential for recursive computation. However, this means that proving speed is still constrained by the efficiency of multi-scalar multiplications using large scalar values, which can limit overall speed improvements despite the flexibility and adaptability of NIVC.",
+      "premise": "NIVC-based ZK systems are currently implemented using elliptic curve-based polynomial commitment schemes.",
+      "query": "Why Do Current NIVC Provers Rely on Elliptic Curves, and What Limits Them?"
+    },
+    {
+      "knowledge": "Recent advancements have made lattice-based polynomial commitment schemes nearly as fast as traditional elliptic curve and hash-based systems. Lattice-based systems operate with smaller word sizes, making them more hardware-efficient, provide quantum resistance, feature a transparent setup, and support recursion. This means lattice PCS offer a powerful alternative that overcomes many limitations of other approaches, potentially enabling dramatic performance increases and improved security for next-generation zero-knowledge proofs.",
+      "premise": "Lattice-based polynomial commitment schemes can use smaller field sizes and offer unique features.",
+      "query": "What Makes Lattice-Based PCS a Game-Changer for ZKPs?"
+    },
+    {
+      "knowledge": "Despite rapid advancements, zero-knowledge proving systems are still estimated to be around 50,000 times slower than simply executing the underlying computation. This means that, while ZKPs have become much faster, there remains a vast gap to bridge before they can verify programs at or near native computational speeds, underlining the importance of ongoing research and optimization.",
+      "premise": "Zero-knowledge proofs are still much slower than the underlying programs they verify.",
+      "query": "How Does ZKP Prover Speed Compare to Regular Program Execution?"
+    },
+    {
+      "knowledge": "Hash-based zero-knowledge proof systems benefit from small field arithmetic for speed but present challenges for recursive proofs, which are essential for working efficiently on memory-constrained devices and networks. This means hash-based ZKPs, despite their speed advantage, have practical limitations in settings requiring nested or recursive operations, motivating hybrid or alternative approaches.",
+      "premise": "Hash-based ZK systems can use small fields but are harder to use with recursion.",
+      "query": "Why Are Hash-Based ZK Systems Challenging for Recursion?"
+    },
+    {
+      "knowledge": "Lattice-based polynomial commitment schemes support smaller fields, eliminate the need for trusted setup, provide quantum resistance, and enable homomorphic operations, making them promising for decentralized and incentive-driven prover networks like NovaNet. This means lattice PCS could empower scalable, privacy-preserving, and efficient zero-knowledge ecosystems that are open to wider hardware participation.",
+      "premise": "Lattice-based PCS offer several benefits over elliptic curve-based PCS for certain use cases.",
+      "query": "How Do Lattice PCS Improve Decentralized ZKP Networks?"
+    }
+  ]
+}

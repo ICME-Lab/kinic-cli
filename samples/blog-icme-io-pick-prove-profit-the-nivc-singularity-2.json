@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "knowledge": "IVC, or Incrementally Verifiable Computation, was initially implemented with universal circuits, meaning the same large circuit was reused for each proof step regardless of the specific computation. This means that even if a task only required a tiny part of the circuit, the entire complex circuit had to be handled every time. As a practical consequence, especially in zkVMs with many opcodes, most of the circuit remained unused during any particular step. This approach resulted in inefficiency, including slower performance and excessive memory use, because every step carried the overhead of the entire universal circuit regardless of what was actually computed.",
+      "premise": "Incrementally Verifiable Computation, or IVC, enables recursive proof systems to verify long computations in steps, but early implementations used a universal circuit for every step.",
+      "query": "Why Do Universal Circuits Slow Down Early Recursive Proofs?"
+    },
+    {
+      "knowledge": "NIVC, or Non-Uniform Incrementally Verifiable Computation, adapts the proving cost to match just the size of the circuit that is used in any individual step, not the size of a much larger universal circuit. This means that zkVMs only pay for the part of the circuit they actively execute, dramatically reducing computational and memory costs per step. As a result, zkVMs become much more efficient and scalable, enabling more specialized and resource-appropriate execution, which is a significant improvement over the traditional universal circuit approach.",
+      "premise": "Non-Uniform Incrementally Verifiable Computation, or NIVC, allows verifying only the relevant portions of a circuit during each proof step, scaling costs accordingly.",
+      "query": "How Does NIVC Transform zkVM Performance?"
+    },
+    {
+      "knowledge": "Nebula, an advanced NIVC scheme tailored for zkVMs, allows a variable number of opcodes to be included in each proof step rather than being restricted to one. This flexibility gives implementers fine-grained control over speed and memory usage: more opcodes per step mean faster proving and better adaptation to available hardware. This means zkVMs can now serve both powerful servers and lightweight devices efficiently and are no longer bottlenecked by single-opcode proof steps, opening up broader compatibility and improved performance across devices.",
+      "premise": "Advanced NIVC schemes like Nebula enable dynamic grouping of instructions for proof generation in zkVMs.",
+      "query": "What Makes Nebula Accelerate zkVMs?"
+    },
+    {
+      "knowledge": "NIVC's architecture makes it possible for a network to aggregate specialized proof circuits, each designed for different tasks such as AI computations, homomorphic encryption, or lightweight mobile applications. By treating these circuits as individual opcodes inside the NIVC framework, they can be combined and orchestrated harmoniously within a broad system. This means developers can build and deploy highly specialized, efficient proof circuits without each having to independently solve the challenges of on-chain integration or interaction, leading to faster innovation and richer ecosystems.",
+      "premise": "NIVC lets specialized proof circuits act as modular components, or opcodes, within a larger networked proof system.",
+      "query": "How Does NIVC Enable Specialized Circuits to Work Together?"
+    },
+    {
+      "knowledge": "Most ZKP schemes begin with complex or expensive verifiers, which become a bottleneck when deployed on resource-constrained L1 blockchains that demand minimal computational costs. Integrating such schemes requires transforming their verifiers to fit into efficient formats like Groth16, a process that typically takes significant effort. NIVC, and specifically Nebula, streamlines this by allowing specialized proof schemes to integrate into a prover network where only the NIVC (Nebula) verifier needs to be composed on-chain. This means ZKP developers can focus on proof construction, letting the network handle the complexities of efficient on-chain verification, greatly reducing integration friction.",
+      "premise": "Layer 1 blockchains like Ethereum have strict resource limits, making verifier efficiency crucial when integrating new zk-proof systems.",
+      "query": "Why Is Fitting Proofs Into Groth16 So Challenging?"
+    },
+    {
+      "knowledge": "Many zero-knowledge proof schemes are designed primarily for computing succinct, verifiable proofs without necessarily ensuring privacy. This means they verify computational correctness but could leak metadata or auxiliary information unless specifically architected to prevent such leaks. Achieving true privacy—where no unintended data is exposed—often demands additional engineering or cryptographic layers. Therefore, while ZKPs are foundational for privacy, they are not necessarily privacy-preserving unless explicitly built or adapted to support zero-knowledge properties across all aspects of computation.",
+      "premise": "ZKPs are not always inherently privacy-preserving and may require adaptations to protect sensitive information.",
+      "query": "Why Are Not All ZKP Schemes Private by Default?"
+    },
+    {
+      "knowledge": "A NIVC-enabled zkVM can compose and wrap non-privacy-preserving ZKP schemes inside specialized circuits crafted for privacy. This modular approach ensures that even high-performance or specialized non-private ZKPs can be used safely, with the zkVM enforcing privacy guarantees by design. This means systems can use efficient but non-private ZKPs for speed or resource benefits while still protecting sensitive data, as the larger zkVM context adds the necessary privacy layers where individual schemes do not.",
+      "premise": "Flexible and modular zkVM architectures, supported by NIVC, can enforce privacy at a higher compositional level by integrating specialized privacy circuits.",
+      "query": "How Can a zkVM Ensure Privacy Even With Non-Private ZKPs?"
+    },
+    {
+      "knowledge": "Despite regular breakthroughs and new implementations in ZKP research, many schemes fail to achieve practical, wide adoption. This is largely because integrating new schemes into the existing proof pipelines and on-chain systems is both technically challenging and time-consuming. Additionally, creators rarely receive ongoing rewards beyond initial recognition, which discourages long-term development and deployment. As a result, many promising ZKP innovations remain experimental and undervalued, slowing ecosystem progress.",
+      "premise": "Innovative ZKP schemes often face obstacles to adoption due to integration complexity and lack of ongoing incentives.",
+      "query": "Why Do Many New ZKP Schemes Remain Unused?"
+    },
+    {
+      "knowledge": "NIVC establishes a network model where each specialized proving scheme or circuit can be added as an independent opcode, focused on its specific computational strength. When these opcodes are invoked within the network, their creators are rewarded proportionally to their usage. This model means implementers do not need to fit their schemes into the unconventional standards of every verification system—instead, NIVC handles network-level proof composition, while developers earn sustainable, ongoing rewards, transforming the ZKP innovation landscape from isolated experiments to a vibrant, incentivized ecosystem.",
+      "premise": "NIVC enables new ZKP schemes to integrate easily as modular opcodes, with ongoing incentives for usage within a prover network.",
+      "query": "How Does NIVC Incentivize ZKP Innovation?"
+    },
+    {
+      "knowledge": "NIVC-based systems replace computationally expensive consensus methods like re-execution or proof-of-work with succinct, cryptographic proofs. Provers generate compact mathematical attestations to computation correctness, and verifiers simply check these proofs—a far more efficient operation than repeating computations or racing to solve puzzles. This approach means less redundant work, lower resource consumption, and significantly better scalability, making consensus processes faster and suitable even for lightweight devices.",
+      "premise": "Traditional consensus in decentralized systems often relies on re-execution or proof-of-work, both resource-intensive.",
+      "query": "What Makes NIVC-Based Consensus More Scalable?"
+    },
+    {
+      "knowledge": "With its math-driven approach, NIVC ensures all network interactions—such as contributions and rewards—are backed by verifiable, succinct proofs. Anyone can check that computations are performed correctly and that rewards are distributed fairly, with no need for subjective assessment or resource-heavy validation. As a result, the system not only increases efficiency but also boosts trust, transparency, and security within decentralized calculation networks.",
+      "premise": "Using mathematical proofs for consensus enables transparent and succinct reward mechanisms for provers in the network.",
+      "query": "How Does NIVC Enhance Security and Fairness in Prover Networks?"
+    },
+    {
+      "knowledge": "The NIVC Singularity is the point at which a prover network reaches critical mass by supporting seamless integration and aggregation of every kind of circuit—no matter how specialized—within a unified, modular architecture. Provers focus solely on their specific tasks, and the network manages aggregation, privacy, and output finalization. This positive feedback loop rapidly accelerates innovation, as every additional specialized component makes the entire system more powerful and universally applicable, turning the prover network into a dynamic, reward-driven ecosystem.",
+      "premise": "NIVC fosters modular, composable prover networks where specialized circuits continually increase utility and efficiency.",
+      "query": "What Is the NIVC Singularity?"
+    }
+  ]
+}

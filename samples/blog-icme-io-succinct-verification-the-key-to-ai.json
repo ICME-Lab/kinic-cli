@@ -1,0 +1,49 @@
+{
+  "items": [
+    {
+      "knowledge": "An AI system is only able to create and maintain knowledge reliably if it can verify that knowledge itself, both succinctly and dependably. This means that without internal, self-contained verification mechanisms, AI systems require continual external oversight from humans to validate their actions and beliefs, which inherently limits their scalability and trustworthiness.",
+      "premise": "AI systems must be able to internally verify their knowledge to maintain autonomy and reliability.",
+      "query": "Why Self-Verification Is Essential for Scalable AI"
+    },
+    {
+      "knowledge": "When an AI model cannot prove the validity of its facts, beliefs, or behaviors under its own operative assumptions, the responsibility for validation is shifted externally to human operators. This means that as AI systems grow more complex, the burden of human intervention and correction increases rapidly, ultimately surpassing what is practically manageable and resulting in systems that become increasingly fragile and unmaintainable.",
+      "premise": "Absence of internal verification in AI leads to increasing complexity and human intervention.",
+      "query": "How Lack of AI Verification Leads to Brittle and Unscalable Systems"
+    },
+    {
+      "knowledge": "Early expert systems relied on manually constructed if-then rules to encode knowledge, but as the number of rules increased, their complexity made interactions unpredictable and their behavior unstable. This means that without mechanisms for internal verification, knowledge structures become fragile and break down as their scale increases, highlighting the importance of verification for robust AI.",
+      "premise": "Historical expert systems accumulated complexity and unpredictability as rule counts grew.",
+      "query": "What Early Expert Systems Taught Us About AI Fragility"
+    },
+    {
+      "knowledge": "Deep Blue succeeded as a chess engine because it could internally verify moves at the point of decision by conducting extensive searches, independent of hand-coded human strategies. However, Deep Blue could not verify the long-term planning function used to evaluate moves, which remained fixed and opaque. TD-Gammon advanced on this by learning and verifying its own evaluation function. This means that AI systems with self-verifying subsystems can adapt and scale more robustly than those relying on fixed, unverifiable modules.",
+      "premise": "Deep Blue and TD-Gammon are notable examples of AI with different verification capabilities.",
+      "query": "How the Ability to Internally Verify Decisions Made Deep Blue and TD-Gammon Resilient"
+    },
+    {
+      "knowledge": "Large language models and other advanced AI systems possess enormous amounts of implicit knowledge but cannot provide proofs or audit trails verifying the correctness of their outputs. This means that, despite providing plausible answers, these models offer no cryptographic guarantee that their results are anything beyond sophisticated pattern matching, limiting their reliability in domains requiring trust.",
+      "premise": "Modern large language models contain vast implicit knowledge but lack verification mechanisms.",
+      "query": "Why Current LLMs Struggle With Trustworthy Reasoning"
+    },
+    {
+      "knowledge": "Zero-knowledge proofs allow for succinct, cryptographic verification of machine-learned inferences, decisions, and updates. This means that claims such as an inference following from known model weights, a decision meeting explicit constraints, or an update reflecting real data can be attached to AI outputs as verifiable evidence, making AI-generated knowledge portable, trustworthy, and durable.",
+      "premise": "Zero-Knowledge Proofs (ZKPs) can provide cryptographic verification for machine learning outputs.",
+      "query": "How Zero-Knowledge Proofs Transform AI Knowledge Into Verifiable Evidence"
+    },
+    {
+      "knowledge": "Without the ability for AI to perform self-contained and succinct internal verification, it is impossible to scale AI safely in domains where trust is essential. This means that such systems will perpetually require human supervision and intervention, preventing true autonomy and making further scale-up unsustainable and untrustworthy.",
+      "premise": "AI without self-contained succinct verification can't scale where trust is critical.",
+      "query": "Why Trust-Dependent AI Domains Need Succinct Self-Verification"
+    },
+    {
+      "knowledge": "GKR-based zero-knowledge machine learning currently leads in supporting complex ML operations efficiently. However, general-purpose zero-knowledge virtual machines (zkVMs), initially developed for broader computational use, are on track to surpass current domain-specific solutions. This means that each major speedup and optimization in zkVMs could unlock new frontiers for scalable, verifiable machine learning by providing a unified execution layer for AI with cryptographic validation.",
+      "premise": "State-of-the-art zkML leverages GKR-based zero-knowledge and ongoing improvements in zkVMs.",
+      "query": "How zkVM Advances Are Poised to Revolutionize Zero-Knowledge Machine Learning"
+    },
+    {
+      "knowledge": "In AI, the adaptation of the cryptographic principle of 'Don't trust. Verify.' takes the form 'Don't just learn. Prove that you’ve learned.' This means that to achieve true reliability and scalability, AI systems must not only acquire and generate knowledge but also provide convincing internal proof of what they have learned, thereby transforming trust in AI from blind acceptance to verifiable evidence.",
+      "premise": "The cryptographic maxim of verification is adapted for AI practices.",
+      "query": "What Does 'Don't Just Learn, Prove That You’ve Learned' Mean for the Future of AI?"
+    }
+  ]
+}
