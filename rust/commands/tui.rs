@@ -307,6 +307,7 @@ fn select_list_multi(
     let mut view_start_local = *view_start;
     let mut lines_rendered = 0usize;
 
+    let mut multi_mode = selected_flags.iter().any(|flag| *flag);
     render_list_multi(
         &mut stdout,
         prompt,
@@ -315,6 +316,7 @@ fn select_list_multi(
         selected_flags,
         view_start_local,
         view_height,
+        multi_mode,
         &mut lines_rendered,
     )?;
 
@@ -340,6 +342,7 @@ fn select_list_multi(
                     if let Some(flag) = selected_flags.get_mut(selected) {
                         *flag = !*flag;
                     }
+                    multi_mode = selected_flags.iter().any(|flag| *flag);
                 }
                 KeyCode::Enter => {
                     *view_start = view_start_local;
@@ -350,7 +353,7 @@ fn select_list_multi(
                         .enumerate()
                         .filter_map(|(idx, flag)| if *flag { Some(idx) } else { None })
                         .collect();
-                    if chosen.is_empty() {
+                    if chosen.is_empty() && !multi_mode {
                         chosen.push(selected);
                     }
                     return Ok(Some(chosen));
@@ -378,6 +381,7 @@ fn select_list_multi(
                 selected_flags,
                 view_start_local,
                 view_height,
+                multi_mode,
                 &mut lines_rendered,
             )?;
         }
@@ -392,6 +396,7 @@ fn render_list_multi(
     selected_flags: &[bool],
     view_start: usize,
     view_height: usize,
+    multi_mode: bool,
     lines_rendered: &mut usize,
 ) -> Result<()> {
     if *lines_rendered > 0 {
@@ -409,7 +414,13 @@ fn render_list_multi(
     for (idx, label) in items.iter().enumerate().take(end).skip(view_start) {
         let is_selected = selected_flags.get(idx).copied().unwrap_or(false);
         if idx == selected {
-            let dot = "●".with(Color::Cyan);
+            let dot = if is_selected {
+                "●".with(Color::White)
+            } else if multi_mode {
+                "○".with(Color::Cyan)
+            } else {
+                "●".with(Color::Cyan)
+            };
             let text = label.clone().with(Color::Cyan);
             write!(stdout, "{} {}", dot, text)?;
         } else if is_selected {
