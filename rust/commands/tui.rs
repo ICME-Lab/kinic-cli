@@ -186,22 +186,22 @@ fn show_market_menu(samples: &[SampleItem], initial_query: Option<String>) -> Re
             })
             .collect();
         let display_results = truncate_results(&results)?;
-        let items: Vec<(usize, String, String)> = display_results
-            .iter()
-            .enumerate()
-            .map(|(idx, label)| (idx, label.clone(), String::new()))
-            .collect();
         let mut selected_index = 0;
+        let mut view_start = 0usize;
+        let mut selected_flags = vec![false; display_results.len()];
 
         loop {
-            let selection = select("\nQuery")
-                .items(&items)
-                .max_rows(10)
-                .initial_value(selected_index)
-                .interact();
+            let selection = select_list_multi(
+                "Query",
+                &display_results,
+                &mut selected_index,
+                &mut view_start,
+                10,
+                &mut selected_flags,
+            )?;
 
             match selection {
-                Ok(index) => {
+                Some(indices) => {
                     let pb = ProgressBar::new_spinner();
                     pb.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
                     pb.set_message("Loading...");
@@ -210,16 +210,19 @@ fn show_market_menu(samples: &[SampleItem], initial_query: Option<String>) -> Re
                     sleep(Duration::from_secs(3));
 
                     pb.finish_and_clear();
-                    println!("Premise: {}", matches[index].item.premise);
-                    println!("Knowledge: {}", matches[index].item.knowledge);
-                    selected_index = index;
+                    for index in indices {
+                        println!("Premise: {}", matches[index].item.premise);
+                        println!("Knowledge: {}", matches[index].item.knowledge);
+                    }
+                    for flag in &mut selected_flags {
+                        *flag = false;
+                    }
                     continue;
                 }
-                Err(err) if err.kind() == ErrorKind::Interrupted => {
+                None => {
                     println!();
                     return Ok(());
                 }
-                Err(err) => return Err(err.into()),
             }
         }
     }
@@ -276,6 +279,170 @@ fn truncate_to_width(text: &str, max_width: usize) -> String {
     let mut trimmed = text.chars().take(max_width - 3).collect::<String>();
     trimmed.push_str("...");
     trimmed
+}
+
+fn select_list_multi(
+    prompt: &str,
+    items: &[String],
+    selected_index: &mut usize,
+    view_start: &mut usize,
+    max_rows: usize,
+    selected_flags: &mut Vec<bool>,
+) -> Result<Option<Vec<usize>>> {
+    if items.is_empty() {
+        return Ok(None);
+    }
+    let _raw_guard = RawModeGuard::new()?;
+    let mut stdout = io::stdout();
+    if selected_flags.len() != items.len() {
+        selected_flags.clear();
+        selected_flags.resize(items.len(), false);
+    }
+    let mut selected = (*selected_index).min(items.len().saturating_sub(1));
+    let view_height = max_rows.max(1);
+    let max_start = items.len().saturating_sub(view_height);
+    if *view_start > max_start {
+        *view_start = max_start;
+    }
+    let mut view_start_local = *view_start;
+    let mut lines_rendered = 0usize;
+
+    render_list_multi(
+        &mut stdout,
+        prompt,
+        items,
+        selected,
+        selected_flags,
+        view_start_local,
+        view_height,
+        &mut lines_rendered,
+    )?;
+
+    loop {
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    *view_start = view_start_local;
+                    clear_rendered(&mut stdout, lines_rendered)?;
+                    return Ok(None);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if selected > 0 {
+                        selected -= 1;
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if selected + 1 < items.len() {
+                        selected += 1;
+                    }
+                }
+                KeyCode::Char(' ') => {
+                    if let Some(flag) = selected_flags.get_mut(selected) {
+                        *flag = !*flag;
+                    }
+                }
+                KeyCode::Enter => {
+                    *view_start = view_start_local;
+                    *selected_index = selected;
+                    clear_rendered(&mut stdout, lines_rendered)?;
+                    let mut chosen: Vec<usize> = selected_flags
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, flag)| if *flag { Some(idx) } else { None })
+                        .collect();
+                    if chosen.is_empty() {
+                        chosen.push(selected);
+                    }
+                    return Ok(Some(chosen));
+                }
+                KeyCode::Esc => {
+                    *view_start = view_start_local;
+                    *selected_index = selected;
+                    clear_rendered(&mut stdout, lines_rendered)?;
+                    return Ok(None);
+                }
+                _ => {}
+            }
+
+            if selected < view_start_local {
+                view_start_local = selected;
+            } else if selected >= view_start_local + view_height {
+                view_start_local = selected.saturating_sub(view_height - 1);
+            }
+
+            render_list_multi(
+                &mut stdout,
+                prompt,
+                items,
+                selected,
+                selected_flags,
+                view_start_local,
+                view_height,
+                &mut lines_rendered,
+            )?;
+        }
+    }
+}
+
+fn render_list_multi(
+    stdout: &mut io::Stdout,
+    prompt: &str,
+    items: &[String],
+    selected: usize,
+    selected_flags: &[bool],
+    view_start: usize,
+    view_height: usize,
+    lines_rendered: &mut usize,
+) -> Result<()> {
+    if *lines_rendered > 0 {
+        execute!(stdout, cursor::MoveUp(*lines_rendered as u16))?;
+    }
+    execute!(
+        stdout,
+        cursor::MoveToColumn(0),
+        Clear(ClearType::FromCursorDown)
+    )?;
+
+    write!(stdout, "{prompt}\r\n")?;
+    let mut count = 1usize;
+    let end = (view_start + view_height).min(items.len());
+    for (idx, label) in items.iter().enumerate().take(end).skip(view_start) {
+        let is_selected = selected_flags.get(idx).copied().unwrap_or(false);
+        if idx == selected {
+            let dot = "●".with(Color::Cyan);
+            let text = label.clone().with(Color::Cyan);
+            write!(stdout, "{} {}", dot, text)?;
+        } else if is_selected {
+            let dot = "●".with(Color::White);
+            let text = label.clone().with(Color::Grey);
+            write!(stdout, "{} {}", dot, text)?;
+        } else {
+            let dot = "○".with(Color::DarkGrey);
+            let text = label.clone().with(Color::Grey).dim();
+            write!(stdout, "{} {}", dot, text)?;
+        }
+        execute!(stdout, Clear(ClearType::UntilNewLine))?;
+        write!(stdout, "\r\n")?;
+        count += 1;
+    }
+    stdout.flush()?;
+    *lines_rendered = count;
+    Ok(())
+}
+
+fn clear_rendered(stdout: &mut io::Stdout, lines_rendered: usize) -> Result<()> {
+    if lines_rendered > 0 {
+        execute!(
+            stdout,
+            cursor::MoveUp(lines_rendered as u16),
+            cursor::MoveToColumn(0),
+            Clear(ClearType::FromCursorDown)
+        )?;
+        stdout.flush()?;
+    }
+    execute!(stdout, cursor::Show)?;
+    stdout.flush()?;
+    Ok(())
 }
 
 fn render_prompt(stdout: &mut io::Stdout, buffer: &str) -> Result<()> {
@@ -627,6 +794,8 @@ impl RawModeGuard {
 impl Drop for RawModeGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, cursor::Show);
     }
 }
 
