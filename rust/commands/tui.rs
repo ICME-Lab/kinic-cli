@@ -19,6 +19,7 @@ use tokio::runtime::Handle;
 use tokio::task::block_in_place;
 use url::Url;
 use crossterm::style::{Color, Stylize};
+use crossterm::terminal;
 
 use crossterm::{
     cursor,
@@ -211,8 +212,11 @@ fn show_market_menu(samples: &[SampleItem], initial_query: Option<String>) -> Re
 
                     pb.finish_and_clear();
                     for index in indices {
-                        println!("Premise: {}", matches[index].item.premise);
-                        println!("Knowledge: {}", matches[index].item.knowledge);
+                        print_boxed_entry(
+                            &matches[index].item.query,
+                            &matches[index].item.premise,
+                            &matches[index].item.knowledge,
+                        );
                     }
                     for flag in &mut selected_flags {
                         *flag = false;
@@ -465,6 +469,116 @@ fn render_prompt(stdout: &mut io::Stdout, buffer: &str) -> Result<()> {
     write!(stdout, "kinic > {buffer}")?;
     stdout.flush()?;
     Ok(())
+}
+
+fn print_boxed_entry(query: &str, premise: &str, knowledge: &str) {
+    let content_width = terminal::size()
+        .map(|(cols, _rows): (u16, u16)| (cols / 2).saturating_sub(4) as usize)
+        .unwrap_or(80)
+        .max(20);
+
+    let mut lines = Vec::new();
+    lines.extend(wrap_plain(query, content_width, LineStyle::Query));
+    lines.push(StyledLine {
+        text: String::new(),
+        style: LineStyle::Query,
+    });
+    lines.extend(wrap_plain(premise, content_width, LineStyle::Premise));
+    lines.push(StyledLine {
+        text: String::new(),
+        style: LineStyle::Premise,
+    });
+    lines.extend(wrap_plain(knowledge, content_width, LineStyle::Knowledge));
+
+    let width = lines
+        .iter()
+        .map(|line| line.text.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let top = format!("╭{}╮", "─".repeat(width + 2));
+    let bottom = format!("╰{}╯", "─".repeat(width + 2));
+    println!("{top}");
+    for line in &lines {
+        let pad = width.saturating_sub(line.text.chars().count());
+        match line.style {
+            LineStyle::Query => println!("│ {}{} │", line.text.clone().bold(), " ".repeat(pad)),
+            LineStyle::Premise => println!("│ {}{} │", line.text.clone().dim(), " ".repeat(pad)),
+            LineStyle::Knowledge => println!("│ {}{} │", line.text, " ".repeat(pad)),
+        }
+    }
+    println!("{bottom}\n");
+}
+
+#[derive(Copy, Clone)]
+enum LineStyle {
+    Query,
+    Premise,
+    Knowledge,
+}
+
+struct StyledLine {
+    text: String,
+    style: LineStyle,
+}
+
+fn wrap_plain(text: &str, width: usize, style: LineStyle) -> Vec<StyledLine> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_len = 0usize;
+
+    for word in text.split_whitespace() {
+        let word_len = word.chars().count();
+        let extra = if current_len > 0 { 1 } else { 0 };
+        if current_len + extra + word_len <= width {
+            if current_len > 0 {
+                current.push(' ');
+                current_len += 1;
+            }
+            current.push_str(word);
+            current_len += word_len;
+            continue;
+        }
+
+        if !current.is_empty() {
+            lines.push(StyledLine {
+                text: current,
+                style,
+            });
+            current = String::new();
+        }
+
+        if word_len > width {
+            let mut chunk = String::new();
+            let mut chunk_len = 0usize;
+            for ch in word.chars() {
+                if chunk_len + 1 > width {
+                    lines.push(StyledLine {
+                        text: chunk,
+                        style,
+                    });
+                    chunk = String::new();
+                    chunk_len = 0;
+                }
+                chunk.push(ch);
+                chunk_len += 1;
+            }
+            current = chunk;
+            current_len = chunk_len;
+        } else {
+            current.push_str(word);
+            current_len = word_len;
+        }
+    }
+
+    if !current.is_empty() {
+        lines.push(StyledLine {
+            text: current,
+            style,
+        });
+    }
+
+    lines
 }
 
 fn print_startup_banner(stdout: &mut io::Stdout) -> Result<()> {
