@@ -43,6 +43,7 @@ htmd = "0.2.2"
 readability-rust = "0.1.0"
 headless_chrome = { version = "1.0.20", features = ["fetch"] }
 url = "2"
+unicode-width = "0.1.13"
 
 [features]
 default = []

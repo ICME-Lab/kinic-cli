@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "knowledge": "Experts are able to package their expertise into a structured context using Kinic, allowing AI models to utilize this knowledge. This means that specialists such as chefs, accountants, or designers can create a one-time package of their skills and make money each time others access it through AI, enabling passive income even when the expert is not actively working.",
+      "premise": "Experts can package their knowledge into a context that AI can use and sell it.",
+      "query": "How Can Experts Earn Passive Income From Their Knowledge?"
+    },
+    {
+      "knowledge": "Professional expertise, such as legal or software development help, is often prohibitively expensive due to high hourly or yearly fees. This means that seventy percent of small businesses cannot afford expert help, leading to a large population that forgoes professional advice or services because current systems only reward experts when they are working and create a scarcity of affordable expertise.",
+      "premise": "Traditional expert services are expensive and time-bound, making them inaccessible to most people.",
+      "query": "Why Is Professional Expertise So Hard To Access?"
+    },
+    {
+      "knowledge": "Freelance platforms like Upwork and Fiverr still require experts to trade time for money, so if an expert is unavailable, no income is generated. In contrast, online courses allow knowledge to be packaged and sold continuously but cannot tailor answers or perform tasks for buyers. This means that neither approach effectively transforms deep expertise into scalable, responsive, and passive sources of income or practical help.",
+      "premise": "Freelance marketplaces and online courses have inherent limitations for both experts and seekers of knowledge.",
+      "query": "What Are The Shortcomings Of Freelance Work And Online Courses?"
+    },
+    {
+      "knowledge": "Small language models, trained exclusively on one expert’s detailed real-world cases and research, can deliver more relevant and effective domain advice than massive models trained on broad internet data. This means that in specialized fields, a focused model built on actual experience will often give better guidance than a large, generic AI.",
+      "premise": "General-purpose large language models lack deep, case-specific expertise compared to specialized models.",
+      "query": "Do Smaller, Domain-Specific AI Models Outperform Giants Like GPT-4?"
+    },
+    {
+      "knowledge": "An AI model that is trained on an expert’s actual documents, cases, and problem-solving methods can emulate that person’s thought process and knowledge base. This means that users gain access to targeted, authentic guidance as if interacting directly with a high-level professional, all while keeping costs and privacy risks low by running models locally.",
+      "premise": "AI models can be trained to think and respond just like the experts whose data they use.",
+      "query": "How Can AI Replicate Human Expertise For Personalized Advice?"
+    },
+    {
+      "knowledge": "Kinic’s tools allow experts to point to their existing work, such as documents or project files, and automatically organize these into a structured knowledge graph. This means that experts are able to monetize their accumulated know-how with minimal extra effort, since the system streamlines the packaging and filling-in of gaps through AI-guided prompts.",
+      "premise": "Kinic’s desktop app and CLI make it easy to structure and sell expertise without writing documentation from scratch.",
+      "query": "How Does Kinic Streamline The Process Of Selling Your Expertise?"
+    },
+    {
+      "knowledge": "Kinic uses blockchain-based databases and zero-knowledge proof cryptography to ensure that experts retain ownership of their data, buyers can verify its authenticity, and sensitive information is never exposed. This means that professionals can monetize their expertise without risking their clients’ privacy while buyers have confidence in the legitimacy and quality of the expertise they access.",
+      "premise": "Bank-level data security and verifiability are necessary for professional knowledge sharing.",
+      "query": "How Does Kinic Protect Privacy And Prove Authenticity In Shared Expertise?"
+    },
+    {
+      "knowledge": "Users can run a small, specialist AI model trained on a specific expert’s knowledge locally, while linking it with a large general model for broad reasoning or language tasks. This means that private, high-quality domain expertise is combined with the versatility of frontier AI models, ensuring users get the best of both worlds without compromising data privacy or incurring high costs.",
+      "premise": "Specialist AI models can work together with large general models to maximize value and privacy.",
+      "query": "How Do Specialist And General AI Models Collaborate For Better Advice?"
+    },
+    {
+      "knowledge": "Packaged expertise can generate continuous income for its owner, similar to how a house appreciates in value or stocks generate compounding returns. This means that knowledge is transformed from a time-bound asset into an evergreen source of financial returns, allowing experts to earn from their accumulated skills even after they stop working actively.",
+      "premise": "Owning a packaged expertise lets experts earn money indefinitely, beyond direct client work.",
+      "query": "Can Expertise Be Monetized Like Real Estate Or Stocks?"
+    },
+    {
+      "knowledge": "When different specialist contexts, such as nutrition, fitness, and sleep, are loaded together into a local AI agent, the collective knowledge can synthesize holistic advice. This means that users benefit from compounded insights spanning multiple domains, resulting in novel guidance that exceeds what any single expert could offer, a feature absent from traditional marketplaces.",
+      "premise": "Combining multiple expert contexts unlocks new, integrated forms of guidance that no single expert could provide.",
+      "query": "What Happens When Multiple Expert Contexts Are Combined In AI?"
+    },
+    {
+      "knowledge": "Kinic’s blockchain-backed vector database architecture allows experts to maintain complete ownership and control of their professional contexts at all times, unlike cloud platforms that claim ownership or marketplaces lacking packaging tools. This means that experts can safely monetize their know-how while keeping their intellectual property and privacy intact, a capability unmatched by typical solutions.",
+      "premise": "Kinic’s infrastructure is designed to give users permanent control over their contributions, unlike existing cloud or freelance platforms.",
+      "query": "How Does Kinic Ensure Experts Retain Ownership Of Their Data?"
+    },
+    {
+      "knowledge": "The Kinic marketplace converts packaged knowledge into an API format that AI agents can discover, verify, and pay for automatically using blockchain transactions. This means that experts earn income continuously with minimal manual intervention, as AI agents can autonomously rent, use, and pay for expertise any time of day without requiring human approval or coordination.",
+      "premise": "The Kinic marketplace enables direct, automated transactions between AI agents and expertise providers.",
+      "query": "How Does Automated Payment Work For AI-Rented Expertise?"
+    }
+  ]
+}

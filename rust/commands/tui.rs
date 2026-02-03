@@ -20,6 +20,7 @@ use tokio::task::block_in_place;
 use url::Url;
 use crossterm::style::{Color, Stylize};
 use crossterm::terminal;
+use unicode_width::UnicodeWidthChar;
 
 use crossterm::{
     cursor,
@@ -186,6 +187,13 @@ fn show_market_menu(samples: &[SampleItem], initial_query: Option<String>) -> Re
                 format!("{price} {}", entry.item.query)
             })
             .collect();
+        let prices: Vec<f32> = matches
+            .iter()
+            .map(|entry| match entry.source {
+                Source::Sample => 0.01,
+                Source::Memory => 0.0,
+            })
+            .collect();
         let display_results = truncate_results(&results)?;
         let mut selected_index = 0;
         let mut view_start = 0usize;
@@ -193,12 +201,13 @@ fn show_market_menu(samples: &[SampleItem], initial_query: Option<String>) -> Re
 
         loop {
             let selection = select_list_multi(
-                "Query",
+                "✨Knowledges",
                 &display_results,
                 &mut selected_index,
                 &mut view_start,
                 10,
                 &mut selected_flags,
+                &prices,
             )?;
 
             match selection {
@@ -208,7 +217,7 @@ fn show_market_menu(samples: &[SampleItem], initial_query: Option<String>) -> Re
                     pb.set_message("Loading...");
                     pb.enable_steady_tick(Duration::from_millis(80));
 
-                    sleep(Duration::from_secs(3));
+                    sleep(Duration::from_secs(1));
 
                     pb.finish_and_clear();
                     for index in indices {
@@ -292,6 +301,7 @@ fn select_list_multi(
     view_start: &mut usize,
     max_rows: usize,
     selected_flags: &mut Vec<bool>,
+    prices: &[f32],
 ) -> Result<Option<Vec<usize>>> {
     if items.is_empty() {
         return Ok(None);
@@ -321,6 +331,7 @@ fn select_list_multi(
         view_start_local,
         view_height,
         multi_mode,
+        prices,
         &mut lines_rendered,
     )?;
 
@@ -347,6 +358,12 @@ fn select_list_multi(
                         *flag = !*flag;
                     }
                     multi_mode = selected_flags.iter().any(|flag| *flag);
+                }
+                KeyCode::Left => {
+                    for flag in selected_flags.iter_mut() {
+                        *flag = false;
+                    }
+                    multi_mode = false;
                 }
                 KeyCode::Enter => {
                     *view_start = view_start_local;
@@ -386,6 +403,7 @@ fn select_list_multi(
                 view_start_local,
                 view_height,
                 multi_mode,
+                prices,
                 &mut lines_rendered,
             )?;
         }
@@ -401,6 +419,7 @@ fn render_list_multi(
     view_start: usize,
     view_height: usize,
     multi_mode: bool,
+    prices: &[f32],
     lines_rendered: &mut usize,
 ) -> Result<()> {
     if *lines_rendered > 0 {
@@ -412,7 +431,30 @@ fn render_list_multi(
         Clear(ClearType::FromCursorDown)
     )?;
 
-    write!(stdout, "{prompt}\r\n")?;
+    let sum_selected: f32 = selected_flags
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, flag)| {
+            if *flag {
+                prices.get(idx).copied()
+            } else {
+                None
+            }
+        })
+        .sum();
+    let sum = if !multi_mode {
+        prices.get(selected).copied().unwrap_or(0.0)
+    } else {
+        sum_selected
+    };
+    write!(
+        stdout,
+        "{} ({}/{}) Cart ${:.2}\r\n",
+        prompt,
+        selected.saturating_add(1),
+        items.len(),
+        sum
+    )?;
     let mut count = 1usize;
     let end = (view_start + view_height).min(items.len());
     for (idx, label) in items.iter().enumerate().take(end).skip(view_start) {
@@ -440,6 +482,11 @@ fn render_list_multi(
         write!(stdout, "\r\n")?;
         count += 1;
     }
+    let hint = "Enter: purchase  |  Space: multi-select  |  ←: unselect all";
+    write!(stdout, "{}", hint.with(Color::DarkGrey))?;
+    execute!(stdout, Clear(ClearType::UntilNewLine))?;
+    write!(stdout, "\r\n")?;
+    count += 1;
     stdout.flush()?;
     *lines_rendered = count;
     Ok(())
@@ -466,7 +513,18 @@ fn render_prompt(stdout: &mut io::Stdout, buffer: &str) -> Result<()> {
         cursor::MoveToColumn(0),
         Clear(ClearType::CurrentLine)
     )?;
-    write!(stdout, "kinic > {buffer}")?;
+    let prompt = "kinic > ";
+    write!(stdout, "{prompt}{buffer}")?;
+    write!(stdout, "\r\n")?;
+    write!(
+        stdout,
+        "{}",
+        " / Menu  |  Enter Search  |  Esc Clear".with(Color::DarkGrey)
+    )?;
+    let prompt_width = display_width(prompt);
+    let buffer_width = display_width(buffer);
+    execute!(stdout, cursor::MoveUp(1))?;
+    execute!(stdout, cursor::MoveToColumn((prompt_width + buffer_width) as u16))?;
     stdout.flush()?;
     Ok(())
 }
@@ -492,7 +550,7 @@ fn print_boxed_entry(query: &str, premise: &str, knowledge: &str) {
 
     let width = lines
         .iter()
-        .map(|line| line.text.chars().count())
+        .map(|line| display_width(&line.text))
         .max()
         .unwrap_or(0);
 
@@ -500,11 +558,11 @@ fn print_boxed_entry(query: &str, premise: &str, knowledge: &str) {
     let bottom = format!("╰{}╯", "─".repeat(width + 2));
     println!("{top}");
     for line in &lines {
-        let pad = width.saturating_sub(line.text.chars().count());
+        let pad = width.saturating_sub(display_width(&line.text));
         match line.style {
-            LineStyle::Query => println!("│ {}{} │", line.text.clone().bold(), " ".repeat(pad)),
-            LineStyle::Premise => println!("│ {}{} │", line.text.clone().dim(), " ".repeat(pad)),
-            LineStyle::Knowledge => println!("│ {}{} │", line.text, " ".repeat(pad)),
+            LineStyle::Query => println!(" {}{}", line.text.clone().bold(), " ".repeat(pad)),
+            LineStyle::Premise => println!(" {}{}", line.text.clone().dim(), " ".repeat(pad)),
+            LineStyle::Knowledge => println!(" {}{}", line.text, " ".repeat(pad)),
         }
     }
     println!("{bottom}\n");
@@ -528,7 +586,7 @@ fn wrap_plain(text: &str, width: usize, style: LineStyle) -> Vec<StyledLine> {
     let mut current_len = 0usize;
 
     for word in text.split_whitespace() {
-        let word_len = word.chars().count();
+        let word_len = display_width(word);
         let extra = if current_len > 0 { 1 } else { 0 };
         if current_len + extra + word_len <= width {
             if current_len > 0 {
@@ -552,7 +610,8 @@ fn wrap_plain(text: &str, width: usize, style: LineStyle) -> Vec<StyledLine> {
             let mut chunk = String::new();
             let mut chunk_len = 0usize;
             for ch in word.chars() {
-                if chunk_len + 1 > width {
+                let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if chunk_len + ch_width > width {
                     lines.push(StyledLine {
                         text: chunk,
                         style,
@@ -561,7 +620,7 @@ fn wrap_plain(text: &str, width: usize, style: LineStyle) -> Vec<StyledLine> {
                     chunk_len = 0;
                 }
                 chunk.push(ch);
-                chunk_len += 1;
+                chunk_len += ch_width;
             }
             current = chunk;
             current_len = chunk_len;
@@ -581,35 +640,204 @@ fn wrap_plain(text: &str, width: usize, style: LineStyle) -> Vec<StyledLine> {
     lines
 }
 
+fn display_width(text: &str) -> usize {
+    text.chars()
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum()
+}
+
 fn print_startup_banner(stdout: &mut io::Stdout) -> Result<()> {
-    let pink = Color::Rgb { r: 255, g: 105, b: 180 };
-    let yellow = Color::Yellow;
-    let cyan = Color::Cyan;
-    let orange = Color::Rgb { r: 255, g: 165, b: 0 };
-
-    let k = ["K   K", "K  K ", "K K  ", "K  K ", "K   K"];
-    let i = [" III ", "  I  ", "  I  ", "  I  ", " III "];
-    let n = ["N   N", "NN  N", "N N N", "N  NN", "N   N"];
-    let c = [" CCCC", "C    ", "C    ", "C    ", " CCCC"];
-
-    for idx in 0..k.len() {
-        write!(
-            stdout,
-            "{} {} {} {} {}\r\n",
-            k[idx].with(pink),
-            i[idx].with(yellow),
-            n[idx].with(cyan),
-            i[idx].with(yellow),
-            c[idx].with(orange),
-        )?;
-    }
-    write!(stdout, "\r\n")?;
+    let logo = include_str!("../../logo.txt");
+    print_gradient_logo(stdout, logo)?;
+    let blurb = "🧠 Kinic is a platform that turns human-generated “answers,” “judgment,” and “expertise” into AI tradable knowledge via micropayments (small, per-use payments)—and makes it usable as AI-ready world knowledge.\n🧩 From individual expertise to full AI workflows, you can sell valuable outputs in small units 🌍 so people everywhere can buy them, build on them, and collectively compound what’s possible 📈.";
+    print_wrapped_rich_text(
+        stdout,
+        blurb,
+        Color::DarkGrey,
+        Color::White,
+        Some(80),
+        true,
+        0,
+    )?;
+    writeln!(stdout)?;
+    let tips = "Tips for getting started:\n1. Search for world knowledge.\n2. Import your knowledge to build a personalized AI memory.\n3. Add your expertise to the world knowledge.";
+    print_wrapped_rich_text(stdout, tips, Color::White, Color::White, Some(80), false, 2)?;
     write!(
         stdout,
-        "{}\r\n\r\n",
-        " / Menu  |  Enter Search  |  Esc Clear".with(Color::DarkGrey)
+        "\r\n"
     )?;
     stdout.flush()?;
+    Ok(())
+}
+
+fn print_gradient_logo(stdout: &mut io::Stdout, logo: &str) -> Result<()> {
+    let lines: Vec<&str> = logo.lines().collect();
+    for line in lines {
+        let chars: Vec<char> = line.chars().collect();
+        let width = chars.len().max(1);
+        for (idx, ch) in chars.into_iter().enumerate() {
+            let t = if width <= 1 {
+                0.0
+            } else {
+                idx as f32 / (width - 1) as f32
+            };
+            let (r, g, b) = pink_gradient(t);
+            write!(stdout, "{}", ch.with(Color::Rgb { r, g, b }))?;
+        }
+        write!(stdout, "\r\n")?;
+    }
+    write!(stdout, "\r\n")?;
+    Ok(())
+}
+
+fn pink_gradient(t: f32) -> (u8, u8, u8) {
+    let start = (255.0_f32, 105.0_f32, 180.0_f32);
+    let end = (255.0_f32, 20.0_f32, 147.0_f32);
+    let r = start.0 + (end.0 - start.0) * t;
+    let g = start.1 + (end.1 - start.1) * t;
+    let b = start.2 + (end.2 - start.2) * t;
+    (r.round() as u8, g.round() as u8, b.round() as u8)
+}
+
+#[derive(Clone)]
+struct RichSpan {
+    text: String,
+    bold: bool,
+}
+
+fn parse_bold_spans(text: &str) -> Vec<RichSpan> {
+    let mut spans = Vec::new();
+    let mut bold = false;
+    for part in text.split("**") {
+        if !part.is_empty() {
+            spans.push(RichSpan {
+                text: part.to_string(),
+                bold,
+            });
+        }
+        bold = !bold;
+    }
+    spans
+}
+
+fn print_wrapped_rich_text(
+    stdout: &mut io::Stdout,
+    text: &str,
+    normal_color: Color,
+    bold_color: Color,
+    max_width: Option<usize>,
+    paragraph_gap: bool,
+    indent: usize,
+) -> Result<()> {
+    let terminal_width = terminal::size()
+        .map(|(cols, _rows): (u16, u16)| cols.saturating_sub(4) as usize)
+        .unwrap_or(80)
+        .max(30);
+    let content_width = max_width
+        .map(|limit| terminal_width.min(limit))
+        .unwrap_or(terminal_width);
+    let content_width = content_width.saturating_sub(indent);
+    for (idx, paragraph) in text.split('\n').enumerate() {
+        if paragraph_gap && idx > 0 {
+            write!(stdout, "\r\n")?;
+        }
+        if indent > 0 {
+            write!(stdout, "{}", " ".repeat(indent))?;
+        }
+        let spans = parse_bold_spans(paragraph);
+        let mut line = Vec::<RichSpan>::new();
+        let mut line_width = 0usize;
+
+        for span in spans {
+            let mut buf = String::new();
+            for ch in span.text.chars() {
+                if ch.is_whitespace() {
+                    flush_word(
+                        stdout,
+                        &mut line,
+                        &mut line_width,
+                        &buf,
+                        span.bold,
+                        content_width,
+                        normal_color,
+                        bold_color,
+                    )?;
+                    buf.clear();
+                } else {
+                    buf.push(ch);
+                }
+            }
+            flush_word(
+                stdout,
+                &mut line,
+                &mut line_width,
+                &buf,
+                span.bold,
+                content_width,
+                normal_color,
+                bold_color,
+            )?;
+        }
+
+        write_rich_line(stdout, &line, normal_color, bold_color)?;
+        write!(stdout, "\r\n")?;
+    }
+    Ok(())
+}
+
+fn flush_word(
+    stdout: &mut io::Stdout,
+    line: &mut Vec<RichSpan>,
+    line_width: &mut usize,
+    word: &str,
+    bold: bool,
+    max_width: usize,
+    normal_color: Color,
+    bold_color: Color,
+) -> Result<()> {
+    if word.is_empty() {
+        return Ok(());
+    }
+    let word_width = display_width(word);
+    let extra = if *line_width > 0 { 1 } else { 0 };
+    if *line_width + extra + word_width > max_width && !line.is_empty() {
+        write_rich_line(stdout, line, normal_color, bold_color)?;
+        write!(stdout, "\r\n")?;
+        line.clear();
+        *line_width = 0;
+    }
+    if *line_width > 0 {
+        line.push(RichSpan {
+            text: " ".to_string(),
+            bold: false,
+        });
+        *line_width += 1;
+    }
+    line.push(RichSpan {
+        text: word.to_string(),
+        bold,
+    });
+    *line_width += word_width;
+    Ok(())
+}
+
+fn write_rich_line(
+    stdout: &mut io::Stdout,
+    line: &[RichSpan],
+    normal_color: Color,
+    bold_color: Color,
+) -> Result<()> {
+    for span in line {
+        if span.bold {
+            write!(
+                stdout,
+                "{}",
+                span.text.clone().with(bold_color).bold()
+            )?;
+        } else {
+            write!(stdout, "{}", span.text.clone().with(normal_color))?;
+        }
+    }
     Ok(())
 }
 
