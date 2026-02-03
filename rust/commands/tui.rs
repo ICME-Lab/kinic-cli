@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::sleep;
@@ -17,6 +18,7 @@ use std::time::Instant;
 use tokio::runtime::Handle;
 use tokio::task::block_in_place;
 use url::Url;
+use crossterm::style::{Color, Stylize};
 
 use crossterm::{
     cursor,
@@ -24,7 +26,7 @@ use crossterm::{
     execute,
     terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode},
 };
-use dialoguer::Select;
+use cliclack::select;
 
 use crate::commands::CommandContext;
 
@@ -37,6 +39,7 @@ fn run_menu(samples: Vec<SampleItem>) -> Result<()> {
     let _raw_guard = RawModeGuard::new()?;
     let mut stdout = io::stdout();
     let mut buffer = String::new();
+    print_startup_banner(&mut stdout)?;
     render_prompt(&mut stdout, &buffer)?;
 
     loop {
@@ -86,55 +89,52 @@ fn run_menu(samples: Vec<SampleItem>) -> Result<()> {
 }
 
 fn show_main_menu(samples: &[SampleItem]) -> Result<()> {
-    let items = ["explore", "create", "insert", "search"];
     println!();
-    let selection = Select::new()
-        .with_prompt("Menu")
-        .items(&items)
-        .default(0)
-        .interact_opt()?;
+    let selection = select("Menu")
+        .item("explore", "explore", "")
+        .item("create", "create", "")
+        .item("insert", "insert", "")
+        .item("search", "search", "")
+        .interact();
 
     match selection {
-        Some(index) => match items[index] {
-            "explore" => show_market_menu(samples, None),
-            "create" => {
-                println!("TODO: create menu is not implemented yet.");
-                Ok(())
-            }
-            "insert" => show_insert_menu(),
-            "search" => {
-                println!("TODO: search menu is not implemented yet.");
-                Ok(())
-            }
-            _ => Ok(()),
-        },
-        None => Ok(()),
+        Ok("explore") => show_market_menu(samples, None),
+        Ok("create") => {
+            println!("TODO: create menu is not implemented yet.");
+            Ok(())
+        }
+        Ok("insert") => show_insert_menu(),
+        Ok("search") => {
+            println!("TODO: search menu is not implemented yet.");
+            Ok(())
+        }
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::Interrupted => Ok(()),
+        Err(err) => Err(err.into()),
     }
 }
 
 fn show_insert_menu() -> Result<()> {
-    let items = ["url", "markdown", "conversation"];
     println!();
-    let selection = Select::new()
-        .with_prompt("Insert")
-        .items(&items)
-        .default(0)
-        .interact_opt()?;
+    let selection = select("Insert")
+        .item("url", "url", "")
+        .item("markdown", "markdown", "")
+        .item("conversation", "conversation", "")
+        .interact();
 
     match selection {
-        Some(index) => match items[index] {
-            "url" => handle_insert_url(),
-            "markdown" => {
-                println!("TODO: insert markdown is not implemented yet.");
-                Ok(())
-            }
-            "conversation" => {
-                println!("TODO: insert conversation is not implemented yet.");
-                Ok(())
-            }
-            _ => Ok(()),
-        },
-        None => Ok(()),
+        Ok("url") => handle_insert_url(),
+        Ok("markdown") => {
+            println!("TODO: insert markdown is not implemented yet.");
+            Ok(())
+        }
+        Ok("conversation") => {
+            println!("TODO: insert conversation is not implemented yet.");
+            Ok(())
+        }
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::Interrupted => Ok(()),
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -186,18 +186,22 @@ fn show_market_menu(samples: &[SampleItem], initial_query: Option<String>) -> Re
             })
             .collect();
         let display_results = truncate_results(&results)?;
+        let items: Vec<(usize, String, String)> = display_results
+            .iter()
+            .enumerate()
+            .map(|(idx, label)| (idx, label.clone(), String::new()))
+            .collect();
         let mut selected_index = 0;
 
         loop {
-            let selection = Select::new()
-                .with_prompt("\nQuery")
-                .items(&display_results)
-                .max_length(10)
-                .default(selected_index)
-                .interact_opt()?;
+            let selection = select("\nQuery")
+                .items(&items)
+                .max_rows(10)
+                .initial_value(selected_index)
+                .interact();
 
             match selection {
-                Some(index) => {
+                Ok(index) => {
                     let pb = ProgressBar::new_spinner();
                     pb.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
                     pb.set_message("Loading...");
@@ -211,10 +215,11 @@ fn show_market_menu(samples: &[SampleItem], initial_query: Option<String>) -> Re
                     selected_index = index;
                     continue;
                 }
-                None => {
+                Err(err) if err.kind() == ErrorKind::Interrupted => {
                     println!();
                     return Ok(());
                 }
+                Err(err) => return Err(err.into()),
             }
         }
     }
@@ -280,6 +285,38 @@ fn render_prompt(stdout: &mut io::Stdout, buffer: &str) -> Result<()> {
         Clear(ClearType::CurrentLine)
     )?;
     write!(stdout, "kinic > {buffer}")?;
+    stdout.flush()?;
+    Ok(())
+}
+
+fn print_startup_banner(stdout: &mut io::Stdout) -> Result<()> {
+    let pink = Color::Rgb { r: 255, g: 105, b: 180 };
+    let yellow = Color::Yellow;
+    let cyan = Color::Cyan;
+    let orange = Color::Rgb { r: 255, g: 165, b: 0 };
+
+    let k = ["K   K", "K  K ", "K K  ", "K  K ", "K   K"];
+    let i = [" III ", "  I  ", "  I  ", "  I  ", " III "];
+    let n = ["N   N", "NN  N", "N N N", "N  NN", "N   N"];
+    let c = [" CCCC", "C    ", "C    ", "C    ", " CCCC"];
+
+    for idx in 0..k.len() {
+        write!(
+            stdout,
+            "{} {} {} {} {}\r\n",
+            k[idx].with(pink),
+            i[idx].with(yellow),
+            n[idx].with(cyan),
+            i[idx].with(yellow),
+            c[idx].with(orange),
+        )?;
+    }
+    write!(stdout, "\r\n")?;
+    write!(
+        stdout,
+        "{}\r\n\r\n",
+        " / Menu  |  Enter Search  |  Esc Clear".with(Color::DarkGrey)
+    )?;
     stdout.flush()?;
     Ok(())
 }
