@@ -1,0 +1,11 @@
+[package]
+name = "tui-kit-model"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Generic UI data model for tui-kit"
+
+[lib]
+name = "tui_kit_model"
+path = "src/lib.rs"

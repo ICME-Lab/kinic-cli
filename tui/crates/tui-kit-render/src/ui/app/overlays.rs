@@ -1,0 +1,100 @@
+//! Overlay blocks: settings popup, help popup.
+
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph, Widget},
+};
+
+use super::TuiKitUi;
+
+impl<'a> TuiKitUi<'a> {
+    pub(super) fn render_settings_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.show_settings {
+            return;
+        }
+        let w = 48.min(area.width.saturating_sub(4));
+        let h = 10.min(area.height.saturating_sub(4));
+        let settings_area = Rect {
+            x: area.x + (area.width - w) / 2,
+            y: area.y + (area.height - h) / 2,
+            width: w,
+            height: h,
+        };
+        Clear.render(settings_area, buf);
+        let cfg = &self.ui_config.settings;
+        let text = vec![
+            Line::from(Span::styled(
+                format!(" {} ", cfg.title),
+                self.theme.style_accent_bold(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                cfg.theme_label.clone(),
+                self.theme.style_dim(),
+            )),
+            Line::from(vec![
+                Span::raw("  Press "),
+                Span::styled(cfg.theme_action_key.clone(), self.theme.style_accent()),
+                Span::raw(" to cycle theme"),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                cfg.close_hint.clone(),
+                self.theme.style_muted(),
+            )),
+        ];
+        let block = Paragraph::new(text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(self.theme.style_border_focused())
+                .title(format!(" {} ", cfg.title))
+                .style(Style::default().bg(self.theme.bg_panel)),
+        );
+        block.render(settings_area, buf);
+    }
+
+    pub(super) fn render_help_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.show_help {
+            return;
+        }
+        let help_width = 62.min(area.width.saturating_sub(4));
+        let help_height = 30.min(area.height.saturating_sub(4));
+        let help_area = Rect {
+            x: area.x + (area.width - help_width) / 2,
+            y: area.y + (area.height - help_height) / 2,
+            width: help_width,
+            height: help_height,
+        };
+        Clear.render(help_area, buf);
+        let cfg = &self.ui_config.help;
+        let mut help_text = vec![
+            Line::from(Span::styled(
+                format!("⌨️  {}", cfg.title),
+                self.theme.style_accent_bold(),
+            )),
+            Line::from(""),
+        ];
+        for line in &cfg.lines {
+            help_text.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(line.clone(), self.theme.style_normal()),
+            ]));
+        }
+        help_text.push(Line::from(""));
+        help_text.push(Line::from(Span::styled(
+            cfg.close_hint.clone(),
+            self.theme.style_muted(),
+        )));
+        let help = Paragraph::new(help_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(self.theme.style_border_focused())
+                .title(format!(" {} ", cfg.title))
+                .style(Style::default().bg(self.theme.bg_panel)),
+        );
+        help.render(help_area, buf);
+    }
+}
