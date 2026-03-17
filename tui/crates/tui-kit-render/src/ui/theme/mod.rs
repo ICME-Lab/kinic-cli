@@ -342,7 +342,7 @@ impl Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self::default_dark()
+        Self::pink()
     }
 }
 

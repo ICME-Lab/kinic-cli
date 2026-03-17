@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod app;
 #[path = "cli_defs.rs"]
 pub mod cli;
 pub(crate) mod clients;
@@ -6,6 +7,8 @@ mod commands;
 mod embedding;
 pub(crate) mod identity_store;
 mod ledger;
+mod tui_app;
+mod tui_config;
 #[cfg(feature = "python-bindings")]
 mod python;
 
@@ -43,9 +46,13 @@ pub async fn run() -> Result<()> {
 
     fmt().with_max_level(max).without_time().try_init().ok();
 
+    if matches!(&cli.command, cli::Command::Tui(_)) {
+        return tui_app::run(&cli.global);
+    }
+
     if cli.global.ii
         && matches!(
-            cli.command,
+            &cli.command,
             cli::Command::Create(_) | cli::Command::Balance(_)
         )
     {
@@ -56,7 +63,14 @@ pub async fn run() -> Result<()> {
         }
     }
 
-    let needs_identity_path = matches!(cli.command, cli::Command::Login(_)) || cli.global.ii;
+    if !cli.global.ii
+        && cli.global.identity.is_none()
+        && !matches!(&cli.command, cli::Command::Login(_) | cli::Command::Tui(_))
+    {
+        anyhow::bail!("--identity is required unless --ii is set");
+    }
+
+    let needs_identity_path = matches!(&cli.command, cli::Command::Login(_)) || cli.global.ii;
     let identity_path = if needs_identity_path {
         Some(match cli.global.identity_path.clone() {
             Some(path) => path,
@@ -66,7 +80,7 @@ pub async fn run() -> Result<()> {
         None
     };
 
-    let agent_factory = if matches!(cli.command, cli::Command::Login(_)) {
+    let agent_factory = if matches!(&cli.command, cli::Command::Login(_)) {
         AgentFactory::new(cli.global.ic, String::new())
     } else if cli.global.ii {
         let path = identity_path

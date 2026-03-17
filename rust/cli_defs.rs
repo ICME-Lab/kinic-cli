@@ -30,7 +30,6 @@ pub struct GlobalOpts {
     #[arg(
         long,
         conflicts_with = "ii",
-        required_unless_present = "ii",
         help = "Dfx identity name used to load credentials from the system keyring"
     )]
     pub identity: Option<String>,
@@ -81,6 +80,8 @@ pub enum Command {
     AskAi(AskAiArgs),
     #[command(about = "Login via Internet Identity and store a delegation")]
     Login(LoginArgs),
+    #[command(about = "Launch the Kinic terminal UI")]
+    Tui(TuiArgs),
 }
 
 #[derive(Args, Debug)]
@@ -91,6 +92,9 @@ pub struct CreateArgs {
     #[arg(long, required = true, help = "Short description for the new memory")]
     pub description: String,
 }
+
+#[derive(Args, Debug, Default)]
+pub struct TuiArgs {}
 
 #[derive(Args, Debug)]
 pub struct ListArgs {}

@@ -1,4 +1,4 @@
-use crate::provider::KinicRecord;
+use super::provider::KinicRecord;
 use tui_kit_model::{
     UiItemDetail, UiItemKind, UiItemSummary, UiRow, UiSection, UiVisibility,
 };

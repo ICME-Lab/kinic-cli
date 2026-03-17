@@ -9,18 +9,18 @@ members = [
 ]
 
 [package]
-name = "tui-kit-workspace"
+name = "kinic-tui"
 version = "0.1.1"
 edition = "2021"
 rust-version = "1.75"
-description = "Blazing-fast Rust Code Inspector for the Terminal"
+description = "Kinic terminal UI"
 license = "MIT"
 authors = ["yashksaini-coder <yashksaini89@gmail.com>"]
 keywords = ["tui", "inspector", "rust", "analyzer", "developer-tools"]
 categories = ["command-line-utilities", "development-tools"]
 repository = "https://github.com/yashksaini-coder/oracle"
 homepage = "https://github.com/yashksaini-coder/oracle"
-documentation = "https://docs.rs/oracle_tui"
+documentation = "https://docs.rs/kinic-tui"
 readme = "README.md"
 
 [package.metadata.cargo-machete]
@@ -32,6 +32,9 @@ name = "tui_kit_lib"
 path = "src/lib.rs"
 
 [dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+kinic_core = { package = "kinic-cli", path = ".." }
+tokio = { version = "1.48", features = ["rt-multi-thread"] }
 tui-kit-host = { path = "crates/tui-kit-host" }
 tui-kit-runtime = { path = "crates/tui-kit-runtime" }
 tui-kit-model = { path = "crates/tui-kit-model" }

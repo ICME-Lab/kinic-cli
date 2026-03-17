@@ -1,38 +1,6 @@
-mod adapter;
-mod provider;
-
-use clap::Parser;
-use provider::{KinicProvider, TuiConfig};
-use tui_kit_host::runtime_loop::{run_provider_app, RuntimeLoopConfig};
 use tui_kit_render::ui::{BrandingText, HeaderText, TabId, TabSpec, UiConfig};
 
-#[derive(Debug, Parser)]
-#[command(name = "kinic-tui", about = "Kinic terminal UI")]
-struct TuiArgs {
-    #[arg(long, help = "Dfx identity name used to load credentials from the system keyring")]
-    identity: Option<String>,
-
-    #[arg(long, help = "Use the Internet Computer mainnet instead of local replica")]
-    ic: bool,
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = TuiArgs::parse();
-    let mut provider = KinicProvider::new(TuiConfig {
-        identity: args.identity,
-        use_mainnet: args.ic,
-    });
-    run_provider_app(
-        &mut provider,
-        RuntimeLoopConfig {
-            initial_tab_id: "kinic-memories",
-            tab_ids: &["kinic-memories", "kinic-create", "kinic-market", "kinic-settings"],
-            ui_config: kinic_ui_config,
-        },
-    )
-}
-
-fn kinic_ui_config() -> UiConfig {
+pub fn kinic_ui_config() -> UiConfig {
     UiConfig {
         branding: BrandingText {
             logo_lines: vec![

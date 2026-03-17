@@ -389,7 +389,8 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus) -> Option<CoreAction> {
         _ => match focus {
             PaneFocus::Search => match key {
                 CoreKey::Backspace => Some(CoreAction::SearchBackspace),
-                CoreKey::Enter | CoreKey::Down => Some(CoreAction::FocusList),
+                CoreKey::Enter => Some(CoreAction::SearchSubmit),
+                CoreKey::Down => Some(CoreAction::FocusList),
                 CoreKey::Char(c) if !c.is_control() => Some(CoreAction::SearchInput(c)),
                 _ => None,
             },

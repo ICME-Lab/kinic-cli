@@ -41,5 +41,6 @@ pub async fn run_command(command: Command, ctx: CommandContext) -> Result<()> {
         Command::Balance(args) => balance::handle(args, &ctx).await,
         Command::AskAi(args) => ask_ai::handle(args, &ctx).await,
         Command::Login(args) => ii_login::handle(args, &ctx).await,
+        Command::Tui(_) => unreachable!("TUI command is handled before command dispatch"),
     }
 }
