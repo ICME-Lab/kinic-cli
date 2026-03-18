@@ -3,8 +3,9 @@ mod provider;
 
 use clap::Parser;
 use provider::{KinicProvider, TuiConfig};
+pub use tui_kit_lib::app;
 use tui_kit_host::runtime_loop::{run_provider_app, RuntimeLoopConfig};
-use tui_kit_render::ui::{BrandingText, HeaderText, TabId, TabSpec, UiConfig};
+use tui_kit_render::ui::{BrandingText, HeaderText, UiConfig};
 
 #[derive(Debug, Parser)]
 #[command(name = "kinic-tui", about = "Kinic terminal UI")]
@@ -25,8 +26,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_provider_app(
         &mut provider,
         RuntimeLoopConfig {
-            initial_tab_id: "kinic-memories",
-            tab_ids: &["kinic-memories", "kinic-create", "kinic-market", "kinic-settings"],
+            initial_tab_id: "",
+            tab_ids: &[],
             ui_config: kinic_ui_config,
         },
     )
@@ -52,28 +53,7 @@ fn kinic_ui_config() -> UiConfig {
             contexts_suffix: "groups".to_string(),
             data_label: "cache".to_string(),
         },
-        tabs: vec![
-            TabSpec {
-                id: TabId::new("kinic-memories"),
-                title: "Memories".to_string(),
-                search_placeholder: "Search memories...".to_string(),
-            },
-            TabSpec {
-                id: TabId::new("kinic-create"),
-                title: "Create".to_string(),
-                search_placeholder: "Search create...".to_string(),
-            },
-            TabSpec {
-                id: TabId::new("kinic-market"),
-                title: "Market".to_string(),
-                search_placeholder: "Search market...".to_string(),
-            },
-            TabSpec {
-                id: TabId::new("kinic-settings"),
-                title: "Settings".to_string(),
-                search_placeholder: "Search settings...".to_string(),
-            },
-        ],
+        tabs: vec![],
         ..UiConfig::default()
     }
 }

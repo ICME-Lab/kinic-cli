@@ -86,11 +86,15 @@ pub fn resolve_tab_action_with_current(
     tab_ids: &[&str],
     current_tab_id: Option<&str>,
 ) -> Option<CoreAction> {
-    let resolved = if tab_ids.is_empty() {
-        &DEFAULT_TAB_IDS[..]
-    } else {
-        tab_ids
-    };
+    if tab_ids.is_empty() {
+        return match action {
+            CoreAction::SelectTabIndex(_)
+            | CoreAction::SelectNextTab
+            | CoreAction::SelectPrevTab => None,
+            other => Some(other),
+        };
+    }
+    let resolved = tab_ids;
     match action {
         CoreAction::SelectTabIndex(index) => resolved
             .get(index)
@@ -124,6 +128,8 @@ pub enum HostGlobalCommand {
     None,
     CloseHelp,
     CloseSettings,
+    CloseCreateModal,
+    OpenCreateModal,
     ToggleTheme,
     ToggleChat,
     ToggleHelp,
@@ -140,10 +146,18 @@ pub fn global_command_for_key(
     focus: PaneFocus,
     show_help: bool,
     show_settings: bool,
+    show_create_modal: bool,
     query_is_empty: bool,
 ) -> HostGlobalCommand {
     if show_help {
         return HostGlobalCommand::CloseHelp;
+    }
+
+    if show_create_modal {
+        return match code {
+            KeyCode::Esc => HostGlobalCommand::CloseCreateModal,
+            _ => HostGlobalCommand::None,
+        };
     }
 
     if show_settings {
@@ -187,6 +201,9 @@ pub fn global_command_for_key(
     {
         return HostGlobalCommand::ToggleSettings;
     }
+    if code == KeyCode::Char('n') && modifiers.is_empty() {
+        return HostGlobalCommand::OpenCreateModal;
+    }
     if code == KeyCode::Esc {
         if focus == PaneFocus::Detail {
             return HostGlobalCommand::BackFromDetail;
@@ -220,10 +237,28 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             },
             CoreEffect::RequestRefresh => {}
             CoreEffect::Custom { id, payload } => {
-                state.status_message = Some(match payload {
-                    Some(p) => format!("Custom effect: {id} ({p})"),
-                    None => format!("Custom effect: {id}"),
-                });
+                match id.as_str() {
+                    "create_modal_close" => {
+                        state.create_modal_open = false;
+                        state.create_name.clear();
+                        state.create_description.clear();
+                        state.create_submitting = false;
+                        state.create_error = None;
+                    }
+                    "create_modal_error" => {
+                        state.create_submitting = false;
+                        state.create_error = payload.clone();
+                    }
+                    "select_first" => {
+                        state.selected_index = if state.list_items.is_empty() { None } else { Some(0) };
+                    }
+                    _ => {
+                        state.status_message = Some(match payload {
+                            Some(p) => format!("Custom effect: {id} ({p})"),
+                            None => format!("Custom effect: {id}"),
+                        });
+                    }
+                }
             }
         }
     }

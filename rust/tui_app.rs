@@ -13,8 +13,8 @@ pub fn run(global: &GlobalOpts) -> Result<()> {
     run_provider_app(
         &mut provider,
         RuntimeLoopConfig {
-            initial_tab_id: "kinic-memories",
-            tab_ids: &["kinic-memories", "kinic-create", "kinic-market", "kinic-settings"],
+            initial_tab_id: "",
+            tab_ids: &[],
             ui_config: kinic_ui_config,
         },
     )
@@ -22,6 +22,8 @@ pub fn run(global: &GlobalOpts) -> Result<()> {
 }
 
 pub mod kinic_tui {
+    pub use crate::app;
+
     pub mod adapter {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tui/src/adapter.rs"));
     }

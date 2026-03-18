@@ -1,4 +1,4 @@
-use tui_kit_render::ui::{BrandingText, HeaderText, TabId, TabSpec, UiConfig};
+use tui_kit_render::ui::{BrandingText, HeaderText, UiConfig};
 
 pub fn kinic_ui_config() -> UiConfig {
     UiConfig {
@@ -20,28 +20,7 @@ pub fn kinic_ui_config() -> UiConfig {
             contexts_suffix: "groups".to_string(),
             data_label: "cache".to_string(),
         },
-        tabs: vec![
-            TabSpec {
-                id: TabId::new("kinic-memories"),
-                title: "Memories".to_string(),
-                search_placeholder: "Search memories...".to_string(),
-            },
-            TabSpec {
-                id: TabId::new("kinic-create"),
-                title: "Create".to_string(),
-                search_placeholder: "Search create...".to_string(),
-            },
-            TabSpec {
-                id: TabId::new("kinic-market"),
-                title: "Market".to_string(),
-                search_placeholder: "Search market...".to_string(),
-            },
-            TabSpec {
-                id: TabId::new("kinic-settings"),
-                title: "Settings".to_string(),
-                search_placeholder: "Search settings...".to_string(),
-            },
-        ],
+        tabs: vec![],
         ..UiConfig::default()
     }
 }

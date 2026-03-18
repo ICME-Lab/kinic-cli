@@ -25,6 +25,7 @@ pub struct UiConfig {
     pub branding: BrandingText,
     pub header: HeaderText,
     pub chat: ChatPanelText,
+    pub create: CreateOverlayText,
     pub settings: SettingsOverlayText,
     pub help: HelpOverlayText,
     pub status: StatusText,
@@ -53,6 +54,16 @@ pub struct ChatPanelText {
     pub title: String,
     pub loading_hint: String,
     pub input_placeholder: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateOverlayText {
+    pub title: String,
+    pub name_label: String,
+    pub description_label: String,
+    pub submit_label: String,
+    pub open_hint: String,
+    pub close_hint: String,
 }
 
 /// Settings overlay text configuration.
@@ -101,6 +112,14 @@ impl Default for UiConfig {
                 title: " ◇ Chat ".to_string(),
                 loading_hint: "  … Assistant is thinking…".to_string(),
                 input_placeholder: "Ask about this item… (Enter to send, Esc to close)".to_string(),
+            },
+            create: CreateOverlayText {
+                title: "Create Memory".to_string(),
+                name_label: "Name".to_string(),
+                description_label: "Description".to_string(),
+                submit_label: "Create".to_string(),
+                open_hint: "Press n to create a new memory".to_string(),
+                close_hint: "Tab: next field, Enter: submit, Esc: cancel".to_string(),
             },
             settings: SettingsOverlayText {
                 title: "Settings".to_string(),

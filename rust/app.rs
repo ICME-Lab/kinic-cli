@@ -35,6 +35,20 @@ pub async fn list_memories(use_mainnet: bool, identity: String) -> Result<Vec<Me
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
+pub async fn create_memory(
+    use_mainnet: bool,
+    identity: String,
+    name: String,
+    description: String,
+) -> Result<String> {
+    let factory = AgentFactory::new(use_mainnet, identity);
+    let agent = factory.build().await?;
+    let client = LauncherClient::new(agent);
+    let price = client.fetch_deployment_price().await?;
+    client.approve_launcher(&price).await?;
+    client.deploy_memory(&name, &description).await
+}
+
 pub async fn search_memory(
     use_mainnet: bool,
     identity: String,

@@ -41,6 +41,14 @@ pub enum PaneFocus {
     Extra,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CreateModalFocus {
+    #[default]
+    Name,
+    Description,
+    Submit,
+}
+
 /// Domain-agnostic runtime state owned by the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoreState {
@@ -58,6 +66,12 @@ pub struct CoreState {
     pub chat_input: String,
     pub chat_loading: bool,
     pub chat_scroll: usize,
+    pub create_modal_open: bool,
+    pub create_name: String,
+    pub create_description: String,
+    pub create_submitting: bool,
+    pub create_error: Option<String>,
+    pub create_focus: CreateModalFocus,
 }
 
 impl Default for CoreState {
@@ -77,6 +91,12 @@ impl Default for CoreState {
             chat_input: String::new(),
             chat_loading: false,
             chat_scroll: 0,
+            create_modal_open: false,
+            create_name: String::new(),
+            create_description: String::new(),
+            create_submitting: false,
+            create_error: None,
+            create_focus: CreateModalFocus::default(),
         }
     }
 }
@@ -108,6 +128,13 @@ pub enum CoreAction {
     ToggleHelp,
     ToggleSettings,
     ToggleChat,
+    OpenCreateModal,
+    CloseCreateModal,
+    CreateInput(char),
+    CreateBackspace,
+    CreateNextField,
+    CreatePrevField,
+    CreateSubmit,
     Submit,
     Cancel,
     ChatInput(char),
@@ -226,7 +253,59 @@ pub trait DataProvider {
 /// Providers may further modify visible data via snapshots; this reducer handles
 /// local interaction state (query, tab, focus, selection).
 pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
+    let has_tabs = !state.current_tab_id.is_empty();
     match action {
+        CoreAction::OpenCreateModal => {
+            state.create_modal_open = true;
+            state.create_name.clear();
+            state.create_description.clear();
+            state.create_submitting = false;
+            state.create_error = None;
+            state.create_focus = CreateModalFocus::Name;
+        }
+        CoreAction::CloseCreateModal => {
+            state.create_modal_open = false;
+            state.create_submitting = false;
+            state.create_error = None;
+            state.create_focus = CreateModalFocus::Name;
+        }
+        CoreAction::CreateInput(c) => {
+            match state.create_focus {
+                CreateModalFocus::Name => state.create_name.push(*c),
+                CreateModalFocus::Description => state.create_description.push(*c),
+                CreateModalFocus::Submit => {}
+            }
+            state.create_error = None;
+        }
+        CoreAction::CreateBackspace => {
+            match state.create_focus {
+                CreateModalFocus::Name => {
+                    state.create_name.pop();
+                }
+                CreateModalFocus::Description => {
+                    state.create_description.pop();
+                }
+                CreateModalFocus::Submit => {}
+            }
+        }
+        CoreAction::CreateNextField => {
+            state.create_focus = match state.create_focus {
+                CreateModalFocus::Name => CreateModalFocus::Description,
+                CreateModalFocus::Description => CreateModalFocus::Submit,
+                CreateModalFocus::Submit => CreateModalFocus::Name,
+            };
+        }
+        CoreAction::CreatePrevField => {
+            state.create_focus = match state.create_focus {
+                CreateModalFocus::Name => CreateModalFocus::Submit,
+                CreateModalFocus::Description => CreateModalFocus::Name,
+                CreateModalFocus::Submit => CreateModalFocus::Description,
+            };
+        }
+        CoreAction::CreateSubmit => {
+            state.create_submitting = true;
+            state.create_error = None;
+        }
         CoreAction::SetQuery(q) => {
             state.query = q.clone();
             state.selected_index = Some(0);
@@ -254,17 +333,33 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 PaneFocus::Detail => {
                     if state.chat_open {
                         PaneFocus::Extra
-                    } else {
+                    } else if has_tabs {
                         PaneFocus::Tabs
+                    } else {
+                        PaneFocus::Search
                     }
                 }
-                PaneFocus::Extra => PaneFocus::Tabs,
+                PaneFocus::Extra => {
+                    if has_tabs {
+                        PaneFocus::Tabs
+                    } else {
+                        PaneFocus::Search
+                    }
+                }
                 PaneFocus::Tabs => PaneFocus::Search,
             };
         }
         CoreAction::FocusPrev => {
             state.focus = match state.focus {
-                PaneFocus::Search => PaneFocus::Tabs,
+                PaneFocus::Search => {
+                    if has_tabs {
+                        PaneFocus::Tabs
+                    } else if state.chat_open {
+                        PaneFocus::Extra
+                    } else {
+                        PaneFocus::Detail
+                    }
+                }
                 PaneFocus::List => PaneFocus::Search,
                 PaneFocus::Detail => PaneFocus::List,
                 PaneFocus::Extra => PaneFocus::Detail,

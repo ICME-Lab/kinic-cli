@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use super::adapter;
-use crate::app::{self, MemorySummary, SearchResultItem};
+use super::app::{self, MemorySummary, SearchResultItem};
 use tokio::runtime::{Handle, Runtime};
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, DataProvider, ProviderOutput, ProviderSnapshot,
@@ -120,24 +120,32 @@ impl KinicProvider {
         }
     }
 
+    fn reload_live_memories(&mut self, prioritize_id: Option<&str>) -> Result<(), String> {
+        let Some(identity) = self.config.identity.clone() else {
+            return Ok(());
+        };
+        let memories = self
+            .runtime
+            .block_on(app::list_memories(self.config.use_mainnet, identity))
+            .map_err(|error| error.to_string())?;
+        self.memory_records = memories.into_iter().map(record_from_memory_summary).collect();
+        if let Some(id) = prioritize_id {
+            if let Some(index) = self.memory_records.iter().position(|r| r.id == id) {
+                let record = self.memory_records.remove(index);
+                self.memory_records.insert(0, record);
+            }
+        }
+        self.all = self.memory_records.clone();
+        self.memories_mode = MemoriesMode::Browser;
+        self.result_records.clear();
+        Ok(())
+    }
+
     fn is_live(&self) -> bool {
         self.config.identity.is_some()
     }
 
     fn current_records(&self) -> Vec<&KinicRecord> {
-        if self.tab_id != "kinic-memories" {
-            return self
-                .all
-                .iter()
-                .filter(|r| match self.tab_id.as_str() {
-                    "kinic-create" => r.group == "create",
-                    "kinic-market" => r.group == "market",
-                    "kinic-settings" => r.group == "settings",
-                    _ => r.group == "memories",
-                })
-                .collect();
-        }
-
         let base = if self.is_live() {
             match self.memories_mode {
                 MemoriesMode::Browser => &self.memory_records,
@@ -290,12 +298,12 @@ impl DataProvider for KinicProvider {
             CoreAction::SearchInput(c) => self.query.push(*c),
             CoreAction::SearchBackspace => {
                 self.query.pop();
-                if self.tab_id == "kinic-memories" && self.query.is_empty() {
+                if self.query.is_empty() {
                     self.reset_memories_browser();
                 }
             }
             CoreAction::SearchSubmit => {
-                if self.tab_id == "kinic-memories" && self.is_live() {
+                if self.is_live() {
                     if let Some(effect) = self.run_live_search() {
                         effects.push(effect);
                     }
@@ -306,15 +314,81 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::SetTab(id) => {
                 self.tab_id = id.0.clone();
-                if self.tab_id != "kinic-memories" {
-                    self.query.clear();
-                }
                 effects.push(CoreEffect::Notify(format!("Switched kinic tab: {}", id.0)));
             }
             CoreAction::ChatSubmit => {
                 effects.push(CoreEffect::Notify(
                     "Chat is still mock-only; search is live first.".to_string(),
                 ));
+            }
+            CoreAction::CreateSubmit => {
+                let name = state.create_name.trim().to_string();
+                let description = state.create_description.trim().to_string();
+                if name.is_empty() || description.is_empty() {
+                    effects.push(CoreEffect::Custom {
+                        id: "create_modal_error".to_string(),
+                        payload: Some("Name and description are required.".to_string()),
+                    });
+                } else if let Some(identity) = self.config.identity.clone() {
+                    match self.runtime.block_on(app::create_memory(
+                        self.config.use_mainnet,
+                        identity,
+                        name.clone(),
+                        description,
+                    )) {
+                        Ok(created_id) => match self.reload_live_memories(Some(&created_id)) {
+                            Ok(()) => {
+                                self.active_memory_id = Some(created_id.clone());
+                                effects.push(CoreEffect::Custom {
+                                    id: "select_first".to_string(),
+                                    payload: None,
+                                });
+                                effects.push(CoreEffect::Custom {
+                                    id: "create_modal_close".to_string(),
+                                    payload: None,
+                                });
+                                effects.push(CoreEffect::Notify(format!(
+                                    "Created memory {created_id}"
+                                )));
+                            }
+                            Err(error) => {
+                                effects.push(CoreEffect::Custom {
+                                    id: "create_modal_error".to_string(),
+                                    payload: Some(error),
+                                });
+                            }
+                        },
+                        Err(error) => {
+                            effects.push(CoreEffect::Custom {
+                                id: "create_modal_error".to_string(),
+                                payload: Some(error.to_string()),
+                            });
+                        }
+                    }
+                } else {
+                    let new_id = format!("mock-memory-{}", self.all.len() + 1);
+                    let record = KinicRecord::new(
+                        new_id.clone(),
+                        name.clone(),
+                        "memories",
+                        "Status: mock".to_string(),
+                        format!(
+                            "## Memory\n\n- Id: `{new_id}`\n- Status: `mock`\n\n### Detail\n{}\n",
+                            state.create_description.trim()
+                        ),
+                    );
+                    self.all.insert(0, record);
+                    self.active_memory_id = Some(new_id.clone());
+                    effects.push(CoreEffect::Custom {
+                        id: "select_first".to_string(),
+                        payload: None,
+                    });
+                    effects.push(CoreEffect::Custom {
+                        id: "create_modal_close".to_string(),
+                        payload: None,
+                    });
+                    effects.push(CoreEffect::Notify(format!("Created mock memory {name}")));
+                }
             }
             _ => {}
         }
@@ -628,27 +702,6 @@ Maintain keyboard-first behavior as baseline.
 - item
 ```
 "#,
-        ),
-        KinicRecord::new(
-            "kinic-2",
-            "Theme Presets",
-            "create",
-            "Built-in themes including the new pink preset.",
-            "Feature memo for create tab.",
-        ),
-        KinicRecord::new(
-            "kinic-3",
-            "Navigation Upgrade",
-            "market",
-            "Tabs focus flow and keyboard-driven tab switching.",
-            "Market note: keyboard-first interactions.",
-        ),
-        KinicRecord::new(
-            "kinic-4",
-            "Design Notes",
-            "settings",
-            "Keep runtime domain-agnostic and move app specifics to examples.",
-            "Settings note: keep defaults simple and explicit.",
         ),
     ]
 }

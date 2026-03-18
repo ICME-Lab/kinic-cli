@@ -94,7 +94,7 @@ impl<'a> TuiKitUi<'a> {
             } else {
                 format!("[0/{}]", self.ui_summaries.len())
             };
-            Line::from(vec![
+            let mut spans = vec![
                 Span::styled(format!("{}: ", cfg.commands_label), self.theme.style_dim()),
                 Span::styled("Tab", self.theme.style_accent()),
                 Span::styled(" focus ", self.theme.style_muted()),
@@ -104,8 +104,15 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(" open ", self.theme.style_muted()),
                 Span::styled("/", self.theme.style_accent()),
                 Span::styled(" search ", self.theme.style_muted()),
-                Span::styled("1-4", self.theme.style_accent()),
-                Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
+            ];
+            if !self.tab_specs.is_empty() {
+                spans.push(Span::styled("1-4", self.theme.style_accent()));
+                spans.push(Span::styled(
+                    format!(" {} ", cfg.tabs_label),
+                    self.theme.style_muted(),
+                ));
+            }
+            spans.extend([
                 Span::styled("? ", self.theme.style_accent()),
                 Span::styled("help ", self.theme.style_muted()),
                 Span::styled("q ", self.theme.style_accent()),
@@ -118,7 +125,8 @@ impl<'a> TuiKitUi<'a> {
                 ),
                 Span::styled("selection ", self.theme.style_muted()),
                 Span::styled(selection_info, self.theme.style_dim()),
-            ])
+            ]);
+            Line::from(spans)
         };
 
         let block = Block::default()

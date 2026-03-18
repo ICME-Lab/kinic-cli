@@ -31,6 +31,13 @@ pub fn content_area(area: Rect, border: bool) -> Rect {
 
 /// Returns the tabs bar Rect for a given full frame area (for mouse hit testing).
 pub fn tabs_rect_for_area(area: Rect) -> Option<Rect> {
+    tabs_rect_for_area_with_tabs(area, true)
+}
+
+pub fn tabs_rect_for_area_with_tabs(area: Rect, has_tabs: bool) -> Option<Rect> {
+    if !has_tabs {
+        return None;
+    }
     let content = content_area(area, true);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -46,12 +53,16 @@ pub fn tabs_rect_for_area(area: Rect) -> Option<Rect> {
 
 /// Returns the list viewport height (content rows, excluding block borders) for a full frame area.
 pub fn list_viewport_height_for_area(area: Rect) -> usize {
+    list_viewport_height_for_area_with_tabs(area, true)
+}
+
+pub fn list_viewport_height_for_area_with_tabs(area: Rect, has_tabs: bool) -> usize {
     let content = content_area(area, true);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(HEADER_HEIGHT),
-            Constraint::Length(TABS_HEIGHT),
+            Constraint::Length(if has_tabs { TABS_HEIGHT } else { 0 }),
             Constraint::Min(12),
             Constraint::Length(STATUS_HEIGHT),
         ])

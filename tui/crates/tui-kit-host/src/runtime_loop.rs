@@ -1,5 +1,5 @@
 use std::time::Duration;
-use tui_kit_render::ui::app::list_viewport_height_for_area;
+use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::theme::{Theme, ThemeKind};
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
@@ -80,7 +80,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 
         if let Ok(size) = terminal.size() {
             let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-            let visible_height = list_viewport_height_for_area(area);
+            let visible_height = list_viewport_height_for_area_with_tabs(area, !cfg.tab_ids.is_empty());
             list_scroll_offset = keep_selection_visible_scroll(
                 list_scroll_offset,
                 state.selected_index,
@@ -114,6 +114,12 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 .status_message(state.status_message.as_deref().unwrap_or("ready"))
                 .show_help(show_help)
                 .show_settings(show_settings)
+                .show_create_modal(state.create_modal_open)
+                .create_name(&state.create_name)
+                .create_description(&state.create_description)
+                .create_submitting(state.create_submitting)
+                .create_error(state.create_error.as_deref())
+                .create_focus(state.create_focus)
                 .show_completion(false)
                 .context_details_loading(false)
                 .context_details_failed(false)
@@ -154,6 +160,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             state.focus,
             show_help,
             show_settings,
+            state.create_modal_open,
             state.query.is_empty(),
         ) {
             HostGlobalCommand::None => {}
@@ -163,6 +170,24 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             }
             HostGlobalCommand::CloseSettings => {
                 show_settings = false;
+                continue;
+            }
+            HostGlobalCommand::CloseCreateModal => {
+                if let Ok(effects) =
+                    dispatch_action(provider, &mut state, &CoreAction::CloseCreateModal)
+                {
+                    hooks.on_effects(provider, &mut state, &effects);
+                    execute_effects_to_status(&mut state, effects);
+                }
+                continue;
+            }
+            HostGlobalCommand::OpenCreateModal => {
+                if let Ok(effects) =
+                    dispatch_action(provider, &mut state, &CoreAction::OpenCreateModal)
+                {
+                    hooks.on_effects(provider, &mut state, &effects);
+                    execute_effects_to_status(&mut state, effects);
+                }
                 continue;
             }
             HostGlobalCommand::ToggleHelp => {
@@ -201,9 +226,22 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             HostGlobalCommand::Quit => break Ok(()),
         }
 
-        let action = action_from_keycode(code, state.focus).and_then(|a| {
-            resolve_tab_action_with_current(a, cfg.tab_ids, Some(state.current_tab_id.as_str()))
-        });
+        let action = if state.create_modal_open {
+            match code {
+                crossterm::event::KeyCode::Tab => Some(CoreAction::CreateNextField),
+                crossterm::event::KeyCode::BackTab => Some(CoreAction::CreatePrevField),
+                crossterm::event::KeyCode::Backspace => Some(CoreAction::CreateBackspace),
+                crossterm::event::KeyCode::Enter => Some(CoreAction::CreateSubmit),
+                crossterm::event::KeyCode::Char(c) if !c.is_control() => {
+                    Some(CoreAction::CreateInput(c))
+                }
+                _ => None,
+            }
+        } else {
+            action_from_keycode(code, state.focus).and_then(|a| {
+                resolve_tab_action_with_current(a, cfg.tab_ids, Some(state.current_tab_id.as_str()))
+            })
+        };
         let mut handled = false;
 
         if let Some(action) = action {

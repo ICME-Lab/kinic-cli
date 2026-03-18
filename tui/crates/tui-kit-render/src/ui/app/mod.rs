@@ -8,7 +8,12 @@ mod right_panel;
 mod status;
 mod types;
 
-pub use layout::{list_viewport_height_for_area, tabs_rect_for_area};
+pub use layout::{
+    list_viewport_height_for_area,
+    list_viewport_height_for_area_with_tabs,
+    tabs_rect_for_area,
+    tabs_rect_for_area_with_tabs,
+};
 pub use types::{
     default_tab_specs, BrandingText, ChatPanelText, Focus, HeaderText, TabId, TabSpec, UiConfig,
 };
@@ -18,6 +23,7 @@ use crate::ui::components::TabBar;
 use crate::ui::model::{UiContextNode, UiItemDetail, UiItemSummary};
 use crate::ui::search::{CompletionCandidate, SearchBar, SearchCompletion};
 use crate::ui::theme::Theme;
+use tui_kit_runtime::CreateModalFocus;
 
 use ratatui::{
     Frame,
@@ -54,6 +60,12 @@ pub struct TuiKitUi<'a> {
     pub(super) show_completion: bool,
     pub(super) show_help: bool,
     pub(super) show_settings: bool,
+    pub(super) show_create_modal: bool,
+    pub(super) create_name: &'a str,
+    pub(super) create_description: &'a str,
+    pub(super) create_submitting: bool,
+    pub(super) create_error: Option<&'a str>,
+    pub(super) create_focus: CreateModalFocus,
     pub(super) status_message: &'a str,
     pub(super) inspector_scroll: usize,
     pub(super) animation: Option<&'a AnimationState>,
@@ -92,6 +104,12 @@ impl<'a> TuiKitUi<'a> {
             show_completion: false,
             show_help: false,
             show_settings: false,
+            show_create_modal: false,
+            create_name: "",
+            create_description: "",
+            create_submitting: false,
+            create_error: None,
+            create_focus: CreateModalFocus::Name,
             status_message: "",
             inspector_scroll: 0,
             animation: None,
@@ -244,6 +262,42 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn show_create_modal(mut self, show: bool) -> Self {
+        self.show_create_modal = show;
+        self
+    }
+
+    #[must_use]
+    pub fn create_name(mut self, value: &'a str) -> Self {
+        self.create_name = value;
+        self
+    }
+
+    #[must_use]
+    pub fn create_description(mut self, value: &'a str) -> Self {
+        self.create_description = value;
+        self
+    }
+
+    #[must_use]
+    pub fn create_submitting(mut self, value: bool) -> Self {
+        self.create_submitting = value;
+        self
+    }
+
+    #[must_use]
+    pub fn create_error(mut self, value: Option<&'a str>) -> Self {
+        self.create_error = value;
+        self
+    }
+
+    #[must_use]
+    pub fn create_focus(mut self, value: CreateModalFocus) -> Self {
+        self.create_focus = value;
+        self
+    }
+
+    #[must_use]
     pub fn status_message(mut self, msg: &'a str) -> Self {
         self.status_message = msg;
         self
@@ -299,7 +353,7 @@ impl<'a> TuiKitUi<'a> {
                 .iter()
                 .find(|t| t.id == self.current_tab_id)
                 .map(|t| t.search_placeholder.as_str())
-                .unwrap_or("Search...")
+                .unwrap_or("Search memories...")
         };
         let search = SearchBar::new(self.search_input, self.theme)
             .focused(self.focus == Focus::Search)
@@ -326,6 +380,9 @@ impl<'a> TuiKitUi<'a> {
     }
 
     fn render_tabs(&self, area: Rect, buf: &mut Buffer) {
+        if self.tab_specs.is_empty() {
+            return;
+        }
         let titles: Vec<&str> = self.tab_specs.iter().map(|t| t.title.as_str()).collect();
         let selected = self
             .tab_specs
@@ -342,17 +399,22 @@ impl<'a> TuiKitUi<'a> {
     ///
     /// Returns `None` when no text input is focused or overlays are shown.
     pub fn cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
-        if self.show_help || self.show_settings {
+        if self.show_help || self.show_settings || self.show_create_modal {
             return None;
         }
 
         // Rebuild the same layout geometry used by `render` so cursor placement stays in sync.
         let padded = layout::content_area(area, true);
+        let tabs_height = if self.tab_specs.is_empty() {
+            0
+        } else {
+            layout::TABS_HEIGHT
+        };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(layout::HEADER_HEIGHT),
-                Constraint::Length(layout::TABS_HEIGHT),
+                Constraint::Length(tabs_height),
                 Constraint::Min(12),
                 Constraint::Length(layout::STATUS_HEIGHT),
             ])
@@ -446,6 +508,7 @@ impl<'a> TuiKitUi<'a> {
 impl Widget for TuiKitUi<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use layout::{HEADER_HEIGHT, STATUS_HEIGHT, TABS_HEIGHT};
+        let tabs_height = if self.tab_specs.is_empty() { 0 } else { TABS_HEIGHT };
 
         let outer = Block::default()
             .borders(Borders::ALL)
@@ -459,14 +522,16 @@ impl Widget for TuiKitUi<'_> {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(HEADER_HEIGHT),
-                Constraint::Length(TABS_HEIGHT),
+                Constraint::Length(tabs_height),
                 Constraint::Min(12),
                 Constraint::Length(STATUS_HEIGHT),
             ])
             .split(padded);
 
         self.render_header(chunks[0], buf);
-        self.render_tabs(chunks[1], buf);
+        if tabs_height > 0 {
+            self.render_tabs(chunks[1], buf);
+        }
 
         let body = chunks[2];
         let left_div_right = Layout::default()
@@ -507,6 +572,7 @@ impl Widget for TuiKitUi<'_> {
         }
         self.render_status(chunks[3], buf);
         self.render_completion(search_rect, buf);
+        self.render_create_overlay(area, buf);
         self.render_settings_overlay(area, buf);
         self.render_help_overlay(area, buf);
     }
