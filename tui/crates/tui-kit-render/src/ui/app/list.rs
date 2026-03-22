@@ -44,6 +44,7 @@ impl<'a> TuiKitUi<'a> {
             .skip(scroll_offset)
             .take(visible_height)
             .map(|(idx, item)| {
+                let is_selected = Some(idx) == selected;
                 let kind_style = match item.kind {
                     UiItemKind::Function => self.theme.style_function(),
                     UiItemKind::Type => self.theme.style_type(),
@@ -52,7 +53,6 @@ impl<'a> TuiKitUi<'a> {
                     UiItemKind::Constant => self.theme.style_string(),
                     _ => self.theme.style_dim(),
                 };
-                let is_selected = Some(idx) == selected;
                 let base_style = if is_selected {
                     if highlight_intensity < 1.0 {
                         self.theme.style_selected().add_modifier(Modifier::BOLD)
@@ -60,7 +60,7 @@ impl<'a> TuiKitUi<'a> {
                         self.theme.style_selected()
                     }
                 } else {
-                    Style::default()
+                    self.theme.style_dim()
                 };
                 let prefix = if is_selected { "▸ " } else { "  " };
                 let vis = match item.visibility {
@@ -68,13 +68,37 @@ impl<'a> TuiKitUi<'a> {
                     UiVisibility::Internal => "◐",
                     UiVisibility::Private => "○",
                 };
-                ListItem::new(Line::from(vec![
-                    Span::styled(prefix, self.theme.style_accent()),
+                let mut spans = vec![
+                    Span::styled(
+                        prefix,
+                        if is_selected {
+                            self.theme.style_accent()
+                        } else {
+                            self.theme.style_dim()
+                        },
+                    ),
                     Span::styled(vis, self.theme.style_dim()),
                     Span::raw(" "),
-                    Span::styled(format!("{:6} ", item.kind.label()), kind_style),
-                    Span::styled(item.name.clone(), self.theme.style_normal()),
-                ]))
+                ];
+                if !item.kind.label().is_empty() {
+                    spans.push(Span::styled(
+                        format!("{:6} ", item.kind.label()),
+                        if is_selected {
+                            kind_style
+                        } else {
+                            self.theme.style_dim()
+                        },
+                    ));
+                }
+                spans.push(Span::styled(
+                    item.name.clone(),
+                    if is_selected {
+                        self.theme.style_normal().add_modifier(Modifier::BOLD)
+                    } else {
+                        self.theme.style_dim()
+                    },
+                ));
+                ListItem::new(Line::from(spans))
                 .style(base_style)
             })
             .collect();

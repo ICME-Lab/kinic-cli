@@ -3,6 +3,7 @@ mod provider;
 use provider::KinicProvider;
 use tui_kit_host::runtime_loop::{run_provider_app, RuntimeLoopConfig};
 use tui_kit_render::ui::{BrandingText, HeaderText, TabId, TabSpec, UiConfig};
+use tui_kit_runtime::PaneFocus;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut provider = KinicProvider::sample();
@@ -11,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RuntimeLoopConfig {
             initial_tab_id: "kinic-memories",
             tab_ids: &["kinic-memories", "kinic-create", "kinic-market", "kinic-settings"],
+            initial_focus: PaneFocus::List,
             ui_config: kinic_ui_config,
         },
     )

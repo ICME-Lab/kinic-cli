@@ -11,7 +11,7 @@ pub fn kinic_ui_config() -> UiConfig {
                 "██║  ██╗ ██║ ██║ ╚████║ ██║ ╚██████╗".to_string(),
                 "╚═╝  ╚═╝ ╚═╝ ╚═╝  ╚═══╝ ╚═╝  ╚═════╝".to_string(),
             ],
-            attribution: "kinic pink".to_string(),
+            attribution: String::new(),
         },
         header: HeaderText {
             visible_icon: "◆".to_string(),

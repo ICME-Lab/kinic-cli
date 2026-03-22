@@ -1,5 +1,6 @@
-use std::future::Future;
+use std::{future::Future, sync::mpsc, thread};
 
+use serde::Deserialize;
 use super::adapter;
 use super::app::{self, MemorySummary, SearchResultItem};
 use tokio::runtime::{Handle, Runtime};
@@ -46,6 +47,12 @@ enum MemoriesMode {
     Results,
 }
 
+#[derive(Debug, Deserialize)]
+struct SearchPayload {
+    sentence: Option<String>,
+    tag: Option<String>,
+}
+
 enum BlockingRuntime {
     Owned(Runtime),
     Handle(Handle),
@@ -81,6 +88,13 @@ pub struct KinicProvider {
     memory_records: Vec<KinicRecord>,
     result_records: Vec<KinicRecord>,
     memories_mode: MemoriesMode,
+    pending_search: Option<mpsc::Receiver<SearchTaskOutput>>,
+    search_in_flight: bool,
+}
+
+struct SearchTaskOutput {
+    memory_id: String,
+    result: Result<Vec<SearchResultItem>, String>,
 }
 
 impl KinicProvider {
@@ -95,6 +109,8 @@ impl KinicProvider {
             memory_records: Vec::new(),
             result_records: Vec::new(),
             memories_mode: MemoriesMode::Browser,
+            pending_search: None,
+            search_in_flight: false,
         }
     }
 
@@ -107,6 +123,7 @@ impl KinicProvider {
             Ok(memories) => {
                 self.memory_records = memories.into_iter().map(record_from_memory_summary).collect();
                 self.all = self.memory_records.clone();
+                self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
             }
             Err(error) => {
                 self.all = vec![KinicRecord::new(
@@ -136,6 +153,7 @@ impl KinicProvider {
             }
         }
         self.all = self.memory_records.clone();
+        self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
         self.memories_mode = MemoriesMode::Browser;
         self.result_records.clear();
         Ok(())
@@ -146,6 +164,10 @@ impl KinicProvider {
     }
 
     fn current_records(&self) -> Vec<&KinicRecord> {
+        if self.is_live() && self.memories_mode == MemoriesMode::Browser {
+            return Vec::new();
+        }
+
         let base = if self.is_live() {
             match self.memories_mode {
                 MemoriesMode::Browser => &self.memory_records,
@@ -170,14 +192,50 @@ impl KinicProvider {
             .collect()
     }
 
+    fn active_memory_record(&self) -> Option<&KinicRecord> {
+        let active_id = self.active_memory_id.as_deref()?;
+        self.memory_records.iter().find(|record| record.id == active_id)
+    }
+
+    fn active_memory_index(&self) -> Option<usize> {
+        let active_id = self.active_memory_id.as_deref()?;
+        self.memory_records.iter().position(|record| record.id == active_id)
+    }
+
+    fn move_active_memory(&mut self, delta: isize) {
+        if !self.is_live() || self.memories_mode != MemoriesMode::Browser || self.memory_records.is_empty()
+        {
+            return;
+        }
+
+        let current = self.active_memory_index().unwrap_or(0) as isize;
+        let last = self.memory_records.len().saturating_sub(1) as isize;
+        let next = (current + delta).clamp(0, last) as usize;
+        self.active_memory_id = Some(self.memory_records[next].id.clone());
+    }
+
+    fn set_active_memory(&mut self, index: usize) {
+        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+            return;
+        }
+        let Some(record) = self.memory_records.get(index) else {
+            return;
+        };
+        self.active_memory_id = Some(record.id.clone());
+    }
+
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
         let filtered = self.current_records();
         let items = filtered
             .iter()
             .map(|r| adapter::to_summary(r))
             .collect::<Vec<_>>();
-        let sel = state.selected_index.unwrap_or(0);
-        let selected_detail = filtered.get(sel).map(|r| adapter::to_detail(r));
+        let selected_detail = if self.is_live() && self.memories_mode == MemoriesMode::Browser {
+            self.active_memory_record().map(adapter::to_detail)
+        } else {
+            let sel = state.selected_index.unwrap_or(0);
+            filtered.get(sel).map(|r| adapter::to_detail(r))
+        };
 
         ProviderSnapshot {
             items,
@@ -196,10 +254,10 @@ impl KinicProvider {
         match self.memories_mode {
             MemoriesMode::Browser => match self.active_memory_id.as_deref() {
                 Some(memory_id) => format!(
-                    "kinic(live): {visible_count} memories | target {memory_id} | Enter in search runs remote search"
+                    "kinic(live): target {memory_id} | j/k selects memory canister | Enter in search runs remote search"
                 ),
                 None => format!(
-                    "kinic(live): {visible_count} memories | select a memory, then press Enter in search"
+                    "kinic(live): no memory selected | j/k selects memory canister"
                 ),
             },
             MemoriesMode::Results => match self.active_memory_id.as_deref() {
@@ -211,26 +269,15 @@ impl KinicProvider {
         }
     }
 
-    fn select_active_memory(&mut self, state: &CoreState) {
-        if self.tab_id != "kinic-memories" || !self.is_live() {
-            return;
-        }
-        if self.memories_mode != MemoriesMode::Browser {
-            return;
-        }
-        let Some(index) = state.selected_index else {
-            return;
-        };
-        let Some(record) = self.memory_records.get(index) else {
-            return;
-        };
-        self.active_memory_id = Some(record.id.clone());
-    }
-
     fn run_live_search(&mut self) -> Option<CoreEffect> {
         let Some(identity) = self.config.identity.clone() else {
             return None;
         };
+        if self.search_in_flight {
+            return Some(CoreEffect::Notify(
+                "Search already running. Wait for the current request to finish.".to_string(),
+            ));
+        }
         let Some(memory_id) = self.active_memory_id.clone() else {
             return Some(CoreEffect::Notify(
                 "Select a memory in the list before running search.".to_string(),
@@ -245,27 +292,66 @@ impl KinicProvider {
             ));
         }
 
-        match self.runtime.block_on(app::search_memory(
-            self.config.use_mainnet,
-            identity,
-            memory_id.clone(),
-            query.clone(),
-        )) {
+        let use_mainnet = self.config.use_mainnet;
+        let (tx, rx) = mpsc::channel();
+        self.pending_search = Some(rx);
+        self.search_in_flight = true;
+
+        thread::spawn(move || {
+            let runtime = Runtime::new().expect("failed to create tokio runtime for search");
+            let result = runtime
+                .block_on(app::search_memory(use_mainnet, identity, memory_id.clone(), query))
+                .map_err(|error| error.to_string());
+            let _ = tx.send(SearchTaskOutput { memory_id, result });
+        });
+
+        Some(CoreEffect::Notify("Searching...".to_string()))
+    }
+
+    pub fn poll_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.pending_search.as_ref()?;
+        let output = match receiver.try_recv() {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_search = None;
+                self.search_in_flight = false;
+                return Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: vec![CoreEffect::Notify(
+                        "Search worker disconnected unexpectedly.".to_string(),
+                    )],
+                });
+            }
+        };
+
+        self.pending_search = None;
+        self.search_in_flight = false;
+
+        let effects = match output.result {
             Ok(results) => {
                 self.result_records = results
                     .into_iter()
                     .enumerate()
-                    .map(|(index, item)| record_from_search_result(index, &memory_id, item))
+                    .map(|(index, item)| record_from_search_result(index, &output.memory_id, item))
                     .collect();
                 self.memories_mode = MemoriesMode::Results;
-                Some(CoreEffect::Notify(format!(
-                    "Loaded {} search results for {}",
-                    self.result_records.len(),
-                    memory_id
-                )))
+                vec![CoreEffect::Custom {
+                    id: "search_completed".to_string(),
+                    payload: Some(format!(
+                        "Loaded {} search results for {}",
+                        self.result_records.len(),
+                        output.memory_id
+                    )),
+                }]
             }
-            Err(error) => Some(CoreEffect::Notify(format!("Search failed: {error}"))),
-        }
+            Err(error) => vec![CoreEffect::Notify(format!("Search failed: {error}"))],
+        };
+
+        Some(ProviderOutput {
+            snapshot: Some(self.build_snapshot(state)),
+            effects,
+        })
     }
 
     fn reset_memories_browser(&mut self) {
@@ -309,9 +395,16 @@ impl DataProvider for KinicProvider {
                     }
                 }
             }
-            CoreAction::OpenSelected => {
-                self.select_active_memory(state);
+            CoreAction::MoveNext => self.move_active_memory(1),
+            CoreAction::MovePrev => self.move_active_memory(-1),
+            CoreAction::MoveHome => self.set_active_memory(0),
+            CoreAction::MoveEnd => {
+                if !self.memory_records.is_empty() {
+                    self.set_active_memory(self.memory_records.len() - 1);
+                }
             }
+            CoreAction::MovePageDown => self.move_active_memory(10),
+            CoreAction::MovePageUp => self.move_active_memory(-10),
             CoreAction::SetTab(id) => {
                 self.tab_id = id.0.clone();
                 effects.push(CoreEffect::Notify(format!("Switched kinic tab: {}", id.0)));
@@ -414,18 +507,84 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
 }
 
 fn record_from_search_result(index: usize, memory_id: &str, item: SearchResultItem) -> KinicRecord {
-    let title = format!("Result #{:02}", index + 1);
+    let parsed = parse_search_payload(&item.payload);
+    let sentence = parsed
+        .as_ref()
+        .and_then(|payload| payload.sentence.as_deref())
+        .map(decode_payload_text);
+    let title = sentence
+        .as_ref()
+        .map(|text| search_result_list_title(text, index))
+        .unwrap_or_else(|| search_result_title(&item.payload, index));
     let score = format!("{:.4}", item.score);
+    let tag = parsed
+        .as_ref()
+        .and_then(|payload| payload.tag.as_deref())
+        .unwrap_or("search-result");
+    let detail_body = sentence.unwrap_or_else(|| item.payload.clone());
     KinicRecord::new(
         format!("{memory_id}-result-{}", index + 1),
         title,
-        "memories",
-        format!("Score: {score}"),
+        "search-result",
+        format!("Score: {score} | Tag: {tag}"),
         format!(
-            "## Search Hit\n\n- Memory: `{memory_id}`\n- Score: `{score}`\n\n### Payload\n{}\n",
+            "## Search Hit\n\n- Memory: `{memory_id}`\n- Score: `{score}`\n- Tag: `{tag}`\n\n### Sentence\n{}\n\n### Raw Payload\n{}\n",
+            detail_body,
             item.payload
         ),
     )
+}
+
+fn search_result_title(payload: &str, index: usize) -> String {
+    payload
+        .lines()
+        .map(clean_payload_line)
+        .find(|line| !line.is_empty())
+        .map(truncate_title)
+        .unwrap_or_else(|| format!("Hit #{:02}", index + 1))
+}
+
+fn search_result_list_title(payload: &str, index: usize) -> String {
+    let single_line = payload
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    search_result_title(&single_line, index)
+}
+
+fn clean_payload_line(line: &str) -> String {
+    let trimmed = line.trim();
+    let stripped = trimmed
+        .trim_start_matches('#')
+        .trim_start_matches('-')
+        .trim_start_matches('*')
+        .trim()
+        .trim_matches('`')
+        .trim();
+    stripped.to_string()
+}
+
+fn truncate_title(mut title: String) -> String {
+    const MAX_CHARS: usize = 72;
+    if title.chars().count() <= MAX_CHARS {
+        return title;
+    }
+    title = title.chars().take(MAX_CHARS - 1).collect::<String>();
+    format!("{title}…")
+}
+
+fn parse_search_payload(payload: &str) -> Option<SearchPayload> {
+    serde_json::from_str::<SearchPayload>(payload).ok()
+}
+
+fn decode_payload_text(text: &str) -> String {
+    text.replace("\\n", "\n")
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn sample_records() -> Vec<KinicRecord> {

@@ -3,6 +3,7 @@ mod provider;
 use provider::TaskProvider;
 use tui_kit_host::runtime_loop::{run_provider_app, RuntimeLoopConfig};
 use tui_kit_render::ui::{BrandingText, HeaderText, TabId, TabSpec, UiConfig};
+use tui_kit_runtime::PaneFocus;
 
 // Example architecture:
 // - `examples/task/provider.rs` provides provider behavior
@@ -21,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "task-blocked",
                 "task-done",
             ],
+            initial_focus: PaneFocus::List,
             ui_config: task_ui_config,
         },
     )

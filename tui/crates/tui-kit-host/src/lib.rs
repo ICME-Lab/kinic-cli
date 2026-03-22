@@ -201,7 +201,7 @@ pub fn global_command_for_key(
     {
         return HostGlobalCommand::ToggleSettings;
     }
-    if code == KeyCode::Char('n') && modifiers.is_empty() {
+    if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateModal;
     }
     if code == KeyCode::Esc {
@@ -251,6 +251,14 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                     }
                     "select_first" => {
                         state.selected_index = if state.list_items.is_empty() { None } else { Some(0) };
+                    }
+                    "focus_list" => {
+                        state.focus = PaneFocus::List;
+                    }
+                    "search_completed" => {
+                        state.status_message = payload.clone();
+                        state.selected_index = if state.list_items.is_empty() { None } else { Some(0) };
+                        state.focus = PaneFocus::List;
                     }
                     _ => {
                         state.status_message = Some(match payload {

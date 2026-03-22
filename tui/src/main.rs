@@ -4,8 +4,12 @@ mod provider;
 use clap::Parser;
 use provider::{KinicProvider, TuiConfig};
 pub use tui_kit_lib::app;
-use tui_kit_host::runtime_loop::{run_provider_app, RuntimeLoopConfig};
+use tui_kit_host::{
+    execute_effects_to_status,
+    runtime_loop::{run_provider_app_with_hooks, RuntimeLoopConfig, RuntimeLoopHooks},
+};
 use tui_kit_render::ui::{BrandingText, HeaderText, UiConfig};
+use tui_kit_runtime::{apply_snapshot, CoreState, PaneFocus};
 
 #[derive(Debug, Parser)]
 #[command(name = "kinic-tui", about = "Kinic terminal UI")]
@@ -23,14 +27,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         identity: args.identity,
         use_mainnet: args.ic,
     });
-    run_provider_app(
+    let mut hooks = KinicRuntimeHooks;
+    run_provider_app_with_hooks(
         &mut provider,
         RuntimeLoopConfig {
             initial_tab_id: "",
             tab_ids: &[],
+            initial_focus: PaneFocus::Search,
             ui_config: kinic_ui_config,
         },
+        &mut hooks,
     )
+}
+
+struct KinicRuntimeHooks;
+
+impl RuntimeLoopHooks<KinicProvider> for KinicRuntimeHooks {
+    fn on_tick(&mut self, provider: &mut KinicProvider, state: &mut CoreState) {
+        if let Some(output) = provider.poll_background(state) {
+            if let Some(snapshot) = output.snapshot {
+                apply_snapshot(state, snapshot);
+            }
+            execute_effects_to_status(state, output.effects);
+        }
+    }
 }
 
 fn kinic_ui_config() -> UiConfig {
@@ -44,7 +64,7 @@ fn kinic_ui_config() -> UiConfig {
                 "██║  ██╗ ██║ ██║ ╚████║ ██║ ╚██████╗".to_string(),
                 "╚═╝  ╚═╝ ╚═╝ ╚═╝  ╚═══╝ ╚═╝  ╚═════╝".to_string(),
             ],
-            attribution: "kinic pink".to_string(),
+            attribution: String::new(),
         },
         header: HeaderText {
             visible_icon: "◆".to_string(),

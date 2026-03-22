@@ -14,6 +14,7 @@ use crate::{
 pub struct RuntimeLoopConfig {
     pub initial_tab_id: &'static str,
     pub tab_ids: &'static [&'static str],
+    pub initial_focus: PaneFocus,
     pub ui_config: fn() -> UiConfig,
 }
 
@@ -59,7 +60,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
         let mut theme = Theme::default();
         let mut state = CoreState {
             current_tab_id: cfg.initial_tab_id.to_string(),
-            focus: PaneFocus::List,
+            focus: cfg.initial_focus,
             ..CoreState::default()
         };
         let mut inspector_scroll: usize = 0;

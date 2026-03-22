@@ -107,27 +107,31 @@ impl<'a> InspectorPanel<'a> {
     }
 
     fn render_detail(&self, detail: &UiItemDetail, area: Rect, buf: &mut Buffer) {
-        let mut lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    format!("{} ", detail.kind.label()),
-                    self.theme.style_keyword().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    detail.title.clone(),
-                    self.theme
-                        .style_accent_bold()
-                        .add_modifier(Modifier::UNDERLINED),
-                ),
-            ]),
-            Line::from(""),
-            self.section_header("Definition"),
-            Line::from(""),
-            Line::from(vec![
+        let mut title_spans = Vec::new();
+        if !detail.kind.label().is_empty() {
+            title_spans.push(Span::styled(
+                format!("{} ", detail.kind.label()),
+                self.theme.style_keyword().add_modifier(Modifier::BOLD),
+            ));
+        }
+        title_spans.push(Span::styled(
+            detail.title.clone(),
+            self.theme
+                .style_accent_bold()
+                .add_modifier(Modifier::UNDERLINED),
+        ));
+
+        let mut lines = vec![Line::from(title_spans)];
+
+        if !detail.definition.trim().is_empty() {
+            lines.push(Line::from(""));
+            lines.push(self.section_header("Definition"));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(detail.definition.clone(), self.theme.style_type()),
-            ]),
-        ];
+            ]));
+        }
 
         if let Some(loc) = &detail.location {
             lines.push(Line::from(""));

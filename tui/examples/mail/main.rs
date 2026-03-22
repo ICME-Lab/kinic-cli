@@ -3,6 +3,7 @@ mod provider;
 use provider::MailProvider;
 use tui_kit_host::runtime_loop::{run_provider_app, RuntimeLoopConfig};
 use tui_kit_render::ui::{BrandingText, HeaderText, TabId, TabSpec, UiConfig};
+use tui_kit_runtime::PaneFocus;
 
 // Example architecture:
 // - `examples/mail/provider.rs` provides provider behavior
@@ -16,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RuntimeLoopConfig {
             initial_tab_id: "mail-inbox",
             tab_ids: &["mail-inbox", "mail-invoices", "mail-alerts", "mail-news"],
+            initial_focus: PaneFocus::List,
             ui_config: mail_ui_config,
         },
     )
