@@ -1,7 +1,5 @@
 use crate::provider::KinicRecord;
-use tui_kit_model::{
-    UiItemDetail, UiItemKind, UiItemSummary, UiRow, UiSection, UiVisibility,
-};
+use tui_kit_model::{UiItemDetail, UiItemKind, UiItemSummary, UiRow, UiSection, UiVisibility};
 
 pub fn to_summary(record: &KinicRecord) -> UiItemSummary {
     UiItemSummary {

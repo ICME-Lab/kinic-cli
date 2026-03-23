@@ -1,7 +1,7 @@
+use ratatui::{backend::TestBackend, Terminal};
 use tui_kit_model::{UiItemKind, UiItemSummary, UiVisibility};
 use tui_kit_render::theme::Theme;
-use tui_kit_render::ui::{Focus, TuiKitUi, TabId, UiConfig};
-use ratatui::{backend::TestBackend, Terminal};
+use tui_kit_render::ui::{Focus, TabId, TuiKitUi, UiConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = TestBackend::new(100, 30);

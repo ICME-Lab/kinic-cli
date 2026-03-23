@@ -53,12 +53,11 @@ pub async fn run() -> Result<()> {
             &cli.command,
             cli::Command::Create(_) | cli::Command::Balance(_)
         )
+        && !cfg!(feature = "experimental")
     {
-        if !cfg!(feature = "experimental") {
-            anyhow::bail!(
-                "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
-            );
-        }
+        anyhow::bail!(
+            "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
+        );
     }
 
     if !cli.global.ii
@@ -327,12 +326,7 @@ fn update_instance(identity: &str, memory_id: &str, ic: Option<bool>) -> PyResul
 #[cfg(feature = "python-bindings")]
 #[pyfunction]
 #[pyo3(signature = (identity, memory_id, dim, ic=None))]
-fn reset_memory(
-    identity: &str,
-    memory_id: &str,
-    dim: usize,
-    ic: Option<bool>,
-) -> PyResult<()> {
+fn reset_memory(identity: &str, memory_id: &str, dim: usize, ic: Option<bool>) -> PyResult<()> {
     let ic = ic.unwrap_or(false);
     block_on_py(python::reset_memory(
         ic,

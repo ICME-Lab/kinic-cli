@@ -11,7 +11,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut provider,
         RuntimeLoopConfig {
             initial_tab_id: "kinic-memories",
-            tab_ids: &["kinic-memories", "kinic-create", "kinic-market", "kinic-settings"],
+            tab_ids: &[
+                "kinic-memories",
+                "kinic-create",
+                "kinic-market",
+                "kinic-settings",
+            ],
             initial_focus: PaneFocus::List,
             ui_config: kinic_ui_config,
         },

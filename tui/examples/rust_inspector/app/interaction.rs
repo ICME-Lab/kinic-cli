@@ -18,8 +18,7 @@ use crate::app::{App, Tab};
 use crate::ui::{AnimationState, Focus, TabId};
 use crossterm::event::{KeyCode, KeyModifiers};
 use tui_kit_host::{
-    action_from_keycode, global_command_for_key, resolve_tab_action_with_current,
-    HostGlobalCommand,
+    action_from_keycode, global_command_for_key, resolve_tab_action_with_current, HostGlobalCommand,
 };
 use tui_kit_runtime::{apply_core_action, CoreAction, CoreState, CoreTabId, PaneFocus};
 
@@ -41,6 +40,8 @@ pub enum UiIntent {
     CycleTheme,
     ToggleSettings,
     ToggleChat,
+    OpenCreateModal,
+    CloseCreateModal,
     OpenGithub,
     OpenSponsor,
     EscapePressed,
@@ -105,6 +106,7 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
         focus_to_pane(app.focus),
         app.show_help,
         app.show_settings,
+        app.create_modal_open,
         app.search_input.is_empty(),
     ) {
         HostGlobalCommand::None => {}
@@ -128,6 +130,8 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
                 return vec![UiIntent::ToggleChat];
             }
         }
+        HostGlobalCommand::CloseCreateModal => return vec![UiIntent::CloseCreateModal],
+        HostGlobalCommand::OpenCreateModal => return vec![UiIntent::OpenCreateModal],
         HostGlobalCommand::BackFromDetail | HostGlobalCommand::ClearQuery => {
             return vec![UiIntent::EscapePressed];
         }
@@ -280,6 +284,35 @@ pub fn try_apply_runtime_action(
         return RuntimeApplyResult::default();
     }
 
+    if app.create_modal_open {
+        let Some(action) = (match code {
+            KeyCode::Tab => Some(CoreAction::CreateNextField),
+            KeyCode::BackTab => Some(CoreAction::CreatePrevField),
+            KeyCode::Backspace => Some(CoreAction::CreateBackspace),
+            KeyCode::Enter => Some(CoreAction::CreateSubmit),
+            KeyCode::Char(c) if !c.is_control() => Some(CoreAction::CreateInput(c)),
+            _ => None,
+        }) else {
+            return RuntimeApplyResult::default();
+        };
+
+        let mut core = core_state_from_app(app);
+        apply_core_action(&mut core, &action);
+        if matches!(action, CoreAction::CreateSubmit) {
+            core.create_modal_open = false;
+            core.create_submitting = false;
+            core.create_error = Some("Create action is not implemented in this example.".into());
+            core.status_message = Some(
+                "Create action is not implemented in this example.".to_string(),
+            );
+        }
+        apply_core_state_to_app(app, core);
+        return RuntimeApplyResult {
+            consumed: true,
+            tab_changed: false,
+        };
+    }
+
     let Some(base_action) = action_from_keycode(code, focus_to_pane(app.focus)) else {
         return RuntimeApplyResult::default();
     };
@@ -343,32 +376,10 @@ pub fn try_apply_runtime_action(
         return RuntimeApplyResult::default();
     }
 
-    let mut core = CoreState {
-        current_tab_id: app.current_tab.id().0,
-        focus: focus_to_pane(app.focus),
-        query: app.search_input.clone(),
-        selected_index: app.list_state.selected(),
-        list_items: app.ui_summaries.clone(),
-        selected_detail: app.ui_selected_detail.clone(),
-        selected_context: app.ui_dependency_node.clone(),
-        total_count: app.ui_total_count,
-        status_message: Some(app.status_message.clone()),
-        chat_open: app.chat_open,
-        chat_messages: app.chat_messages.clone(),
-        chat_input: app.chat_input.clone(),
-        chat_loading: app.chat_loading,
-        chat_scroll: app.chat_scroll,
-    };
+    let mut core = core_state_from_app(app);
     let prev_tab = app.current_tab;
     apply_core_action(&mut core, &action);
-
-    app.search_input = core.query;
-    app.focus = pane_to_focus(core.focus);
-    app.chat_open = core.chat_open;
-    app.chat_messages = core.chat_messages;
-    app.chat_input = core.chat_input;
-    app.chat_loading = core.chat_loading;
-    app.chat_scroll = core.chat_scroll;
+    apply_core_state_to_app(app, core.clone());
 
     let mut tab_changed = false;
     let tab_id = TabId::new(core.current_tab_id.clone());
@@ -408,32 +419,9 @@ pub fn try_apply_runtime_action(
 
 /// Apply runtime tab switch directly (used by mouse tab click path).
 pub fn apply_runtime_set_tab(app: &mut App, tab_id: TabId) -> RuntimeApplyResult {
-    let mut core = CoreState {
-        current_tab_id: app.current_tab.id().0,
-        focus: focus_to_pane(app.focus),
-        query: app.search_input.clone(),
-        selected_index: app.list_state.selected(),
-        list_items: app.ui_summaries.clone(),
-        selected_detail: app.ui_selected_detail.clone(),
-        selected_context: app.ui_dependency_node.clone(),
-        total_count: app.ui_total_count,
-        status_message: Some(app.status_message.clone()),
-        chat_open: app.chat_open,
-        chat_messages: app.chat_messages.clone(),
-        chat_input: app.chat_input.clone(),
-        chat_loading: app.chat_loading,
-        chat_scroll: app.chat_scroll,
-    };
+    let mut core = core_state_from_app(app);
     apply_core_action(&mut core, &CoreAction::SetTab(CoreTabId::new(tab_id.0)));
-
-    app.search_input = core.query;
-    app.focus = pane_to_focus(core.focus);
-    app.list_state.select(core.selected_index);
-    app.chat_open = core.chat_open;
-    app.chat_messages = core.chat_messages;
-    app.chat_input = core.chat_input;
-    app.chat_loading = core.chat_loading;
-    app.chat_scroll = core.chat_scroll;
+    apply_core_state_to_app(app, core.clone());
 
     let mut tab_changed = false;
     let tab_id = TabId::new(core.current_tab_id.clone());
@@ -483,6 +471,16 @@ pub fn apply_intent(
             } else {
                 app.status_message = "Select an item in the list to ask Chat about it".into();
             }
+        }
+        UiIntent::OpenCreateModal => {
+            let mut core = core_state_from_app(app);
+            apply_core_action(&mut core, &CoreAction::OpenCreateModal);
+            apply_core_state_to_app(app, core);
+        }
+        UiIntent::CloseCreateModal => {
+            let mut core = core_state_from_app(app);
+            apply_core_action(&mut core, &CoreAction::CloseCreateModal);
+            apply_core_state_to_app(app, core);
         }
         UiIntent::EscapePressed => {
             if app.show_settings {
@@ -551,22 +549,97 @@ pub fn apply_intent(
             app.focus = Focus::Chat;
             app.chat_input.push(c);
         }
-        UiIntent::ChatDown => {
-            app.chat_scroll = app.chat_scroll.saturating_add(1)
-        }
+        UiIntent::ChatDown => app.chat_scroll = app.chat_scroll.saturating_add(1),
         UiIntent::ChatUp => app.chat_scroll = app.chat_scroll.saturating_sub(1),
-        UiIntent::ChatPageDown => {
-            app.chat_scroll = app.chat_scroll.saturating_add(10)
-        }
-        UiIntent::ChatPageUp => {
-            app.chat_scroll = app.chat_scroll.saturating_sub(10)
-        }
+        UiIntent::ChatPageDown => app.chat_scroll = app.chat_scroll.saturating_add(10),
+        UiIntent::ChatPageUp => app.chat_scroll = app.chat_scroll.saturating_sub(10),
         UiIntent::ChatHome => app.chat_scroll = 0,
-        UiIntent::ChatEnd => {
-            app.chat_scroll = app.chat_scroll.saturating_add(9999)
-        }
+        UiIntent::ChatEnd => app.chat_scroll = app.chat_scroll.saturating_add(9999),
     }
     effects
+}
+
+fn core_state_from_app(app: &App) -> CoreState {
+    CoreState {
+        current_tab_id: app.current_tab.id().0,
+        focus: focus_to_pane(app.focus),
+        query: app.search_input.clone(),
+        selected_index: app.list_state.selected(),
+        list_items: app.ui_summaries.clone(),
+        selected_detail: app.ui_selected_detail.clone(),
+        selected_context: app.ui_dependency_node.clone(),
+        total_count: app.ui_total_count,
+        status_message: Some(app.status_message.clone()),
+        chat_open: app.chat_open,
+        chat_messages: app.chat_messages.clone(),
+        chat_input: app.chat_input.clone(),
+        chat_loading: app.chat_loading,
+        chat_scroll: app.chat_scroll,
+        create_modal_open: app.create_modal_open,
+        create_name: app.create_name.clone(),
+        create_description: app.create_description.clone(),
+        create_submitting: app.create_submitting,
+        create_error: app.create_error.clone(),
+        create_focus: app.create_focus,
+    }
+}
+
+fn apply_core_state_to_app(app: &mut App, core: CoreState) {
+    app.search_input = core.query;
+    app.focus = pane_to_focus(core.focus);
+    app.list_state.select(core.selected_index);
+    app.chat_open = core.chat_open;
+    app.chat_messages = core.chat_messages;
+    app.chat_input = core.chat_input;
+    app.chat_loading = core.chat_loading;
+    app.chat_scroll = core.chat_scroll;
+    app.create_modal_open = core.create_modal_open;
+    app.create_name = core.create_name;
+    app.create_description = core.create_description;
+    app.create_submitting = core.create_submitting;
+    app.create_error = core.create_error;
+    app.create_focus = core.create_focus;
+    if let Some(status_message) = core.status_message {
+        app.status_message = status_message;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    #[test]
+    fn ctrl_n_opens_create_modal() {
+        let app = App::default();
+        let intents = intents_for_key(&app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        assert!(matches!(intents.as_slice(), [UiIntent::OpenCreateModal]));
+    }
+
+    #[test]
+    fn create_submit_sets_example_status_and_closes_modal() {
+        let mut app = App::default();
+        app.create_modal_open = true;
+        let mut inspector_scroll = 0;
+
+        let result = try_apply_runtime_action(
+            &mut app,
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            &mut inspector_scroll,
+        );
+
+        assert!(result.consumed);
+        assert!(!app.create_modal_open);
+        assert_eq!(
+            app.status_message,
+            "Create action is not implemented in this example."
+        );
+        assert_eq!(
+            app.create_error.as_deref(),
+            Some("Create action is not implemented in this example.")
+        );
+    }
 }
 
 fn tab_id_refs(app: &App) -> Vec<&str> {

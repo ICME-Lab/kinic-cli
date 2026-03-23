@@ -464,11 +464,13 @@ impl DataProvider for KinicProvider {
                             });
                         }
                     };
-                    match self.runtime.block_on(crate::commands::create::create_memory(
-                        &factory,
-                        &name,
-                        &description,
-                    )) {
+                    match self
+                        .runtime
+                        .block_on(crate::commands::create::create_memory(
+                            &factory,
+                            &name,
+                            &description,
+                        )) {
                         Ok(created_id) => match self.reload_live_memories(Some(&created_id)) {
                             Ok(()) => {
                                 self.active_memory_id = Some(created_id.clone());
