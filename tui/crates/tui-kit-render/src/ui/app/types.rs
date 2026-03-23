@@ -118,7 +118,7 @@ impl Default for UiConfig {
                 name_label: "Name".to_string(),
                 description_label: "Description".to_string(),
                 submit_label: "Create".to_string(),
-                open_hint: "Press n to create a new memory".to_string(),
+                open_hint: "Press Ctrl-N to create a new memory".to_string(),
                 close_hint: "Tab: next field, Enter: submit, Esc: cancel".to_string(),
             },
             settings: SettingsOverlayText {

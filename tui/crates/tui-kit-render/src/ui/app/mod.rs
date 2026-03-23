@@ -9,9 +9,7 @@ mod status;
 mod types;
 
 pub use layout::{
-    list_viewport_height_for_area,
-    list_viewport_height_for_area_with_tabs,
-    tabs_rect_for_area,
+    list_viewport_height_for_area, list_viewport_height_for_area_with_tabs, tabs_rect_for_area,
     tabs_rect_for_area_with_tabs,
 };
 pub use types::{
@@ -26,11 +24,11 @@ use crate::ui::theme::Theme;
 use tui_kit_runtime::CreateModalFocus;
 
 use ratatui::{
-    Frame,
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     widgets::{block::BorderType, Block, Borders, Widget},
+    Frame,
 };
 
 /// Main tui-kit UI widget, data and builder; rendering is delegated to block modules.
@@ -508,7 +506,11 @@ impl<'a> TuiKitUi<'a> {
 impl Widget for TuiKitUi<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use layout::{HEADER_HEIGHT, STATUS_HEIGHT, TABS_HEIGHT};
-        let tabs_height = if self.tab_specs.is_empty() { 0 } else { TABS_HEIGHT };
+        let tabs_height = if self.tab_specs.is_empty() {
+            0
+        } else {
+            TABS_HEIGHT
+        };
 
         let outer = Block::default()
             .borders(Borders::ALL)

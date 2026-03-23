@@ -173,16 +173,13 @@ impl KinicProvider {
     }
 
     fn is_live(&self) -> bool {
-        self.config.identity.is_some()
+        matches!(self.config.auth, TuiAuth::KeyringIdentity(_))
     }
 
     fn current_records(&self) -> Vec<&KinicRecord> {
-        if self.is_live() && self.memories_mode == MemoriesMode::Browser {
-            return Vec::new();
-        }
-
         let base = if self.is_live() {
             match self.memories_mode {
+                MemoriesMode::Browser if self.memory_records.is_empty() => &self.all,
                 MemoriesMode::Browser => &self.memory_records,
                 MemoriesMode::Results => &self.result_records,
             }

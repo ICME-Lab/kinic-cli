@@ -37,10 +37,7 @@ pub fn config_file_path(app_namespace: &str, file_name: &str) -> Result<PathBuf,
     Ok(base.join(app_namespace).join(file_name))
 }
 
-pub fn load_yaml_or_default<T>(
-    app_namespace: &str,
-    file_name: &str,
-) -> Result<T, SettingsError>
+pub fn load_yaml_or_default<T>(app_namespace: &str, file_name: &str) -> Result<T, SettingsError>
 where
     T: Default + DeserializeOwned,
 {
@@ -65,4 +62,3 @@ where
     std::fs::write(path, content)?;
     Ok(())
 }
-

@@ -125,7 +125,10 @@ impl Widget for SearchBar<'_> {
         } else {
             (self.input, self.theme.style_normal())
         };
-        let line = Line::from(vec![prompt, Span::styled(input_text.to_string(), input_style)]);
+        let line = Line::from(vec![
+            prompt,
+            Span::styled(input_text.to_string(), input_style),
+        ]);
 
         let paragraph = Paragraph::new(line);
         paragraph.render(inner, buf);

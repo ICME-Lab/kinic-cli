@@ -12,7 +12,7 @@ pub mod theme;
 
 pub use animation::{AnimationState, Easing, SmoothScroll};
 pub use app::{
-    tabs_rect_for_area, BrandingText, ChatPanelText, Focus, HeaderText, TuiKitUi, TabId, TabSpec,
+    tabs_rect_for_area, BrandingText, ChatPanelText, Focus, HeaderText, TabId, TabSpec, TuiKitUi,
     UiConfig,
 };
 pub use context_view::ContextView;
