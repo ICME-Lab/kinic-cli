@@ -1,8 +1,9 @@
 use std::{future::Future, sync::mpsc, thread};
 
-use serde::Deserialize;
 use super::adapter;
-use super::app::{self, MemorySummary, SearchResultItem};
+use super::bridge::{self, MemorySummary, SearchResultItem};
+use crate::tui::TuiAuth;
+use serde::Deserialize;
 use tokio::runtime::{Handle, Runtime};
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, DataProvider, ProviderOutput, ProviderSnapshot,
@@ -10,7 +11,7 @@ use tui_kit_runtime::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TuiConfig {
-    pub identity: Option<String>,
+    pub auth: TuiAuth,
     pub use_mainnet: bool,
 }
 
@@ -115,13 +116,19 @@ impl KinicProvider {
     }
 
     fn initialize_live_memories(&mut self) {
-        let Some(identity) = self.config.identity.clone() else {
+        if !self.is_live() {
             return;
-        };
+        }
 
-        match self.runtime.block_on(app::list_memories(self.config.use_mainnet, identity)) {
+        match self.runtime.block_on(bridge::list_memories(
+            self.config.use_mainnet,
+            self.config.auth.clone(),
+        )) {
             Ok(memories) => {
-                self.memory_records = memories.into_iter().map(record_from_memory_summary).collect();
+                self.memory_records = memories
+                    .into_iter()
+                    .map(record_from_memory_summary)
+                    .collect();
                 self.all = self.memory_records.clone();
                 self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
             }
@@ -138,19 +145,25 @@ impl KinicProvider {
     }
 
     fn reload_live_memories(&mut self, prioritize_id: Option<&str>) -> Result<(), String> {
-        let Some(identity) = self.config.identity.clone() else {
+        if !self.is_live() {
             return Ok(());
-        };
+        }
         let memories = self
             .runtime
-            .block_on(app::list_memories(self.config.use_mainnet, identity))
+            .block_on(bridge::list_memories(
+                self.config.use_mainnet,
+                self.config.auth.clone(),
+            ))
             .map_err(|error| error.to_string())?;
-        self.memory_records = memories.into_iter().map(record_from_memory_summary).collect();
-        if let Some(id) = prioritize_id {
-            if let Some(index) = self.memory_records.iter().position(|r| r.id == id) {
-                let record = self.memory_records.remove(index);
-                self.memory_records.insert(0, record);
-            }
+        self.memory_records = memories
+            .into_iter()
+            .map(record_from_memory_summary)
+            .collect();
+        if let Some(id) = prioritize_id
+            && let Some(index) = self.memory_records.iter().position(|r| r.id == id)
+        {
+            let record = self.memory_records.remove(index);
+            self.memory_records.insert(0, record);
         }
         self.all = self.memory_records.clone();
         self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
@@ -194,16 +207,22 @@ impl KinicProvider {
 
     fn active_memory_record(&self) -> Option<&KinicRecord> {
         let active_id = self.active_memory_id.as_deref()?;
-        self.memory_records.iter().find(|record| record.id == active_id)
+        self.memory_records
+            .iter()
+            .find(|record| record.id == active_id)
     }
 
     fn active_memory_index(&self) -> Option<usize> {
         let active_id = self.active_memory_id.as_deref()?;
-        self.memory_records.iter().position(|record| record.id == active_id)
+        self.memory_records
+            .iter()
+            .position(|record| record.id == active_id)
     }
 
     fn move_active_memory(&mut self, delta: isize) {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser || self.memory_records.is_empty()
+        if !self.is_live()
+            || self.memories_mode != MemoriesMode::Browser
+            || self.memory_records.is_empty()
         {
             return;
         }
@@ -231,7 +250,9 @@ impl KinicProvider {
             .map(|r| adapter::to_summary(r))
             .collect::<Vec<_>>();
         let selected_detail = if self.is_live() && self.memories_mode == MemoriesMode::Browser {
-            self.active_memory_record().map(adapter::to_detail)
+            self.active_memory_record()
+                .or_else(|| filtered.first().copied())
+                .map(adapter::to_detail)
         } else {
             let sel = state.selected_index.unwrap_or(0);
             filtered.get(sel).map(|r| adapter::to_detail(r))
@@ -248,7 +269,10 @@ impl KinicProvider {
 
     fn status_message(&self, visible_count: usize) -> String {
         if !self.is_live() {
-            return format!("kinic(mock): {visible_count} filtered / {} total", self.all.len());
+            return format!(
+                "kinic(mock): {visible_count} filtered / {} total",
+                self.all.len()
+            );
         }
 
         match self.memories_mode {
@@ -256,9 +280,7 @@ impl KinicProvider {
                 Some(memory_id) => format!(
                     "kinic(live): target {memory_id} | j/k selects memory canister | Enter in search runs remote search"
                 ),
-                None => format!(
-                    "kinic(live): no memory selected | j/k selects memory canister"
-                ),
+                None => "kinic(live): no memory selected | j/k selects memory canister".to_string(),
             },
             MemoriesMode::Results => match self.active_memory_id.as_deref() {
                 Some(memory_id) => format!(
@@ -270,9 +292,10 @@ impl KinicProvider {
     }
 
     fn run_live_search(&mut self) -> Option<CoreEffect> {
-        let Some(identity) = self.config.identity.clone() else {
+        let auth = self.config.auth.clone();
+        if !matches!(auth, TuiAuth::KeyringIdentity(_)) {
             return None;
-        };
+        }
         if self.search_in_flight {
             return Some(CoreEffect::Notify(
                 "Search already running. Wait for the current request to finish.".to_string(),
@@ -300,7 +323,12 @@ impl KinicProvider {
         thread::spawn(move || {
             let runtime = Runtime::new().expect("failed to create tokio runtime for search");
             let result = runtime
-                .block_on(app::search_memory(use_mainnet, identity, memory_id.clone(), query))
+                .block_on(bridge::search_memory(
+                    use_mainnet,
+                    auth,
+                    memory_id.clone(),
+                    query,
+                ))
                 .map_err(|error| error.to_string());
             let _ = tx.send(SearchTaskOutput { memory_id, result });
         });
@@ -389,10 +417,10 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::SearchSubmit => {
-                if self.is_live() {
-                    if let Some(effect) = self.run_live_search() {
-                        effects.push(effect);
-                    }
+                if self.is_live()
+                    && let Some(effect) = self.run_live_search()
+                {
+                    effects.push(effect);
                 }
             }
             CoreAction::MoveNext => self.move_active_memory(1),
@@ -422,12 +450,27 @@ impl DataProvider for KinicProvider {
                         id: "create_modal_error".to_string(),
                         payload: Some("Name and description are required.".to_string()),
                     });
-                } else if let Some(identity) = self.config.identity.clone() {
-                    match self.runtime.block_on(app::create_memory(
+                } else if self.is_live() {
+                    let factory = match bridge::resolve_agent_factory(
                         self.config.use_mainnet,
-                        identity,
-                        name.clone(),
-                        description,
+                        &self.config.auth,
+                    ) {
+                        Ok(factory) => factory,
+                        Err(error) => {
+                            effects.push(CoreEffect::Custom {
+                                id: "create_modal_error".to_string(),
+                                payload: Some(error.to_string()),
+                            });
+                            return Ok(ProviderOutput {
+                                snapshot: Some(self.build_snapshot(state)),
+                                effects,
+                            });
+                        }
+                    };
+                    match self.runtime.block_on(crate::commands::create::create_memory(
+                        &factory,
+                        &name,
+                        &description,
                     )) {
                         Ok(created_id) => match self.reload_live_memories(Some(&created_id)) {
                             Ok(()) => {
@@ -529,8 +572,7 @@ fn record_from_search_result(index: usize, memory_id: &str, item: SearchResultIt
         format!("Score: {score} | Tag: {tag}"),
         format!(
             "## Search Hit\n\n- Memory: `{memory_id}`\n- Score: `{score}`\n- Tag: `{tag}`\n\n### Sentence\n{}\n\n### Raw Payload\n{}\n",
-            detail_body,
-            item.payload
+            detail_body, item.payload
         ),
     )
 }
@@ -863,4 +905,80 @@ Maintain keyboard-first behavior as baseline.
 "#,
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn live_config() -> TuiConfig {
+        TuiConfig {
+            auth: TuiAuth::KeyringIdentity("alice".to_string()),
+            use_mainnet: false,
+        }
+    }
+
+    #[test]
+    fn current_records_returns_live_browser_memories() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![KinicRecord::new(
+            "aaaaa-aa",
+            "Memory A",
+            "memories",
+            "Status: running",
+            "detail",
+        )];
+
+        let records = provider.current_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "aaaaa-aa");
+    }
+
+    #[test]
+    fn current_records_uses_error_row_when_live_load_failed() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.all = vec![KinicRecord::new(
+            "kinic-live-error",
+            "Unable to load memories",
+            "memories",
+            "Check your identity or network configuration.",
+            "## Live Load Error",
+        )];
+
+        let records = provider.current_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "kinic-live-error");
+    }
+
+    #[test]
+    fn build_snapshot_uses_error_row_for_detail_when_no_active_memory_exists() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.all = vec![KinicRecord::new(
+            "kinic-live-error",
+            "Unable to load memories",
+            "memories",
+            "Check your identity or network configuration.",
+            "## Live Load Error\n\nboom",
+        )];
+
+        let snapshot = provider.build_snapshot(&CoreState::default());
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(
+            snapshot
+                .selected_detail
+                .as_ref()
+                .map(|detail| detail.id.as_str()),
+            Some("kinic-live-error")
+        );
+    }
+
+    #[test]
+    fn create_submit_stays_mock_when_auth_is_mock() {
+        let provider = KinicProvider::new(TuiConfig {
+            auth: TuiAuth::Mock,
+            use_mainnet: false,
+        });
+
+        assert!(!provider.is_live());
+    }
 }

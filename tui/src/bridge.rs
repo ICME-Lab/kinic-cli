@@ -9,8 +9,8 @@ use crate::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
     },
-    commands::ask_ai::{AskAiResult, ask_ai_flow},
     embedding::fetch_embedding,
+    tui::TuiAuth,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,8 +26,15 @@ pub struct SearchResultItem {
     pub payload: String,
 }
 
-pub async fn list_memories(use_mainnet: bool, identity: String) -> Result<Vec<MemorySummary>> {
-    let factory = AgentFactory::new(use_mainnet, identity);
+pub(crate) fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<AgentFactory> {
+    match auth {
+        TuiAuth::Mock => anyhow::bail!("mock auth cannot be used for live TUI operations"),
+        TuiAuth::KeyringIdentity(identity) => Ok(AgentFactory::new(use_mainnet, identity.clone())),
+    }
+}
+
+pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<MemorySummary>> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
     let agent = factory.build().await?;
     let client = LauncherClient::new(agent);
     let states = client.list_memories().await?;
@@ -35,30 +42,15 @@ pub async fn list_memories(use_mainnet: bool, identity: String) -> Result<Vec<Me
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
-pub async fn create_memory(
-    use_mainnet: bool,
-    identity: String,
-    name: String,
-    description: String,
-) -> Result<String> {
-    let factory = AgentFactory::new(use_mainnet, identity);
-    let agent = factory.build().await?;
-    let client = LauncherClient::new(agent);
-    let price = client.fetch_deployment_price().await?;
-    client.approve_launcher(&price).await?;
-    client.deploy_memory(&name, &description).await
-}
-
 pub async fn search_memory(
     use_mainnet: bool,
-    identity: String,
+    auth: TuiAuth,
     memory_id: String,
     query: String,
 ) -> Result<Vec<SearchResultItem>> {
-    let factory = AgentFactory::new(use_mainnet, identity);
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
     let agent = factory.build().await?;
-    let memory =
-        Principal::from_text(memory_id).context("Failed to parse memory canister id")?;
+    let memory = Principal::from_text(memory_id).context("Failed to parse memory canister id")?;
     let client = MemoryClient::new(agent, memory);
     let embedding = fetch_embedding(&query).await?;
     let mut results = client.search(embedding).await?;
@@ -68,19 +60,6 @@ pub async fn search_memory(
         .into_iter()
         .map(|(score, payload)| SearchResultItem { score, payload })
         .collect())
-}
-
-pub async fn ask_ai(
-    use_mainnet: bool,
-    identity: String,
-    memory_id: String,
-    query: String,
-    top_k: usize,
-    language: &str,
-) -> Result<AskAiResult> {
-    let factory = AgentFactory::new(use_mainnet, identity);
-    let memory = Principal::from_text(memory_id).context("Failed to parse memory canister id")?;
-    ask_ai_flow(&factory, &memory, &query, top_k, language).await
 }
 
 fn memory_summary_from_state(state: State) -> MemorySummary {

@@ -1,5 +1,4 @@
 pub mod agent;
-pub mod app;
 #[path = "cli_defs.rs"]
 pub mod cli;
 pub(crate) mod clients;
@@ -7,10 +6,9 @@ mod commands;
 mod embedding;
 pub(crate) mod identity_store;
 mod ledger;
-mod tui_app;
-mod tui_config;
 #[cfg(feature = "python-bindings")]
 mod python;
+pub mod tui;
 
 use anyhow::Result;
 use clap::Parser;
@@ -47,7 +45,7 @@ pub async fn run() -> Result<()> {
     fmt().with_max_level(max).without_time().try_init().ok();
 
     if matches!(&cli.command, cli::Command::Tui(_)) {
-        return tui_app::run(&cli.global);
+        return tui::run(&cli.global);
     }
 
     if cli.global.ii
