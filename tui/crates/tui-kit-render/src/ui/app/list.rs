@@ -98,8 +98,7 @@ impl<'a> TuiKitUi<'a> {
                         self.theme.style_dim()
                     },
                 ));
-                ListItem::new(Line::from(spans))
-                .style(base_style)
+                ListItem::new(Line::from(spans)).style(base_style)
             })
             .collect();
 

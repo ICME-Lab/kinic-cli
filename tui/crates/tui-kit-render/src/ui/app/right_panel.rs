@@ -152,12 +152,7 @@ impl<'a> TuiKitUi<'a> {
         let input_area = chunks[1];
 
         let mut lines: Vec<Line<'_>> = Vec::new();
-        if self.chat_loading
-            && self
-                .chat_messages
-                .last()
-                .is_some_and(|(r, _)| r == "user")
-        {
+        if self.chat_loading && self.chat_messages.last().is_some_and(|(r, _)| r == "user") {
             lines.push(Line::from(Span::styled(
                 self.ui_config.chat.loading_hint.as_str(),
                 self.theme.style_muted(),

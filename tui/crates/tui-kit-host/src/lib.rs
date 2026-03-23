@@ -1,16 +1,16 @@
 //! Host-side helpers for integrating terminal input/output with `tui-kit-runtime`.
 
-pub mod settings;
 pub mod runtime_loop;
+pub mod settings;
 pub mod terminal;
 
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
+use std::time::Duration;
 use tui_kit_runtime::{
     action_for_key, CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, PaneFocus,
 };
-use std::time::Duration;
 
 /// Fallback tab ids used when host does not provide explicit tabs.
 pub const DEFAULT_TAB_IDS: [&str; 4] = ["tab-1", "tab-2", "tab-3", "tab-4"];
@@ -113,7 +113,11 @@ pub fn resolve_tab_action_with_current(
                 .and_then(|cur| resolved.iter().position(|id| *id == cur))
                 .unwrap_or(0);
             let len = resolved.len().max(1);
-            let prev = if current_idx == 0 { len - 1 } else { current_idx - 1 };
+            let prev = if current_idx == 0 {
+                len - 1
+            } else {
+                current_idx - 1
+            };
             resolved
                 .get(prev)
                 .map(|id| CoreAction::SetTab(CoreTabId::new(*id)))
@@ -236,38 +240,44 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 Err(e) => state.status_message = Some(format!("Failed to open URL: {url} ({e})")),
             },
             CoreEffect::RequestRefresh => {}
-            CoreEffect::Custom { id, payload } => {
-                match id.as_str() {
-                    "create_modal_close" => {
-                        state.create_modal_open = false;
-                        state.create_name.clear();
-                        state.create_description.clear();
-                        state.create_submitting = false;
-                        state.create_error = None;
-                    }
-                    "create_modal_error" => {
-                        state.create_submitting = false;
-                        state.create_error = payload.clone();
-                    }
-                    "select_first" => {
-                        state.selected_index = if state.list_items.is_empty() { None } else { Some(0) };
-                    }
-                    "focus_list" => {
-                        state.focus = PaneFocus::List;
-                    }
-                    "search_completed" => {
-                        state.status_message = payload.clone();
-                        state.selected_index = if state.list_items.is_empty() { None } else { Some(0) };
-                        state.focus = PaneFocus::List;
-                    }
-                    _ => {
-                        state.status_message = Some(match payload {
-                            Some(p) => format!("Custom effect: {id} ({p})"),
-                            None => format!("Custom effect: {id}"),
-                        });
-                    }
+            CoreEffect::Custom { id, payload } => match id.as_str() {
+                "create_modal_close" => {
+                    state.create_modal_open = false;
+                    state.create_name.clear();
+                    state.create_description.clear();
+                    state.create_submitting = false;
+                    state.create_error = None;
                 }
-            }
+                "create_modal_error" => {
+                    state.create_submitting = false;
+                    state.create_error = payload.clone();
+                }
+                "select_first" => {
+                    state.selected_index = if state.list_items.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    };
+                }
+                "focus_list" => {
+                    state.focus = PaneFocus::List;
+                }
+                "search_completed" => {
+                    state.status_message = payload.clone();
+                    state.selected_index = if state.list_items.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    };
+                    state.focus = PaneFocus::List;
+                }
+                _ => {
+                    state.status_message = Some(match payload {
+                        Some(p) => format!("Custom effect: {id} ({p})"),
+                        None => format!("Custom effect: {id}"),
+                    });
+                }
+            },
         }
     }
 }
@@ -305,8 +315,25 @@ mod tests {
                 false,
                 false,
                 false,
+                false,
             ),
             HostGlobalCommand::ClearQuery
+        );
+    }
+
+    #[test]
+    fn global_command_opens_create_modal_with_ctrl_n() {
+        assert_eq!(
+            global_command_for_key(
+                KeyCode::Char('n'),
+                KeyModifiers::CONTROL,
+                PaneFocus::List,
+                false,
+                false,
+                false,
+                true,
+            ),
+            HostGlobalCommand::OpenCreateModal
         );
     }
 
@@ -324,6 +351,7 @@ mod tests {
                 KeyCode::Char('q'),
                 KeyModifiers::NONE,
                 PaneFocus::List,
+                false,
                 false,
                 false,
                 true,
@@ -351,6 +379,7 @@ mod tests {
                 KeyCode::Char('t'),
                 KeyModifiers::NONE,
                 PaneFocus::List,
+                false,
                 false,
                 false,
                 true,

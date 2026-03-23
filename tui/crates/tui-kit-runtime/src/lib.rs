@@ -277,17 +277,15 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
             state.create_error = None;
         }
-        CoreAction::CreateBackspace => {
-            match state.create_focus {
-                CreateModalFocus::Name => {
-                    state.create_name.pop();
-                }
-                CreateModalFocus::Description => {
-                    state.create_description.pop();
-                }
-                CreateModalFocus::Submit => {}
+        CoreAction::CreateBackspace => match state.create_focus {
+            CreateModalFocus::Name => {
+                state.create_name.pop();
             }
-        }
+            CreateModalFocus::Description => {
+                state.create_description.pop();
+            }
+            CreateModalFocus::Submit => {}
+        },
         CoreAction::CreateNextField => {
             state.create_focus = match state.create_focus {
                 CreateModalFocus::Name => CreateModalFocus::Description,
@@ -502,12 +500,8 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus) -> Option<CoreAction> {
                 _ => None,
             },
             PaneFocus::Tabs => match key {
-                CoreKey::Up | CoreKey::Char('k') => {
-                    Some(CoreAction::SelectPrevTab)
-                }
-                CoreKey::Down | CoreKey::Char('j') => {
-                    Some(CoreAction::SelectNextTab)
-                }
+                CoreKey::Up | CoreKey::Char('k') => Some(CoreAction::SelectPrevTab),
+                CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::SelectNextTab),
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::FocusList),
                 CoreKey::Right | CoreKey::Char('l') | CoreKey::Enter => {
                     Some(CoreAction::FocusDetail)
