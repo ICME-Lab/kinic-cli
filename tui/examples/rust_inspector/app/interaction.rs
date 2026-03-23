@@ -302,9 +302,8 @@ pub fn try_apply_runtime_action(
             core.create_modal_open = false;
             core.create_submitting = false;
             core.create_error = Some("Create action is not implemented in this example.".into());
-            core.status_message = Some(
-                "Create action is not implemented in this example.".to_string(),
-            );
+            core.status_message =
+                Some("Create action is not implemented in this example.".to_string());
         }
         apply_core_state_to_app(app, core);
         return RuntimeApplyResult {

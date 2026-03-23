@@ -1,7 +1,7 @@
 //! Workspace facade crate for running the standalone Kinic TUI.
 
 use clap::Parser;
-use kinic_core::tui::{TuiLaunchConfig, build_launch_config};
+use kinic_core::tui::{build_launch_config, TuiLaunchConfig};
 
 pub use kinic_core::tui;
 pub use tui_kit_host as host;
@@ -41,7 +41,10 @@ mod tests {
         };
 
         let config = build_launch_config_from_args(&args).unwrap();
-        assert_eq!(config.auth, tui::TuiAuth::KeyringIdentity("alice".to_string()));
+        assert_eq!(
+            config.auth,
+            tui::TuiAuth::KeyringIdentity("alice".to_string())
+        );
         assert!(config.use_mainnet);
     }
 
