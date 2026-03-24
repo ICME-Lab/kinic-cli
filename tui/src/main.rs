@@ -1,6 +1,6 @@
 use clap::Parser;
 use kinic_core::tui::run_with_config;
-use tui_kit_lib::{TuiArgs, build_launch_config_from_args};
+use tui_kit_lib::{build_launch_config_from_args, TuiArgs};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = TuiArgs::parse();
