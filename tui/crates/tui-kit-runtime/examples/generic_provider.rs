@@ -1,7 +1,7 @@
 use tui_kit_model::{UiItemDetail, UiItemKind, UiItemSummary, UiSection, UiVisibility};
 use tui_kit_runtime::{
-    apply_snapshot, CoreAction, CoreResult, CoreState, DataProvider, ProviderOutput,
-    ProviderSnapshot,
+    CoreAction, CoreResult, CoreState, DataProvider, ProviderOutput, ProviderSnapshot,
+    apply_snapshot,
 };
 
 #[derive(Clone)]

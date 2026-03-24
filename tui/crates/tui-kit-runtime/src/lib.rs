@@ -3,6 +3,8 @@
 //! This crate defines generic actions/effects, shared runtime state, and the
 //! `DataProvider` trait so multiple domains can plug into the same UI shell.
 
+pub mod kinic_tabs;
+
 use tui_kit_model::{UiContextNode, UiItemDetail, UiItemSummary};
 
 /// Core result type used by provider and reducer contracts.
@@ -38,6 +40,7 @@ pub enum PaneFocus {
     List,
     Tabs,
     Detail,
+    Form,
     Extra,
 }
 
@@ -194,7 +197,25 @@ pub enum CoreEffect {
     OpenExternal(String),
     Notify(String),
     RequestRefresh,
-    Custom { id: String, payload: Option<String> },
+    /// Validation or async error for the create form (clears submitting state).
+    CreateFormError(Option<String>),
+    /// Select the first row in the list (no-op when empty).
+    SelectFirstListItem,
+    /// Move keyboard focus to a pane.
+    FocusPane(PaneFocus),
+    /// Search finished: set status line, select first row, focus list.
+    SearchCompleted {
+        message: String,
+    },
+    /// Clear create form fields and switch the active tab (e.g. after successful create).
+    ResetCreateFormAndSetTab {
+        tab_id: String,
+    },
+    /// Escape hatch for domain-specific integrations (examples, experiments).
+    Custom {
+        id: String,
+        payload: Option<String>,
+    },
 }
 
 /// Provider-owned snapshot sent to core/UI.
@@ -337,6 +358,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                         PaneFocus::Search
                     }
                 }
+                PaneFocus::Form => PaneFocus::Tabs,
                 PaneFocus::Extra => {
                     if has_tabs {
                         PaneFocus::Tabs
@@ -360,6 +382,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 }
                 PaneFocus::List => PaneFocus::Search,
                 PaneFocus::Detail => PaneFocus::List,
+                PaneFocus::Form => PaneFocus::Tabs,
                 PaneFocus::Extra => PaneFocus::Detail,
                 PaneFocus::Tabs => {
                     if state.chat_open {
@@ -386,7 +409,14 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             if state.chat_open {
                 state.focus = PaneFocus::Extra;
             } else if state.focus == PaneFocus::Extra {
-                state.focus = PaneFocus::Detail;
+                state.focus = if matches!(
+                    kinic_tabs::tab_kind(state.current_tab_id.as_str()),
+                    kinic_tabs::TabKind::Form
+                ) {
+                    PaneFocus::Form
+                } else {
+                    PaneFocus::Detail
+                };
             }
         }
         CoreAction::ChatInput(c) => {
@@ -517,6 +547,7 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus) -> Option<CoreAction> {
                 CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::MoveHome),
                 _ => None,
             },
+            PaneFocus::Form => None,
             PaneFocus::Extra => match key {
                 CoreKey::Backspace => Some(CoreAction::ChatBackspace),
                 CoreKey::Enter => Some(CoreAction::ChatSubmit),
@@ -644,5 +675,20 @@ mod tests {
         let mut state = CoreState::default();
         let effects = dispatch_action(&mut provider, &mut state, &CoreAction::FocusList).unwrap();
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn toggle_chat_returns_to_create_focus_on_create_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ToggleChat);
+        assert_eq!(state.focus, PaneFocus::Extra);
+
+        apply_core_action(&mut state, &CoreAction::ToggleChat);
+        assert_eq!(state.focus, PaneFocus::Form);
     }
 }
