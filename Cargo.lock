@@ -3531,6 +3531,7 @@ dependencies = [
  "ratatui",
  "tui-kit-model",
  "tui-kit-runtime",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

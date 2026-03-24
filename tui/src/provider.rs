@@ -6,7 +6,11 @@ use crate::tui::TuiAuth;
 use serde::Deserialize;
 use tokio::runtime::{Handle, Runtime};
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreResult, CoreState, DataProvider, ProviderOutput, ProviderSnapshot,
+    CoreAction, CoreEffect, CoreResult, CoreState, DataProvider, PaneFocus, ProviderOutput,
+    ProviderSnapshot,
+    kinic_tabs::{
+        KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +107,7 @@ impl KinicProvider {
         Self {
             all: sample_records(),
             query: String::new(),
-            tab_id: "kinic-memories".to_string(),
+            tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
             runtime: BlockingRuntime::new(),
             config,
             active_memory_id: None,
@@ -441,13 +445,12 @@ impl KinicProvider {
                     .map(|(index, item)| record_from_search_result(index, &output.memory_id, item))
                     .collect();
                 self.memories_mode = MemoriesMode::Results;
-                vec![CoreEffect::Custom {
-                    id: "search_completed".to_string(),
-                    payload: Some(format!(
+                vec![CoreEffect::SearchCompleted {
+                    message: format!(
                         "Loaded {} search results for {}",
                         self.result_records.len(),
                         output.memory_id
-                    )),
+                    ),
                 }]
             }
             Err(error) => vec![CoreEffect::Notify(format!("Search failed: {error}"))],
@@ -463,6 +466,27 @@ impl KinicProvider {
         if self.is_live() {
             self.memories_mode = MemoriesMode::Browser;
             self.result_records.clear();
+        }
+    }
+
+    fn set_tab(&mut self, tab_id: &str) -> Vec<CoreEffect> {
+        self.tab_id = tab_id.to_string();
+
+        match tab_id {
+            KINIC_MEMORIES_TAB_ID => {
+                self.reset_memories_browser();
+                vec![CoreEffect::Notify("Switched to memories.".to_string())]
+            }
+            KINIC_CREATE_TAB_ID => vec![CoreEffect::Notify("Create a new memory.".to_string())],
+            KINIC_MARKET_TAB_ID => {
+                vec![CoreEffect::Notify(
+                    "Market is not implemented yet.".to_string(),
+                )]
+            }
+            KINIC_SETTINGS_TAB_ID => vec![CoreEffect::Notify(
+                "Use Shift+S or the future settings tab flow.".to_string(),
+            )],
+            _ => vec![CoreEffect::Notify(format!("Switched kinic tab: {tab_id}"))],
         }
     }
 }
@@ -482,7 +506,7 @@ impl DataProvider for KinicProvider {
         match action {
             CoreAction::SetQuery(q) => {
                 self.query = q.clone();
-                if self.tab_id == "kinic-memories" && q.is_empty() {
+                if self.tab_id == KINIC_MEMORIES_TAB_ID && q.is_empty() {
                     self.reset_memories_browser();
                 }
                 self.sync_active_memory_to_visible_records();
@@ -517,8 +541,7 @@ impl DataProvider for KinicProvider {
             CoreAction::MovePageDown => self.move_active_memory(10),
             CoreAction::MovePageUp => self.move_active_memory(-10),
             CoreAction::SetTab(id) => {
-                self.tab_id = id.0.clone();
-                effects.push(CoreEffect::Notify(format!("Switched kinic tab: {}", id.0)));
+                effects.extend(self.set_tab(id.0.as_str()));
             }
             CoreAction::ChatSubmit => {
                 effects.push(CoreEffect::Notify(
@@ -529,10 +552,9 @@ impl DataProvider for KinicProvider {
                 let name = state.create_name.trim().to_string();
                 let description = state.create_description.trim().to_string();
                 if name.is_empty() || description.is_empty() {
-                    effects.push(CoreEffect::Custom {
-                        id: "create_modal_error".to_string(),
-                        payload: Some("Name and description are required.".to_string()),
-                    });
+                    effects.push(CoreEffect::CreateFormError(Some(
+                        "Name and description are required.".to_string(),
+                    )));
                 } else if self.is_live() {
                     match self.runtime.block_on(bridge::create_memory(
                         self.config.use_mainnet,
@@ -543,30 +565,22 @@ impl DataProvider for KinicProvider {
                         Ok(created_id) => match self.reload_live_memories(Some(&created_id)) {
                             Ok(()) => {
                                 self.active_memory_id = Some(created_id.clone());
-                                effects.push(CoreEffect::Custom {
-                                    id: "select_first".to_string(),
-                                    payload: None,
+                                effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
+                                effects.push(CoreEffect::SelectFirstListItem);
+                                effects.push(CoreEffect::ResetCreateFormAndSetTab {
+                                    tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
                                 });
-                                effects.push(CoreEffect::Custom {
-                                    id: "create_modal_close".to_string(),
-                                    payload: None,
-                                });
+                                effects.push(CoreEffect::FocusPane(PaneFocus::List));
                                 effects.push(CoreEffect::Notify(format!(
                                     "Created memory {created_id}"
                                 )));
                             }
                             Err(error) => {
-                                effects.push(CoreEffect::Custom {
-                                    id: "create_modal_error".to_string(),
-                                    payload: Some(error),
-                                });
+                                effects.push(CoreEffect::CreateFormError(Some(error)));
                             }
                         },
                         Err(error) => {
-                            effects.push(CoreEffect::Custom {
-                                id: "create_modal_error".to_string(),
-                                payload: Some(error.to_string()),
-                            });
+                            effects.push(CoreEffect::CreateFormError(Some(error.to_string())));
                         }
                     }
                 } else {
@@ -583,14 +597,12 @@ impl DataProvider for KinicProvider {
                     );
                     self.all.insert(0, record);
                     self.active_memory_id = Some(new_id.clone());
-                    effects.push(CoreEffect::Custom {
-                        id: "select_first".to_string(),
-                        payload: None,
+                    effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
+                    effects.push(CoreEffect::SelectFirstListItem);
+                    effects.push(CoreEffect::ResetCreateFormAndSetTab {
+                        tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
                     });
-                    effects.push(CoreEffect::Custom {
-                        id: "create_modal_close".to_string(),
-                        payload: None,
-                    });
+                    effects.push(CoreEffect::FocusPane(PaneFocus::List));
                     effects.push(CoreEffect::Notify(format!("Created mock memory {name}")));
                 }
             }
@@ -1067,6 +1079,101 @@ mod tests {
         });
 
         assert!(!provider.is_live());
+    }
+
+    #[test]
+    fn set_tab_create_requests_open_modal() {
+        let mut provider = KinicProvider::new(TuiConfig {
+            auth: TuiAuth::Mock,
+            use_mainnet: false,
+        });
+
+        let effects = provider.set_tab(KINIC_CREATE_TAB_ID);
+
+        assert_eq!(provider.tab_id, KINIC_CREATE_TAB_ID);
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Create a new memory."
+        )));
+    }
+
+    #[test]
+    fn set_tab_memories_keeps_existing_snapshot_shape() {
+        let mut provider = KinicProvider::new(TuiConfig {
+            auth: TuiAuth::Mock,
+            use_mainnet: false,
+        });
+        provider.query = "Unified".to_string();
+
+        let effects = provider.set_tab(KINIC_MEMORIES_TAB_ID);
+        let snapshot = provider.build_snapshot(&CoreState::default());
+
+        assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
+        assert!(!snapshot.items.is_empty());
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Switched to memories."
+        )));
+    }
+
+    #[test]
+    fn create_submit_returns_to_memories_in_mock_mode() {
+        let mut provider = KinicProvider::new(TuiConfig {
+            auth: TuiAuth::Mock,
+            use_mainnet: false,
+        });
+        provider.tab_id = KINIC_CREATE_TAB_ID.to_string();
+
+        let state = CoreState {
+            create_name: "New Memory".to_string(),
+            create_description: "Created from test".to_string(),
+            ..CoreState::default()
+        };
+
+        let output = provider
+            .handle_action(&CoreAction::CreateSubmit, &state)
+            .unwrap();
+
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::ResetCreateFormAndSetTab { tab_id }
+                if tab_id == KINIC_MEMORIES_TAB_ID
+        )));
+        assert!(
+            output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::List)))
+        );
+        assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
+    }
+
+    #[test]
+    fn clearing_query_after_create_resets_memories_browser() {
+        let mut provider = KinicProvider::new(TuiConfig {
+            auth: TuiAuth::Mock,
+            use_mainnet: false,
+        });
+        provider.tab_id = KINIC_CREATE_TAB_ID.to_string();
+        provider.query = "stale".to_string();
+        provider
+            .handle_action(
+                &CoreAction::CreateSubmit,
+                &CoreState {
+                    create_name: "New Memory".to_string(),
+                    create_description: "Created from test".to_string(),
+                    ..CoreState::default()
+                },
+            )
+            .unwrap();
+
+        let output = provider
+            .handle_action(&CoreAction::SetQuery(String::new()), &CoreState::default())
+            .unwrap();
+
+        assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
+        assert_eq!(provider.query, "");
+        assert_eq!(output.snapshot.unwrap().total_count, provider.all.len());
     }
 
     #[test]

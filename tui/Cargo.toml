@@ -11,8 +11,9 @@ members = [
 [package]
 name = "kinic-tui"
 version = "0.1.1"
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.85"
+autoexamples = false
 description = "Kinic terminal UI"
 license = "MIT"
 authors = ["yashksaini-coder <yashksaini89@gmail.com>"]

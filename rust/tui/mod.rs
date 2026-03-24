@@ -16,7 +16,7 @@ use tui_kit_host::{
     execute_effects_to_status,
     runtime_loop::{RuntimeLoopConfig, RuntimeLoopHooks, run_provider_app_with_hooks},
 };
-use tui_kit_runtime::{CoreState, PaneFocus, apply_snapshot};
+use tui_kit_runtime::{CoreState, PaneFocus, apply_snapshot, kinic_tabs};
 
 pub use provider::TuiConfig;
 
@@ -62,17 +62,17 @@ pub fn run_with_config(config: TuiLaunchConfig) -> Result<()> {
     });
     let mut hooks = KinicRuntimeHooks;
 
-    run_provider_app_with_hooks(
-        &mut provider,
-        RuntimeLoopConfig {
-            initial_tab_id: "",
-            tab_ids: &[],
-            initial_focus: PaneFocus::Search,
-            ui_config: ui_config::kinic_ui_config,
-        },
-        &mut hooks,
-    )
-    .map_err(|error| anyhow!(error.to_string()))
+    run_provider_app_with_hooks(&mut provider, kinic_runtime_loop_config(), &mut hooks)
+        .map_err(|error| anyhow!(error.to_string()))
+}
+
+fn kinic_runtime_loop_config() -> RuntimeLoopConfig {
+    RuntimeLoopConfig {
+        initial_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID,
+        tab_ids: &kinic_tabs::KINIC_TAB_IDS,
+        initial_focus: PaneFocus::Search,
+        ui_config: ui_config::kinic_ui_config,
+    }
 }
 
 struct KinicRuntimeHooks;
@@ -148,5 +148,13 @@ mod tests {
 
         assert_eq!(config.auth, TuiAuth::Mock);
         assert!(!config.use_mainnet);
+    }
+
+    #[test]
+    fn runtime_loop_config_uses_kinic_tabs() {
+        let config = kinic_runtime_loop_config();
+        assert_eq!(config.initial_tab_id, kinic_tabs::KINIC_MEMORIES_TAB_ID);
+        assert_eq!(config.tab_ids, &kinic_tabs::KINIC_TAB_IDS);
+        assert_eq!(config.initial_focus, PaneFocus::Search);
     }
 }

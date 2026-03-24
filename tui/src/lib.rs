@@ -1,7 +1,7 @@
 //! Workspace facade crate for running the standalone Kinic TUI.
 
 use clap::Parser;
-use kinic_core::tui::{build_launch_config, TuiLaunchConfig};
+use kinic_core::tui::{TuiLaunchConfig, build_launch_config};
 
 pub use kinic_core::tui;
 pub use tui_kit_host as host;
