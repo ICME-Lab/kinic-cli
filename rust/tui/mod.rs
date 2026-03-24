@@ -5,8 +5,6 @@ use crate::resolve_tui_identity;
 
 #[path = "../../tui/src/adapter.rs"]
 mod adapter;
-#[path = "../../tui/src/branding.rs"]
-mod branding;
 #[path = "../../tui/src/bridge.rs"]
 mod bridge;
 #[path = "../../tui/src/provider.rs"]
