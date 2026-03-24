@@ -9,7 +9,7 @@ Command-line companion for deploying and operating Kinic “memory” canisters.
 - Local Internet Computer replica (`dfx start`)
 - macOS keychain (the CLI reads PEMs via the `keyring` crate)
 
-> **Keychain note:** If you hit `-67671 (errSecInteractionNotAllowed)` when loading a PEM, switch to the arm64 build of `dfx`. See the [dfx 0.31 release](https://github.com/dfinity/sdk/releases/tag/0.31.0).
+> **Keychain note:** If you hit `-67671 (errSecInteractionNotAllowed)` when loading a PEM, switch to the arm64 build of `dfx`. See the [dfx 0.28 migration guide](https://github.com/dfinity/sdk/blob/0.28.0/docs/migration/dfx-0.28.0-migration-guide.md).
 
 ## Local test setup
 

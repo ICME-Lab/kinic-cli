@@ -69,7 +69,6 @@ pub struct CoreState {
     pub chat_input: String,
     pub chat_loading: bool,
     pub chat_scroll: usize,
-    pub create_modal_open: bool,
     pub create_name: String,
     pub create_description: String,
     pub create_submitting: bool,
@@ -94,7 +93,6 @@ impl Default for CoreState {
             chat_input: String::new(),
             chat_loading: false,
             chat_scroll: 0,
-            create_modal_open: false,
             create_name: String::new(),
             create_description: String::new(),
             create_submitting: false,
@@ -131,8 +129,6 @@ pub enum CoreAction {
     ToggleHelp,
     ToggleSettings,
     ToggleChat,
-    OpenCreateModal,
-    CloseCreateModal,
     CreateInput(char),
     CreateBackspace,
     CreateNextField,
@@ -276,20 +272,6 @@ pub trait DataProvider {
 pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     let has_tabs = !state.current_tab_id.is_empty();
     match action {
-        CoreAction::OpenCreateModal => {
-            state.create_modal_open = true;
-            state.create_name.clear();
-            state.create_description.clear();
-            state.create_submitting = false;
-            state.create_error = None;
-            state.create_focus = CreateModalFocus::Name;
-        }
-        CoreAction::CloseCreateModal => {
-            state.create_modal_open = false;
-            state.create_submitting = false;
-            state.create_error = None;
-            state.create_focus = CreateModalFocus::Name;
-        }
         CoreAction::CreateInput(c) => {
             match state.create_focus {
                 CreateModalFocus::Name => state.create_name.push(*c),

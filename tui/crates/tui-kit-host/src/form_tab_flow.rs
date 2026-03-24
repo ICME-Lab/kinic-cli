@@ -50,7 +50,6 @@ pub fn reset_create_focus(state: &mut CoreState) {
 
 /// Clear stale create-tab form state before opening a fresh create flow.
 pub fn reset_create_form_state(state: &mut CoreState) {
-    state.create_modal_open = false;
     state.create_name.clear();
     state.create_description.clear();
     state.create_submitting = false;

@@ -40,7 +40,6 @@ pub enum UiIntent {
     ToggleSettings,
     ToggleChat,
     OpenCreateModal,
-    CloseCreateModal,
     OpenGithub,
     OpenSponsor,
     EscapePressed,
@@ -124,7 +123,6 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
                 return vec![UiIntent::ToggleChat];
             }
         }
-        HostGlobalCommand::ToggleTheme => {}
         HostGlobalCommand::CloseChat => {
             if app.chat_open && !in_chat_panel && app.focus != Focus::Search {
                 return vec![UiIntent::ToggleChat];
@@ -295,7 +293,7 @@ pub fn try_apply_runtime_action(
         let mut core = core_state_from_app(app);
         apply_core_action(&mut core, &action);
         if matches!(action, CoreAction::CreateSubmit) {
-            core.create_modal_open = false;
+            app.create_modal_open = false;
             core.create_submitting = false;
             core.create_error = Some("Create action is not implemented in this example.".into());
             core.status_message =
@@ -467,14 +465,12 @@ pub fn apply_intent(
             }
         }
         UiIntent::OpenCreateModal => {
-            let mut core = core_state_from_app(app);
-            apply_core_action(&mut core, &CoreAction::OpenCreateModal);
-            apply_core_state_to_app(app, core);
-        }
-        UiIntent::CloseCreateModal => {
-            let mut core = core_state_from_app(app);
-            apply_core_action(&mut core, &CoreAction::CloseCreateModal);
-            apply_core_state_to_app(app, core);
+            app.create_modal_open = true;
+            app.create_name.clear();
+            app.create_description.clear();
+            app.create_submitting = false;
+            app.create_error = None;
+            app.create_focus = tui_kit_runtime::CreateModalFocus::Name;
         }
         UiIntent::EscapePressed => {
             if app.show_settings {
@@ -569,7 +565,6 @@ fn core_state_from_app(app: &App) -> CoreState {
         chat_input: app.chat_input.clone(),
         chat_loading: app.chat_loading,
         chat_scroll: app.chat_scroll,
-        create_modal_open: app.create_modal_open,
         create_name: app.create_name.clone(),
         create_description: app.create_description.clone(),
         create_submitting: app.create_submitting,
@@ -587,7 +582,6 @@ fn apply_core_state_to_app(app: &mut App, core: CoreState) {
     app.chat_input = core.chat_input;
     app.chat_loading = core.chat_loading;
     app.chat_scroll = core.chat_scroll;
-    app.create_modal_open = core.create_modal_open;
     app.create_name = core.create_name;
     app.create_description = core.create_description;
     app.create_submitting = core.create_submitting;
