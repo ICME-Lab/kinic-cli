@@ -16,13 +16,16 @@ pub async fn handle(args: ResetArgs, ctx: &CommandContext) -> Result<()> {
         dim = args.dim,
         "memory reset completed"
     );
-    println!("Reset memory canister {} to dim {}", args.memory_id, args.dim);
+    println!(
+        "Reset memory canister {} to dim {}",
+        args.memory_id, args.dim
+    );
     Ok(())
 }
 
 async fn build_memory_client(id: &str, ctx: &CommandContext) -> Result<MemoryClient> {
     let agent = ctx.agent_factory.build().await?;
-    let memory = Principal::from_text(id)
-        .context("Failed to parse canister id for reset command")?;
+    let memory =
+        Principal::from_text(id).context("Failed to parse canister id for reset command")?;
     Ok(MemoryClient::new(agent, memory))
 }

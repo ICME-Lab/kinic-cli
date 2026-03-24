@@ -51,8 +51,8 @@ impl MemoryClient {
             .await
             .context("Failed to call tagged_embeddings on memory canister")?;
 
-        let results =
-            Decode!(&response, Vec<Vec<f32>>).context("Failed to decode tagged_embeddings response")?;
+        let results = Decode!(&response, Vec<Vec<f32>>)
+            .context("Failed to decode tagged_embeddings response")?;
         Ok(results)
     }
 

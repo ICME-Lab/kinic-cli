@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use ic_agent::export::Principal;
 
 use crate::{
-    agent::AgentFactory,
+    build_keyring_agent_factory,
     clients::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
@@ -26,10 +26,12 @@ pub struct SearchResultItem {
     pub payload: String,
 }
 
-pub(crate) fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<AgentFactory> {
+fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<crate::agent::AgentFactory> {
     match auth {
         TuiAuth::Mock => anyhow::bail!("mock auth cannot be used for live TUI operations"),
-        TuiAuth::KeyringIdentity(identity) => Ok(AgentFactory::new(use_mainnet, identity.clone())),
+        TuiAuth::KeyringIdentity(identity) => {
+            Ok(build_keyring_agent_factory(use_mainnet, identity))
+        }
     }
 }
 

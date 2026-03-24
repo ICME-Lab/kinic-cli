@@ -10,8 +10,9 @@ mod ledger;
 mod python;
 pub mod tui;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Parser;
+use std::path::PathBuf;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::fmt;
 
@@ -28,8 +29,6 @@ use pyo3::{
     types::PyModule,
     wrap_pyfunction,
 };
-#[cfg(feature = "python-bindings")]
-use std::path::PathBuf;
 #[cfg(feature = "python-bindings")]
 use tokio::runtime::Runtime;
 
@@ -61,38 +60,14 @@ pub async fn run() -> Result<()> {
         }
     }
 
-    if !cli.global.ii
-        && cli.global.identity.is_none()
-        && !matches!(&cli.command, cli::Command::Login(_) | cli::Command::Tui(_))
-    {
-        anyhow::bail!("--identity is required unless --ii is set");
-    }
-
-    let needs_identity_path = matches!(&cli.command, cli::Command::Login(_)) || cli.global.ii;
-    let identity_path = if needs_identity_path {
-        Some(match cli.global.identity_path.clone() {
-            Some(path) => path,
-            None => identity_store::default_identity_path()?,
-        })
+    let (agent_factory, identity_path) = if matches!(&cli.command, cli::Command::Login(_)) {
+        let identity_path = Some(resolve_identity_path(&cli.global)?);
+        (
+            AgentFactory::new(cli.global.ic, String::new()),
+            identity_path,
+        )
     } else {
-        None
-    };
-
-    let agent_factory = if matches!(&cli.command, cli::Command::Login(_)) {
-        AgentFactory::new(cli.global.ic, String::new())
-    } else if cli.global.ii {
-        let path = identity_path
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("Identity path is missing"))?;
-        let delegated = identity_store::load_delegated_identity(&path)?;
-        AgentFactory::new_with_identity(cli.global.ic, delegated)
-    } else {
-        let identity_suffix = cli
-            .global
-            .identity
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("--identity is required unless --ii is set"))?;
-        AgentFactory::new(cli.global.ic, identity_suffix)
+        build_cli_command_context(&cli.global)?
     };
 
     let context = CommandContext {
@@ -101,6 +76,93 @@ pub async fn run() -> Result<()> {
     };
 
     run_command(cli.command, context).await
+}
+
+fn build_cli_command_context(global: &cli::GlobalOpts) -> Result<(AgentFactory, Option<PathBuf>)> {
+    if global.ii {
+        let identity_path = resolve_identity_path(global)?;
+        let delegated = identity_store::load_delegated_identity(&identity_path)?;
+        Ok((
+            AgentFactory::new_with_identity(global.ic, delegated),
+            Some(identity_path),
+        ))
+    } else {
+        let identity = resolve_required_identity(global)?;
+        Ok((build_keyring_agent_factory(global.ic, &identity), None))
+    }
+}
+
+pub(crate) fn build_keyring_agent_factory(use_mainnet: bool, identity: &str) -> AgentFactory {
+    AgentFactory::new(use_mainnet, identity.to_string())
+}
+
+pub(crate) fn resolve_tui_identity(global: &cli::GlobalOpts) -> Result<Option<String>> {
+    if global.ii {
+        return Err(anyhow!(
+            "Internet Identity is not supported for the Kinic TUI yet"
+        ));
+    }
+    Ok(global.identity.clone())
+}
+
+fn resolve_required_identity(global: &cli::GlobalOpts) -> Result<String> {
+    global
+        .identity
+        .clone()
+        .ok_or_else(|| anyhow!("--identity is required unless --ii is set"))
+}
+
+fn resolve_identity_path(global: &cli::GlobalOpts) -> Result<PathBuf> {
+    match global.identity_path.clone() {
+        Some(path) => Ok(path),
+        None => identity_store::default_identity_path(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn global_opts(
+        identity: Option<&str>,
+        ii: bool,
+        identity_path: Option<PathBuf>,
+    ) -> cli::GlobalOpts {
+        cli::GlobalOpts {
+            verbose: 0,
+            ic: false,
+            identity: identity.map(ToOwned::to_owned),
+            ii,
+            identity_path,
+        }
+    }
+
+    #[test]
+    fn resolve_tui_identity_returns_identity_when_present() {
+        let global = global_opts(Some("alice"), false, None);
+
+        let identity = resolve_tui_identity(&global).unwrap();
+
+        assert_eq!(identity.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn resolve_tui_identity_returns_none_without_identity() {
+        let global = global_opts(None, false, None);
+
+        let identity = resolve_tui_identity(&global).unwrap();
+
+        assert!(identity.is_none());
+    }
+
+    #[test]
+    fn resolve_identity_path_uses_default_location_when_not_provided() {
+        let global = global_opts(None, true, None);
+
+        let path = resolve_identity_path(&global).unwrap();
+
+        assert!(path.ends_with(PathBuf::from(".config/kinic/identity.json")));
+    }
 }
 
 #[cfg(feature = "python-bindings")]
@@ -327,12 +389,7 @@ fn update_instance(identity: &str, memory_id: &str, ic: Option<bool>) -> PyResul
 #[cfg(feature = "python-bindings")]
 #[pyfunction]
 #[pyo3(signature = (identity, memory_id, dim, ic=None))]
-fn reset_memory(
-    identity: &str,
-    memory_id: &str,
-    dim: usize,
-    ic: Option<bool>,
-) -> PyResult<()> {
+fn reset_memory(identity: &str, memory_id: &str, dim: usize, ic: Option<bool>) -> PyResult<()> {
     let ic = ic.unwrap_or(false);
     block_on_py(python::reset_memory(
         ic,

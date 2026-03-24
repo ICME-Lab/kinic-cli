@@ -1,11 +1,10 @@
 use anyhow::{Result, anyhow};
 
 use crate::cli::GlobalOpts;
+use crate::resolve_tui_identity;
 
 #[path = "../../tui/src/adapter.rs"]
 mod adapter;
-#[path = "../../tui/src/branding.rs"]
-mod branding;
 #[path = "../../tui/src/bridge.rs"]
 mod bridge;
 #[path = "../../tui/src/provider.rs"]
@@ -34,7 +33,7 @@ pub struct TuiLaunchConfig {
 }
 
 pub fn run(global: &GlobalOpts) -> Result<()> {
-    run_with_config(build_launch_config(global.identity.clone(), global.ic))
+    run_with_config(build_launch_config_from_global(global)?)
 }
 
 pub fn build_launch_config(identity: Option<String>, use_mainnet: bool) -> TuiLaunchConfig {
@@ -42,6 +41,18 @@ pub fn build_launch_config(identity: Option<String>, use_mainnet: bool) -> TuiLa
         auth: resolve_auth(identity),
         use_mainnet,
     }
+}
+
+pub fn build_launch_config_from_global(global: &GlobalOpts) -> Result<TuiLaunchConfig> {
+    let auth = match resolve_tui_identity(global)? {
+        Some(identity) => TuiAuth::KeyringIdentity(identity),
+        None => TuiAuth::Mock,
+    };
+
+    Ok(TuiLaunchConfig {
+        auth,
+        use_mainnet: global.ic,
+    })
 }
 
 pub fn run_with_config(config: TuiLaunchConfig) -> Result<()> {
@@ -105,5 +116,37 @@ mod tests {
         let config = build_launch_config(Some("alice".to_string()), true);
         assert_eq!(config.auth, TuiAuth::KeyringIdentity("alice".to_string()));
         assert!(config.use_mainnet);
+    }
+
+    #[test]
+    fn build_launch_config_from_global_uses_keyring_identity() {
+        let global = GlobalOpts {
+            verbose: 0,
+            ic: true,
+            identity: Some("alice".to_string()),
+            ii: false,
+            identity_path: None,
+        };
+
+        let config = build_launch_config_from_global(&global).unwrap();
+
+        assert_eq!(config.auth, TuiAuth::KeyringIdentity("alice".to_string()));
+        assert!(config.use_mainnet);
+    }
+
+    #[test]
+    fn build_launch_config_from_global_uses_mock_without_identity() {
+        let global = GlobalOpts {
+            verbose: 0,
+            ic: false,
+            identity: None,
+            ii: false,
+            identity_path: None,
+        };
+
+        let config = build_launch_config_from_global(&global).unwrap();
+
+        assert_eq!(config.auth, TuiAuth::Mock);
+        assert!(!config.use_mainnet);
     }
 }
