@@ -173,7 +173,7 @@ impl KinicProvider {
     }
 
     fn is_live(&self) -> bool {
-        self.config.identity.is_some()
+        matches!(self.config.auth, TuiAuth::KeyringIdentity(_))
     }
 
     fn current_records(&self) -> Vec<&KinicRecord> {
@@ -532,26 +532,11 @@ impl DataProvider for KinicProvider {
                         payload: Some("Name and description are required.".to_string()),
                     });
                 } else if self.is_live() {
-                    let factory = match bridge::resolve_agent_factory(
+                    match self.runtime.block_on(bridge::create_memory(
                         self.config.use_mainnet,
-                        &self.config.auth,
-                    ) {
-                        Ok(factory) => factory,
-                        Err(error) => {
-                            effects.push(CoreEffect::Custom {
-                                id: "create_modal_error".to_string(),
-                                payload: Some(error.to_string()),
-                            });
-                            return Ok(ProviderOutput {
-                                snapshot: Some(self.build_snapshot(state)),
-                                effects,
-                            });
-                        }
-                    };
-                    match self.runtime.block_on(crate::commands::create::create_memory(
-                        &factory,
-                        &name,
-                        &description,
+                        self.config.auth.clone(),
+                        name.clone(),
+                        description,
                     )) {
                         Ok(created_id) => match self.reload_live_memories(Some(&created_id)) {
                             Ok(()) => {

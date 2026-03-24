@@ -42,6 +42,20 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
+pub async fn create_memory(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    name: String,
+    description: String,
+) -> Result<String> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let client = LauncherClient::new(agent);
+    let price = client.fetch_deployment_price().await?;
+    client.approve_launcher(&price).await?;
+    client.deploy_memory(&name, &description).await
+}
+
 pub async fn search_memory(
     use_mainnet: bool,
     auth: TuiAuth,
