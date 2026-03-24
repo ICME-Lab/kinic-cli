@@ -139,7 +139,11 @@ pub struct InsertRawArgs {
     )]
     pub embedding: String,
 
-    #[arg(long, required = true, help = "Text payload to store with the embedding")]
+    #[arg(
+        long,
+        required = true,
+        help = "Text payload to store with the embedding"
+    )]
     pub text: String,
 
     #[arg(long, required = true, help = "Tag metadata stored alongside the text")]

@@ -177,8 +177,11 @@ impl KinicProvider {
     }
 
     fn current_records(&self) -> Vec<&KinicRecord> {
-        if self.is_live() && self.memories_mode == MemoriesMode::Browser {
-            return Vec::new();
+        if self.is_live()
+            && self.memories_mode == MemoriesMode::Browser
+            && self.memory_records.is_empty()
+        {
+            return self.all.iter().collect();
         }
 
         let base = if self.is_live() {
