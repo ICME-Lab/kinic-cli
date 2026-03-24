@@ -1,7 +1,7 @@
 //! Search bar and completion widgets
 
-use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,

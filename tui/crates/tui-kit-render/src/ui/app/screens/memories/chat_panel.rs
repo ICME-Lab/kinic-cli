@@ -1,23 +1,19 @@
-//! Right panel: vertical divider, inspector/context views and chat chat.
+//! Chat panel rendering and markdown decoration for the memories screen.
 
-use crate::ui::context_view::{self, ContextView};
-use crate::ui::inspector::InspectorPanel;
-use crate::ui::theme::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        block::BorderType, Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, StatefulWidget, Widget, Wrap,
+        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+        Widget, Wrap, block::BorderType,
     },
 };
 
-use super::types::Focus;
-use super::TuiKitUi;
+use crate::ui::app::{Focus, TuiKitUi};
+use crate::ui::theme::Theme;
 
-/// Parse a line of markdown into styled spans: **bold**, `code`, ## header.
 fn markdown_line_to_spans(line: &str, theme: &Theme, base_style: Style) -> Vec<Span<'static>> {
     let mut spans: Vec<Span> = Vec::new();
     let bold = base_style.add_modifier(Modifier::BOLD);
@@ -78,55 +74,6 @@ fn markdown_line_to_spans(line: &str, theme: &Theme, base_style: Style) -> Vec<S
 }
 
 impl<'a> TuiKitUi<'a> {
-    pub(super) fn render_vertical_divider(&self, area: Rect, buf: &mut Buffer) {
-        let style = self.theme.style_border();
-        let symbol = "│";
-        for y in area.top()..area.bottom() {
-            if area.width > 0 {
-                if let Some(cell) = buf.cell_mut((area.x, y)) {
-                    cell.set_symbol(symbol).set_style(style);
-                }
-            }
-        }
-    }
-
-    pub(super) fn render_inspector(&self, area: Rect, buf: &mut Buffer) {
-        if self.show_context_panel {
-            let selected_context_name = self
-                .list_selected
-                .and_then(|i| self.filtered_context_indices.get(i).copied())
-                .and_then(|tree_idx| self.context_tree.get(tree_idx))
-                .map(|(n, _)| n.as_str());
-
-            if self.context_details_loading && self.ui_context_node.is_none() {
-                if let Some(name) = selected_context_name {
-                    context_view::render_context_loading(self.theme, area, buf, name);
-                    return;
-                }
-            }
-            if self.context_details_failed && self.ui_context_node.is_none() {
-                if let Some(name) = selected_context_name {
-                    context_view::render_context_load_failed(self.theme, area, buf, name);
-                    return;
-                }
-            }
-
-            let context_view = ContextView::new(self.theme)
-                .ui_node(self.ui_context_node)
-                .focused(self.focus == Focus::Inspector)
-                .scroll(self.inspector_scroll)
-                .show_link_hints(true);
-            context_view.render(area, buf);
-            return;
-        }
-
-        let inspector = InspectorPanel::new(self.theme)
-            .ui_detail(self.ui_selected_detail)
-            .focused(self.focus == Focus::Inspector)
-            .scroll(self.inspector_scroll);
-        inspector.render(area, buf);
-    }
-
     pub(super) fn render_chat_panel(&self, area: Rect, buf: &mut Buffer) {
         if area.width < 4 || area.height < 4 {
             return;

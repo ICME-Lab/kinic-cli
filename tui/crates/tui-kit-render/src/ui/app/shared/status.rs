@@ -7,22 +7,77 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
+use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
 
-use super::types::Focus;
-use super::TuiKitUi;
+use crate::ui::app::{Focus, TuiKitUi};
 
 impl<'a> TuiKitUi<'a> {
-    pub(super) fn render_status(&self, area: Rect, buf: &mut Buffer) {
+    pub(crate) fn render_status(&self, area: Rect, buf: &mut Buffer) {
         let cfg = &self.ui_config.status;
+        let tab_id = self.current_tab_id.0.as_str();
         let focus_indicator = match self.focus {
             Focus::Search => ("🔍", "Search"),
             Focus::List => ("📋", "List"),
             Focus::Tabs => ("🗂", "Tabs"),
             Focus::Inspector => ("🔬", "Content"),
+            Focus::Form => ("✍", "Form"),
             Focus::Chat => ("💬", "Chat"),
         };
 
-        let status_line = if self.show_context_panel && self.in_context_items_view {
+        let status_line = if matches!(tab_kind(tab_id), TabKind::Form) {
+            let tab_label = self
+                .tab_specs
+                .iter()
+                .find(|tab| tab.id == self.current_tab_id)
+                .map(|tab| tab.title.as_str())
+                .unwrap_or("Form");
+            let mut spans = vec![
+                Span::styled(tab_label, self.theme.style_accent_bold()),
+                Span::styled(" │ ", self.theme.style_dim()),
+                Span::styled("Tab/Shift+Tab", self.theme.style_accent()),
+                Span::styled(" fields ", self.theme.style_muted()),
+                Span::styled("Enter", self.theme.style_accent()),
+                Span::styled(" enter/submit ", self.theme.style_muted()),
+                Span::styled("1-4", self.theme.style_accent()),
+                Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
+                Span::styled("│ ", self.theme.style_dim()),
+                Span::styled(focus_indicator.0, self.theme.style_accent()),
+                Span::styled(format!(" {}", focus_indicator.1), self.theme.style_dim()),
+            ];
+            if self.focus == Focus::Form {
+                spans.splice(
+                    6..6,
+                    [
+                        Span::styled("Esc", self.theme.style_accent()),
+                        Span::styled(" tabs ", self.theme.style_muted()),
+                    ],
+                );
+            }
+            Line::from(spans)
+        } else if matches!(
+            tab_kind(tab_id),
+            TabKind::PlaceholderMarket | TabKind::PlaceholderSettings
+        ) {
+            let mut spans = vec![
+                Span::styled("Tab", self.theme.style_accent()),
+                Span::styled(" switch ", self.theme.style_muted()),
+                Span::styled("1-4", self.theme.style_accent()),
+                Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
+                Span::styled("│ ", self.theme.style_dim()),
+                Span::styled(focus_indicator.0, self.theme.style_accent()),
+                Span::styled(format!(" {}", focus_indicator.1), self.theme.style_dim()),
+            ];
+            if self.focus == Focus::Inspector {
+                spans.splice(
+                    4..4,
+                    [
+                        Span::styled("Esc", self.theme.style_accent()),
+                        Span::styled(" tabs ", self.theme.style_muted()),
+                    ],
+                );
+            }
+            Line::from(spans)
+        } else if self.show_context_panel && self.in_context_items_view {
             let selection_info = if let Some(selected) = self.list_selected {
                 format!("[{}/{}]", selected + 1, self.ui_summaries.len())
             } else {
@@ -43,11 +98,6 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(" │ ", self.theme.style_muted()),
                 Span::styled(selection_info, self.theme.style_muted()),
                 Span::styled(" │ Tab ↑/↓ Enter / Esc back ", self.theme.style_muted()),
-                Span::styled("│ ", self.theme.style_dim()),
-                Span::styled(" [g] ", self.theme.style_accent()),
-                Span::styled(format!("{} ", cfg.github_label), self.theme.style_muted()),
-                Span::styled("[s] ", self.theme.style_accent()),
-                Span::styled(cfg.sponsor_label.clone(), self.theme.style_muted()),
             ])
         } else if self.show_context_panel {
             Line::from(vec![
@@ -60,10 +110,6 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(" open ", self.theme.style_muted()),
                 Span::styled("/", self.theme.style_accent()),
                 Span::styled(" search ", self.theme.style_muted()),
-                Span::styled("[o]", self.theme.style_accent()),
-                Span::styled(" primary ", self.theme.style_muted()),
-                Span::styled("[c]", self.theme.style_accent()),
-                Span::styled(" secondary ", self.theme.style_muted()),
                 Span::styled("│ ", self.theme.style_dim()),
                 Span::styled(
                     format!("◇ Context ({}) ", self.filtered_context_indices.len()),

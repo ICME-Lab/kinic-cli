@@ -134,16 +134,6 @@ impl<'a> TuiKitUi<'a> {
             )),
             Line::from(""),
             Line::from(Span::styled(
-                cfg.theme_label.clone(),
-                self.theme.style_dim(),
-            )),
-            Line::from(vec![
-                Span::raw("  Press "),
-                Span::styled(cfg.theme_action_key.clone(), self.theme.style_accent()),
-                Span::raw(" to cycle theme"),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
                 cfg.close_hint.clone(),
                 self.theme.style_muted(),
             )),

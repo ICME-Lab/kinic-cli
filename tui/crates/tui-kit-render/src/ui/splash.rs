@@ -2,12 +2,12 @@
 
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
-    Frame, Terminal,
 };
 use std::io;
 use std::time::{Duration, Instant};

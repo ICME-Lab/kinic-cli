@@ -2,13 +2,11 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-/// Layout constants for the main frame.
 pub const HEADER_HEIGHT: u16 = 6;
 pub const TABS_HEIGHT: u16 = 3;
 pub const STATUS_HEIGHT: u16 = 3;
 pub const BODY_MARGIN: u16 = 1;
 
-/// Returns the inner padded area after the outer rounded block.
 pub fn content_area(area: Rect, border: bool) -> Rect {
     let inner = if border {
         Rect {
@@ -24,12 +22,10 @@ pub fn content_area(area: Rect, border: bool) -> Rect {
         x: inner.x + BODY_MARGIN,
         y: inner.y + BODY_MARGIN,
         width: inner.width.saturating_sub(2 * BODY_MARGIN),
-        // Keep top breathing room, but let footer/status sit flush to the bottom.
         height: inner.height.saturating_sub(BODY_MARGIN),
     }
 }
 
-/// Returns the tabs bar Rect for a given full frame area (for mouse hit testing).
 pub fn tabs_rect_for_area(area: Rect) -> Option<Rect> {
     tabs_rect_for_area_with_tabs(area, true)
 }
@@ -51,7 +47,6 @@ pub fn tabs_rect_for_area_with_tabs(area: Rect, has_tabs: bool) -> Option<Rect> 
     Some(chunks[1])
 }
 
-/// Returns the list viewport height (content rows, excluding block borders) for a full frame area.
 pub fn list_viewport_height_for_area(area: Rect) -> usize {
     list_viewport_height_for_area_with_tabs(area, true)
 }
@@ -76,11 +71,9 @@ pub fn list_viewport_height_for_area_with_tabs(area: Rect, has_tabs: bool) -> us
             Constraint::Ratio(2, 3),
         ])
         .split(body);
-    let left_column = left_div_right[0];
     let left_split = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(6)])
-        .split(left_column);
-    let list_rect = left_split[1];
-    list_rect.height.saturating_sub(2) as usize
+        .split(left_div_right[0]);
+    left_split[1].height.saturating_sub(2) as usize
 }

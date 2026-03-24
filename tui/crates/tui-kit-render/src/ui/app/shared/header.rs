@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-use super::TuiKitUi;
+use crate::ui::app::TuiKitUi;
 
 fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
@@ -26,8 +26,7 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 impl<'a> TuiKitUi<'a> {
-    /// Renders the header: left = branding logo, right = live metrics.
-    pub(super) fn render_header(&self, area: Rect, buf: &mut Buffer) {
+    pub(crate) fn render_header(&self, area: Rect, buf: &mut Buffer) {
         let line1 = format!(
             "{} {} {}",
             self.ui_config.header.visible_icon,
@@ -88,9 +87,8 @@ impl<'a> TuiKitUi<'a> {
     }
 }
 
-fn resolve_logo_lines(branding: &super::types::BrandingText, max_height: u16) -> Vec<String> {
+fn resolve_logo_lines(branding: &crate::ui::app::BrandingText, max_height: u16) -> Vec<String> {
     let mut lines = branding.logo_lines.clone();
-
     if lines.is_empty() {
         lines.push("TUI".to_string());
     }
