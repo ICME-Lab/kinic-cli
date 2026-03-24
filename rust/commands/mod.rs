@@ -9,14 +9,14 @@ pub mod convert_pdf;
 pub mod create;
 pub mod ii_login;
 pub mod insert;
-pub mod insert_raw;
 pub mod insert_pdf;
+pub mod insert_raw;
 pub mod list;
+pub mod reset;
 pub mod search;
 pub mod search_raw;
 pub mod tagged_embeddings;
 pub mod update;
-pub mod reset;
 
 #[derive(Clone)]
 pub struct CommandContext {

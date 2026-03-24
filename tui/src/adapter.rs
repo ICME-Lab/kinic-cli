@@ -1,8 +1,6 @@
 use super::provider::KinicRecord;
 use serde_json::Value;
-use tui_kit_model::{
-    UiItemDetail, UiItemKind, UiItemSummary, UiRow, UiSection, UiVisibility,
-};
+use tui_kit_model::{UiItemDetail, UiItemKind, UiItemSummary, UiRow, UiSection, UiVisibility};
 
 pub fn to_summary(record: &KinicRecord) -> UiItemSummary {
     UiItemSummary {
@@ -48,7 +46,11 @@ fn generic_detail(record: &KinicRecord) -> UiItemDetail {
                     label: "Summary".to_string(),
                     value: record.summary.clone(),
                 }],
-                body_lines: record.content_md.lines().map(|line| line.to_string()).collect(),
+                body_lines: record
+                    .content_md
+                    .lines()
+                    .map(|line| line.to_string())
+                    .collect(),
             },
             metadata_section(record, &[]),
         ],
@@ -151,7 +153,10 @@ fn search_result_detail(record: &KinicRecord) -> UiItemDetail {
             UiSection {
                 heading: "Payload".to_string(),
                 rows: vec![],
-                body_lines: pretty_payload.lines().map(|line| line.to_string()).collect(),
+                body_lines: pretty_payload
+                    .lines()
+                    .map(|line| line.to_string())
+                    .collect(),
             },
             metadata_section(record, &[("Kind", "search hit".to_string())]),
         ],

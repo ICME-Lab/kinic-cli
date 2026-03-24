@@ -1,21 +1,21 @@
 //! Application state management
 
-use crate::app::Tab;
-use crate::config::Settings;
-use crate::error::Result;
-use crate::ui::theme::Theme;
-use crate::ui::{
-    filter_candidates, CandidateKind, CompletionCandidate, Focus, TabId, TabSpec, UiConfig,
-};
-use crate::ui::{UiContextNode, UiItemDetail, UiItemSummary};
-use crate::utils::dir_size;
 use crate::adapter::{
     crate_doc_to_node, crate_info_to_node, installed_crate_to_node, item_to_detail, item_to_summary,
 };
+use crate::app::Tab;
+use crate::config::Settings;
 use crate::domain_rust::analyzer::{
     AnalyzedItem, CrateInfo, CrateRegistry, DependencyAnalyzer, InstalledCrate, RustAnalyzer,
 };
 use crate::domain_rust::crates_io::CrateDocInfo;
+use crate::error::Result;
+use crate::ui::theme::Theme;
+use crate::ui::{
+    CandidateKind, CompletionCandidate, Focus, TabId, TabSpec, UiConfig, filter_candidates,
+};
+use crate::ui::{UiContextNode, UiItemDetail, UiItemSummary};
+use crate::utils::dir_size;
 
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
+use tui_kit_runtime::CreateModalFocus;
 
 /// Main application state
 pub struct App {
@@ -78,6 +79,12 @@ pub struct App {
     pub chat_input: String,
     pub chat_loading: bool,
     pub chat_scroll: usize,
+    pub create_modal_open: bool,
+    pub create_name: String,
+    pub create_description: String,
+    pub create_submitting: bool,
+    pub create_error: Option<String>,
+    pub create_focus: CreateModalFocus,
     /// Size of target/ directory in bytes (build artifacts), if computed.
     pub target_size_bytes: Option<u64>,
 
@@ -137,6 +144,12 @@ impl App {
             chat_input: String::new(),
             chat_loading: false,
             chat_scroll: 0,
+            create_modal_open: false,
+            create_name: String::new(),
+            create_description: String::new(),
+            create_submitting: false,
+            create_error: None,
+            create_focus: CreateModalFocus::Name,
             crate_docs_cache: HashMap::new(),
             crate_docs_loading: None,
             crate_docs_failed: HashSet::new(),
@@ -849,8 +862,7 @@ impl App {
             return;
         }
         self.chat_input.clear();
-        self.chat_messages
-            .push(("user".to_string(), input.clone()));
+        self.chat_messages.push(("user".to_string(), input.clone()));
 
         let context = if let Some(c) = self.build_chat_context() {
             c

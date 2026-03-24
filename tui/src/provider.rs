@@ -1,8 +1,9 @@
 use std::{future::Future, sync::mpsc, thread};
 
-use serde::Deserialize;
 use super::adapter;
-use super::app::{self, MemorySummary, SearchResultItem};
+use super::bridge::{self, MemorySummary, SearchResultItem};
+use crate::tui::TuiAuth;
+use serde::Deserialize;
 use tokio::runtime::{Handle, Runtime};
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, DataProvider, ProviderOutput, ProviderSnapshot,
@@ -10,7 +11,7 @@ use tui_kit_runtime::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TuiConfig {
-    pub identity: Option<String>,
+    pub auth: TuiAuth,
     pub use_mainnet: bool,
 }
 
@@ -115,13 +116,19 @@ impl KinicProvider {
     }
 
     fn initialize_live_memories(&mut self) {
-        let Some(identity) = self.config.identity.clone() else {
+        if !self.is_live() {
             return;
-        };
+        }
 
-        match self.runtime.block_on(app::list_memories(self.config.use_mainnet, identity)) {
+        match self.runtime.block_on(bridge::list_memories(
+            self.config.use_mainnet,
+            self.config.auth.clone(),
+        )) {
             Ok(memories) => {
-                self.memory_records = memories.into_iter().map(record_from_memory_summary).collect();
+                self.memory_records = memories
+                    .into_iter()
+                    .map(record_from_memory_summary)
+                    .collect();
                 self.all = self.memory_records.clone();
                 self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
             }
@@ -138,19 +145,25 @@ impl KinicProvider {
     }
 
     fn reload_live_memories(&mut self, prioritize_id: Option<&str>) -> Result<(), String> {
-        let Some(identity) = self.config.identity.clone() else {
+        if !self.is_live() {
             return Ok(());
-        };
+        }
         let memories = self
             .runtime
-            .block_on(app::list_memories(self.config.use_mainnet, identity))
+            .block_on(bridge::list_memories(
+                self.config.use_mainnet,
+                self.config.auth.clone(),
+            ))
             .map_err(|error| error.to_string())?;
-        self.memory_records = memories.into_iter().map(record_from_memory_summary).collect();
-        if let Some(id) = prioritize_id {
-            if let Some(index) = self.memory_records.iter().position(|r| r.id == id) {
-                let record = self.memory_records.remove(index);
-                self.memory_records.insert(0, record);
-            }
+        self.memory_records = memories
+            .into_iter()
+            .map(record_from_memory_summary)
+            .collect();
+        if let Some(id) = prioritize_id
+            && let Some(index) = self.memory_records.iter().position(|r| r.id == id)
+        {
+            let record = self.memory_records.remove(index);
+            self.memory_records.insert(0, record);
         }
         self.all = self.memory_records.clone();
         self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
@@ -160,12 +173,15 @@ impl KinicProvider {
     }
 
     fn is_live(&self) -> bool {
-        self.config.identity.is_some()
+        matches!(self.config.auth, TuiAuth::KeyringIdentity(_))
     }
 
     fn current_records(&self) -> Vec<&KinicRecord> {
-        if self.is_live() && self.memories_mode == MemoriesMode::Browser {
-            return Vec::new();
+        if self.is_live()
+            && self.memories_mode == MemoriesMode::Browser
+            && self.memory_records.is_empty()
+        {
+            return self.all.iter().collect();
         }
 
         let base = if self.is_live() {
@@ -192,33 +208,112 @@ impl KinicProvider {
             .collect()
     }
 
-    fn active_memory_record(&self) -> Option<&KinicRecord> {
-        let active_id = self.active_memory_id.as_deref()?;
-        self.memory_records.iter().find(|record| record.id == active_id)
+    fn visible_memory_records(&self) -> Vec<&KinicRecord> {
+        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+            return Vec::new();
+        }
+        if self.memory_records.is_empty() {
+            return Vec::new();
+        }
+        self.current_records()
     }
 
-    fn active_memory_index(&self) -> Option<usize> {
-        let active_id = self.active_memory_id.as_deref()?;
-        self.memory_records.iter().position(|record| record.id == active_id)
-    }
+    fn sync_active_memory_to_visible_records(&mut self) {
+        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+            return;
+        }
 
-    fn move_active_memory(&mut self, delta: isize) {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser || self.memory_records.is_empty()
+        if self.query.is_empty() {
+            if self.active_memory_id.is_none() {
+                self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
+            }
+            return;
+        }
+
+        let visible_ids = self
+            .visible_memory_records()
+            .into_iter()
+            .map(|record| record.id.clone())
+            .collect::<Vec<_>>();
+
+        if visible_ids.is_empty() {
+            self.active_memory_id = None;
+            return;
+        }
+
+        if self
+            .active_memory_id
+            .as_ref()
+            .is_some_and(|active_id| visible_ids.iter().any(|id| id == active_id))
         {
             return;
         }
 
-        let current = self.active_memory_index().unwrap_or(0) as isize;
-        let last = self.memory_records.len().saturating_sub(1) as isize;
+        self.active_memory_id = visible_ids.first().cloned();
+    }
+
+    fn live_search_target_id(&self) -> Option<String> {
+        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+            return self.active_memory_id.clone();
+        }
+
+        if self.query.is_empty() {
+            return self.active_memory_id.clone();
+        }
+
+        let visible_records = self.visible_memory_records();
+        if visible_records.is_empty() {
+            return None;
+        }
+
+        if let Some(active_id) = self.active_memory_id.as_ref()
+            && visible_records.iter().any(|record| &record.id == active_id)
+        {
+            return Some(active_id.clone());
+        }
+
+        visible_records.first().map(|record| record.id.clone())
+    }
+
+    fn active_visible_memory_record(&self) -> Option<&KinicRecord> {
+        let active_id = self.active_memory_id.as_deref()?;
+        self.visible_memory_records()
+            .into_iter()
+            .find(|record| record.id == active_id)
+    }
+
+    fn active_visible_memory_index(&self) -> Option<usize> {
+        let active_id = self.active_memory_id.as_deref()?;
+        self.visible_memory_records()
+            .into_iter()
+            .position(|record| record.id == active_id)
+    }
+
+    fn visible_memory_count(&self) -> usize {
+        self.visible_memory_records().len()
+    }
+
+    fn move_active_memory(&mut self, delta: isize) {
+        if !self.is_live()
+            || self.memories_mode != MemoriesMode::Browser
+            || self.visible_memory_count() == 0
+        {
+            return;
+        }
+
+        let visible_records = self.visible_memory_records();
+        let current = self.active_visible_memory_index().unwrap_or(0) as isize;
+        let last = visible_records.len().saturating_sub(1) as isize;
         let next = (current + delta).clamp(0, last) as usize;
-        self.active_memory_id = Some(self.memory_records[next].id.clone());
+        self.active_memory_id = Some(visible_records[next].id.clone());
     }
 
     fn set_active_memory(&mut self, index: usize) {
         if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
             return;
         }
-        let Some(record) = self.memory_records.get(index) else {
+        let visible_records = self.visible_memory_records();
+        let Some(record) = visible_records.get(index) else {
             return;
         };
         self.active_memory_id = Some(record.id.clone());
@@ -231,7 +326,11 @@ impl KinicProvider {
             .map(|r| adapter::to_summary(r))
             .collect::<Vec<_>>();
         let selected_detail = if self.is_live() && self.memories_mode == MemoriesMode::Browser {
-            self.active_memory_record().map(adapter::to_detail)
+            if self.memory_records.is_empty() {
+                filtered.first().copied().map(adapter::to_detail)
+            } else {
+                self.active_visible_memory_record().map(adapter::to_detail)
+            }
         } else {
             let sel = state.selected_index.unwrap_or(0);
             filtered.get(sel).map(|r| adapter::to_detail(r))
@@ -248,7 +347,10 @@ impl KinicProvider {
 
     fn status_message(&self, visible_count: usize) -> String {
         if !self.is_live() {
-            return format!("kinic(mock): {visible_count} filtered / {} total", self.all.len());
+            return format!(
+                "kinic(mock): {visible_count} filtered / {} total",
+                self.all.len()
+            );
         }
 
         match self.memories_mode {
@@ -256,9 +358,7 @@ impl KinicProvider {
                 Some(memory_id) => format!(
                     "kinic(live): target {memory_id} | j/k selects memory canister | Enter in search runs remote search"
                 ),
-                None => format!(
-                    "kinic(live): no memory selected | j/k selects memory canister"
-                ),
+                None => "kinic(live): no memory selected | j/k selects memory canister".to_string(),
             },
             MemoriesMode::Results => match self.active_memory_id.as_deref() {
                 Some(memory_id) => format!(
@@ -270,15 +370,16 @@ impl KinicProvider {
     }
 
     fn run_live_search(&mut self) -> Option<CoreEffect> {
-        let Some(identity) = self.config.identity.clone() else {
+        let auth = self.config.auth.clone();
+        if !matches!(auth, TuiAuth::KeyringIdentity(_)) {
             return None;
-        };
+        }
         if self.search_in_flight {
             return Some(CoreEffect::Notify(
                 "Search already running. Wait for the current request to finish.".to_string(),
             ));
         }
-        let Some(memory_id) = self.active_memory_id.clone() else {
+        let Some(memory_id) = self.live_search_target_id() else {
             return Some(CoreEffect::Notify(
                 "Select a memory in the list before running search.".to_string(),
             ));
@@ -300,7 +401,12 @@ impl KinicProvider {
         thread::spawn(move || {
             let runtime = Runtime::new().expect("failed to create tokio runtime for search");
             let result = runtime
-                .block_on(app::search_memory(use_mainnet, identity, memory_id.clone(), query))
+                .block_on(bridge::search_memory(
+                    use_mainnet,
+                    auth,
+                    memory_id.clone(),
+                    query,
+                ))
                 .map_err(|error| error.to_string());
             let _ = tx.send(SearchTaskOutput { memory_id, result });
         });
@@ -380,27 +486,33 @@ impl DataProvider for KinicProvider {
                 if self.tab_id == "kinic-memories" && q.is_empty() {
                     self.reset_memories_browser();
                 }
+                self.sync_active_memory_to_visible_records();
             }
-            CoreAction::SearchInput(c) => self.query.push(*c),
+            CoreAction::SearchInput(c) => {
+                self.query.push(*c);
+                self.sync_active_memory_to_visible_records();
+            }
             CoreAction::SearchBackspace => {
                 self.query.pop();
                 if self.query.is_empty() {
                     self.reset_memories_browser();
                 }
+                self.sync_active_memory_to_visible_records();
             }
             CoreAction::SearchSubmit => {
-                if self.is_live() {
-                    if let Some(effect) = self.run_live_search() {
-                        effects.push(effect);
-                    }
+                if self.is_live()
+                    && let Some(effect) = self.run_live_search()
+                {
+                    effects.push(effect);
                 }
             }
             CoreAction::MoveNext => self.move_active_memory(1),
             CoreAction::MovePrev => self.move_active_memory(-1),
             CoreAction::MoveHome => self.set_active_memory(0),
             CoreAction::MoveEnd => {
-                if !self.memory_records.is_empty() {
-                    self.set_active_memory(self.memory_records.len() - 1);
+                let visible_count = self.visible_memory_count();
+                if visible_count != 0 {
+                    self.set_active_memory(visible_count - 1);
                 }
             }
             CoreAction::MovePageDown => self.move_active_memory(10),
@@ -422,10 +534,10 @@ impl DataProvider for KinicProvider {
                         id: "create_modal_error".to_string(),
                         payload: Some("Name and description are required.".to_string()),
                     });
-                } else if let Some(identity) = self.config.identity.clone() {
-                    match self.runtime.block_on(app::create_memory(
+                } else if self.is_live() {
+                    match self.runtime.block_on(bridge::create_memory(
                         self.config.use_mainnet,
-                        identity,
+                        self.config.auth.clone(),
                         name.clone(),
                         description,
                     )) {
@@ -529,8 +641,7 @@ fn record_from_search_result(index: usize, memory_id: &str, item: SearchResultIt
         format!("Score: {score} | Tag: {tag}"),
         format!(
             "## Search Hit\n\n- Memory: `{memory_id}`\n- Score: `{score}`\n- Tag: `{tag}`\n\n### Sentence\n{}\n\n### Raw Payload\n{}\n",
-            detail_body,
-            item.payload
+            detail_body, item.payload
         ),
     )
 }
@@ -863,4 +974,260 @@ Maintain keyboard-first behavior as baseline.
 "#,
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn live_config() -> TuiConfig {
+        TuiConfig {
+            auth: TuiAuth::KeyringIdentity("alice".to_string()),
+            use_mainnet: false,
+        }
+    }
+
+    fn live_memory(id: &str, title: &str) -> KinicRecord {
+        KinicRecord::new(
+            id,
+            title,
+            "memories",
+            "Status: running",
+            format!("detail for {id}"),
+        )
+    }
+
+    #[test]
+    fn current_records_returns_live_browser_memories() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Memory A")];
+
+        let records = provider.current_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "aaaaa-aa");
+    }
+
+    #[test]
+    fn current_records_uses_error_row_when_live_load_failed() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.all = vec![KinicRecord::new(
+            "kinic-live-error",
+            "Unable to load memories",
+            "memories",
+            "Check your identity or network configuration.",
+            "## Live Load Error",
+        )];
+
+        let records = provider.current_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "kinic-live-error");
+    }
+
+    #[test]
+    fn build_snapshot_uses_error_row_for_detail_when_no_active_memory_exists() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.all = vec![KinicRecord::new(
+            "kinic-live-error",
+            "Unable to load memories",
+            "memories",
+            "Check your identity or network configuration.",
+            "## Live Load Error\n\nboom",
+        )];
+
+        let snapshot = provider.build_snapshot(&CoreState::default());
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(
+            snapshot
+                .selected_detail
+                .as_ref()
+                .map(|detail| detail.id.as_str()),
+            Some("kinic-live-error")
+        );
+    }
+
+    #[test]
+    fn live_search_target_is_none_when_live_load_failed() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.all = vec![KinicRecord::new(
+            "kinic-live-error",
+            "Unable to load memories",
+            "memories",
+            "Check your identity or network configuration.",
+            "## Live Load Error\n\nboom",
+        )];
+        provider.query = "alpha".to_string();
+
+        assert_eq!(provider.live_search_target_id(), None);
+    }
+
+    #[test]
+    fn create_submit_stays_mock_when_auth_is_mock() {
+        let provider = KinicProvider::new(TuiConfig {
+            auth: TuiAuth::Mock,
+            use_mainnet: false,
+        });
+
+        assert!(!provider.is_live());
+    }
+
+    #[test]
+    fn sync_active_memory_switches_to_first_visible_match() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "beta".to_string();
+
+        provider.sync_active_memory_to_visible_records();
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    }
+
+    #[test]
+    fn sync_active_memory_keeps_visible_selection() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "alpha".to_string();
+
+        provider.sync_active_memory_to_visible_records();
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+    }
+
+    #[test]
+    fn sync_active_memory_clears_selection_when_filter_hides_all_memories() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "gamma".to_string();
+
+        provider.sync_active_memory_to_visible_records();
+
+        assert_eq!(provider.active_memory_id, None);
+        let snapshot = provider.build_snapshot(&CoreState::default());
+        assert!(snapshot.selected_detail.is_none());
+        assert!(snapshot.items.is_empty());
+    }
+
+    #[test]
+    fn sync_active_memory_restores_first_memory_when_query_clears() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "gamma".to_string();
+
+        provider.sync_active_memory_to_visible_records();
+        assert_eq!(provider.active_memory_id, None);
+
+        provider.query.clear();
+        provider.sync_active_memory_to_visible_records();
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+        assert_eq!(
+            provider
+                .build_snapshot(&CoreState::default())
+                .selected_detail
+                .as_ref()
+                .map(|detail| detail.id.as_str()),
+            Some("aaaaa-aa")
+        );
+        assert_eq!(
+            provider.live_search_target_id().as_deref(),
+            Some("aaaaa-aa")
+        );
+    }
+
+    #[test]
+    fn live_search_target_matches_visible_memory_after_filtering() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "beta".to_string();
+
+        provider.sync_active_memory_to_visible_records();
+
+        assert_eq!(
+            provider.live_search_target_id().as_deref(),
+            Some("bbbbb-bb")
+        );
+    }
+
+    #[test]
+    fn move_next_stays_within_visible_filtered_memories() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+            live_memory("ccccc-cc", "Bravo Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "b".to_string();
+
+        let output = provider
+            .handle_action(&CoreAction::MoveNext, &CoreState::default())
+            .expect("move next should succeed");
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("ccccc-cc"));
+        assert_eq!(
+            output
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.selected_detail.as_ref())
+                .map(|detail| detail.id.as_str()),
+            Some("ccccc-cc")
+        );
+        assert_eq!(
+            provider.live_search_target_id().as_deref(),
+            Some("ccccc-cc")
+        );
+    }
+
+    #[test]
+    fn move_home_and_end_use_visible_filtered_memories() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+            live_memory("ccccc-cc", "Bravo Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.query = "b".to_string();
+        provider.active_memory_id = Some("ccccc-cc".to_string());
+
+        provider
+            .handle_action(&CoreAction::MoveHome, &CoreState::default())
+            .expect("move home should succeed");
+        assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+
+        let output = provider
+            .handle_action(&CoreAction::MoveEnd, &CoreState::default())
+            .expect("move end should succeed");
+        assert_eq!(provider.active_memory_id.as_deref(), Some("ccccc-cc"));
+        assert_eq!(
+            output
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.selected_detail.as_ref())
+                .map(|detail| detail.id.as_str()),
+            Some("ccccc-cc")
+        );
+    }
 }

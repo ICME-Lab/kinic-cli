@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
-use tui_kit_host::settings::{load_yaml_or_default, save_yaml, SettingsError};
+use tui_kit_host::settings::{SettingsError, load_yaml_or_default, save_yaml};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -78,7 +78,9 @@ impl Settings {
 
 fn map_settings_error(err: SettingsError) -> crate::error::OracleError {
     match err {
-        SettingsError::NoConfigDir => crate::error::OracleError::Config("No config directory".into()),
+        SettingsError::NoConfigDir => {
+            crate::error::OracleError::Config("No config directory".into())
+        }
         SettingsError::Io(e) => crate::error::OracleError::Io(e),
         SettingsError::Yaml(e) => crate::error::OracleError::Yaml(e),
     }

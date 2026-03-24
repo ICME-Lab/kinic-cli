@@ -2,11 +2,7 @@ use anyhow::{Result, bail};
 use candid::Nat;
 use tracing::info;
 
-use crate::{
-    cli::CreateArgs,
-    clients::launcher::LauncherClient,
-    ledger::fetch_balance,
-};
+use crate::{cli::CreateArgs, clients::launcher::LauncherClient, ledger::fetch_balance};
 
 use super::CommandContext;
 

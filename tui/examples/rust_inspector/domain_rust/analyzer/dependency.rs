@@ -226,7 +226,7 @@ mod tests {
         }
         let analyzer = DependencyAnalyzer::from_manifest(&manifest).unwrap();
         let root = analyzer.root_package().expect("root package");
-        assert_eq!(root.name, "oracle-domain-rust");
+        assert_eq!(root.name, "kinic-tui");
         let tree = analyzer.dependency_tree(&root.name);
         assert!(!tree.is_empty());
         assert_eq!(tree[0].0, root.name);
@@ -243,8 +243,9 @@ mod tests {
         let root = analyzer.root_package().unwrap();
         let deps = analyzer.direct_dependencies(&root.name);
         // Oracle has at least ratatui, crossterm, etc.
-        assert!(deps
-            .iter()
-            .any(|d| d.name == "ratatui" || d.name == "crossterm"));
+        assert!(
+            deps.iter()
+                .any(|d| d.name == "ratatui" || d.name == "crossterm")
+        );
     }
 }
