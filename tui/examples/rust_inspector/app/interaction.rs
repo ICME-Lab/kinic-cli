@@ -18,9 +18,9 @@ use crate::app::{App, Tab};
 use crate::ui::{AnimationState, Focus, TabId};
 use crossterm::event::{KeyCode, KeyModifiers};
 use tui_kit_host::{
-    HostGlobalCommand, action_from_keycode, global_command_for_key, resolve_tab_action_with_current,
+    action_from_keycode, global_command_for_key, resolve_tab_action_with_current, HostGlobalCommand,
 };
-use tui_kit_runtime::{CoreAction, CoreState, CoreTabId, PaneFocus, apply_core_action};
+use tui_kit_runtime::{apply_core_action, CoreAction, CoreState, CoreTabId, PaneFocus};
 
 /// Side effects triggered by reducer (executed by outer runtime).
 #[derive(Debug, Clone)]
@@ -37,7 +37,6 @@ pub enum UiEffect {
 pub enum UiIntent {
     Quit,
     ToggleHelp,
-    CycleTheme,
     ToggleSettings,
     ToggleChat,
     OpenCreateModal,
@@ -104,9 +103,9 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
         code,
         modifiers,
         focus_to_pane(app.focus),
+        app.current_tab.id().0.as_str(),
         app.show_help,
         app.show_settings,
-        app.create_modal_open,
         app.search_input.is_empty(),
     ) {
         HostGlobalCommand::None => {}
@@ -120,19 +119,24 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
                 return vec![UiIntent::ToggleSettings];
             }
         }
-        HostGlobalCommand::ToggleTheme => {
-            if !in_chat_panel && app.focus != Focus::Search {
-                return vec![UiIntent::CycleTheme];
-            }
-        }
         HostGlobalCommand::ToggleChat => {
             if !in_chat_panel && app.focus != Focus::Search {
                 return vec![UiIntent::ToggleChat];
             }
         }
-        HostGlobalCommand::CloseCreateModal => return vec![UiIntent::CloseCreateModal],
-        HostGlobalCommand::OpenCreateModal => return vec![UiIntent::OpenCreateModal],
-        HostGlobalCommand::BackFromDetail | HostGlobalCommand::ClearQuery => {
+        HostGlobalCommand::ToggleTheme => {}
+        HostGlobalCommand::CloseChat => {
+            if app.chat_open && !in_chat_panel && app.focus != Focus::Search {
+                return vec![UiIntent::ToggleChat];
+            }
+        }
+        HostGlobalCommand::BackFromFormToTabs => {
+            return vec![UiIntent::EscapePressed];
+        }
+        HostGlobalCommand::OpenCreateTab => return vec![UiIntent::OpenCreateModal],
+        HostGlobalCommand::BackToMemoriesTab
+        | HostGlobalCommand::BackFromDetail
+        | HostGlobalCommand::ClearQuery => {
             return vec![UiIntent::EscapePressed];
         }
         HostGlobalCommand::Quit => {
@@ -144,11 +148,6 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
 
     // App-specific globals not part of shared host command helper.
     match code {
-        KeyCode::Char('t')
-            if modifiers.is_empty() && !in_chat_panel && app.focus != Focus::Search =>
-        {
-            return vec![UiIntent::CycleTheme];
-        }
         KeyCode::Char('g')
             if modifiers.is_empty() && !in_chat_panel && app.focus != Focus::Search =>
         {
@@ -172,9 +171,6 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
 
     // Overlay handling.
     if app.show_settings {
-        if let KeyCode::Char('t') = code {
-            return vec![UiIntent::CycleTheme];
-        }
         return out;
     }
     if app.show_help {
@@ -452,7 +448,6 @@ pub fn apply_intent(
     match intent {
         UiIntent::Quit => app.should_quit = true,
         UiIntent::ToggleHelp => app.toggle_help(),
-        UiIntent::CycleTheme => app.cycle_theme(),
         UiIntent::ToggleSettings => app.toggle_settings(),
         UiIntent::OpenGithub => effects.push(UiEffect::OpenUrl {
             url: "https://github.com/yashksaini-coder/oracle".to_string(),

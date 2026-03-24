@@ -9,7 +9,9 @@ use crossterm::event::{
 };
 use std::time::Duration;
 use tui_kit_runtime::{
-    action_for_key, CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, PaneFocus,
+    CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateModalFocus, PaneFocus,
+    action_for_key,
+    kinic_tabs::{TabKind, tab_kind},
 };
 
 /// Fallback tab ids used when host does not provide explicit tabs.
@@ -77,7 +79,12 @@ pub fn action_from_keycode(code: KeyCode, focus: PaneFocus) -> Option<CoreAction
 
 /// Resolve number-based tab action to concrete tab id using host configuration.
 pub fn resolve_tab_action(action: CoreAction, tab_ids: &[&str]) -> Option<CoreAction> {
-    resolve_tab_action_with_current(action, tab_ids, None)
+    let resolved = if tab_ids.is_empty() {
+        &DEFAULT_TAB_IDS[..]
+    } else {
+        tab_ids
+    };
+    resolve_tab_action_with_current(action, resolved, None)
 }
 
 /// Resolve tab-related actions using host tab ids and optional current tab id.
@@ -132,9 +139,10 @@ pub enum HostGlobalCommand {
     None,
     CloseHelp,
     CloseSettings,
-    CloseCreateModal,
-    OpenCreateModal,
-    ToggleTheme,
+    CloseChat,
+    BackFromFormToTabs,
+    BackToMemoriesTab,
+    OpenCreateTab,
     ToggleChat,
     ToggleHelp,
     ToggleSettings,
@@ -148,33 +156,48 @@ pub fn global_command_for_key(
     code: KeyCode,
     modifiers: KeyModifiers,
     focus: PaneFocus,
+    current_tab_id: &str,
     show_help: bool,
     show_settings: bool,
-    show_create_modal: bool,
     query_is_empty: bool,
 ) -> HostGlobalCommand {
     if show_help {
         return HostGlobalCommand::CloseHelp;
     }
 
-    if show_create_modal {
-        return match code {
-            KeyCode::Esc => HostGlobalCommand::CloseCreateModal,
-            _ => HostGlobalCommand::None,
-        };
-    }
-
     if show_settings {
         return match code {
-            KeyCode::Char('t') if modifiers.is_empty() => HostGlobalCommand::ToggleTheme,
             KeyCode::Esc => HostGlobalCommand::CloseSettings,
             _ => HostGlobalCommand::None,
         };
     }
 
+    if code == KeyCode::Esc && focus == PaneFocus::Extra {
+        return HostGlobalCommand::CloseChat;
+    }
+
+    if code == KeyCode::Esc {
+        let tab_specific = match tab_kind(current_tab_id) {
+            TabKind::Form => match focus {
+                PaneFocus::Form => HostGlobalCommand::BackFromFormToTabs,
+                PaneFocus::Tabs => HostGlobalCommand::BackToMemoriesTab,
+                _ => HostGlobalCommand::None,
+            },
+            TabKind::PlaceholderMarket | TabKind::PlaceholderSettings => match focus {
+                PaneFocus::Detail | PaneFocus::Tabs => HostGlobalCommand::BackToMemoriesTab,
+                _ => HostGlobalCommand::None,
+            },
+            _ => HostGlobalCommand::None,
+        };
+        if tab_specific != HostGlobalCommand::None {
+            return tab_specific;
+        }
+    }
+
     if code == KeyCode::Char('q')
         && modifiers.is_empty()
         && focus != PaneFocus::Search
+        && focus != PaneFocus::Form
         && focus != PaneFocus::Extra
     {
         return HostGlobalCommand::Quit;
@@ -182,31 +205,27 @@ pub fn global_command_for_key(
     if code == KeyCode::Char('?')
         && modifiers.is_empty()
         && focus != PaneFocus::Search
+        && focus != PaneFocus::Form
         && focus != PaneFocus::Extra
     {
         return HostGlobalCommand::ToggleHelp;
     }
-    if code == KeyCode::Char('t')
-        && modifiers.is_empty()
-        && focus != PaneFocus::Search
-        && focus != PaneFocus::Extra
-    {
-        return HostGlobalCommand::ToggleTheme;
-    }
     if code == KeyCode::Char('C')
         && modifiers.contains(KeyModifiers::SHIFT)
+        && focus != PaneFocus::Form
         && focus != PaneFocus::Extra
     {
         return HostGlobalCommand::ToggleChat;
     }
     if code == KeyCode::Char('S')
         && modifiers.contains(KeyModifiers::SHIFT)
+        && focus != PaneFocus::Form
         && focus != PaneFocus::Extra
     {
         return HostGlobalCommand::ToggleSettings;
     }
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
-        return HostGlobalCommand::OpenCreateModal;
+        return HostGlobalCommand::OpenCreateTab;
     }
     if code == KeyCode::Esc {
         if focus == PaneFocus::Detail {
@@ -215,7 +234,7 @@ pub fn global_command_for_key(
         if !query_is_empty {
             return HostGlobalCommand::ClearQuery;
         }
-        return HostGlobalCommand::Quit;
+        return HostGlobalCommand::None;
     }
     HostGlobalCommand::None
 }
@@ -240,44 +259,43 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 Err(e) => state.status_message = Some(format!("Failed to open URL: {url} ({e})")),
             },
             CoreEffect::RequestRefresh => {}
-            CoreEffect::Custom { id, payload } => match id.as_str() {
-                "create_modal_close" => {
-                    state.create_modal_open = false;
-                    state.create_name.clear();
-                    state.create_description.clear();
-                    state.create_submitting = false;
-                    state.create_error = None;
-                }
-                "create_modal_error" => {
-                    state.create_submitting = false;
-                    state.create_error = payload.clone();
-                }
-                "select_first" => {
-                    state.selected_index = if state.list_items.is_empty() {
-                        None
-                    } else {
-                        Some(0)
-                    };
-                }
-                "focus_list" => {
-                    state.focus = PaneFocus::List;
-                }
-                "search_completed" => {
-                    state.status_message = payload.clone();
-                    state.selected_index = if state.list_items.is_empty() {
-                        None
-                    } else {
-                        Some(0)
-                    };
-                    state.focus = PaneFocus::List;
-                }
-                _ => {
-                    state.status_message = Some(match payload {
-                        Some(p) => format!("Custom effect: {id} ({p})"),
-                        None => format!("Custom effect: {id}"),
-                    });
-                }
-            },
+            CoreEffect::CreateFormError(message) => {
+                state.create_submitting = false;
+                state.create_error = message.clone();
+            }
+            CoreEffect::SelectFirstListItem => {
+                state.selected_index = if state.list_items.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                };
+            }
+            CoreEffect::FocusPane(pane) => {
+                state.focus = pane;
+            }
+            CoreEffect::SearchCompleted { message } => {
+                state.status_message = Some(message.clone());
+                state.selected_index = if state.list_items.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                };
+                state.focus = PaneFocus::List;
+            }
+            CoreEffect::ResetCreateFormAndSetTab { tab_id } => {
+                state.current_tab_id = tab_id.clone();
+                state.create_name.clear();
+                state.create_description.clear();
+                state.create_submitting = false;
+                state.create_error = None;
+                state.create_focus = CreateModalFocus::Name;
+            }
+            CoreEffect::Custom { id, payload } => {
+                state.status_message = Some(match payload {
+                    Some(p) => format!("Custom effect: {id} ({p})"),
+                    None => format!("Custom effect: {id}"),
+                });
+            }
         }
     }
 }
@@ -286,6 +304,9 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
 mod tests {
     use super::*;
     use tui_kit_runtime::CoreState;
+    use tui_kit_runtime::kinic_tabs::{
+        KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
+    };
 
     #[test]
     fn key_map_includes_navigation() {
@@ -312,7 +333,7 @@ mod tests {
                 KeyCode::Esc,
                 KeyModifiers::NONE,
                 PaneFocus::List,
-                false,
+                KINIC_MEMORIES_TAB_ID,
                 false,
                 false,
                 false,
@@ -322,18 +343,18 @@ mod tests {
     }
 
     #[test]
-    fn global_command_opens_create_modal_with_ctrl_n() {
+    fn global_command_opens_create_tab_with_ctrl_n() {
         assert_eq!(
             global_command_for_key(
                 KeyCode::Char('n'),
                 KeyModifiers::CONTROL,
                 PaneFocus::List,
-                false,
+                KINIC_MEMORIES_TAB_ID,
                 false,
                 false,
                 true,
             ),
-            HostGlobalCommand::OpenCreateModal
+            HostGlobalCommand::OpenCreateTab
         );
     }
 
@@ -345,13 +366,39 @@ mod tests {
     }
 
     #[test]
+    fn execute_effects_sets_memories_tab() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+            create_name: "stale".to_string(),
+            create_description: "stale".to_string(),
+            create_submitting: true,
+            create_error: Some("boom".to_string()),
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(
+            &mut state,
+            vec![CoreEffect::ResetCreateFormAndSetTab {
+                tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+            }],
+        );
+
+        assert_eq!(state.current_tab_id, KINIC_MEMORIES_TAB_ID);
+        assert_eq!(state.create_name, "");
+        assert_eq!(state.create_description, "");
+        assert!(!state.create_submitting);
+        assert_eq!(state.create_error, None);
+        assert_eq!(state.create_focus, CreateModalFocus::Name);
+    }
+
+    #[test]
     fn global_command_quit_on_q() {
         assert_eq!(
             global_command_for_key(
                 KeyCode::Char('q'),
                 KeyModifiers::NONE,
                 PaneFocus::List,
-                false,
+                KINIC_MEMORIES_TAB_ID,
                 false,
                 false,
                 true,
@@ -373,18 +420,114 @@ mod tests {
     }
 
     #[test]
-    fn global_command_theme_toggle_on_t() {
+    fn global_command_returns_to_memories_from_create_tab_tabs_focus() {
         assert_eq!(
             global_command_for_key(
-                KeyCode::Char('t'),
+                KeyCode::Esc,
                 KeyModifiers::NONE,
-                PaneFocus::List,
-                false,
+                PaneFocus::Tabs,
+                KINIC_CREATE_TAB_ID,
                 false,
                 false,
                 true,
             ),
-            HostGlobalCommand::ToggleTheme
+            HostGlobalCommand::BackToMemoriesTab
+        );
+    }
+
+    #[test]
+    fn global_command_returns_to_tabs_from_form_tab() {
+        assert_eq!(
+            global_command_for_key(
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+                PaneFocus::Form,
+                KINIC_CREATE_TAB_ID,
+                false,
+                false,
+                true,
+            ),
+            HostGlobalCommand::BackFromFormToTabs
+        );
+    }
+
+    #[test]
+    fn global_command_returns_to_memories_from_market_content() {
+        assert_eq!(
+            global_command_for_key(
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+                PaneFocus::Detail,
+                KINIC_MARKET_TAB_ID,
+                false,
+                false,
+                true,
+            ),
+            HostGlobalCommand::BackToMemoriesTab
+        );
+    }
+
+    #[test]
+    fn global_command_returns_to_memories_from_settings_content() {
+        assert_eq!(
+            global_command_for_key(
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+                PaneFocus::Detail,
+                KINIC_SETTINGS_TAB_ID,
+                false,
+                false,
+                true,
+            ),
+            HostGlobalCommand::BackToMemoriesTab
+        );
+    }
+
+    #[test]
+    fn global_command_leaves_q_unhandled_in_create_focus() {
+        assert_eq!(
+            global_command_for_key(
+                KeyCode::Char('q'),
+                KeyModifiers::NONE,
+                PaneFocus::Form,
+                KINIC_CREATE_TAB_ID,
+                false,
+                false,
+                true,
+            ),
+            HostGlobalCommand::None
+        );
+    }
+
+    #[test]
+    fn global_command_closes_chat_before_quit() {
+        assert_eq!(
+            global_command_for_key(
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+                PaneFocus::Extra,
+                KINIC_MEMORIES_TAB_ID,
+                false,
+                false,
+                true,
+            ),
+            HostGlobalCommand::CloseChat
+        );
+    }
+
+    #[test]
+    fn global_command_leaves_escape_unhandled_when_nothing_to_close() {
+        assert_eq!(
+            global_command_for_key(
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+                PaneFocus::List,
+                KINIC_MEMORIES_TAB_ID,
+                false,
+                false,
+                true,
+            ),
+            HostGlobalCommand::None
         );
     }
 }

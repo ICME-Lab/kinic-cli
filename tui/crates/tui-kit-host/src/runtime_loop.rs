@@ -1,15 +1,21 @@
+#[path = "form_tab_flow.rs"]
+mod form_tab_flow;
+
 use std::time::Duration;
-use tui_kit_render::theme::{Theme, ThemeKind};
+use tui_kit_render::theme::Theme;
 use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
-    apply_snapshot, dispatch_action, CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus,
+    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, apply_snapshot, dispatch_action,
+    kinic_tabs::{KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, TabKind, tab_kind},
 };
 
 use crate::{
-    action_from_keycode, execute_effects_to_status, global_command_for_key, poll_host_input,
-    resolve_tab_action_with_current, terminal::with_terminal, HostGlobalCommand, HostInputEvent,
+    HostGlobalCommand, HostInputEvent, action_from_keycode, execute_effects_to_status,
+    global_command_for_key, poll_host_input, resolve_tab_action_with_current,
+    terminal::with_terminal,
 };
+use form_tab_flow::{form_tab_action_from_key, reset_create_focus, reset_create_form_state};
 
 pub struct RuntimeLoopConfig {
     pub initial_tab_id: &'static str,
@@ -51,7 +57,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
     hooks: &mut H,
 ) -> Result<(), Box<dyn std::error::Error>> {
     with_terminal(|terminal| {
-        let mut theme = Theme::default();
+        let theme = Theme::default();
         let mut state = CoreState {
             current_tab_id: cfg.initial_tab_id.to_string(),
             focus: cfg.initial_focus,
@@ -110,7 +116,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .status_message(state.status_message.as_deref().unwrap_or("ready"))
                     .show_help(show_help)
                     .show_settings(show_settings)
-                    .show_create_modal(state.create_modal_open)
+                    .show_create_modal(false)
                     .create_name(&state.create_name)
                     .create_description(&state.create_description)
                     .create_submitting(state.create_submitting)
@@ -154,9 +160,9 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 code,
                 modifiers,
                 state.focus,
+                state.current_tab_id.as_str(),
                 show_help,
                 show_settings,
-                state.create_modal_open,
                 state.query.is_empty(),
             ) {
                 HostGlobalCommand::None => {}
@@ -168,31 +174,37 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     show_settings = false;
                     continue;
                 }
-                HostGlobalCommand::CloseCreateModal => {
+                HostGlobalCommand::CloseChat => {
                     if let Ok(effects) =
-                        dispatch_action(provider, &mut state, &CoreAction::CloseCreateModal)
+                        dispatch_action(provider, &mut state, &CoreAction::ToggleChat)
                     {
                         hooks.on_effects(provider, &mut state, &effects);
                         execute_effects_to_status(&mut state, effects);
                     }
                     continue;
                 }
-                HostGlobalCommand::OpenCreateModal => {
-                    if let Ok(effects) =
-                        dispatch_action(provider, &mut state, &CoreAction::OpenCreateModal)
-                    {
+                HostGlobalCommand::BackFromFormToTabs => {
+                    state.focus = PaneFocus::Tabs;
+                    continue;
+                }
+                HostGlobalCommand::BackToMemoriesTab => {
+                    if let Ok(effects) = dispatch_action(
+                        provider,
+                        &mut state,
+                        &CoreAction::SetTab(KINIC_MEMORIES_TAB_ID.into()),
+                    ) {
                         hooks.on_effects(provider, &mut state, &effects);
                         execute_effects_to_status(&mut state, effects);
                     }
+                    state.focus = PaneFocus::List;
+                    continue;
+                }
+                HostGlobalCommand::OpenCreateTab => {
+                    open_form_tab(provider, &mut state, hooks, KINIC_CREATE_TAB_ID, true);
                     continue;
                 }
                 HostGlobalCommand::ToggleHelp => {
                     show_help = true;
-                    continue;
-                }
-                HostGlobalCommand::ToggleTheme => {
-                    let next = ThemeKind::from_name(&theme.name).next();
-                    theme = Theme::from_kind(next);
                     continue;
                 }
                 HostGlobalCommand::ToggleChat => {
@@ -224,18 +236,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 HostGlobalCommand::Quit => break Ok(()),
             }
 
-            let action = if state.create_modal_open {
-                match code {
-                    crossterm::event::KeyCode::Tab => Some(CoreAction::CreateNextField),
-                    crossterm::event::KeyCode::BackTab => Some(CoreAction::CreatePrevField),
-                    crossterm::event::KeyCode::Backspace => Some(CoreAction::CreateBackspace),
-                    crossterm::event::KeyCode::Enter => Some(CoreAction::CreateSubmit),
-                    crossterm::event::KeyCode::Char(c) if !c.is_control() => {
-                        Some(CoreAction::CreateInput(c))
-                    }
-                    _ => None,
-                }
-            } else {
+            let action = form_tab_action_from_key(code, &mut state).or_else(|| {
                 action_from_keycode(code, state.focus).and_then(|a| {
                     resolve_tab_action_with_current(
                         a,
@@ -243,7 +244,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         Some(state.current_tab_id.as_str()),
                     )
                 })
-            };
+            });
             let mut handled = false;
 
             if let Some(action) = action {
@@ -278,6 +279,9 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 );
                 match dispatch_action(provider, &mut state, &action) {
                     Ok(effects) => {
+                        if matches!(&action, CoreAction::SetTab(_)) {
+                            normalize_focus_after_set_tab(&mut state);
+                        }
                         hooks.on_effects(provider, &mut state, &effects);
                         execute_effects_to_status(&mut state, effects)
                     }
@@ -300,14 +304,50 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
     })
 }
 
+fn normalize_focus_after_set_tab(state: &mut CoreState) {
+    match tab_kind(state.current_tab_id.as_str()) {
+        TabKind::Memories => {
+            state.focus = PaneFocus::List;
+        }
+        TabKind::Form => {
+            reset_create_focus(state);
+            state.focus = PaneFocus::Tabs;
+        }
+        TabKind::PlaceholderMarket | TabKind::PlaceholderSettings | TabKind::Unknown => {
+            state.focus = PaneFocus::Tabs;
+        }
+    }
+}
+
 fn ui_focus_from_pane(focus: PaneFocus) -> Focus {
     match focus {
         PaneFocus::Search => Focus::Search,
         PaneFocus::List => Focus::List,
         PaneFocus::Tabs => Focus::Tabs,
         PaneFocus::Detail => Focus::Inspector,
+        PaneFocus::Form => Focus::Form,
         PaneFocus::Extra => Focus::Chat,
     }
+}
+
+fn open_form_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    tab_id: &str,
+    reset_form_state: bool,
+) {
+    if reset_form_state
+        && state.current_tab_id != tab_id
+        && matches!(tab_kind(tab_id), TabKind::Form)
+    {
+        reset_create_form_state(state);
+    }
+    if let Ok(effects) = dispatch_action(provider, state, &CoreAction::SetTab(tab_id.into())) {
+        hooks.on_effects(provider, state, &effects);
+        execute_effects_to_status(state, effects);
+    }
+    normalize_focus_after_set_tab(state);
 }
 
 fn keep_selection_visible_scroll(
