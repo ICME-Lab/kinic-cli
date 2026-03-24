@@ -445,13 +445,16 @@ impl KinicProvider {
                     .map(|(index, item)| record_from_search_result(index, &output.memory_id, item))
                     .collect();
                 self.memories_mode = MemoriesMode::Results;
-                vec![CoreEffect::SearchCompleted {
-                    message: format!(
+                let mut effects = vec![CoreEffect::SelectFirstListItem];
+                if state.current_tab_id == KINIC_MEMORIES_TAB_ID {
+                    effects.push(CoreEffect::FocusPane(PaneFocus::List));
+                }
+                effects.push(CoreEffect::Notify(format!(
                         "Loaded {} search results for {}",
                         self.result_records.len(),
                         output.memory_id
-                    ),
-                }]
+                )));
+                effects
             }
             Err(error) => vec![CoreEffect::Notify(format!("Search failed: {error}"))],
         };
@@ -1174,6 +1177,86 @@ mod tests {
         assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
         assert_eq!(provider.query, "");
         assert_eq!(output.snapshot.unwrap().total_count, provider.all.len());
+    }
+
+    #[test]
+    fn poll_background_returns_split_search_effects_on_memories_tab() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.search_in_flight = true;
+        tx.send(SearchTaskOutput {
+            memory_id: "aaaaa-aa".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "hello".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                ..CoreState::default()
+            })
+            .unwrap();
+
+        assert!(
+            output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::SelectFirstListItem))
+        );
+        assert!(
+            output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::List)))
+        );
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Loaded 1 search results for aaaaa-aa"
+        )));
+    }
+
+    #[test]
+    fn poll_background_skips_focus_effect_off_memories_tab() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.search_in_flight = true;
+        tx.send(SearchTaskOutput {
+            memory_id: "aaaaa-aa".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "hello".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState {
+                current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+                ..CoreState::default()
+            })
+            .unwrap();
+
+        assert!(
+            output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::SelectFirstListItem))
+        );
+        assert!(
+            !output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::List)))
+        );
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Loaded 1 search results for aaaaa-aa"
+        )));
     }
 
     #[test]

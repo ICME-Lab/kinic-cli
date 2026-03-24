@@ -10,8 +10,7 @@ use crossterm::event::{
 use std::time::Duration;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateModalFocus, PaneFocus,
-    action_for_key,
-    kinic_tabs::{TabKind, tab_kind},
+    action_for_key, tab_focus_policy,
 };
 
 /// Fallback tab ids used when host does not provide explicit tabs.
@@ -161,6 +160,8 @@ pub fn global_command_for_key(
     show_settings: bool,
     query_is_empty: bool,
 ) -> HostGlobalCommand {
+    let focus_policy = tab_focus_policy(current_tab_id);
+
     if show_help {
         return HostGlobalCommand::CloseHelp;
     }
@@ -177,17 +178,14 @@ pub fn global_command_for_key(
     }
 
     if code == KeyCode::Esc {
-        let tab_specific = match tab_kind(current_tab_id) {
-            TabKind::Form => match focus {
-                PaneFocus::Form => HostGlobalCommand::BackFromFormToTabs,
-                PaneFocus::Tabs => HostGlobalCommand::BackToMemoriesTab,
-                _ => HostGlobalCommand::None,
-            },
-            TabKind::PlaceholderMarket | TabKind::PlaceholderSettings => match focus {
-                PaneFocus::Detail | PaneFocus::Tabs => HostGlobalCommand::BackToMemoriesTab,
-                _ => HostGlobalCommand::None,
-            },
-            _ => HostGlobalCommand::None,
+        let tab_specific = if focus == PaneFocus::Form && focus_policy.allows_form {
+            HostGlobalCommand::BackFromFormToTabs
+        } else if focus == PaneFocus::Tabs && !focus_policy.allows_search {
+            HostGlobalCommand::BackToMemoriesTab
+        } else if focus == PaneFocus::Detail && !focus_policy.allows_list {
+            HostGlobalCommand::BackToMemoriesTab
+        } else {
+            HostGlobalCommand::None
         };
         if tab_specific != HostGlobalCommand::None {
             return tab_specific;
@@ -271,16 +269,18 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 };
             }
             CoreEffect::FocusPane(pane) => {
-                state.focus = pane;
-            }
-            CoreEffect::SearchCompleted { message } => {
-                state.status_message = Some(message.clone());
-                state.selected_index = if state.list_items.is_empty() {
-                    None
-                } else {
-                    Some(0)
+                let focus_policy = tab_focus_policy(state.current_tab_id.as_str());
+                let allows_focus = match pane {
+                    PaneFocus::Search => focus_policy.allows_search,
+                    PaneFocus::List => focus_policy.allows_list,
+                    PaneFocus::Tabs => focus_policy.allows_tabs,
+                    PaneFocus::Detail => focus_policy.allows_detail,
+                    PaneFocus::Form => focus_policy.allows_form,
+                    PaneFocus::Extra => focus_policy.allows_chat,
                 };
-                state.focus = PaneFocus::List;
+                if allows_focus {
+                    state.focus = pane;
+                }
             }
             CoreEffect::ResetCreateFormAndSetTab { tab_id } => {
                 state.current_tab_id = tab_id.clone();
@@ -389,6 +389,32 @@ mod tests {
         assert!(!state.create_submitting);
         assert_eq!(state.create_error, None);
         assert_eq!(state.create_focus, CreateModalFocus::Name);
+    }
+
+    #[test]
+    fn focus_pane_applies_visible_pane_on_memories_tab() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Search,
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::List)]);
+
+        assert_eq!(state.focus, PaneFocus::List);
+    }
+
+    #[test]
+    fn focus_pane_ignores_hidden_pane_off_memories_tab() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::List)]);
+
+        assert_eq!(state.focus, PaneFocus::Form);
     }
 
     #[test]
