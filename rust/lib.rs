@@ -52,12 +52,11 @@ pub async fn run() -> Result<()> {
             &cli.command,
             cli::Command::Create(_) | cli::Command::Balance(_)
         )
+        && !cfg!(feature = "experimental")
     {
-        if !cfg!(feature = "experimental") {
-            anyhow::bail!(
-                "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
-            );
-        }
+        anyhow::bail!(
+            "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
+        );
     }
 
     let (agent_factory, identity_path) = if matches!(&cli.command, cli::Command::Login(_)) {

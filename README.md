@@ -34,7 +34,7 @@ By default we use the Internet Computer as the DA layer—with VetKey encryption
 ## Prerequisites
 
 - **Python 3.9+**
-- **dfx 0.28+** with the `arm64` build on Apple Silicon (macOS)
+- **dfx 0.31+** with the `arm64` build on Apple Silicon (macOS)
 - **KINIC tokens**: At least 1 KINIC to deploy memory canisters
 - **dfx identity**: Create or select one with `dfx identity new <name>` or `dfx identity use <name>`
 
