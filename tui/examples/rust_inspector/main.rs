@@ -2,8 +2,8 @@
 
 //! Oracle example app built on top of tui-kit crates.
 
-mod app;
 mod adapter;
+mod app;
 mod config;
 mod domain_rust;
 mod error;
@@ -14,17 +14,18 @@ pub use tui_kit_render::ui;
 
 use anyhow::Result;
 use app::{
-    apply_intent, apply_runtime_set_tab, build_render_context, intents_for_key,
-    try_apply_runtime_action, App, UiEffect,
+    App, UiEffect, apply_intent, apply_runtime_set_tab, build_render_context, intents_for_key,
+    try_apply_runtime_action,
 };
-use crossterm::{
-    execute,
-};
+use crossterm::execute;
 use ratatui::layout::Rect;
 use std::{env, io, path::PathBuf, time::Duration};
-use tui_kit_host::terminal::{with_terminal, HostTerminal};
-use tui_kit_host::{poll_host_input, HostInputEvent};
-use ui::{app::{list_viewport_height_for_area, tabs_rect_for_area}, AnimationState, TuiKitUi};
+use tui_kit_host::terminal::{HostTerminal, with_terminal};
+use tui_kit_host::{HostInputEvent, poll_host_input};
+use ui::{
+    AnimationState, TuiKitUi,
+    app::{list_viewport_height_for_area, tabs_rect_for_area},
+};
 
 fn main() -> Result<()> {
     // Load .env so GITHUB_TOKEN etc. are available (cwd first, then project path overrides)
@@ -94,8 +95,7 @@ fn run_app(terminal: &mut HostTerminal, app: &mut App) -> Result<()> {
 
         // Poll Chat chat response (from background thread)
         if let Ok(response) = app.chat_rx.try_recv() {
-            app.chat_messages
-                .push(("assistant".to_string(), response));
+            app.chat_messages.push(("assistant".to_string(), response));
             app.chat_loading = false;
         }
 
@@ -131,6 +131,12 @@ fn run_app(terminal: &mut HostTerminal, app: &mut App) -> Result<()> {
                 .show_completion(app.show_completion)
                 .show_help(app.show_help)
                 .show_settings(app.show_settings)
+                .show_create_modal(app.create_modal_open)
+                .create_name(&app.create_name)
+                .create_description(&app.create_description)
+                .create_submitting(app.create_submitting)
+                .create_error(app.create_error.as_deref())
+                .create_focus(app.create_focus)
                 .status_message(&app.status_message)
                 .inspector_scroll(inspector_scroll)
                 .animation_state(&animation)
@@ -171,7 +177,8 @@ fn run_app(terminal: &mut HostTerminal, app: &mut App) -> Result<()> {
                     }
                     let intents = intents_for_key(app, code, modifiers);
                     for intent in intents {
-                        let effects = apply_intent(app, intent, &mut inspector_scroll, &mut animation);
+                        let effects =
+                            apply_intent(app, intent, &mut inspector_scroll, &mut animation);
                         execute_effects(app, effects);
                     }
                 }
@@ -196,7 +203,8 @@ fn run_app(terminal: &mut HostTerminal, app: &mut App) -> Result<()> {
                                     let rel = col.saturating_sub(inner_x);
                                     let idx = (rel / tab_width).min(tab_count - 1) as usize;
                                     if let Some(spec) = tab_specs.get(idx) {
-                                        let runtime_result = apply_runtime_set_tab(app, spec.id.clone());
+                                        let runtime_result =
+                                            apply_runtime_set_tab(app, spec.id.clone());
                                         if runtime_result.tab_changed {
                                             animation.on_tab_change();
                                         }
