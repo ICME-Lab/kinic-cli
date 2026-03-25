@@ -59,10 +59,16 @@ pub struct ChatPanelText {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateOverlayText {
     pub title: String,
+    pub intro_description: String,
+    pub intro_enter_hint: String,
+    pub intro_cycle_hint: String,
+    pub intro_escape_hint: String,
     pub name_label: String,
     pub description_label: String,
     pub submit_label: String,
+    pub submit_pending_label: String,
     pub open_hint: String,
+    pub tabs_focus_hint: String,
     pub close_hint: String,
 }
 
@@ -111,10 +117,19 @@ impl Default for UiConfig {
             },
             create: CreateOverlayText {
                 title: "Create Memory".to_string(),
+                intro_description: "Provision a new memory canister without leaving the tab view."
+                    .to_string(),
+                intro_enter_hint: "enter the form when tabs are focused".to_string(),
+                intro_cycle_hint: "cycle fields".to_string(),
+                intro_escape_hint: "step back one level".to_string(),
                 name_label: "Name".to_string(),
                 description_label: "Description".to_string(),
                 submit_label: "Create".to_string(),
+                submit_pending_label: "Creating...".to_string(),
                 open_hint: "Press Ctrl-N to create a new memory".to_string(),
+                tabs_focus_hint:
+                    "Tabs focused. Press Enter or Tab to edit from Name, or Esc for Memories."
+                        .to_string(),
                 close_hint: "Tab: cycle fields, Enter: submit, Esc: back to tab focus".to_string(),
             },
             settings: SettingsOverlayText {

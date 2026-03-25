@@ -18,6 +18,10 @@ impl<'a> TuiKitUi<'a> {
         lead: &str,
         detail: &str,
     ) {
+        let body_area = crate::ui::app::shared::layout::body_rect_for_area_with_tabs(
+            area,
+            !self.tab_specs.is_empty(),
+        );
         let body = vec![
             Line::from(""),
             Line::from(Span::styled(lead, self.theme.style_normal())),
@@ -45,6 +49,6 @@ impl<'a> TuiKitUi<'a> {
                     .style(Style::default().bg(self.theme.bg_panel)),
             )
             .wrap(Wrap { trim: false })
-            .render(area, buf);
+            .render(body_area, buf);
     }
 }

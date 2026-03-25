@@ -81,7 +81,7 @@ impl Widget for TuiKitUi<'_> {
             self.render_tabs(chunks[1], buf);
         }
 
-        if !self.render_special_tab_body(chunks[2], buf) {
+        if !self.render_special_tab_body(area, buf) {
             self.render_memories_body(chunks[2], buf);
         }
         self.render_status(chunks[3], buf);

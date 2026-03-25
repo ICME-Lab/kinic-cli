@@ -82,7 +82,7 @@ impl<'a> TuiKitUi<'a> {
                 Span::raw("  "),
                 Span::styled(
                     if self.create_submitting {
-                        "Creating..."
+                        cfg.submit_pending_label.as_str()
                     } else {
                         cfg.submit_label.as_str()
                     },
