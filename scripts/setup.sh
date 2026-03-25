@@ -3,6 +3,9 @@ set -e  # Stop script on errors
 # set -x  # Print commands for debugging
 set -o pipefail  # Fail on pipeline errors
 
+## Local replica bootstrap for launcher, ledger, and Internet Identity.
+## This keeps local `--identity` and `--ii` flows aligned with the documented setup.
+
 ## -- Ledger --
 USER_NAME=$(dfx identity whoami)
 USER_PRINCIPAL=$(dfx identity get-principal)
@@ -47,7 +50,6 @@ record {
 
 # Switch back to original identity
 dfx identity use "${USER_NAME}"
-
 
 dfx deploy internet_identity --specified-id rdmx6-jaaaa-aaaaa-aaadq-cai
 dfx deploy launcher --specified-id xfug4-5qaaa-aaaak-afowa-cai --argument='(variant {minor})'

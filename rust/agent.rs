@@ -37,24 +37,19 @@ impl AgentFactory {
         }
     }
 
+    pub fn new_with_arc_identity(use_mainnet: bool, identity: Arc<dyn Identity>) -> Self {
+        Self {
+            use_mainnet,
+            identity_suffix: String::new(),
+            identity_override: Some(identity),
+        }
+    }
+
     pub async fn build(&self) -> Result<Agent> {
         let builder = if let Some(identity) = &self.identity_override {
             Agent::builder().with_arc_identity(identity.clone())
         } else {
-            let pem_bytes = load_pem_from_keyring(&self.identity_suffix)?;
-            let pem_text = String::from_utf8(pem_bytes.clone())?;
-            let pem = pem::parse(pem_text.as_bytes())?;
-            match pem.tag() {
-                "PRIVATE KEY" => {
-                    let identity = BasicIdentity::from_pem(Cursor::new(pem_text.clone()))?;
-                    Agent::builder().with_identity(identity)
-                }
-                "EC PRIVATE KEY" => {
-                    let identity = Secp256k1Identity::from_pem(Cursor::new(pem_text.clone()))?;
-                    Agent::builder().with_identity(identity)
-                }
-                _ => anyhow::bail!("Unsupported PEM tag: {}", pem.tag()),
-            }
+            Agent::builder().with_arc_identity(load_identity_from_keyring(&self.identity_suffix)?)
         };
 
         let url = if self.use_mainnet {
@@ -69,6 +64,27 @@ impl AgentFactory {
             agent.fetch_root_key().await?;
         }
         Ok(agent)
+    }
+}
+
+pub fn load_identity_from_keyring(suffix: &str) -> Result<Arc<dyn Identity>> {
+    let pem_bytes = load_pem_from_keyring(suffix)?;
+    parse_identity_from_pem_bytes(&pem_bytes)
+}
+
+fn parse_identity_from_pem_bytes(pem_bytes: &[u8]) -> Result<Arc<dyn Identity>> {
+    let pem_text = String::from_utf8(pem_bytes.to_vec())?;
+    let pem = pem::parse(pem_text.as_bytes())?;
+    match pem.tag() {
+        "PRIVATE KEY" => {
+            let identity = BasicIdentity::from_pem(Cursor::new(pem_text))?;
+            Ok(Arc::new(identity))
+        }
+        "EC PRIVATE KEY" => {
+            let identity = Secp256k1Identity::from_pem(Cursor::new(pem_text))?;
+            Ok(Arc::new(identity))
+        }
+        _ => anyhow::bail!("Unsupported PEM tag: {}", pem.tag()),
     }
 }
 

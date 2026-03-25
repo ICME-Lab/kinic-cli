@@ -393,7 +393,7 @@ Maintain keyboard-first behavior as baseline.
                 filtered.len(),
                 self.all.len()
             )),
-            settings: Default::default(),
+            ..ProviderSnapshot::default()
         }
     }
 }

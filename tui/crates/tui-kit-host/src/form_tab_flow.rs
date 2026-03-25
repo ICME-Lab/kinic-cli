@@ -5,25 +5,11 @@ use tui_kit_runtime::{
     CoreAction, CoreState, CreateModalFocus, PaneFocus, kinic_tabs::is_form_tab,
 };
 
-/// Route key input to create-tab actions while preserving normal text entry.
+/// Route create-form key input while preserving normal text entry semantics.
 ///
 /// The dedicated create form owns `Tab` and `Shift+Tab` so field order stays
 /// predictable: `Name -> Description -> Submit -> Name`.
 pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<CoreAction> {
-    if is_form_tab(state.current_tab_id.as_str()) && state.focus == PaneFocus::Tabs {
-        return match code {
-            // Create uses a full-body form, so "open content" enters the form instead of
-            // borrowing the memories inspector focus model.
-            KeyCode::Tab | KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-                reset_create_focus(state);
-                state.focus = PaneFocus::Form;
-                None
-            }
-            KeyCode::Left | KeyCode::Char('h') => None,
-            _ => None,
-        };
-    }
-
     if !is_create_form_input_mode(state) {
         return None;
     }
@@ -33,7 +19,12 @@ pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<
         KeyCode::BackTab => Some(CoreAction::CreatePrevField),
         KeyCode::Backspace => Some(CoreAction::CreateBackspace),
         KeyCode::Enter => Some(CoreAction::CreateSubmit),
-        KeyCode::Char(c) if !c.is_control() => Some(CoreAction::CreateInput(c)),
+        KeyCode::Char(c) if !c.is_control() => match state.create_focus {
+            CreateModalFocus::Name | CreateModalFocus::Description => {
+                Some(CoreAction::CreateInput(c))
+            }
+            CreateModalFocus::Submit => None,
+        },
         _ => None,
     }
 }
@@ -52,7 +43,8 @@ pub fn reset_create_focus(state: &mut CoreState) {
 pub fn reset_create_form_state(state: &mut CoreState) {
     state.create_name.clear();
     state.create_description.clear();
-    state.create_submitting = false;
+    state.create_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+    state.create_spinner_frame = 0;
     state.create_error = None;
     reset_create_focus(state);
 }
@@ -81,7 +73,7 @@ mod tests {
         let mut state = CoreState {
             create_name: "stale".to_string(),
             create_description: "stale".to_string(),
-            create_submitting: true,
+            create_submit_state: tui_kit_runtime::CreateSubmitState::Submitting,
             create_error: Some("boom".to_string()),
             create_focus: CreateModalFocus::Submit,
             ..CoreState::default()
@@ -91,24 +83,11 @@ mod tests {
 
         assert_eq!(state.create_name, "");
         assert_eq!(state.create_description, "");
-        assert!(!state.create_submitting);
+        assert_eq!(
+            state.create_submit_state,
+            tui_kit_runtime::CreateSubmitState::Idle
+        );
         assert_eq!(state.create_error, None);
-        assert_eq!(state.create_focus, CreateModalFocus::Name);
-    }
-
-    #[test]
-    fn card_entry_from_tabs_restarts_at_name() {
-        let mut state = CoreState {
-            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
-            focus: PaneFocus::Tabs,
-            create_focus: CreateModalFocus::Submit,
-            ..CoreState::default()
-        };
-
-        let action = form_tab_action_from_key(KeyCode::Tab, &mut state);
-
-        assert_eq!(action, None);
-        assert_eq!(state.focus, PaneFocus::Form);
         assert_eq!(state.create_focus, CreateModalFocus::Name);
     }
 
@@ -142,5 +121,19 @@ mod tests {
         assert_eq!(action, Some(CoreAction::CreatePrevField));
         assert_eq!(state.create_focus, CreateModalFocus::Name);
         assert_eq!(state.focus, PaneFocus::Form);
+    }
+
+    #[test]
+    fn submit_focus_uses_submit_action_on_enter() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            create_focus: CreateModalFocus::Submit,
+            ..CoreState::default()
+        };
+
+        let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+        assert_eq!(action, Some(CoreAction::CreateSubmit));
     }
 }

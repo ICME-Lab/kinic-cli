@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
-use tui_kit_runtime::{CreateModalFocus, SettingsSnapshot};
+use tui_kit_runtime::{CreateModalFocus, CreateSubmitState};
 
 use super::TuiKitUi;
 
@@ -81,8 +81,8 @@ impl<'a> TuiKitUi<'a> {
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    if self.create_submitting {
-                        "Creating..."
+                    if self.create_submit_state == CreateSubmitState::Submitting {
+                        cfg.submit_pending_label.as_str()
                     } else {
                         cfg.submit_label.as_str()
                     },
@@ -127,21 +127,17 @@ impl<'a> TuiKitUi<'a> {
         };
         Clear.render(settings_area, buf);
         let cfg = &self.ui_config.settings;
-        let text = settings_overlay_lines(self.settings_snapshot, cfg)
-            .into_iter()
-            .map(|line| {
-                if line == cfg.detail_hint || line == cfg.close_hint {
-                    Line::from(Span::styled(line, self.theme.style_muted()))
-                } else if line.starts_with(' ') {
-                    Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(line.trim_start().to_string(), self.theme.style_normal()),
-                    ])
-                } else {
-                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
-                }
-            })
-            .collect::<Vec<_>>();
+        let text = vec![
+            Line::from(Span::styled(
+                format!(" {} ", cfg.title),
+                self.theme.style_accent_bold(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                cfg.close_hint.clone(),
+                self.theme.style_muted(),
+            )),
+        ];
         let block = Paragraph::new(text).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -192,67 +188,5 @@ impl<'a> TuiKitUi<'a> {
                 .style(Style::default().bg(self.theme.bg_panel)),
         );
         help.render(help_area, buf);
-    }
-}
-
-fn settings_overlay_lines(
-    snapshot: Option<&SettingsSnapshot>,
-    cfg: &super::types::SettingsOverlayText,
-) -> Vec<String> {
-    let mut lines = vec![format!(" {} ", cfg.title), String::new()];
-    if let Some(snapshot) = snapshot {
-        if snapshot.quick_entries.is_empty() {
-            lines.push(" No settings available yet.".to_string());
-        } else {
-            for entry in snapshot.quick_entries.iter().take(7) {
-                lines.push(format!(" {}: {}", entry.label, entry.value));
-            }
-        }
-    } else {
-        lines.push(" No settings available yet.".to_string());
-    }
-    lines.push(String::new());
-    lines.push(cfg.detail_hint.clone());
-    lines.push(cfg.close_hint.clone());
-    lines
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ui::app::UiConfig;
-    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
-
-    #[test]
-    fn settings_overlay_lines_include_priority_entries() {
-        let cfg = UiConfig::default().settings;
-        let snapshot = SettingsSnapshot {
-            quick_entries: vec![
-                SettingsEntry {
-                    label: "Identity name".to_string(),
-                    value: "alice".to_string(),
-                    note: None,
-                },
-                SettingsEntry {
-                    label: "Principal ID".to_string(),
-                    value: "aaaaa-aa".to_string(),
-                    note: None,
-                },
-                SettingsEntry {
-                    label: "II status".to_string(),
-                    value: "unsupported in TUI".to_string(),
-                    note: None,
-                },
-            ],
-            sections: vec![SettingsSection::default()],
-        };
-
-        let lines = settings_overlay_lines(Some(&snapshot), &cfg);
-        let joined = lines.join("\n");
-
-        assert!(joined.contains("Identity name: alice"));
-        assert!(joined.contains("Principal ID: aaaaa-aa"));
-        assert!(joined.contains("unsupported in TUI"));
-        assert!(joined.contains("Open the Settings tab for detailed view."));
     }
 }

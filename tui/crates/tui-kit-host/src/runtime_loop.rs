@@ -119,10 +119,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .show_create_modal(false)
                     .create_name(&state.create_name)
                     .create_description(&state.create_description)
-                    .create_submitting(state.create_submitting)
+                    .create_submit_state(state.create_submit_state.clone())
+                    .create_spinner_frame(state.create_spinner_frame)
                     .create_error(state.create_error.as_deref())
                     .create_focus(state.create_focus)
-                    .settings_snapshot(&state.settings)
+                    .create_cost_state(&state.create_cost_state)
                     .show_completion(false)
                     .context_details_loading(false)
                     .context_details_failed(false)
@@ -197,7 +198,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         hooks.on_effects(provider, &mut state, &effects);
                         execute_effects_to_status(&mut state, effects);
                     }
-                    state.focus = PaneFocus::List;
+                    normalize_focus_after_set_tab(&mut state);
                     continue;
                 }
                 HostGlobalCommand::OpenCreateTab => {
@@ -225,6 +226,15 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     state.focus = PaneFocus::List;
                     continue;
                 }
+                HostGlobalCommand::RefreshCurrentView => {
+                    if let Ok(effects) =
+                        dispatch_action(provider, &mut state, &CoreAction::RefreshCurrentView)
+                    {
+                        hooks.on_effects(provider, &mut state, &effects);
+                        execute_effects_to_status(&mut state, effects);
+                    }
+                    continue;
+                }
                 HostGlobalCommand::ClearQuery => {
                     if let Ok(effects) =
                         dispatch_action(provider, &mut state, &CoreAction::SetQuery(String::new()))
@@ -238,13 +248,15 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             }
 
             let action = form_tab_action_from_key(code, &mut state).or_else(|| {
-                action_from_keycode(code, state.focus).and_then(|a| {
-                    resolve_tab_action_with_current(
-                        a,
-                        cfg.tab_ids,
-                        Some(state.current_tab_id.as_str()),
-                    )
-                })
+                action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
+                    |a| {
+                        resolve_tab_action_with_current(
+                            a,
+                            cfg.tab_ids,
+                            Some(state.current_tab_id.as_str()),
+                        )
+                    },
+                )
             });
             let mut handled = false;
 
@@ -306,18 +318,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 }
 
 fn normalize_focus_after_set_tab(state: &mut CoreState) {
-    match tab_kind(state.current_tab_id.as_str()) {
-        TabKind::Memories => {
-            state.focus = PaneFocus::List;
-        }
-        TabKind::Form => {
-            reset_create_focus(state);
-            state.focus = PaneFocus::Tabs;
-        }
-        TabKind::PlaceholderMarket | TabKind::PlaceholderSettings | TabKind::Unknown => {
-            state.focus = PaneFocus::Tabs;
-        }
+    if matches!(tab_kind(state.current_tab_id.as_str()), TabKind::Form) {
+        reset_create_focus(state);
     }
+    state.focus = PaneFocus::Tabs;
 }
 
 fn ui_focus_from_pane(focus: PaneFocus) -> Focus {
@@ -371,4 +375,53 @@ fn keep_selection_visible_scroll(
         offset = sel + 1 - visible_height;
     }
     offset.min(max_offset)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tui_kit_runtime::kinic_tabs::{
+        KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
+    };
+
+    #[test]
+    fn normalize_focus_keeps_memories_on_tabs_after_tab_switch() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::List,
+            ..CoreState::default()
+        };
+
+        normalize_focus_after_set_tab(&mut state);
+
+        assert_eq!(state.focus, PaneFocus::Tabs);
+    }
+
+    #[test]
+    fn normalize_focus_resets_create_tab_to_tabs_and_name_field() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Detail,
+            create_focus: tui_kit_runtime::CreateModalFocus::Submit,
+            ..CoreState::default()
+        };
+
+        normalize_focus_after_set_tab(&mut state);
+
+        assert_eq!(state.focus, PaneFocus::Tabs);
+        assert_eq!(state.create_focus, tui_kit_runtime::CreateModalFocus::Name);
+    }
+
+    #[test]
+    fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_MARKET_TAB_ID.to_string(),
+            focus: PaneFocus::Detail,
+            ..CoreState::default()
+        };
+
+        normalize_focus_after_set_tab(&mut state);
+
+        assert_eq!(state.focus, PaneFocus::Tabs);
+    }
 }

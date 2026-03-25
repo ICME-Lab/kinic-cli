@@ -30,6 +30,20 @@ pub fn tabs_rect_for_area(area: Rect) -> Option<Rect> {
     tabs_rect_for_area_with_tabs(area, true)
 }
 
+pub fn body_rect_for_area_with_tabs(area: Rect, has_tabs: bool) -> Rect {
+    let content = content_area(area, true);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(HEADER_HEIGHT),
+            Constraint::Length(if has_tabs { TABS_HEIGHT } else { 0 }),
+            Constraint::Min(12),
+            Constraint::Length(STATUS_HEIGHT),
+        ])
+        .split(content);
+    chunks[2]
+}
+
 pub fn tabs_rect_for_area_with_tabs(area: Rect, has_tabs: bool) -> Option<Rect> {
     if !has_tabs {
         return None;
@@ -52,17 +66,7 @@ pub fn list_viewport_height_for_area(area: Rect) -> usize {
 }
 
 pub fn list_viewport_height_for_area_with_tabs(area: Rect, has_tabs: bool) -> usize {
-    let content = content_area(area, true);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(HEADER_HEIGHT),
-            Constraint::Length(if has_tabs { TABS_HEIGHT } else { 0 }),
-            Constraint::Min(12),
-            Constraint::Length(STATUS_HEIGHT),
-        ])
-        .split(content);
-    let body = chunks[2];
+    let body = body_rect_for_area_with_tabs(area, has_tabs);
     let left_div_right = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([

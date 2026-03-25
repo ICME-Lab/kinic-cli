@@ -59,11 +59,27 @@ pub struct ChatPanelText {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateOverlayText {
     pub title: String,
+    pub intro_description: String,
+    pub intro_enter_hint: String,
+    pub intro_cycle_hint: String,
+    pub intro_escape_hint: String,
     pub name_label: String,
     pub description_label: String,
     pub submit_label: String,
+    pub submit_pending_label: String,
     pub open_hint: String,
+    pub tabs_focus_hint: String,
     pub close_hint: String,
+    pub account_title: String,
+    pub loading_message: String,
+    pub principal_label: String,
+    pub balance_label: String,
+    pub price_label: String,
+    pub status_label: String,
+    pub status_ready_label: String,
+    pub status_insufficient_label: String,
+    pub unavailable_message: String,
+    pub error_prefix: String,
 }
 
 /// Settings overlay text configuration.
@@ -112,11 +128,32 @@ impl Default for UiConfig {
             },
             create: CreateOverlayText {
                 title: "Create Memory".to_string(),
+                intro_description: "Provision a new memory canister without leaving the tab view."
+                    .to_string(),
+                intro_enter_hint: "enter the form when tabs are focused".to_string(),
+                intro_cycle_hint: "cycle fields".to_string(),
+                intro_escape_hint: "step back one level".to_string(),
                 name_label: "Name".to_string(),
                 description_label: "Description".to_string(),
                 submit_label: "Create".to_string(),
+                submit_pending_label: "Creating...".to_string(),
                 open_hint: "Press Ctrl-N to create a new memory".to_string(),
-                close_hint: "Tab: cycle fields, Enter: submit, Esc: back to tab focus".to_string(),
+                tabs_focus_hint:
+                    "Tabs focused. Press Enter or Tab to edit from Name, or Esc for Memories."
+                        .to_string(),
+                close_hint:
+                    "Tab: cycle fields, Enter: submit, F5: refresh account info, Esc: back to tab focus"
+                        .to_string(),
+                account_title: "Account & Cost".to_string(),
+                loading_message: "Loading account info...".to_string(),
+                principal_label: "Principal".to_string(),
+                balance_label: "KINIC balance".to_string(),
+                price_label: "Create cost".to_string(),
+                status_label: "Status".to_string(),
+                status_ready_label: "Ready to create".to_string(),
+                status_insufficient_label: "Insufficient balance".to_string(),
+                unavailable_message: "Live account info unavailable in mock mode.".to_string(),
+                error_prefix: "Account info error".to_string(),
             },
             settings: SettingsOverlayText {
                 title: "Settings".to_string(),
@@ -126,9 +163,11 @@ impl Default for UiConfig {
             help: HelpOverlayText {
                 title: "Help".to_string(),
                 lines: vec![
-                    "Tab / Shift+Tab: switch panel focus".to_string(),
+                    "Tab: enter selected tab or move focus, Shift+Tab: previous focus"
+                        .to_string(),
                     "/: focus search".to_string(),
                     "Esc: back / clear / close".to_string(),
+                    "F5: refresh current view".to_string(),
                     "↑/↓ or j/k: move selection".to_string(),
                     "Enter or →: open/focus detail".to_string(),
                     "C: toggle chat panel".to_string(),

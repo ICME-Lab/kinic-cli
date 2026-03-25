@@ -44,6 +44,61 @@ pub enum PaneFocus {
     Extra,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TabFocusPolicy {
+    pub default_focus: PaneFocus,
+    pub allows_search: bool,
+    pub allows_list: bool,
+    pub allows_tabs: bool,
+    pub allows_detail: bool,
+    pub allows_form: bool,
+    pub allows_chat: bool,
+}
+
+pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
+    match kinic_tabs::tab_kind(tab_id) {
+        kinic_tabs::TabKind::Memories | kinic_tabs::TabKind::Unknown => TabFocusPolicy {
+            default_focus: PaneFocus::Search,
+            allows_search: true,
+            allows_list: true,
+            allows_tabs: true,
+            allows_detail: true,
+            allows_form: false,
+            allows_chat: true,
+        },
+        kinic_tabs::TabKind::Form => TabFocusPolicy {
+            default_focus: PaneFocus::Tabs,
+            allows_search: false,
+            allows_list: false,
+            allows_tabs: true,
+            allows_detail: false,
+            allows_form: true,
+            allows_chat: true,
+        },
+        kinic_tabs::TabKind::PlaceholderMarket | kinic_tabs::TabKind::PlaceholderSettings => {
+            TabFocusPolicy {
+                default_focus: PaneFocus::Tabs,
+                allows_search: false,
+                allows_list: false,
+                allows_tabs: true,
+                allows_detail: true,
+                allows_form: false,
+                allows_chat: true,
+            }
+        }
+    }
+}
+
+pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
+    match kinic_tabs::tab_kind(tab_id) {
+        kinic_tabs::TabKind::Memories => Some(PaneFocus::List),
+        kinic_tabs::TabKind::Form => Some(PaneFocus::Form),
+        kinic_tabs::TabKind::PlaceholderMarket
+        | kinic_tabs::TabKind::PlaceholderSettings
+        | kinic_tabs::TabKind::Unknown => Some(PaneFocus::Detail),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CreateModalFocus {
     #[default]
@@ -53,23 +108,35 @@ pub enum CreateModalFocus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SettingsEntry {
-    pub label: String,
-    pub value: String,
-    pub note: Option<String>,
+pub enum CreateSubmitState {
+    #[default]
+    Idle,
+    Submitting,
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SettingsSection {
-    pub title: String,
-    pub entries: Vec<SettingsEntry>,
-    pub footer: Option<String>,
+pub enum CreateCostState {
+    #[default]
+    Hidden,
+    Loading,
+    Unavailable,
+    Error(String),
+    Ready(CreateCostDetails),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SettingsSnapshot {
-    pub quick_entries: Vec<SettingsEntry>,
-    pub sections: Vec<SettingsSection>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateCostDetails {
+    pub principal: String,
+    pub balance_kinic: String,
+    pub balance_base_units: String,
+    pub price_kinic: String,
+    pub price_base_units: String,
+    pub required_total_kinic: String,
+    pub required_total_base_units: String,
+    pub difference_kinic: String,
+    pub difference_base_units: String,
+    pub sufficient_balance: bool,
 }
 
 /// Domain-agnostic runtime state owned by the core.
@@ -91,10 +158,11 @@ pub struct CoreState {
     pub chat_scroll: usize,
     pub create_name: String,
     pub create_description: String,
-    pub create_submitting: bool,
+    pub create_submit_state: CreateSubmitState,
+    pub create_spinner_frame: usize,
     pub create_error: Option<String>,
     pub create_focus: CreateModalFocus,
-    pub settings: SettingsSnapshot,
+    pub create_cost_state: CreateCostState,
 }
 
 impl Default for CoreState {
@@ -116,10 +184,11 @@ impl Default for CoreState {
             chat_scroll: 0,
             create_name: String::new(),
             create_description: String::new(),
-            create_submitting: false,
+            create_submit_state: CreateSubmitState::default(),
+            create_spinner_frame: 0,
             create_error: None,
             create_focus: CreateModalFocus::default(),
-            settings: SettingsSnapshot::default(),
+            create_cost_state: CreateCostState::default(),
         }
     }
 }
@@ -138,6 +207,7 @@ pub enum CoreAction {
     FocusSearch,
     FocusList,
     FocusDetail,
+    FocusForm,
     OpenSelected,
     Back,
     SearchInput(char),
@@ -155,6 +225,8 @@ pub enum CoreAction {
     CreateBackspace,
     CreateNextField,
     CreatePrevField,
+    CreateRefresh,
+    RefreshCurrentView,
     CreateSubmit,
     Submit,
     Cancel,
@@ -221,10 +293,6 @@ pub enum CoreEffect {
     SelectFirstListItem,
     /// Move keyboard focus to a pane.
     FocusPane(PaneFocus),
-    /// Search finished: set status line, select first row, focus list.
-    SearchCompleted {
-        message: String,
-    },
     /// Clear create form fields and switch the active tab (e.g. after successful create).
     ResetCreateFormAndSetTab {
         tab_id: String,
@@ -244,7 +312,8 @@ pub struct ProviderSnapshot {
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
-    pub settings: SettingsSnapshot,
+    pub create_cost_state: CreateCostState,
+    pub create_submit_state: CreateSubmitState,
 }
 
 /// Provider response to one action.
@@ -286,6 +355,10 @@ pub trait DataProvider {
         action: &CoreAction,
         state: &CoreState,
     ) -> CoreResult<ProviderOutput>;
+
+    fn poll_background(&mut self, _state: &CoreState) -> Option<ProviderOutput> {
+        None
+    }
 }
 
 /// Apply one core action to local runtime state.
@@ -294,6 +367,7 @@ pub trait DataProvider {
 /// local interaction state (query, tab, focus, selection).
 pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     let has_tabs = !state.current_tab_id.is_empty();
+    let previous_focus = state.focus;
     match action {
         CoreAction::CreateInput(c) => {
             match state.create_focus {
@@ -302,6 +376,9 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 CreateModalFocus::Submit => {}
             }
             state.create_error = None;
+            if state.create_submit_state == CreateSubmitState::Error {
+                state.create_submit_state = CreateSubmitState::Idle;
+            }
         }
         CoreAction::CreateBackspace => match state.create_focus {
             CreateModalFocus::Name => {
@@ -326,8 +403,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 CreateModalFocus::Submit => CreateModalFocus::Description,
             };
         }
+        CoreAction::CreateRefresh => {
+            state.create_cost_state = CreateCostState::Loading;
+            state.create_spinner_frame = 0;
+        }
         CoreAction::CreateSubmit => {
-            state.create_submitting = true;
+            state.create_submit_state = CreateSubmitState::Submitting;
+            state.create_spinner_frame = 0;
             state.create_error = None;
         }
         CoreAction::SetQuery(q) => {
@@ -401,6 +483,10 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::FocusSearch => state.focus = PaneFocus::Search,
         CoreAction::FocusList => state.focus = PaneFocus::List,
         CoreAction::FocusDetail => state.focus = PaneFocus::Detail,
+        CoreAction::FocusForm => {
+            state.focus = PaneFocus::Form;
+            state.create_focus = CreateModalFocus::Name;
+        }
         CoreAction::OpenSelected => state.focus = PaneFocus::Detail,
         CoreAction::Back => {
             state.focus = if state.focus == PaneFocus::Extra {
@@ -414,14 +500,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             if state.chat_open {
                 state.focus = PaneFocus::Extra;
             } else if state.focus == PaneFocus::Extra {
-                state.focus = if matches!(
-                    kinic_tabs::tab_kind(state.current_tab_id.as_str()),
-                    kinic_tabs::TabKind::Form
-                ) {
-                    PaneFocus::Form
-                } else {
-                    PaneFocus::Detail
-                };
+                state.focus = focus_after_chat_close(state.current_tab_id.as_str());
             }
         }
         CoreAction::ChatInput(c) => {
@@ -486,6 +565,58 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         _ => {}
     }
+
+    normalize_focus_for_tab(state, previous_focus);
+}
+
+fn normalize_focus_for_tab(state: &mut CoreState, previous_focus: PaneFocus) {
+    let policy = tab_focus_policy(state.current_tab_id.as_str());
+
+    if is_focus_allowed_for_policy(policy, state.focus) {
+        return;
+    }
+
+    if is_focus_allowed_for_policy(policy, previous_focus) {
+        state.focus = previous_focus;
+        return;
+    }
+
+    state.focus = default_focus_for_policy(policy, state.chat_open);
+}
+
+fn is_focus_allowed_for_policy(policy: TabFocusPolicy, focus: PaneFocus) -> bool {
+    match focus {
+        PaneFocus::Search => policy.allows_search,
+        PaneFocus::List => policy.allows_list,
+        PaneFocus::Tabs => policy.allows_tabs,
+        PaneFocus::Detail => policy.allows_detail,
+        PaneFocus::Form => policy.allows_form,
+        PaneFocus::Extra => policy.allows_chat,
+    }
+}
+
+fn default_focus_for_policy(policy: TabFocusPolicy, chat_open: bool) -> PaneFocus {
+    if chat_open {
+        return PaneFocus::Extra;
+    }
+
+    policy.default_focus
+}
+
+fn focus_after_chat_close(tab_id: &str) -> PaneFocus {
+    let policy = tab_focus_policy(tab_id);
+
+    if policy.allows_form {
+        return PaneFocus::Form;
+    }
+    if policy.allows_detail {
+        return PaneFocus::Detail;
+    }
+    if policy.allows_list {
+        return PaneFocus::List;
+    }
+
+    policy.default_focus
 }
 
 /// Dispatch one action through local reducer + provider + snapshot merge.
@@ -505,7 +636,31 @@ pub fn dispatch_action(
 }
 
 /// Shared focus-aware keymap from abstract keys to core actions.
-pub fn action_for_key(key: CoreKey, focus: PaneFocus) -> Option<CoreAction> {
+pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> Option<CoreAction> {
+    if focus == PaneFocus::Tabs {
+        return match key {
+            CoreKey::Up | CoreKey::Char('k') => Some(CoreAction::SelectPrevTab),
+            CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::SelectNextTab),
+            CoreKey::Left | CoreKey::Char('h') => None,
+            CoreKey::Tab | CoreKey::Right | CoreKey::Char('l') | CoreKey::Enter => {
+                tab_entry_focus(current_tab_id).map(|focus| match focus {
+                    PaneFocus::Search => CoreAction::FocusSearch,
+                    PaneFocus::List => CoreAction::FocusList,
+                    PaneFocus::Tabs => CoreAction::FocusNext,
+                    PaneFocus::Detail => CoreAction::FocusDetail,
+                    PaneFocus::Form => CoreAction::FocusForm,
+                    PaneFocus::Extra => CoreAction::ToggleChat,
+                })
+            }
+            CoreKey::BackTab => Some(CoreAction::FocusPrev),
+            CoreKey::Char(c) if c.is_ascii_digit() && c != '0' => {
+                let idx = (c as u8 - b'1') as usize;
+                Some(CoreAction::SelectTabIndex(idx))
+            }
+            _ => None,
+        };
+    }
+
     match key {
         CoreKey::Slash => Some(CoreAction::FocusSearch),
         CoreKey::Tab => Some(CoreAction::FocusNext),
@@ -534,15 +689,7 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus) -> Option<CoreAction> {
                 }
                 _ => None,
             },
-            PaneFocus::Tabs => match key {
-                CoreKey::Up | CoreKey::Char('k') => Some(CoreAction::SelectPrevTab),
-                CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::SelectNextTab),
-                CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::FocusList),
-                CoreKey::Right | CoreKey::Char('l') | CoreKey::Enter => {
-                    Some(CoreAction::FocusDetail)
-                }
-                _ => None,
-            },
+            PaneFocus::Tabs => None,
             PaneFocus::Detail => match key {
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
                 CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::MovePageDown),
@@ -576,7 +723,8 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.selected_context = snapshot.selected_context;
     state.total_count = snapshot.total_count;
     state.status_message = snapshot.status_message;
-    state.settings = snapshot.settings;
+    state.create_cost_state = snapshot.create_cost_state;
+    state.create_submit_state = snapshot.create_submit_state;
 
     if let Some(sel) = state.selected_index {
         if sel >= state.list_items.len() {
@@ -631,7 +779,7 @@ mod tests {
             selected_context: None,
             total_count: 1,
             status_message: Some("ok".to_string()),
-            settings: SettingsSnapshot::default(),
+            ..ProviderSnapshot::default()
         };
 
         apply_snapshot(&mut state, snapshot);
@@ -697,5 +845,213 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::ToggleChat);
         assert_eq!(state.focus, PaneFocus::Form);
+    }
+
+    #[test]
+    fn focus_search_is_blocked_on_create_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Tabs,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusSearch);
+        assert_eq!(state.focus, PaneFocus::Tabs);
+    }
+
+    #[test]
+    fn focus_next_stays_visible_on_placeholder_tabs() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MARKET_TAB_ID.to_string(),
+            focus: PaneFocus::Tabs,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusNext);
+        assert_eq!(state.focus, PaneFocus::Tabs);
+    }
+
+    #[test]
+    fn focus_prev_is_clamped_on_create_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Tabs,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusPrev);
+        assert_eq!(state.focus, PaneFocus::Tabs);
+    }
+
+    #[test]
+    fn tab_focus_policy_matches_create_tab_capabilities() {
+        let policy = tab_focus_policy(kinic_tabs::KINIC_CREATE_TAB_ID);
+
+        assert_eq!(policy.default_focus, PaneFocus::Tabs);
+        assert!(!policy.allows_search);
+        assert!(!policy.allows_list);
+        assert!(policy.allows_tabs);
+        assert!(!policy.allows_detail);
+        assert!(policy.allows_form);
+        assert!(policy.allows_chat);
+    }
+
+    #[test]
+    fn back_is_clamped_on_create_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::Back);
+        assert_eq!(state.focus, PaneFocus::Form);
+    }
+
+    #[test]
+    fn create_next_field_cycles_back_to_name() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            create_focus: CreateModalFocus::Submit,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::CreateNextField);
+        assert_eq!(state.create_focus, CreateModalFocus::Name);
+    }
+
+    #[test]
+    fn create_refresh_sets_loading_state() {
+        let mut state = CoreState::default();
+
+        apply_core_action(&mut state, &CoreAction::CreateRefresh);
+
+        assert_eq!(state.create_cost_state, CreateCostState::Loading);
+        assert_eq!(state.create_spinner_frame, 0);
+    }
+
+    #[test]
+    fn tab_entry_focus_matches_kinic_tabs() {
+        assert_eq!(
+            tab_entry_focus(kinic_tabs::KINIC_MEMORIES_TAB_ID),
+            Some(PaneFocus::List)
+        );
+        assert_eq!(
+            tab_entry_focus(kinic_tabs::KINIC_CREATE_TAB_ID),
+            Some(PaneFocus::Form)
+        );
+        assert_eq!(
+            tab_entry_focus(kinic_tabs::KINIC_MARKET_TAB_ID),
+            Some(PaneFocus::Detail)
+        );
+        assert_eq!(tab_entry_focus("unknown"), Some(PaneFocus::Detail));
+    }
+
+    #[test]
+    fn tabs_enter_targets_list_on_memories() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Enter,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::FocusList)
+        );
+    }
+
+    #[test]
+    fn tabs_tab_targets_list_on_memories() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Tab,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::FocusList)
+        );
+    }
+
+    #[test]
+    fn tabs_enter_targets_form_on_create() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Enter,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            Some(CoreAction::FocusForm)
+        );
+    }
+
+    #[test]
+    fn tabs_tab_targets_form_on_create() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Tab,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            Some(CoreAction::FocusForm)
+        );
+    }
+
+    #[test]
+    fn tabs_enter_targets_detail_on_placeholder() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Enter,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MARKET_TAB_ID
+            ),
+            Some(CoreAction::FocusDetail)
+        );
+    }
+
+    #[test]
+    fn tabs_tab_targets_detail_on_placeholder() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Tab,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MARKET_TAB_ID
+            ),
+            Some(CoreAction::FocusDetail)
+        );
+    }
+
+    #[test]
+    fn tabs_left_does_not_exit_tab_bar() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Left,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            None
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('h'),
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn focus_form_resets_create_entry_to_name() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Tabs,
+            create_focus: CreateModalFocus::Submit,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusForm);
+
+        assert_eq!(state.focus, PaneFocus::Form);
+        assert_eq!(state.create_focus, CreateModalFocus::Name);
     }
 }

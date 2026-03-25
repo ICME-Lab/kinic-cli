@@ -1,20 +1,19 @@
-use std::{future::Future, sync::mpsc, thread};
+use std::{sync::mpsc, thread};
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
-use super::settings::{self, PreferencesHealth, SessionSettingsSnapshot, UserPreferences};
 use crate::tui::TuiAuth;
 use serde::Deserialize;
-use tokio::runtime::{Handle, Runtime};
+use tokio::runtime::Runtime;
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreResult, CoreState, DataProvider, PaneFocus, ProviderOutput,
-    ProviderSnapshot,
+    CoreAction, CoreEffect, CoreResult, CoreState, CreateCostDetails, CreateCostState,
+    DataProvider, PaneFocus, ProviderOutput, ProviderSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct TuiConfig {
     pub auth: TuiAuth,
     pub use_mainnet: bool,
@@ -59,88 +58,84 @@ struct SearchPayload {
     tag: Option<String>,
 }
 
-enum BlockingRuntime {
-    Owned(Runtime),
-    Handle(Handle),
-}
-
-impl BlockingRuntime {
-    fn new() -> Self {
-        if let Ok(handle) = Handle::try_current() {
-            Self::Handle(handle)
-        } else {
-            Self::Owned(Runtime::new().expect("failed to create tokio runtime for tui"))
-        }
-    }
-
-    fn block_on<F>(&self, future: F) -> F::Output
-    where
-        F: Future,
-    {
-        match self {
-            Self::Owned(runtime) => runtime.block_on(future),
-            Self::Handle(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
-        }
-    }
-}
-
 pub struct KinicProvider {
     all: Vec<KinicRecord>,
     query: String,
     tab_id: String,
-    runtime: BlockingRuntime,
     config: TuiConfig,
-    session_settings: SessionSettingsSnapshot,
-    user_preferences: UserPreferences,
-    preferences_health: PreferencesHealth,
     active_memory_id: Option<String>,
     memory_records: Vec<KinicRecord>,
     result_records: Vec<KinicRecord>,
     memories_mode: MemoriesMode,
+    pending_initial_memories: Option<mpsc::Receiver<InitialMemoriesTaskOutput>>,
+    initial_memories_in_flight: bool,
     pending_search: Option<mpsc::Receiver<SearchTaskOutput>>,
+    pending_search_context: Option<SearchRequestContext>,
+    next_search_request_id: u64,
     search_in_flight: bool,
+    create_cost_state: CreateCostState,
+    pending_create_cost: Option<mpsc::Receiver<CreateCostTaskOutput>>,
+    pending_create_cost_request_id: Option<u64>,
+    create_cost_in_flight: bool,
+    pending_create_submit: Option<mpsc::Receiver<CreateSubmitTaskOutput>>,
+    pending_create_submit_request_id: Option<u64>,
+    create_submit_in_flight: bool,
+    next_create_request_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SearchRequestContext {
+    request_id: u64,
+    memory_id: String,
+    query: String,
 }
 
 struct SearchTaskOutput {
+    request_id: u64,
     memory_id: String,
+    query: String,
     result: Result<Vec<SearchResultItem>, String>,
+}
+
+struct InitialMemoriesTaskOutput {
+    result: Result<Vec<MemorySummary>, String>,
+}
+
+struct CreateCostTaskOutput {
+    request_id: u64,
+    result: Result<CreateCostDetails, bridge::CreateCostFetchError>,
+}
+
+struct CreateSubmitTaskOutput {
+    request_id: u64,
+    result: Result<bridge::CreateMemorySuccess, bridge::CreateMemoryError>,
 }
 
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
-        let (user_preferences, preferences_health) = match settings::load_user_preferences() {
-            Ok(preferences) => (preferences, PreferencesHealth::default()),
-            Err(error) => (
-                UserPreferences::default(),
-                PreferencesHealth {
-                    load_error: Some(error.to_string()),
-                    save_error: None,
-                },
-            ),
-        };
-        let session_settings = SessionSettingsSnapshot::new(
-            &config.auth,
-            config.use_mainnet,
-            None,
-            crate::embedding::embedding_base_url(),
-            user_preferences.default_memory_id.clone(),
-        );
-
         Self {
             all: sample_records(),
             query: String::new(),
             tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
-            runtime: BlockingRuntime::new(),
             config,
-            session_settings,
-            user_preferences,
-            preferences_health,
             active_memory_id: None,
             memory_records: Vec::new(),
             result_records: Vec::new(),
             memories_mode: MemoriesMode::Browser,
+            pending_initial_memories: None,
+            initial_memories_in_flight: false,
             pending_search: None,
+            pending_search_context: None,
+            next_search_request_id: 0,
             search_in_flight: false,
+            create_cost_state: CreateCostState::Hidden,
+            pending_create_cost: None,
+            pending_create_cost_request_id: None,
+            create_cost_in_flight: false,
+            pending_create_submit: None,
+            pending_create_submit_request_id: None,
+            create_submit_in_flight: false,
+            next_create_request_id: 0,
         }
     }
 
@@ -149,63 +144,75 @@ impl KinicProvider {
             return;
         }
 
-        match self.runtime.block_on(bridge::list_memories(
-            self.config.use_mainnet,
-            self.config.auth.clone(),
-        )) {
-            Ok(memories) => {
-                self.memory_records = memories
-                    .into_iter()
-                    .map(record_from_memory_summary)
-                    .collect();
-                self.prioritize_default_memory();
-                self.all = self.memory_records.clone();
-                self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
-            }
-            Err(error) => {
-                self.all = vec![KinicRecord::new(
-                    "kinic-live-error",
-                    "Unable to load memories",
-                    "memories",
-                    "Check your identity or network configuration.",
-                    format!("## Live Load Error\n\n{error}"),
-                )];
-            }
-        }
+        let _ = self.start_live_memories_load(None, false);
     }
 
-    fn reload_live_memories(&mut self, prioritize_id: Option<&str>) -> Result<(), String> {
+    fn start_live_memories_load(
+        &mut self,
+        notify_message: Option<&str>,
+        preserve_query: bool,
+    ) -> Option<CoreEffect> {
         if !self.is_live() {
-            return Ok(());
+            return Some(CoreEffect::Notify(
+                "Live memories unavailable in mock mode.".to_string(),
+            ));
         }
-        let memories = self
-            .runtime
-            .block_on(bridge::list_memories(
-                self.config.use_mainnet,
-                self.config.auth.clone(),
-            ))
-            .map_err(|error| error.to_string())?;
-        self.memory_records = memories
-            .into_iter()
-            .map(record_from_memory_summary)
-            .collect();
-        if let Some(id) = prioritize_id
-            && let Some(index) = self.memory_records.iter().position(|r| r.id == id)
-        {
-            let record = self.memory_records.remove(index);
-            self.memory_records.insert(0, record);
-        } else {
-            self.prioritize_default_memory();
+
+        if self.initial_memories_in_flight {
+            return Some(CoreEffect::Notify(
+                "Memories are already loading.".to_string(),
+            ));
         }
-        self.all = self.memory_records.clone();
-        self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
+
         self.memories_mode = MemoriesMode::Browser;
+        if !preserve_query {
+            self.query.clear();
+        }
         self.result_records.clear();
-        Ok(())
+        self.invalidate_pending_search();
+        self.pending_search = None;
+        self.search_in_flight = false;
+
+        self.all = vec![loading_memories_record()];
+        self.memory_records.clear();
+        self.active_memory_id = None;
+        self.initial_memories_in_flight = true;
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        let (tx, rx) = mpsc::channel();
+        self.pending_initial_memories = Some(rx);
+
+        thread::spawn(move || {
+            let runtime =
+                Runtime::new().expect("failed to create tokio runtime for initial memories load");
+            let result = runtime
+                .block_on(bridge::list_memories(use_mainnet, auth))
+                .map_err(|error| error.to_string());
+            let _ = tx.send(InitialMemoriesTaskOutput { result });
+        });
+
+        notify_message.map(|message| CoreEffect::Notify(message.to_string()))
+    }
+
+    fn is_memories_load_error_visible(&self) -> bool {
+        self.memory_records.is_empty()
+            && self.all.len() == 1
+            && self.all[0].id == "kinic-live-error"
+    }
+
+    fn refresh_current_view(&mut self) -> Vec<CoreEffect> {
+        match self.tab_id.as_str() {
+            KINIC_CREATE_TAB_ID => self.start_create_cost_refresh().into_iter().collect(),
+            KINIC_MEMORIES_TAB_ID => self
+                .start_live_memories_load(Some("Refreshing memories..."), true)
+                .into_iter()
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     fn is_live(&self) -> bool {
-        matches!(self.config.auth, TuiAuth::KeyringIdentity(_))
+        self.config.auth.is_live()
     }
 
     fn current_records(&self) -> Vec<&KinicRecord> {
@@ -254,9 +261,13 @@ impl KinicProvider {
             return;
         }
 
+        let previous_active_memory_id = self.active_memory_id.clone();
         if self.query.is_empty() {
             if self.active_memory_id.is_none() {
                 self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
+            }
+            if self.active_memory_id != previous_active_memory_id {
+                self.invalidate_pending_search();
             }
             return;
         }
@@ -269,6 +280,9 @@ impl KinicProvider {
 
         if visible_ids.is_empty() {
             self.active_memory_id = None;
+            if self.active_memory_id != previous_active_memory_id {
+                self.invalidate_pending_search();
+            }
             return;
         }
 
@@ -281,6 +295,7 @@ impl KinicProvider {
         }
 
         self.active_memory_id = visible_ids.first().cloned();
+        self.invalidate_pending_search();
     }
 
     fn live_search_target_id(&self) -> Option<String> {
@@ -337,7 +352,7 @@ impl KinicProvider {
         let last = visible_records.len().saturating_sub(1) as isize;
         let next = (current + delta).clamp(0, last) as usize;
         self.active_memory_id = Some(visible_records[next].id.clone());
-        self.persist_default_memory_preference();
+        self.invalidate_pending_search();
     }
 
     fn set_active_memory(&mut self, index: usize) {
@@ -349,7 +364,7 @@ impl KinicProvider {
             return;
         };
         self.active_memory_id = Some(record.id.clone());
-        self.persist_default_memory_preference();
+        self.invalidate_pending_search();
     }
 
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
@@ -375,97 +390,80 @@ impl KinicProvider {
             selected_context: None,
             total_count: filtered.len(),
             status_message: Some(self.status_message(filtered.len())),
-            settings: settings::build_settings_snapshot(
-                &self.session_settings,
-                &self.user_preferences,
-                &self.available_memory_ids(),
-                &self.preferences_health,
-            ),
+            create_cost_state: self.create_cost_state.clone(),
+            create_submit_state: state.create_submit_state.clone(),
         }
     }
 
-    fn available_memory_ids(&self) -> Vec<String> {
-        self.memory_records
-            .iter()
-            .map(|record| record.id.clone())
-            .collect()
+    fn start_create_cost_refresh(&mut self) -> Option<CoreEffect> {
+        if !self.is_live() {
+            self.create_cost_state = CreateCostState::Unavailable;
+            return Some(CoreEffect::Notify(
+                "Live account info unavailable in mock mode.".to_string(),
+            ));
+        }
+        if self.create_cost_in_flight {
+            return Some(CoreEffect::Notify(
+                "Account info refresh already running.".to_string(),
+            ));
+        }
+
+        let request_id = self.next_create_request_id;
+        self.next_create_request_id += 1;
+        self.pending_create_cost_request_id = Some(request_id);
+        self.create_cost_state = CreateCostState::Loading;
+        self.create_cost_in_flight = true;
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        let (tx, rx) = mpsc::channel();
+        self.pending_create_cost = Some(rx);
+
+        thread::spawn(move || {
+            let runtime =
+                Runtime::new().expect("failed to create tokio runtime for create cost refresh");
+            let result = runtime.block_on(bridge::fetch_create_cost_details(use_mainnet, auth));
+            let _ = tx.send(CreateCostTaskOutput { request_id, result });
+        });
+
+        Some(CoreEffect::Notify("Refreshing account info...".to_string()))
     }
 
-    fn refresh_session_settings(&mut self) {
-        self.session_settings = self.runtime.block_on(bridge::load_session_settings(
-            self.config.use_mainnet,
-            self.config.auth.clone(),
-            self.user_preferences.default_memory_id.clone(),
-        ));
-    }
+    fn start_create_submit(&mut self, name: String, description: String) -> CoreEffect {
+        let request_id = self.next_create_request_id;
+        self.next_create_request_id += 1;
+        self.pending_create_submit_request_id = Some(request_id);
+        self.create_submit_in_flight = true;
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        let (tx, rx) = mpsc::channel();
+        self.pending_create_submit = Some(rx);
 
-    fn prioritize_default_memory(&mut self) {
-        let Some(default_memory_id) = self.user_preferences.default_memory_id.as_deref() else {
-            return;
-        };
-        let Some(index) = self
-            .memory_records
-            .iter()
-            .position(|record| record.id == default_memory_id)
-        else {
-            return;
-        };
-        if index == 0 {
-            return;
-        }
+        thread::spawn(move || {
+            let runtime = Runtime::new().expect("failed to create tokio runtime for create submit");
+            let result =
+                runtime.block_on(bridge::create_memory(use_mainnet, auth, name, description));
+            let _ = tx.send(CreateSubmitTaskOutput { request_id, result });
+        });
 
-        let record = self.memory_records.remove(index);
-        self.memory_records.insert(0, record);
-    }
-
-    fn persist_default_memory_preference(&mut self) {
-        if !self.is_live()
-            || self.memories_mode != MemoriesMode::Browser
-            || self.tab_id != KINIC_MEMORIES_TAB_ID
-        {
-            return;
-        }
-        let Some(active_memory_id) = self.active_memory_id.clone() else {
-            return;
-        };
-        if self.user_preferences.default_memory_id.as_deref() == Some(active_memory_id.as_str()) {
-            return;
-        }
-
-        let updated_preferences = UserPreferences {
-            default_memory_id: Some(active_memory_id),
-        };
-        match settings::save_user_preferences(&updated_preferences) {
-            Ok(()) => {
-                self.user_preferences = updated_preferences;
-                self.session_settings.default_memory_id =
-                    self.user_preferences.default_memory_id.clone();
-                self.preferences_health.save_error = None;
-            }
-            Err(error) => {
-                self.preferences_health.save_error = Some(error.to_string());
-            }
-        }
+        CoreEffect::Notify("Creating memory...".to_string())
     }
 
     fn status_message(&self, visible_count: usize) -> String {
-        if self.is_live()
-            && self.memory_records.is_empty()
-            && self
-                .all
-                .first()
-                .is_some_and(|record| record.id == "kinic-live-error")
-        {
-            return "kinic(live): unable to load memories | check identity or network configuration"
-                .to_string();
-        }
-        let base = if !self.is_live() {
-            format!(
+        if !self.is_live() {
+            return format!(
                 "kinic(mock): {visible_count} filtered / {} total",
                 self.all.len()
-            )
-        } else {
-            match self.memories_mode {
+            );
+        }
+
+        if self.initial_memories_in_flight {
+            return "kinic(live): loading memories...".to_string();
+        }
+        if self.is_memories_load_error_visible() {
+            return "kinic(live): memories unavailable | F5 retries loading".to_string();
+        }
+
+        match self.memories_mode {
             MemoriesMode::Browser => match self.active_memory_id.as_deref() {
                 Some(memory_id) => format!(
                     "kinic(live): target {memory_id} | j/k selects memory canister | Enter in search runs remote search"
@@ -478,20 +476,40 @@ impl KinicProvider {
                 ),
                 None => format!("kinic(live): {visible_count} search results"),
             },
-            }
-        };
-        if let Some(error) = &self.preferences_health.save_error {
-            return format!("{base} | preferences save failed: {error}");
         }
-        if let Some(error) = &self.preferences_health.load_error {
-            return format!("{base} | preferences load failed: {error}");
+    }
+
+    fn invalidate_pending_search(&mut self) {
+        self.pending_search_context = None;
+    }
+
+    fn invalidate_pending_create_cost(&mut self) {
+        self.pending_create_cost_request_id = None;
+    }
+
+    fn invalidate_pending_create_submit(&mut self) {
+        self.pending_create_submit_request_id = None;
+    }
+
+    fn search_context(request_id: u64, memory_id: String, query: String) -> SearchRequestContext {
+        SearchRequestContext {
+            request_id,
+            memory_id,
+            query,
         }
-        base
+    }
+
+    fn matches_pending_search(&self, output: &SearchTaskOutput) -> bool {
+        self.pending_search_context.as_ref().is_some_and(|context| {
+            context.request_id == output.request_id
+                && context.memory_id == output.memory_id
+                && context.query == output.query
+        })
     }
 
     fn run_live_search(&mut self) -> Option<CoreEffect> {
         let auth = self.config.auth.clone();
-        if !matches!(auth, TuiAuth::KeyringIdentity(_)) {
+        if !auth.is_live() {
             return None;
         }
         if self.search_in_flight {
@@ -508,12 +526,20 @@ impl KinicProvider {
         if query.is_empty() {
             self.memories_mode = MemoriesMode::Browser;
             self.result_records.clear();
+            self.invalidate_pending_search();
             return Some(CoreEffect::Notify(
                 "Cleared search query and returned to memories.".to_string(),
             ));
         }
 
         let use_mainnet = self.config.use_mainnet;
+        let request_id = self.next_search_request_id;
+        self.next_search_request_id += 1;
+        self.pending_search_context = Some(Self::search_context(
+            request_id,
+            memory_id.clone(),
+            query.clone(),
+        ));
         let (tx, rx) = mpsc::channel();
         self.pending_search = Some(rx);
         self.search_in_flight = true;
@@ -525,22 +551,28 @@ impl KinicProvider {
                     use_mainnet,
                     auth,
                     memory_id.clone(),
-                    query,
+                    query.clone(),
                 ))
                 .map_err(|error| error.to_string());
-            let _ = tx.send(SearchTaskOutput { memory_id, result });
+            let _ = tx.send(SearchTaskOutput {
+                request_id,
+                memory_id,
+                query,
+                result,
+            });
         });
 
         Some(CoreEffect::Notify("Searching...".to_string()))
     }
 
-    pub fn poll_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+    fn poll_search_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
         let receiver = self.pending_search.as_ref()?;
         let output = match receiver.try_recv() {
             Ok(output) => output,
             Err(mpsc::TryRecvError::Empty) => return None,
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.pending_search = None;
+                self.invalidate_pending_search();
                 self.search_in_flight = false;
                 return Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
@@ -553,6 +585,15 @@ impl KinicProvider {
 
         self.pending_search = None;
         self.search_in_flight = false;
+        let is_current_search = self.matches_pending_search(&output);
+        self.invalidate_pending_search();
+
+        if !is_current_search {
+            return Some(ProviderOutput {
+                snapshot: Some(self.build_snapshot(state)),
+                effects: Vec::new(),
+            });
+        }
 
         let effects = match output.result {
             Ok(results) => {
@@ -562,16 +603,190 @@ impl KinicProvider {
                     .map(|(index, item)| record_from_search_result(index, &output.memory_id, item))
                     .collect();
                 self.memories_mode = MemoriesMode::Results;
-                vec![CoreEffect::SearchCompleted {
-                    message: format!(
-                        "Loaded {} search results for {}",
-                        self.result_records.len(),
-                        output.memory_id
-                    ),
-                }]
+                let mut effects = vec![CoreEffect::SelectFirstListItem];
+                if state.current_tab_id == KINIC_MEMORIES_TAB_ID {
+                    effects.push(CoreEffect::FocusPane(PaneFocus::List));
+                }
+                effects.push(CoreEffect::Notify(format!(
+                    "Loaded {} search results for {}",
+                    self.result_records.len(),
+                    output.memory_id
+                )));
+                effects
             }
-            Err(error) => vec![CoreEffect::Notify(format!("Search failed: {error}"))],
+            Err(error) => {
+                self.result_records.clear();
+                self.memories_mode = MemoriesMode::Browser;
+                vec![CoreEffect::Notify(format!("Search failed: {error}"))]
+            }
         };
+
+        Some(ProviderOutput {
+            snapshot: Some(self.build_snapshot(state)),
+            effects,
+        })
+    }
+
+    fn poll_initial_memories_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.pending_initial_memories.as_ref()?;
+        let output = match receiver.try_recv() {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_initial_memories = None;
+                self.initial_memories_in_flight = false;
+                self.all = vec![load_error_record(
+                    "Initial memories worker disconnected unexpectedly.".to_string(),
+                )];
+                return Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: vec![CoreEffect::Notify(
+                        "Initial memories load failed unexpectedly.".to_string(),
+                    )],
+                });
+            }
+        };
+
+        self.pending_initial_memories = None;
+        self.initial_memories_in_flight = false;
+        match output.result {
+            Ok(memories) => {
+                self.memory_records = memories
+                    .into_iter()
+                    .map(record_from_memory_summary)
+                    .collect();
+                self.all = self.memory_records.clone();
+                self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
+                Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: vec![CoreEffect::Notify("Loaded memories.".to_string())],
+                })
+            }
+            Err(error) => {
+                self.memory_records.clear();
+                self.result_records.clear();
+                self.memories_mode = MemoriesMode::Browser;
+                self.all = vec![load_error_record(error)];
+                self.active_memory_id = None;
+                Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: vec![CoreEffect::Notify("Unable to load memories.".to_string())],
+                })
+            }
+        }
+    }
+
+    fn poll_create_cost_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.pending_create_cost.as_ref()?;
+        let output = match receiver.try_recv() {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_create_cost = None;
+                self.invalidate_pending_create_cost();
+                self.create_cost_in_flight = false;
+                self.create_cost_state =
+                    CreateCostState::Error("Account info refresh worker disconnected.".to_string());
+                return Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: vec![CoreEffect::Notify(
+                        "Account info refresh failed unexpectedly.".to_string(),
+                    )],
+                });
+            }
+        };
+
+        self.pending_create_cost = None;
+        self.create_cost_in_flight = false;
+        let is_current = self.pending_create_cost_request_id == Some(output.request_id);
+        self.invalidate_pending_create_cost();
+        if !is_current {
+            return Some(ProviderOutput {
+                snapshot: Some(self.build_snapshot(state)),
+                effects: Vec::new(),
+            });
+        }
+
+        self.create_cost_state = match output.result {
+            Ok(details) => CreateCostState::Ready(details),
+            Err(error) => CreateCostState::Error(format_create_cost_error(&error)),
+        };
+
+        Some(ProviderOutput {
+            snapshot: Some(self.build_snapshot(state)),
+            effects: Vec::new(),
+        })
+    }
+
+    fn poll_create_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.pending_create_submit.as_ref()?;
+        let output = match receiver.try_recv() {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_create_submit = None;
+                self.invalidate_pending_create_submit();
+                self.create_submit_in_flight = false;
+                return Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: vec![CoreEffect::CreateFormError(Some(
+                        "Create request failed: background worker disconnected.".to_string(),
+                    ))],
+                });
+            }
+        };
+
+        self.pending_create_submit = None;
+        self.create_submit_in_flight = false;
+        let is_current = self.pending_create_submit_request_id == Some(output.request_id);
+        self.invalidate_pending_create_submit();
+        if !is_current {
+            return Some(ProviderOutput {
+                snapshot: Some(self.build_snapshot(state)),
+                effects: Vec::new(),
+            });
+        }
+
+        let mut effects = Vec::new();
+        match output.result {
+            Ok(success) => {
+                self.active_memory_id = Some(success.id.clone());
+                if let Some(memories) = success.memories {
+                    self.memory_records = memories
+                        .into_iter()
+                        .map(record_from_memory_summary)
+                        .collect();
+                    self.all = self.memory_records.clone();
+                    if let Some(index) = self.memory_records.iter().position(|r| r.id == success.id)
+                    {
+                        let record = self.memory_records.remove(index);
+                        self.memory_records.insert(0, record.clone());
+                        self.all = self.memory_records.clone();
+                    }
+                }
+                self.memories_mode = MemoriesMode::Browser;
+                self.result_records.clear();
+                self.invalidate_pending_search();
+                let _ = self.start_create_cost_refresh();
+                effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
+                effects.push(CoreEffect::SelectFirstListItem);
+                effects.push(CoreEffect::ResetCreateFormAndSetTab {
+                    tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                });
+                effects.push(CoreEffect::FocusPane(PaneFocus::List));
+                let status = if let Some(warning) = success.refresh_warning {
+                    format!("Created memory {}. {}", success.id, warning)
+                } else {
+                    format!("Created memory {}", success.id)
+                };
+                effects.push(CoreEffect::Notify(status));
+            }
+            Err(error) => {
+                effects.push(CoreEffect::CreateFormError(Some(
+                    format_create_submit_error(&error),
+                )));
+            }
+        }
 
         Some(ProviderOutput {
             snapshot: Some(self.build_snapshot(state)),
@@ -583,6 +798,7 @@ impl KinicProvider {
         if self.is_live() {
             self.memories_mode = MemoriesMode::Browser;
             self.result_records.clear();
+            self.invalidate_pending_search();
         }
     }
 
@@ -594,14 +810,20 @@ impl KinicProvider {
                 self.reset_memories_browser();
                 vec![CoreEffect::Notify("Switched to memories.".to_string())]
             }
-            KINIC_CREATE_TAB_ID => vec![CoreEffect::Notify("Create a new memory.".to_string())],
+            KINIC_CREATE_TAB_ID => {
+                let mut effects = vec![CoreEffect::Notify("Create a new memory.".to_string())];
+                if let Some(effect) = self.start_create_cost_refresh() {
+                    effects.push(effect);
+                }
+                effects
+            }
             KINIC_MARKET_TAB_ID => {
                 vec![CoreEffect::Notify(
                     "Market is not implemented yet.".to_string(),
                 )]
             }
             KINIC_SETTINGS_TAB_ID => vec![CoreEffect::Notify(
-                "Settings tab shows detailed status. Shift+S opens quick status.".to_string(),
+                "Use Shift+S or the future settings tab flow.".to_string(),
             )],
             _ => vec![CoreEffect::Notify(format!("Switched kinic tab: {tab_id}"))],
         }
@@ -610,7 +832,6 @@ impl KinicProvider {
 
 impl DataProvider for KinicProvider {
     fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
-        self.refresh_session_settings();
         self.initialize_live_memories();
         Ok(self.build_snapshot(&CoreState::default()))
     }
@@ -624,6 +845,7 @@ impl DataProvider for KinicProvider {
         match action {
             CoreAction::SetQuery(q) => {
                 self.query = q.clone();
+                self.invalidate_pending_search();
                 if self.tab_id == KINIC_MEMORIES_TAB_ID && q.is_empty() {
                     self.reset_memories_browser();
                 }
@@ -631,10 +853,12 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::SearchInput(c) => {
                 self.query.push(*c);
+                self.invalidate_pending_search();
                 self.sync_active_memory_to_visible_records();
             }
             CoreAction::SearchBackspace => {
                 self.query.pop();
+                self.invalidate_pending_search();
                 if self.query.is_empty() {
                     self.reset_memories_browser();
                 }
@@ -673,35 +897,12 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::CreateFormError(Some(
                         "Name and description are required.".to_string(),
                     )));
+                } else if self.create_submit_in_flight {
+                    effects.push(CoreEffect::Notify(
+                        "Create request already running.".to_string(),
+                    ));
                 } else if self.is_live() {
-                    match self.runtime.block_on(bridge::create_memory(
-                        self.config.use_mainnet,
-                        self.config.auth.clone(),
-                        name.clone(),
-                        description,
-                    )) {
-                        Ok(created_id) => match self.reload_live_memories(Some(&created_id)) {
-                            Ok(()) => {
-                                self.active_memory_id = Some(created_id.clone());
-                                self.persist_default_memory_preference();
-                                effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
-                                effects.push(CoreEffect::SelectFirstListItem);
-                                effects.push(CoreEffect::ResetCreateFormAndSetTab {
-                                    tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
-                                });
-                                effects.push(CoreEffect::FocusPane(PaneFocus::List));
-                                effects.push(CoreEffect::Notify(format!(
-                                    "Created memory {created_id}"
-                                )));
-                            }
-                            Err(error) => {
-                                effects.push(CoreEffect::CreateFormError(Some(error)));
-                            }
-                        },
-                        Err(error) => {
-                            effects.push(CoreEffect::CreateFormError(Some(error.to_string())));
-                        }
-                    }
+                    effects.push(self.start_create_submit(name, description));
                 } else {
                     let new_id = format!("mock-memory-{}", self.all.len() + 1);
                     let record = KinicRecord::new(
@@ -725,6 +926,14 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::Notify(format!("Created mock memory {name}")));
                 }
             }
+            CoreAction::CreateRefresh => {
+                if let Some(effect) = self.start_create_cost_refresh() {
+                    effects.push(effect);
+                }
+            }
+            CoreAction::RefreshCurrentView => {
+                effects.extend(self.refresh_current_view());
+            }
             _ => {}
         }
 
@@ -733,6 +942,33 @@ impl DataProvider for KinicProvider {
             effects,
         })
     }
+
+    fn poll_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        self.poll_initial_memories_background(state)
+            .or_else(|| self.poll_create_submit_background(state))
+            .or_else(|| self.poll_create_cost_background(state))
+            .or_else(|| self.poll_search_background(state))
+    }
+}
+
+fn loading_memories_record() -> KinicRecord {
+    KinicRecord::new(
+        "kinic-live-loading",
+        "Loading memories...",
+        "memories",
+        "Waiting for launcher response.",
+        "## Loading Memories\n\nThe TUI started successfully and is waiting for the launcher to respond.\n",
+    )
+}
+
+fn load_error_record(error: String) -> KinicRecord {
+    KinicRecord::new(
+        "kinic-live-error",
+        "Unable to load memories",
+        "memories",
+        "Check your identity or network configuration.",
+        format!("## Live Load Error\n\n{error}"),
+    )
 }
 
 fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
@@ -826,6 +1062,48 @@ fn decode_payload_text(text: &str) -> String {
         .map(str::trim_end)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn format_create_cost_error(error: &bridge::CreateCostFetchError) -> String {
+    match error {
+        bridge::CreateCostFetchError::Principal(reason) => {
+            format!("Could not derive principal. Cause: {reason}")
+        }
+        bridge::CreateCostFetchError::Balance(reason) => {
+            format!("Could not fetch KINIC balance. Cause: {reason}")
+        }
+        bridge::CreateCostFetchError::Price(reason) => {
+            format!("Could not fetch create price. Cause: {reason}")
+        }
+    }
+}
+
+fn format_create_submit_error(error: &bridge::CreateMemoryError) -> String {
+    match error {
+        bridge::CreateMemoryError::Principal(reason) => {
+            format!("Could not derive principal for create. Cause: {reason}")
+        }
+        bridge::CreateMemoryError::Balance(reason) => {
+            format!("Could not fetch current balance. Cause: {reason}")
+        }
+        bridge::CreateMemoryError::Price(reason) => {
+            format!("Could not fetch create price. Cause: {reason}")
+        }
+        bridge::CreateMemoryError::InsufficientBalance {
+            required_total_kinic,
+            required_total_base_units,
+            shortfall_kinic,
+            shortfall_base_units,
+        } => format!(
+            "Insufficient balance. Need {required_total_kinic} KINIC ({required_total_base_units} e8s) total, short by {shortfall_kinic} KINIC ({shortfall_base_units} e8s)."
+        ),
+        bridge::CreateMemoryError::Approve(reason) => {
+            format!("Approve step failed. Cause: {reason}")
+        }
+        bridge::CreateMemoryError::Deploy(reason) => {
+            format!("Deploy step failed. Cause: {reason}")
+        }
+    }
 }
 
 fn sample_records() -> Vec<KinicRecord> {
@@ -1112,7 +1390,7 @@ mod tests {
 
     fn live_config() -> TuiConfig {
         TuiConfig {
-            auth: TuiAuth::KeyringIdentity("alice".to_string()),
+            auth: TuiAuth::resolved_for_tests(),
             use_mainnet: false,
         }
     }
@@ -1125,6 +1403,33 @@ mod tests {
             "Status: running",
             format!("detail for {id}"),
         )
+    }
+
+    fn pending_search_context(
+        request_id: u64,
+        memory_id: &str,
+        query: &str,
+    ) -> SearchRequestContext {
+        SearchRequestContext {
+            request_id,
+            memory_id: memory_id.to_string(),
+            query: query.to_string(),
+        }
+    }
+
+    fn ready_cost_details() -> CreateCostDetails {
+        CreateCostDetails {
+            principal: "aaaaa-aa".to_string(),
+            balance_kinic: "1.00000000".to_string(),
+            balance_base_units: "100000000".to_string(),
+            price_kinic: "0.50000000".to_string(),
+            price_base_units: "50000000".to_string(),
+            required_total_kinic: "0.50200000".to_string(),
+            required_total_base_units: "50200000".to_string(),
+            difference_kinic: "+0.49800000".to_string(),
+            difference_base_units: "+49800000".to_string(),
+            sufficient_balance: true,
+        }
     }
 
     #[test]
@@ -1210,10 +1515,121 @@ mod tests {
         let effects = provider.set_tab(KINIC_CREATE_TAB_ID);
 
         assert_eq!(provider.tab_id, KINIC_CREATE_TAB_ID);
+        assert_eq!(provider.create_cost_state, CreateCostState::Unavailable);
         assert!(effects.iter().any(|effect| matches!(
             effect,
             CoreEffect::Notify(message) if message == "Create a new memory."
         )));
+    }
+
+    #[test]
+    fn set_tab_create_starts_loading_account_info_in_live_mode() {
+        let mut provider = KinicProvider::new(live_config());
+
+        let effects = provider.set_tab(KINIC_CREATE_TAB_ID);
+
+        assert_eq!(provider.tab_id, KINIC_CREATE_TAB_ID);
+        assert_eq!(provider.create_cost_state, CreateCostState::Loading);
+        assert!(provider.create_cost_in_flight);
+        assert!(provider.pending_create_cost.is_some());
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Refreshing account info..."
+        )));
+    }
+
+    #[test]
+    fn build_snapshot_exposes_create_cost_state() {
+        let mut provider = KinicProvider::new(TuiConfig {
+            auth: TuiAuth::Mock,
+            use_mainnet: false,
+        });
+        provider.create_cost_state = CreateCostState::Unavailable;
+
+        let snapshot = provider.build_snapshot(&CoreState::default());
+
+        assert_eq!(snapshot.create_cost_state, CreateCostState::Unavailable);
+    }
+
+    #[test]
+    fn initialize_live_memories_starts_background_load_without_blocking() {
+        let mut provider = KinicProvider::new(live_config());
+
+        provider.initialize_live_memories();
+
+        assert!(provider.initial_memories_in_flight);
+        assert!(provider.pending_initial_memories.is_some());
+        assert_eq!(provider.all.len(), 1);
+        assert_eq!(provider.all[0].id, "kinic-live-loading");
+    }
+
+    #[test]
+    fn poll_initial_memories_background_applies_loaded_memories() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_initial_memories = Some(rx);
+        provider.initial_memories_in_flight = true;
+        tx.send(InitialMemoriesTaskOutput {
+            result: Ok(vec![MemorySummary {
+                id: "aaaaa-aa".to_string(),
+                status: "running".to_string(),
+                detail: "ready".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_initial_memories_background(&CoreState::default())
+            .expect("background result");
+
+        assert!(!provider.initial_memories_in_flight);
+        assert_eq!(provider.memory_records.len(), 1);
+        assert_eq!(provider.memory_records[0].id, "aaaaa-aa");
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Loaded memories."
+        )));
+    }
+
+    #[test]
+    fn poll_initial_memories_background_surfaces_error_row() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.result_records = vec![live_memory("aaaaa-aa-result-1", "Search Hit")];
+        provider.memories_mode = MemoriesMode::Results;
+        let (tx, rx) = mpsc::channel();
+        provider.pending_initial_memories = Some(rx);
+        provider.initial_memories_in_flight = true;
+        tx.send(InitialMemoriesTaskOutput {
+            result: Err("boom".to_string()),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_initial_memories_background(&CoreState::default())
+            .expect("background result");
+
+        assert!(!provider.initial_memories_in_flight);
+        assert!(provider.memory_records.is_empty());
+        assert!(provider.result_records.is_empty());
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert_eq!(provider.all.len(), 1);
+        assert_eq!(provider.all[0].id, "kinic-live-error");
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Unable to load memories."
+        )));
+    }
+
+    #[test]
+    fn load_error_status_message_mentions_retry_shortcut() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.all = vec![load_error_record("boom".to_string())];
+
+        assert_eq!(
+            provider.status_message(0),
+            "kinic(live): memories unavailable | F5 retries loading"
+        );
     }
 
     #[test]
@@ -1268,6 +1684,122 @@ mod tests {
     }
 
     #[test]
+    fn poll_background_applies_ready_create_cost_state() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_create_cost = Some(rx);
+        provider.pending_create_cost_request_id = Some(7);
+        provider.create_cost_in_flight = true;
+        tx.send(CreateCostTaskOutput {
+            request_id: 7,
+            result: Ok(ready_cost_details()),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("create cost output");
+
+        assert!(output.effects.is_empty());
+        assert_eq!(
+            provider.create_cost_state,
+            CreateCostState::Ready(ready_cost_details())
+        );
+        assert!(!provider.create_cost_in_flight);
+    }
+
+    #[test]
+    fn poll_background_returns_create_error_for_failed_submit() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_create_submit = Some(rx);
+        provider.pending_create_submit_request_id = Some(3);
+        provider.create_submit_in_flight = true;
+        tx.send(CreateSubmitTaskOutput {
+            request_id: 3,
+            result: Err(bridge::CreateMemoryError::Approve(
+                "ledger rejected approve".to_string(),
+            )),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("create submit output");
+
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::CreateFormError(Some(message))
+                if message.contains("Approve step failed")
+        )));
+        assert!(!provider.create_submit_in_flight);
+    }
+
+    #[test]
+    fn poll_background_keeps_create_success_when_memory_reload_fails() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("bbbbb-bb", "Existing Memory")];
+        provider.all = provider.memory_records.clone();
+        let (tx, rx) = mpsc::channel();
+        provider.pending_create_submit = Some(rx);
+        provider.pending_create_submit_request_id = Some(5);
+        provider.create_submit_in_flight = true;
+        tx.send(CreateSubmitTaskOutput {
+            request_id: 5,
+            result: Ok(bridge::CreateMemorySuccess {
+                id: "aaaaa-aa".to_string(),
+                memories: None,
+                refresh_warning: Some(
+                    "Automatic reload failed after create. Press F5 to refresh. Cause: boom"
+                        .to_string(),
+                ),
+            }),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("create submit output");
+
+        assert!(!provider.create_submit_in_flight);
+        assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
+        assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+        assert_eq!(provider.memory_records.len(), 1);
+        assert_eq!(provider.memory_records[0].id, "bbbbb-bb");
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::ResetCreateFormAndSetTab { tab_id }
+                if tab_id == KINIC_MEMORIES_TAB_ID
+        )));
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message)
+                if message.contains("Created memory aaaaa-aa.")
+                    && message.contains("Press F5 to refresh")
+        )));
+    }
+
+    #[test]
+    fn refresh_current_view_restarts_live_memories_load() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.all = vec![load_error_record("boom".to_string())];
+        provider.query = "alpha".to_string();
+
+        let output = provider
+            .handle_action(&CoreAction::RefreshCurrentView, &CoreState::default())
+            .expect("refresh output");
+
+        assert!(provider.initial_memories_in_flight);
+        assert!(provider.pending_initial_memories.is_some());
+        assert_eq!(provider.all[0].id, "kinic-live-loading");
+        assert_eq!(provider.query, "alpha");
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Refreshing memories..."
+        )));
+    }
+
+    #[test]
     fn clearing_query_after_create_resets_memories_browser() {
         let mut provider = KinicProvider::new(TuiConfig {
             auth: TuiAuth::Mock,
@@ -1293,6 +1825,286 @@ mod tests {
         assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
         assert_eq!(provider.query, "");
         assert_eq!(output.snapshot.unwrap().total_count, provider.all.len());
+    }
+
+    #[test]
+    fn poll_background_returns_split_search_effects_on_memories_tab() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        tx.send(SearchTaskOutput {
+            request_id: 0,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "hello".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                ..CoreState::default()
+            })
+            .unwrap();
+
+        assert!(
+            output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::SelectFirstListItem))
+        );
+        assert!(
+            output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::List)))
+        );
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Loaded 1 search results for aaaaa-aa"
+        )));
+    }
+
+    #[test]
+    fn poll_background_skips_focus_effect_off_memories_tab() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        tx.send(SearchTaskOutput {
+            request_id: 0,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "hello".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState {
+                current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+                ..CoreState::default()
+            })
+            .unwrap();
+
+        assert!(
+            output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::SelectFirstListItem))
+        );
+        assert!(
+            !output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::List)))
+        );
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Loaded 1 search results for aaaaa-aa"
+        )));
+    }
+
+    #[test]
+    fn poll_background_discards_stale_result_after_query_changes() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "alpha".to_string();
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        provider
+            .handle_action(
+                &CoreAction::SetQuery("beta".to_string()),
+                &CoreState::default(),
+            )
+            .expect("query update should succeed");
+        tx.send(SearchTaskOutput {
+            request_id: 0,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "stale".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("stale search should still return a snapshot");
+
+        assert!(output.effects.is_empty());
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert!(provider.result_records.is_empty());
+        assert_eq!(provider.pending_search_context, None);
+        assert!(!provider.search_in_flight);
+        assert_eq!(
+            output
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.total_count),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn poll_background_discards_stale_result_after_active_memory_changes() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        provider
+            .handle_action(&CoreAction::MoveNext, &CoreState::default())
+            .expect("active memory update should succeed");
+        tx.send(SearchTaskOutput {
+            request_id: 0,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "stale".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("stale search should still return a snapshot");
+
+        assert!(output.effects.is_empty());
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert!(provider.result_records.is_empty());
+        assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+        assert_eq!(
+            output
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.selected_detail.as_ref())
+                .map(|detail| detail.id.as_str()),
+            Some("bbbbb-bb")
+        );
+    }
+
+    #[test]
+    fn poll_background_clears_previous_results_when_search_fails() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.result_records = vec![record_from_search_result(
+            0,
+            "aaaaa-aa",
+            SearchResultItem {
+                score: 0.9,
+                payload: "hello".to_string(),
+            },
+        )];
+        provider.memories_mode = MemoriesMode::Results;
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(1, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        tx.send(SearchTaskOutput {
+            request_id: 1,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Err("boom".to_string()),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("failed search should return a snapshot");
+
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert!(provider.result_records.is_empty());
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Search failed: boom"
+        )));
+        assert_eq!(
+            output
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.total_count),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn poll_background_discards_late_result_after_query_is_cleared() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "alpha".to_string();
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(2, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        provider
+            .handle_action(&CoreAction::SetQuery(String::new()), &CoreState::default())
+            .expect("clearing query should succeed");
+        tx.send(SearchTaskOutput {
+            request_id: 2,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "late".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("late search should still return a snapshot");
+
+        assert!(output.effects.is_empty());
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert!(provider.result_records.is_empty());
+    }
+
+    #[test]
+    fn poll_background_disconnected_clears_pending_search_state() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel::<SearchTaskOutput>();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(3, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        drop(tx);
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("disconnect should produce a provider output");
+
+        assert!(provider.pending_search.is_none());
+        assert_eq!(provider.pending_search_context, None);
+        assert!(!provider.search_in_flight);
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message)
+                if message == "Search worker disconnected unexpectedly."
+        )));
     }
 
     #[test]
@@ -1454,48 +2266,5 @@ mod tests {
                 .map(|detail| detail.id.as_str()),
             Some("ccccc-cc")
         );
-    }
-
-    #[test]
-    fn settings_tab_navigation_does_not_persist_default_memory() {
-        let mut provider = KinicProvider::new(live_config());
-        provider.tab_id = KINIC_SETTINGS_TAB_ID.to_string();
-        provider.memory_records = vec![
-            live_memory("aaaaa-aa", "Alpha Memory"),
-            live_memory("bbbbb-bb", "Beta Memory"),
-        ];
-        provider.all = provider.memory_records.clone();
-        provider.active_memory_id = Some("aaaaa-aa".to_string());
-        provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
-
-        provider
-            .handle_action(&CoreAction::MoveNext, &CoreState::default())
-            .expect("move next should succeed");
-
-        assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
-        assert_eq!(
-            provider.user_preferences.default_memory_id.as_deref(),
-            Some("aaaaa-aa")
-        );
-        assert!(provider.preferences_health.save_error.is_none());
-    }
-
-    #[test]
-    fn build_snapshot_surfaces_preferences_load_error_in_status() {
-        let mut provider = KinicProvider::new(live_config());
-        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
-        provider.all = provider.memory_records.clone();
-        provider.active_memory_id = Some("aaaaa-aa".to_string());
-        provider.preferences_health.load_error = Some("invalid YAML".to_string());
-
-        let snapshot = provider.build_snapshot(&CoreState::default());
-
-        assert_eq!(
-            snapshot.status_message.as_deref(),
-            Some(
-                "kinic(live): target aaaaa-aa | j/k selects memory canister | Enter in search runs remote search | preferences load failed: invalid YAML"
-            )
-        );
-        assert_eq!(snapshot.settings.quick_entries[5].value, "preferences unavailable");
     }
 }
