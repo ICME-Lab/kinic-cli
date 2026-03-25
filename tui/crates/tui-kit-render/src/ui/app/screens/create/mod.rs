@@ -7,10 +7,10 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::CreateModalFocus;
+use tui_kit_runtime::{CreateCostDetails, CreateCostState, CreateModalFocus, CreateSubmitState};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::ui::app::{Focus, TuiKitUi, shared};
+use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_create_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -32,7 +32,10 @@ impl<'a> TuiKitUi<'a> {
                 ),
                 Span::styled("  │  ", self.theme.style_dim()),
                 Span::styled(" Tab / Shift+Tab ", self.theme.style_accent()),
-                Span::styled(self.ui_config.create.intro_cycle_hint.as_str(), self.theme.style_muted()),
+                Span::styled(
+                    self.ui_config.create.intro_cycle_hint.as_str(),
+                    self.theme.style_muted(),
+                ),
                 Span::styled("  │  ", self.theme.style_dim()),
                 Span::styled(" Esc ", self.theme.style_accent()),
                 Span::styled(
@@ -187,11 +190,11 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
         !ui.create_description.is_empty(),
     );
     let submit_value = fit_single_line(
-        submit_text,
+        submit_text.as_str(),
         layout.input_width(terminal_str_width(submit_hint.content.as_ref())),
         false,
     );
-    let mut lines = Vec::with_capacity(if ui.create_error.is_some() { 11 } else { 9 });
+    let mut lines = Vec::with_capacity(if ui.create_error.is_some() { 20 } else { 18 });
 
     lines.push(Line::from(Span::styled(
         ui.ui_config.create.name_label.as_str(),
@@ -222,6 +225,8 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
         submit_hint,
     ]));
     lines.push(Line::from(""));
+    lines.extend(create_cost_lines(ui, layout));
+    lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(close_hint, ui.theme.style_muted())));
 
     if let Some(error) = ui.create_error {
@@ -239,6 +244,137 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
         submit_row,
         name_display_width: terminal_str_width(name_value.as_str()),
         description_display_width: terminal_str_width(description_value.as_str()),
+    }
+}
+fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<'static>> {
+    if matches!(ui.create_cost_state, CreateCostState::Hidden) {
+        return Vec::new();
+    }
+
+    let create_cfg = &ui.ui_config.create;
+    let mut lines = vec![Line::from(Span::styled(
+        create_cfg.account_title.clone(),
+        ui.theme.style_dim(),
+    ))];
+    let detail_label_width = create_cost_label_width(create_cfg);
+
+    match ui.create_cost_state {
+        CreateCostState::Hidden => {}
+        CreateCostState::Loading => {
+            lines.push(Line::from(Span::styled(
+                create_cfg.loading_message.clone(),
+                ui.theme.style_muted(),
+            )));
+        }
+        CreateCostState::Unavailable => {
+            lines.push(Line::from(Span::styled(
+                create_cfg.unavailable_message.clone(),
+                ui.theme.style_muted(),
+            )));
+        }
+        CreateCostState::Error(error) => {
+            lines.push(Line::from(Span::styled(
+                format!("{}: {error}", create_cfg.error_prefix),
+                ui.theme.style_error(),
+            )));
+        }
+        CreateCostState::Ready(details) => {
+            lines.push(create_cost_detail_line(
+                ui,
+                layout,
+                detail_label_width,
+                create_cfg.principal_label.as_str(),
+                details.principal.clone(),
+            ));
+            lines.push(create_cost_detail_line(
+                ui,
+                layout,
+                detail_label_width,
+                create_cfg.balance_label.as_str(),
+                format_kinic_value(details.balance_kinic.as_str()),
+            ));
+            lines.push(create_cost_detail_line(
+                ui,
+                layout,
+                detail_label_width,
+                create_cfg.price_label.as_str(),
+                format_kinic_value(details.required_total_kinic.as_str()),
+            ));
+            lines.push(create_cost_detail_line(
+                ui,
+                layout,
+                detail_label_width,
+                create_cfg.status_label.as_str(),
+                create_status_text(create_cfg, details),
+            ));
+        }
+    }
+
+    lines
+}
+fn create_cost_detail_line(
+    ui: &TuiKitUi<'_>,
+    layout: CreateScreenLayout,
+    label_width: u16,
+    label: &str,
+    value: String,
+) -> Line<'static> {
+    let padded_label = pad_terminal_width(label, label_width as usize);
+    let fitted_value = fit_single_line(value.as_str(), layout.input_width(label_width + 2), true);
+    Line::from(vec![
+        create_input_indent(),
+        Span::styled(format!("{padded_label}: "), ui.theme.style_dim()),
+        Span::styled(fitted_value, ui.theme.style_normal()),
+    ])
+}
+
+fn create_cost_label_width(create_cfg: &CreateOverlayText) -> u16 {
+    [
+        create_cfg.principal_label.as_str(),
+        create_cfg.balance_label.as_str(),
+        create_cfg.price_label.as_str(),
+        create_cfg.status_label.as_str(),
+    ]
+    .into_iter()
+    .map(terminal_str_width)
+    .max()
+    .unwrap_or(0)
+}
+
+fn format_kinic_value(kinic: &str) -> String {
+    format!("{} KINIC", round_kinic_display(kinic))
+}
+
+fn round_kinic_display(value: &str) -> String {
+    let mut chars = value.chars();
+    let sign = if matches!(chars.clone().next(), Some('+') | Some('-')) {
+        chars.next().unwrap_or_default().to_string()
+    } else {
+        String::new()
+    };
+    let unsigned = chars.as_str();
+    let Some((whole, frac)) = unsigned.split_once('.') else {
+        return format!("{sign}{unsigned}.000");
+    };
+    let mut frac_digits = frac.chars();
+    let first = frac_digits.next().unwrap_or('0');
+    let second = frac_digits.next().unwrap_or('0');
+    let third = frac_digits.next().unwrap_or('0');
+    format!("{sign}{whole}.{first}{second}{third}")
+}
+
+fn pad_terminal_width(value: &str, width: usize) -> String {
+    let current_width = terminal_str_width(value) as usize;
+    if current_width >= width {
+        return value.to_string();
+    }
+    format!("{value}{}", " ".repeat(width - current_width))
+}
+fn create_status_text(create_cfg: &CreateOverlayText, details: &CreateCostDetails) -> String {
+    if details.sufficient_balance {
+        create_cfg.status_ready_label.clone()
+    } else {
+        create_cfg.status_insufficient_label.clone()
     }
 }
 fn create_form_border_style(ui: &TuiKitUi<'_>) -> Style {
@@ -277,11 +413,16 @@ fn is_pending_create_entry(ui: &TuiKitUi<'_>, focus: CreateModalFocus) -> bool {
 fn display_create_value<'a>(value: &'a str, placeholder: &'a str) -> &'a str {
     if value.is_empty() { placeholder } else { value }
 }
-fn create_submit_text<'a>(ui: &'a TuiKitUi<'a>) -> &'a str {
-    if ui.create_submitting {
-        ui.ui_config.create.submit_pending_label.as_str()
-    } else {
-        ui.ui_config.create.submit_label.as_str()
+fn create_submit_text(ui: &TuiKitUi<'_>) -> String {
+    match ui.create_submit_state {
+        CreateSubmitState::Submitting => format!(
+            "{} {}",
+            spinner_frame(ui.create_spinner_frame),
+            ui.ui_config.create.submit_pending_label
+        ),
+        CreateSubmitState::Idle | CreateSubmitState::Error => {
+            ui.ui_config.create.submit_label.clone()
+        }
     }
 }
 fn create_close_hint<'a>(ui: &'a TuiKitUi<'a>) -> &'a str {
@@ -334,7 +475,9 @@ fn take_suffix_by_width(value: &str, max_width: u16) -> String {
     rev_chars.into_iter().rev().collect()
 }
 fn char_width(ch: char) -> u16 {
-    UnicodeWidthChar::width(ch).unwrap_or(0).min(u16::MAX as usize) as u16
+    UnicodeWidthChar::width(ch)
+        .unwrap_or(0)
+        .min(u16::MAX as usize) as u16
 }
 fn terminal_str_width(s: &str) -> u16 {
     UnicodeWidthStr::width(s).min(u16::MAX as usize) as u16
@@ -344,6 +487,10 @@ fn next_entry_hint(ui: &TuiKitUi<'_>, focus: CreateModalFocus) -> Span<'static> 
         return Span::styled("  ← next input", ui.theme.style_muted());
     }
     Span::raw("")
+}
+fn spinner_frame(frame: usize) -> &'static str {
+    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+    FRAMES[frame % FRAMES.len()]
 }
 #[cfg(test)]
 mod tests;

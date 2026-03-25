@@ -4,7 +4,7 @@ use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemDetail, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
-use tui_kit_runtime::CreateModalFocus;
+use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState};
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
 
@@ -36,9 +36,11 @@ pub struct TuiKitUi<'a> {
     pub(super) show_create_modal: bool,
     pub(super) create_name: &'a str,
     pub(super) create_description: &'a str,
-    pub(super) create_submitting: bool,
+    pub(super) create_submit_state: CreateSubmitState,
+    pub(super) create_spinner_frame: usize,
     pub(super) create_error: Option<&'a str>,
     pub(super) create_focus: CreateModalFocus,
+    pub(super) create_cost_state: &'a CreateCostState,
     pub(super) status_message: &'a str,
     pub(super) inspector_scroll: usize,
     pub(super) animation: Option<&'a AnimationState>,
@@ -79,9 +81,11 @@ impl<'a> TuiKitUi<'a> {
             show_create_modal: false,
             create_name: "",
             create_description: "",
-            create_submitting: false,
+            create_submit_state: CreateSubmitState::Idle,
+            create_spinner_frame: 0,
             create_error: None,
             create_focus: CreateModalFocus::Name,
+            create_cost_state: &CreateCostState::Hidden,
             status_message: "",
             inspector_scroll: 0,
             animation: None,

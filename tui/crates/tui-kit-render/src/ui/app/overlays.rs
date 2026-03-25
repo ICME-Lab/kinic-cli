@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
-use tui_kit_runtime::CreateModalFocus;
+use tui_kit_runtime::{CreateModalFocus, CreateSubmitState};
 
 use super::TuiKitUi;
 
@@ -81,7 +81,7 @@ impl<'a> TuiKitUi<'a> {
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    if self.create_submitting {
+                    if self.create_submit_state == CreateSubmitState::Submitting {
                         cfg.submit_pending_label.as_str()
                     } else {
                         cfg.submit_label.as_str()

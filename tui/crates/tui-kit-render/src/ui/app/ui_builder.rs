@@ -3,7 +3,7 @@
 use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemDetail, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
-use tui_kit_runtime::CreateModalFocus;
+use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState};
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
 
@@ -166,8 +166,14 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn create_submitting(mut self, value: bool) -> Self {
-        self.create_submitting = value;
+    pub fn create_submit_state(mut self, value: CreateSubmitState) -> Self {
+        self.create_submit_state = value;
+        self
+    }
+
+    #[must_use]
+    pub fn create_spinner_frame(mut self, value: usize) -> Self {
+        self.create_spinner_frame = value;
         self
     }
 
@@ -180,6 +186,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn create_focus(mut self, value: CreateModalFocus) -> Self {
         self.create_focus = value;
+        self
+    }
+
+    #[must_use]
+    pub fn create_cost_state(mut self, value: &'a CreateCostState) -> Self {
+        self.create_cost_state = value;
         self
     }
 
