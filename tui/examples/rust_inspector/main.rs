@@ -22,6 +22,7 @@ use ratatui::layout::Rect;
 use std::{env, io, path::PathBuf, time::Duration};
 use tui_kit_host::terminal::{HostTerminal, with_terminal};
 use tui_kit_host::{HostInputEvent, poll_host_input};
+use tui_kit_runtime::{CreateCostState, CreateSubmitState};
 use ui::{
     AnimationState, TuiKitUi,
     app::{list_viewport_height_for_area, tabs_rect_for_area},
@@ -134,9 +135,15 @@ fn run_app(terminal: &mut HostTerminal, app: &mut App) -> Result<()> {
                 .show_create_modal(app.create_modal_open)
                 .create_name(&app.create_name)
                 .create_description(&app.create_description)
-                .create_submitting(app.create_submitting)
+                .create_submit_state(if app.create_submitting {
+                    CreateSubmitState::Submitting
+                } else {
+                    CreateSubmitState::Idle
+                })
+                .create_spinner_frame(0)
                 .create_error(app.create_error.as_deref())
                 .create_focus(app.create_focus)
+                .create_cost_state(&CreateCostState::Hidden)
                 .status_message(&app.status_message)
                 .inspector_scroll(inspector_scroll)
                 .animation_state(&animation)

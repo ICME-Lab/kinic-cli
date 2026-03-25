@@ -18,9 +18,12 @@ use crate::app::{App, Tab};
 use crate::ui::{AnimationState, Focus, TabId};
 use crossterm::event::{KeyCode, KeyModifiers};
 use tui_kit_host::{
-    action_from_keycode, global_command_for_key, resolve_tab_action_with_current, HostGlobalCommand,
+    HostGlobalCommand, action_from_keycode, global_command_for_key, resolve_tab_action_with_current,
 };
-use tui_kit_runtime::{apply_core_action, CoreAction, CoreState, CoreTabId, PaneFocus};
+use tui_kit_runtime::{
+    CoreAction, CoreState, CoreTabId, CreateCostState, CreateSubmitState, PaneFocus,
+    apply_core_action,
+};
 
 /// Side effects triggered by reducer (executed by outer runtime).
 #[derive(Debug, Clone)]
@@ -137,6 +140,7 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
         | HostGlobalCommand::ClearQuery => {
             return vec![UiIntent::EscapePressed];
         }
+        HostGlobalCommand::RefreshCurrentView => {}
         HostGlobalCommand::Quit => {
             if !in_chat_panel && app.focus != Focus::Search {
                 return vec![UiIntent::Quit];
@@ -213,6 +217,7 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
             _ => {}
         },
         Focus::Tabs => {}
+        Focus::Form => {}
         Focus::Inspector => match code {
             KeyCode::Char('o') if modifiers.is_empty() => out.push(UiIntent::InspectorOpenDocs),
             KeyCode::Char('c') if modifiers.is_empty() => out.push(UiIntent::InspectorOpenCratesIo),
@@ -242,6 +247,7 @@ fn focus_to_pane(focus: Focus) -> PaneFocus {
         Focus::Search => PaneFocus::Search,
         Focus::List => PaneFocus::List,
         Focus::Tabs => PaneFocus::Tabs,
+        Focus::Form => PaneFocus::Form,
         Focus::Inspector => PaneFocus::Detail,
         Focus::Chat => PaneFocus::Extra,
     }
@@ -252,6 +258,7 @@ fn pane_to_focus(focus: PaneFocus) -> Focus {
         PaneFocus::Search => Focus::Search,
         PaneFocus::List => Focus::List,
         PaneFocus::Tabs => Focus::Tabs,
+        PaneFocus::Form => Focus::Form,
         PaneFocus::Detail => Focus::Inspector,
         PaneFocus::Extra => Focus::Chat,
     }
@@ -294,7 +301,7 @@ pub fn try_apply_runtime_action(
         apply_core_action(&mut core, &action);
         if matches!(action, CoreAction::CreateSubmit) {
             app.create_modal_open = false;
-            core.create_submitting = false;
+            core.create_submit_state = CreateSubmitState::Idle;
             core.create_error = Some("Create action is not implemented in this example.".into());
             core.status_message =
                 Some("Create action is not implemented in this example.".to_string());
@@ -306,7 +313,11 @@ pub fn try_apply_runtime_action(
         };
     }
 
-    let Some(base_action) = action_from_keycode(code, focus_to_pane(app.focus)) else {
+    let Some(base_action) = action_from_keycode(
+        code,
+        focus_to_pane(app.focus),
+        app.current_tab.id().0.as_str(),
+    ) else {
         return RuntimeApplyResult::default();
     };
     let tab_ids = tab_id_refs(app);
@@ -567,9 +578,15 @@ fn core_state_from_app(app: &App) -> CoreState {
         chat_scroll: app.chat_scroll,
         create_name: app.create_name.clone(),
         create_description: app.create_description.clone(),
-        create_submitting: app.create_submitting,
+        create_submit_state: if app.create_submitting {
+            CreateSubmitState::Submitting
+        } else {
+            CreateSubmitState::Idle
+        },
+        create_spinner_frame: 0,
         create_error: app.create_error.clone(),
         create_focus: app.create_focus,
+        create_cost_state: CreateCostState::Hidden,
     }
 }
 
@@ -584,7 +601,7 @@ fn apply_core_state_to_app(app: &mut App, core: CoreState) {
     app.chat_scroll = core.chat_scroll;
     app.create_name = core.create_name;
     app.create_description = core.create_description;
-    app.create_submitting = core.create_submitting;
+    app.create_submitting = core.create_submit_state == CreateSubmitState::Submitting;
     app.create_error = core.create_error;
     app.create_focus = core.create_focus;
     if let Some(status_message) = core.status_message {

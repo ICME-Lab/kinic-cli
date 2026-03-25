@@ -109,6 +109,7 @@ impl TaskProvider {
                 filtered.len(),
                 self.all.len()
             )),
+            ..ProviderSnapshot::default()
         }
     }
 }

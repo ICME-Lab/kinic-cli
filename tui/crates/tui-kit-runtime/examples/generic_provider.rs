@@ -90,6 +90,7 @@ impl DemoProvider {
             selected_context: None,
             total_count: self.all.len(),
             status_message: Some(format!("{} records", filtered.len())),
+            ..ProviderSnapshot::default()
         }
     }
 }
