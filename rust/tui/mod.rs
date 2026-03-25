@@ -9,6 +9,8 @@ mod adapter;
 mod bridge;
 #[path = "../../tui/src/provider.rs"]
 mod provider;
+#[path = "../../tui/src/settings.rs"]
+mod settings;
 #[path = "../../tui/src/ui_config.rs"]
 mod ui_config;
 

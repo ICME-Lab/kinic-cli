@@ -132,6 +132,7 @@ impl MailProvider {
                 filtered.len(),
                 self.all.len()
             )),
+            settings: Default::default(),
         }
     }
 }

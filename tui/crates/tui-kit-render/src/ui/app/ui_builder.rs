@@ -3,7 +3,7 @@
 use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemDetail, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
-use tui_kit_runtime::CreateModalFocus;
+use tui_kit_runtime::{CreateModalFocus, SettingsSnapshot};
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
 
@@ -180,6 +180,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn create_focus(mut self, value: CreateModalFocus) -> Self {
         self.create_focus = value;
+        self
+    }
+
+    #[must_use]
+    pub fn settings_snapshot(mut self, value: &'a SettingsSnapshot) -> Self {
+        self.settings_snapshot = Some(value);
         self
     }
 

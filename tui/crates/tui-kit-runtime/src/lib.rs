@@ -52,6 +52,26 @@ pub enum CreateModalFocus {
     Submit,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsEntry {
+    pub label: String,
+    pub value: String,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsSection {
+    pub title: String,
+    pub entries: Vec<SettingsEntry>,
+    pub footer: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsSnapshot {
+    pub quick_entries: Vec<SettingsEntry>,
+    pub sections: Vec<SettingsSection>,
+}
+
 /// Domain-agnostic runtime state owned by the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoreState {
@@ -74,6 +94,7 @@ pub struct CoreState {
     pub create_submitting: bool,
     pub create_error: Option<String>,
     pub create_focus: CreateModalFocus,
+    pub settings: SettingsSnapshot,
 }
 
 impl Default for CoreState {
@@ -98,6 +119,7 @@ impl Default for CoreState {
             create_submitting: false,
             create_error: None,
             create_focus: CreateModalFocus::default(),
+            settings: SettingsSnapshot::default(),
         }
     }
 }
@@ -222,6 +244,7 @@ pub struct ProviderSnapshot {
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
+    pub settings: SettingsSnapshot,
 }
 
 /// Provider response to one action.
@@ -553,6 +576,7 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.selected_context = snapshot.selected_context;
     state.total_count = snapshot.total_count;
     state.status_message = snapshot.status_message;
+    state.settings = snapshot.settings;
 
     if let Some(sel) = state.selected_index {
         if sel >= state.list_items.len() {
@@ -607,6 +631,7 @@ mod tests {
             selected_context: None,
             total_count: 1,
             status_message: Some("ok".to_string()),
+            settings: SettingsSnapshot::default(),
         };
 
         apply_snapshot(&mut state, snapshot);

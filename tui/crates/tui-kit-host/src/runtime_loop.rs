@@ -122,6 +122,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .create_submitting(state.create_submitting)
                     .create_error(state.create_error.as_deref())
                     .create_focus(state.create_focus)
+                    .settings_snapshot(&state.settings)
                     .show_completion(false)
                     .context_details_loading(false)
                     .context_details_failed(false)

@@ -4,7 +4,7 @@ use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemDetail, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
-use tui_kit_runtime::CreateModalFocus;
+use tui_kit_runtime::{CreateModalFocus, SettingsSnapshot};
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
 
@@ -39,6 +39,7 @@ pub struct TuiKitUi<'a> {
     pub(super) create_submitting: bool,
     pub(super) create_error: Option<&'a str>,
     pub(super) create_focus: CreateModalFocus,
+    pub(super) settings_snapshot: Option<&'a SettingsSnapshot>,
     pub(super) status_message: &'a str,
     pub(super) inspector_scroll: usize,
     pub(super) animation: Option<&'a AnimationState>,
@@ -82,6 +83,7 @@ impl<'a> TuiKitUi<'a> {
             create_submitting: false,
             create_error: None,
             create_focus: CreateModalFocus::Name,
+            settings_snapshot: None,
             status_message: "",
             inspector_scroll: 0,
             animation: None,

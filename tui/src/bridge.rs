@@ -9,8 +9,9 @@ use crate::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
     },
-    embedding::fetch_embedding,
+    embedding::{embedding_base_url, fetch_embedding},
     tui::TuiAuth,
+    tui::settings::SessionSettingsSnapshot,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +43,31 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     let states = client.list_memories().await?;
 
     Ok(states.into_iter().map(memory_summary_from_state).collect())
+}
+
+pub async fn load_session_settings(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    default_memory_id: Option<String>,
+) -> SessionSettingsSnapshot {
+    let principal_id = match resolve_agent_factory(use_mainnet, &auth) {
+        Ok(factory) => match factory.build().await {
+            Ok(agent) => agent
+                .get_principal()
+                .ok()
+                .map(|principal| principal.to_text()),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    };
+
+    SessionSettingsSnapshot::new(
+        &auth,
+        use_mainnet,
+        principal_id,
+        embedding_base_url(),
+        default_memory_id,
+    )
 }
 
 pub async fn create_memory(
