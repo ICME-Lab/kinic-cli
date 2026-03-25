@@ -32,7 +32,8 @@ pub struct SearchResultItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateMemorySuccess {
     pub id: String,
-    pub memories: Vec<MemorySummary>,
+    pub memories: Option<Vec<MemorySummary>>,
+    pub refresh_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +56,6 @@ pub enum CreateMemoryError {
     },
     Approve(String),
     Deploy(String),
-    RefreshMemories(String),
 }
 
 fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<crate::agent::AgentFactory> {
@@ -111,14 +111,24 @@ pub async fn create_memory(
         .deploy_memory(&name, &description)
         .await
         .map_err(|error| CreateMemoryError::Deploy(short_error(&error.to_string())))?;
-    let states = client
-        .list_memories()
-        .await
-        .map_err(|error| CreateMemoryError::RefreshMemories(short_error(&error.to_string())))?;
+    let (memories, refresh_warning) = match client.list_memories().await {
+        Ok(states) => (
+            Some(states.into_iter().map(memory_summary_from_state).collect()),
+            None,
+        ),
+        Err(error) => (
+            None,
+            Some(format!(
+                "Automatic reload failed after create. Press F5 to refresh. Cause: {}",
+                short_error(&error.to_string())
+            )),
+        ),
+    };
 
     Ok(CreateMemorySuccess {
         id,
-        memories: states.into_iter().map(memory_summary_from_state).collect(),
+        memories,
+        refresh_warning,
     })
 }
 
@@ -280,5 +290,42 @@ mod tests {
         let factory = resolve_agent_factory(false, &auth).expect("resolved identity factory");
 
         let _ = factory;
+    }
+
+    #[test]
+    fn create_success_can_carry_reloaded_memories() {
+        let success = CreateMemorySuccess {
+            id: "aaaaa-aa".to_string(),
+            memories: Some(vec![MemorySummary {
+                id: "aaaaa-aa".to_string(),
+                status: "running".to_string(),
+                detail: "ready".to_string(),
+            }]),
+            refresh_warning: None,
+        };
+
+        assert_eq!(success.memories.as_ref().map(Vec::len), Some(1));
+        assert_eq!(success.refresh_warning, None);
+    }
+
+    #[test]
+    fn create_success_preserves_create_when_reload_fails() {
+        let success = CreateMemorySuccess {
+            id: "aaaaa-aa".to_string(),
+            memories: None,
+            refresh_warning: Some(
+                "Automatic reload failed after create. Press F5 to refresh. Cause: boom"
+                    .to_string(),
+            ),
+        };
+
+        assert_eq!(success.id, "aaaaa-aa");
+        assert!(success.memories.is_none());
+        assert!(
+            success
+                .refresh_warning
+                .as_deref()
+                .is_some_and(|message| message.contains("Press F5 to refresh"))
+        );
     }
 }

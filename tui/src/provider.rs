@@ -663,6 +663,9 @@ impl KinicProvider {
                 })
             }
             Err(error) => {
+                self.memory_records.clear();
+                self.result_records.clear();
+                self.memories_mode = MemoriesMode::Browser;
                 self.all = vec![load_error_record(error)];
                 self.active_memory_id = None;
                 Some(ProviderOutput {
@@ -747,17 +750,19 @@ impl KinicProvider {
         let mut effects = Vec::new();
         match output.result {
             Ok(success) => {
-                self.memory_records = success
-                    .memories
-                    .into_iter()
-                    .map(record_from_memory_summary)
-                    .collect();
-                self.all = self.memory_records.clone();
                 self.active_memory_id = Some(success.id.clone());
-                if let Some(index) = self.memory_records.iter().position(|r| r.id == success.id) {
-                    let record = self.memory_records.remove(index);
-                    self.memory_records.insert(0, record.clone());
+                if let Some(memories) = success.memories {
+                    self.memory_records = memories
+                        .into_iter()
+                        .map(record_from_memory_summary)
+                        .collect();
                     self.all = self.memory_records.clone();
+                    if let Some(index) = self.memory_records.iter().position(|r| r.id == success.id)
+                    {
+                        let record = self.memory_records.remove(index);
+                        self.memory_records.insert(0, record.clone());
+                        self.all = self.memory_records.clone();
+                    }
                 }
                 self.memories_mode = MemoriesMode::Browser;
                 self.result_records.clear();
@@ -769,7 +774,12 @@ impl KinicProvider {
                     tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
                 });
                 effects.push(CoreEffect::FocusPane(PaneFocus::List));
-                effects.push(CoreEffect::Notify(format!("Created memory {}", success.id)));
+                let status = if let Some(warning) = success.refresh_warning {
+                    format!("Created memory {}. {}", success.id, warning)
+                } else {
+                    format!("Created memory {}", success.id)
+                };
+                effects.push(CoreEffect::Notify(status));
             }
             Err(error) => {
                 effects.push(CoreEffect::CreateFormError(Some(
@@ -1092,9 +1102,6 @@ fn format_create_submit_error(error: &bridge::CreateMemoryError) -> String {
         }
         bridge::CreateMemoryError::Deploy(reason) => {
             format!("Deploy step failed. Cause: {reason}")
-        }
-        bridge::CreateMemoryError::RefreshMemories(reason) => {
-            format!("Create succeeded, but reloading memories failed. Cause: {reason}")
         }
     }
 }
@@ -1587,6 +1594,9 @@ mod tests {
     #[test]
     fn poll_initial_memories_background_surfaces_error_row() {
         let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.result_records = vec![live_memory("aaaaa-aa-result-1", "Search Hit")];
+        provider.memories_mode = MemoriesMode::Results;
         let (tx, rx) = mpsc::channel();
         provider.pending_initial_memories = Some(rx);
         provider.initial_memories_in_flight = true;
@@ -1600,6 +1610,9 @@ mod tests {
             .expect("background result");
 
         assert!(!provider.initial_memories_in_flight);
+        assert!(provider.memory_records.is_empty());
+        assert!(provider.result_records.is_empty());
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
         assert_eq!(provider.all.len(), 1);
         assert_eq!(provider.all[0].id, "kinic-live-error");
         assert!(output.effects.iter().any(|effect| matches!(
@@ -1720,6 +1733,50 @@ mod tests {
                 if message.contains("Approve step failed")
         )));
         assert!(!provider.create_submit_in_flight);
+    }
+
+    #[test]
+    fn poll_background_keeps_create_success_when_memory_reload_fails() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("bbbbb-bb", "Existing Memory")];
+        provider.all = provider.memory_records.clone();
+        let (tx, rx) = mpsc::channel();
+        provider.pending_create_submit = Some(rx);
+        provider.pending_create_submit_request_id = Some(5);
+        provider.create_submit_in_flight = true;
+        tx.send(CreateSubmitTaskOutput {
+            request_id: 5,
+            result: Ok(bridge::CreateMemorySuccess {
+                id: "aaaaa-aa".to_string(),
+                memories: None,
+                refresh_warning: Some(
+                    "Automatic reload failed after create. Press F5 to refresh. Cause: boom"
+                        .to_string(),
+                ),
+            }),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("create submit output");
+
+        assert!(!provider.create_submit_in_flight);
+        assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
+        assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+        assert_eq!(provider.memory_records.len(), 1);
+        assert_eq!(provider.memory_records[0].id, "bbbbb-bb");
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::ResetCreateFormAndSetTab { tab_id }
+                if tab_id == KINIC_MEMORIES_TAB_ID
+        )));
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message)
+                if message.contains("Created memory aaaaa-aa.")
+                    && message.contains("Press F5 to refresh")
+        )));
     }
 
     #[test]
