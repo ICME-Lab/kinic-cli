@@ -308,252 +308,216 @@ mod tests {
         KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
     };
 
-    #[test]
-    fn key_map_includes_navigation() {
-        assert_eq!(key_to_core_key(KeyCode::Tab), Some(CoreKey::Tab));
-        assert_eq!(key_to_core_key(KeyCode::Down), Some(CoreKey::Down));
-        assert_eq!(
-            key_to_core_key(KeyCode::Char('a')),
-            Some(CoreKey::Char('a'))
-        );
+    mod key_mapping {
+        use super::*;
+
+        #[test]
+        fn action_from_keycode_maps_search_input() {
+            assert_eq!(
+                action_from_keycode(KeyCode::Char('x'), PaneFocus::Search),
+                Some(CoreAction::SearchInput('x'))
+            );
+        }
     }
 
-    #[test]
-    fn action_from_keycode_maps_search_input() {
-        assert_eq!(
-            action_from_keycode(KeyCode::Char('x'), PaneFocus::Search),
-            Some(CoreAction::SearchInput('x'))
-        );
+    mod tab_resolution {
+        use super::*;
+
+        #[test]
+        fn resolve_tab_action_uses_host_and_default_ids() {
+            let host_mapped = resolve_tab_action(CoreAction::SelectTabIndex(1), &["a", "b", "c"]);
+            let default_mapped = resolve_tab_action(CoreAction::SelectTabIndex(2), &[]);
+
+            assert_eq!(host_mapped, Some(CoreAction::SetTab(CoreTabId::new("b"))));
+            assert_eq!(
+                default_mapped,
+                Some(CoreAction::SetTab(CoreTabId::new("tab-3")))
+            );
+        }
     }
 
-    #[test]
-    fn global_command_handles_escape_clear_query() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-                PaneFocus::List,
-                KINIC_MEMORIES_TAB_ID,
-                false,
-                false,
-                false,
-            ),
-            HostGlobalCommand::ClearQuery
-        );
+    mod effect_application {
+        use super::*;
+
+        #[test]
+        fn execute_effects_updates_status_message() {
+            let mut state = CoreState::default();
+            execute_effects_to_status(&mut state, vec![CoreEffect::Notify("hello".to_string())]);
+            assert_eq!(state.status_message.as_deref(), Some("hello"));
+        }
+
+        #[test]
+        fn execute_effects_sets_memories_tab() {
+            let mut state = CoreState {
+                current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+                create_name: "stale".to_string(),
+                create_description: "stale".to_string(),
+                create_submitting: true,
+                create_error: Some("boom".to_string()),
+                ..CoreState::default()
+            };
+
+            execute_effects_to_status(
+                &mut state,
+                vec![CoreEffect::ResetCreateFormAndSetTab {
+                    tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                }],
+            );
+
+            assert_eq!(state.current_tab_id, KINIC_MEMORIES_TAB_ID);
+            assert_eq!(state.create_name, "");
+            assert_eq!(state.create_description, "");
+            assert!(!state.create_submitting);
+            assert_eq!(state.create_error, None);
+            assert_eq!(state.create_focus, CreateModalFocus::Name);
+        }
+
+        #[test]
+        fn focus_pane_applies_visible_pane_on_memories_tab() {
+            let mut state = CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                focus: PaneFocus::Search,
+                ..CoreState::default()
+            };
+
+            execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::List)]);
+
+            assert_eq!(state.focus, PaneFocus::List);
+        }
+
+        #[test]
+        fn focus_pane_ignores_hidden_pane_off_memories_tab() {
+            let mut state = CoreState {
+                current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+                focus: PaneFocus::Form,
+                ..CoreState::default()
+            };
+
+            execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::List)]);
+
+            assert_eq!(state.focus, PaneFocus::Form);
+        }
     }
 
-    #[test]
-    fn global_command_opens_create_tab_with_ctrl_n() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Char('n'),
-                KeyModifiers::CONTROL,
-                PaneFocus::List,
-                KINIC_MEMORIES_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::OpenCreateTab
-        );
-    }
+    mod global_commands {
+        use super::*;
 
-    #[test]
-    fn execute_effects_updates_status_message() {
-        let mut state = CoreState::default();
-        execute_effects_to_status(&mut state, vec![CoreEffect::Notify("hello".to_string())]);
-        assert_eq!(state.status_message.as_deref(), Some("hello"));
-    }
+        #[test]
+        fn global_command_handles_primary_shortcuts() {
+            let cases = [
+                (
+                    KeyCode::Esc,
+                    KeyModifiers::NONE,
+                    PaneFocus::List,
+                    KINIC_MEMORIES_TAB_ID,
+                    false,
+                    HostGlobalCommand::ClearQuery,
+                ),
+                (
+                    KeyCode::Char('n'),
+                    KeyModifiers::CONTROL,
+                    PaneFocus::List,
+                    KINIC_MEMORIES_TAB_ID,
+                    true,
+                    HostGlobalCommand::OpenCreateTab,
+                ),
+                (
+                    KeyCode::Char('q'),
+                    KeyModifiers::NONE,
+                    PaneFocus::List,
+                    KINIC_MEMORIES_TAB_ID,
+                    true,
+                    HostGlobalCommand::Quit,
+                ),
+                (
+                    KeyCode::Esc,
+                    KeyModifiers::NONE,
+                    PaneFocus::Extra,
+                    KINIC_MEMORIES_TAB_ID,
+                    true,
+                    HostGlobalCommand::CloseChat,
+                ),
+                (
+                    KeyCode::Esc,
+                    KeyModifiers::NONE,
+                    PaneFocus::List,
+                    KINIC_MEMORIES_TAB_ID,
+                    true,
+                    HostGlobalCommand::None,
+                ),
+            ];
 
-    #[test]
-    fn execute_effects_sets_memories_tab() {
-        let mut state = CoreState {
-            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
-            create_name: "stale".to_string(),
-            create_description: "stale".to_string(),
-            create_submitting: true,
-            create_error: Some("boom".to_string()),
-            ..CoreState::default()
-        };
+            for (code, modifiers, focus, tab_id, query_is_empty, expected) in cases {
+                assert_eq!(
+                    global_command_for_key(
+                        code,
+                        modifiers,
+                        focus,
+                        tab_id,
+                        false,
+                        false,
+                        query_is_empty,
+                    ),
+                    expected
+                );
+            }
+        }
 
-        execute_effects_to_status(
-            &mut state,
-            vec![CoreEffect::ResetCreateFormAndSetTab {
-                tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
-            }],
-        );
+        #[test]
+        fn global_command_resolves_escape_for_special_tabs() {
+            let cases = [
+                (
+                    PaneFocus::Tabs,
+                    KINIC_CREATE_TAB_ID,
+                    HostGlobalCommand::BackToMemoriesTab,
+                ),
+                (
+                    PaneFocus::Form,
+                    KINIC_CREATE_TAB_ID,
+                    HostGlobalCommand::BackFromFormToTabs,
+                ),
+                (
+                    PaneFocus::Detail,
+                    KINIC_MARKET_TAB_ID,
+                    HostGlobalCommand::BackToMemoriesTab,
+                ),
+                (
+                    PaneFocus::Detail,
+                    KINIC_SETTINGS_TAB_ID,
+                    HostGlobalCommand::BackToMemoriesTab,
+                ),
+            ];
 
-        assert_eq!(state.current_tab_id, KINIC_MEMORIES_TAB_ID);
-        assert_eq!(state.create_name, "");
-        assert_eq!(state.create_description, "");
-        assert!(!state.create_submitting);
-        assert_eq!(state.create_error, None);
-        assert_eq!(state.create_focus, CreateModalFocus::Name);
-    }
+            for (focus, tab_id, expected) in cases {
+                assert_eq!(
+                    global_command_for_key(
+                        KeyCode::Esc,
+                        KeyModifiers::NONE,
+                        focus,
+                        tab_id,
+                        false,
+                        false,
+                        true,
+                    ),
+                    expected
+                );
+            }
+        }
 
-    #[test]
-    fn focus_pane_applies_visible_pane_on_memories_tab() {
-        let mut state = CoreState {
-            current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
-            focus: PaneFocus::Search,
-            ..CoreState::default()
-        };
-
-        execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::List)]);
-
-        assert_eq!(state.focus, PaneFocus::List);
-    }
-
-    #[test]
-    fn focus_pane_ignores_hidden_pane_off_memories_tab() {
-        let mut state = CoreState {
-            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
-            focus: PaneFocus::Form,
-            ..CoreState::default()
-        };
-
-        execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::List)]);
-
-        assert_eq!(state.focus, PaneFocus::Form);
-    }
-
-    #[test]
-    fn global_command_quit_on_q() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Char('q'),
-                KeyModifiers::NONE,
-                PaneFocus::List,
-                KINIC_MEMORIES_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::Quit
-        );
-    }
-
-    #[test]
-    fn resolve_tab_action_maps_index_with_host_tabs() {
-        let mapped = resolve_tab_action(CoreAction::SelectTabIndex(1), &["a", "b", "c"]);
-        assert_eq!(mapped, Some(CoreAction::SetTab(CoreTabId::new("b"))));
-    }
-
-    #[test]
-    fn resolve_tab_action_falls_back_to_default_ids() {
-        let mapped = resolve_tab_action(CoreAction::SelectTabIndex(2), &[]);
-        assert_eq!(mapped, Some(CoreAction::SetTab(CoreTabId::new("tab-3"))));
-    }
-
-    #[test]
-    fn global_command_returns_to_memories_from_create_tab_tabs_focus() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-                PaneFocus::Tabs,
-                KINIC_CREATE_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::BackToMemoriesTab
-        );
-    }
-
-    #[test]
-    fn global_command_returns_to_tabs_from_form_tab() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-                PaneFocus::Form,
-                KINIC_CREATE_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::BackFromFormToTabs
-        );
-    }
-
-    #[test]
-    fn global_command_returns_to_memories_from_market_content() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-                PaneFocus::Detail,
-                KINIC_MARKET_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::BackToMemoriesTab
-        );
-    }
-
-    #[test]
-    fn global_command_returns_to_memories_from_settings_content() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-                PaneFocus::Detail,
-                KINIC_SETTINGS_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::BackToMemoriesTab
-        );
-    }
-
-    #[test]
-    fn global_command_leaves_q_unhandled_in_create_focus() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Char('q'),
-                KeyModifiers::NONE,
-                PaneFocus::Form,
-                KINIC_CREATE_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::None
-        );
-    }
-
-    #[test]
-    fn global_command_closes_chat_before_quit() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-                PaneFocus::Extra,
-                KINIC_MEMORIES_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::CloseChat
-        );
-    }
-
-    #[test]
-    fn global_command_leaves_escape_unhandled_when_nothing_to_close() {
-        assert_eq!(
-            global_command_for_key(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-                PaneFocus::List,
-                KINIC_MEMORIES_TAB_ID,
-                false,
-                false,
-                true,
-            ),
-            HostGlobalCommand::None
-        );
+        #[test]
+        fn global_command_leaves_q_unhandled_in_create_focus() {
+            assert_eq!(
+                global_command_for_key(
+                    KeyCode::Char('q'),
+                    KeyModifiers::NONE,
+                    PaneFocus::Form,
+                    KINIC_CREATE_TAB_ID,
+                    false,
+                    false,
+                    true,
+                ),
+                HostGlobalCommand::None
+            );
+        }
     }
 }

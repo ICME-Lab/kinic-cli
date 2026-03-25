@@ -94,11 +94,22 @@ pub struct KinicProvider {
     result_records: Vec<KinicRecord>,
     memories_mode: MemoriesMode,
     pending_search: Option<mpsc::Receiver<SearchTaskOutput>>,
+    pending_search_context: Option<SearchRequestContext>,
+    next_search_request_id: u64,
     search_in_flight: bool,
 }
 
-struct SearchTaskOutput {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SearchRequestContext {
+    request_id: u64,
     memory_id: String,
+    query: String,
+}
+
+struct SearchTaskOutput {
+    request_id: u64,
+    memory_id: String,
+    query: String,
     result: Result<Vec<SearchResultItem>, String>,
 }
 
@@ -115,6 +126,8 @@ impl KinicProvider {
             result_records: Vec::new(),
             memories_mode: MemoriesMode::Browser,
             pending_search: None,
+            pending_search_context: None,
+            next_search_request_id: 0,
             search_in_flight: false,
         }
     }
@@ -173,6 +186,7 @@ impl KinicProvider {
         self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
         self.memories_mode = MemoriesMode::Browser;
         self.result_records.clear();
+        self.invalidate_pending_search();
         Ok(())
     }
 
@@ -226,9 +240,13 @@ impl KinicProvider {
             return;
         }
 
+        let previous_active_memory_id = self.active_memory_id.clone();
         if self.query.is_empty() {
             if self.active_memory_id.is_none() {
                 self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
+            }
+            if self.active_memory_id != previous_active_memory_id {
+                self.invalidate_pending_search();
             }
             return;
         }
@@ -241,6 +259,9 @@ impl KinicProvider {
 
         if visible_ids.is_empty() {
             self.active_memory_id = None;
+            if self.active_memory_id != previous_active_memory_id {
+                self.invalidate_pending_search();
+            }
             return;
         }
 
@@ -253,6 +274,7 @@ impl KinicProvider {
         }
 
         self.active_memory_id = visible_ids.first().cloned();
+        self.invalidate_pending_search();
     }
 
     fn live_search_target_id(&self) -> Option<String> {
@@ -309,6 +331,7 @@ impl KinicProvider {
         let last = visible_records.len().saturating_sub(1) as isize;
         let next = (current + delta).clamp(0, last) as usize;
         self.active_memory_id = Some(visible_records[next].id.clone());
+        self.invalidate_pending_search();
     }
 
     fn set_active_memory(&mut self, index: usize) {
@@ -320,6 +343,7 @@ impl KinicProvider {
             return;
         };
         self.active_memory_id = Some(record.id.clone());
+        self.invalidate_pending_search();
     }
 
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
@@ -372,6 +396,26 @@ impl KinicProvider {
         }
     }
 
+    fn invalidate_pending_search(&mut self) {
+        self.pending_search_context = None;
+    }
+
+    fn search_context(request_id: u64, memory_id: String, query: String) -> SearchRequestContext {
+        SearchRequestContext {
+            request_id,
+            memory_id,
+            query,
+        }
+    }
+
+    fn matches_pending_search(&self, output: &SearchTaskOutput) -> bool {
+        self.pending_search_context.as_ref().is_some_and(|context| {
+            context.request_id == output.request_id
+                && context.memory_id == output.memory_id
+                && context.query == output.query
+        })
+    }
+
     fn run_live_search(&mut self) -> Option<CoreEffect> {
         let auth = self.config.auth.clone();
         if !matches!(auth, TuiAuth::KeyringIdentity(_)) {
@@ -391,12 +435,20 @@ impl KinicProvider {
         if query.is_empty() {
             self.memories_mode = MemoriesMode::Browser;
             self.result_records.clear();
+            self.invalidate_pending_search();
             return Some(CoreEffect::Notify(
                 "Cleared search query and returned to memories.".to_string(),
             ));
         }
 
         let use_mainnet = self.config.use_mainnet;
+        let request_id = self.next_search_request_id;
+        self.next_search_request_id += 1;
+        self.pending_search_context = Some(Self::search_context(
+            request_id,
+            memory_id.clone(),
+            query.clone(),
+        ));
         let (tx, rx) = mpsc::channel();
         self.pending_search = Some(rx);
         self.search_in_flight = true;
@@ -408,10 +460,15 @@ impl KinicProvider {
                     use_mainnet,
                     auth,
                     memory_id.clone(),
-                    query,
+                    query.clone(),
                 ))
                 .map_err(|error| error.to_string());
-            let _ = tx.send(SearchTaskOutput { memory_id, result });
+            let _ = tx.send(SearchTaskOutput {
+                request_id,
+                memory_id,
+                query,
+                result,
+            });
         });
 
         Some(CoreEffect::Notify("Searching...".to_string()))
@@ -424,6 +481,7 @@ impl KinicProvider {
             Err(mpsc::TryRecvError::Empty) => return None,
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.pending_search = None;
+                self.invalidate_pending_search();
                 self.search_in_flight = false;
                 return Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
@@ -436,6 +494,15 @@ impl KinicProvider {
 
         self.pending_search = None;
         self.search_in_flight = false;
+        let is_current_search = self.matches_pending_search(&output);
+        self.invalidate_pending_search();
+
+        if !is_current_search {
+            return Some(ProviderOutput {
+                snapshot: Some(self.build_snapshot(state)),
+                effects: Vec::new(),
+            });
+        }
 
         let effects = match output.result {
             Ok(results) => {
@@ -450,13 +517,17 @@ impl KinicProvider {
                     effects.push(CoreEffect::FocusPane(PaneFocus::List));
                 }
                 effects.push(CoreEffect::Notify(format!(
-                        "Loaded {} search results for {}",
-                        self.result_records.len(),
-                        output.memory_id
+                    "Loaded {} search results for {}",
+                    self.result_records.len(),
+                    output.memory_id
                 )));
                 effects
             }
-            Err(error) => vec![CoreEffect::Notify(format!("Search failed: {error}"))],
+            Err(error) => {
+                self.result_records.clear();
+                self.memories_mode = MemoriesMode::Browser;
+                vec![CoreEffect::Notify(format!("Search failed: {error}"))]
+            }
         };
 
         Some(ProviderOutput {
@@ -469,6 +540,7 @@ impl KinicProvider {
         if self.is_live() {
             self.memories_mode = MemoriesMode::Browser;
             self.result_records.clear();
+            self.invalidate_pending_search();
         }
     }
 
@@ -509,6 +581,7 @@ impl DataProvider for KinicProvider {
         match action {
             CoreAction::SetQuery(q) => {
                 self.query = q.clone();
+                self.invalidate_pending_search();
                 if self.tab_id == KINIC_MEMORIES_TAB_ID && q.is_empty() {
                     self.reset_memories_browser();
                 }
@@ -516,10 +589,12 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::SearchInput(c) => {
                 self.query.push(*c);
+                self.invalidate_pending_search();
                 self.sync_active_memory_to_visible_records();
             }
             CoreAction::SearchBackspace => {
                 self.query.pop();
+                self.invalidate_pending_search();
                 if self.query.is_empty() {
                     self.reset_memories_browser();
                 }
@@ -1011,6 +1086,18 @@ mod tests {
         )
     }
 
+    fn pending_search_context(
+        request_id: u64,
+        memory_id: &str,
+        query: &str,
+    ) -> SearchRequestContext {
+        SearchRequestContext {
+            request_id,
+            memory_id: memory_id.to_string(),
+            query: query.to_string(),
+        }
+    }
+
     #[test]
     fn current_records_returns_live_browser_memories() {
         let mut provider = KinicProvider::new(live_config());
@@ -1184,9 +1271,12 @@ mod tests {
         let mut provider = KinicProvider::new(live_config());
         let (tx, rx) = mpsc::channel();
         provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
         provider.search_in_flight = true;
         tx.send(SearchTaskOutput {
+            request_id: 0,
             memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
             result: Ok(vec![SearchResultItem {
                 score: 0.9,
                 payload: "hello".to_string(),
@@ -1224,9 +1314,12 @@ mod tests {
         let mut provider = KinicProvider::new(live_config());
         let (tx, rx) = mpsc::channel();
         provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
         provider.search_in_flight = true;
         tx.send(SearchTaskOutput {
+            request_id: 0,
             memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
             result: Ok(vec![SearchResultItem {
                 score: 0.9,
                 payload: "hello".to_string(),
@@ -1256,6 +1349,200 @@ mod tests {
         assert!(output.effects.iter().any(|effect| matches!(
             effect,
             CoreEffect::Notify(message) if message == "Loaded 1 search results for aaaaa-aa"
+        )));
+    }
+
+    #[test]
+    fn poll_background_discards_stale_result_after_query_changes() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "alpha".to_string();
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        provider
+            .handle_action(
+                &CoreAction::SetQuery("beta".to_string()),
+                &CoreState::default(),
+            )
+            .expect("query update should succeed");
+        tx.send(SearchTaskOutput {
+            request_id: 0,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "stale".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("stale search should still return a snapshot");
+
+        assert!(output.effects.is_empty());
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert!(provider.result_records.is_empty());
+        assert_eq!(provider.pending_search_context, None);
+        assert!(!provider.search_in_flight);
+        assert_eq!(
+            output
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.total_count),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn poll_background_discards_stale_result_after_active_memory_changes() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        provider
+            .handle_action(&CoreAction::MoveNext, &CoreState::default())
+            .expect("active memory update should succeed");
+        tx.send(SearchTaskOutput {
+            request_id: 0,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "stale".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("stale search should still return a snapshot");
+
+        assert!(output.effects.is_empty());
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert!(provider.result_records.is_empty());
+        assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+        assert_eq!(
+            output
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.selected_detail.as_ref())
+                .map(|detail| detail.id.as_str()),
+            Some("bbbbb-bb")
+        );
+    }
+
+    #[test]
+    fn poll_background_clears_previous_results_when_search_fails() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.result_records = vec![record_from_search_result(
+            0,
+            "aaaaa-aa",
+            SearchResultItem {
+                score: 0.9,
+                payload: "hello".to_string(),
+            },
+        )];
+        provider.memories_mode = MemoriesMode::Results;
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(1, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        tx.send(SearchTaskOutput {
+            request_id: 1,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Err("boom".to_string()),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("failed search should return a snapshot");
+
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert!(provider.result_records.is_empty());
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Search failed: boom"
+        )));
+        assert_eq!(
+            output
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.total_count),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn poll_background_discards_late_result_after_query_is_cleared() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.query = "alpha".to_string();
+        let (tx, rx) = mpsc::channel();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(2, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        provider
+            .handle_action(&CoreAction::SetQuery(String::new()), &CoreState::default())
+            .expect("clearing query should succeed");
+        tx.send(SearchTaskOutput {
+            request_id: 2,
+            memory_id: "aaaaa-aa".to_string(),
+            query: "alpha".to_string(),
+            result: Ok(vec![SearchResultItem {
+                score: 0.9,
+                payload: "late".to_string(),
+            }]),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("late search should still return a snapshot");
+
+        assert!(output.effects.is_empty());
+        assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+        assert!(provider.result_records.is_empty());
+    }
+
+    #[test]
+    fn poll_background_disconnected_clears_pending_search_state() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel::<SearchTaskOutput>();
+        provider.pending_search = Some(rx);
+        provider.pending_search_context = Some(pending_search_context(3, "aaaaa-aa", "alpha"));
+        provider.search_in_flight = true;
+        drop(tx);
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("disconnect should produce a provider output");
+
+        assert!(provider.pending_search.is_none());
+        assert_eq!(provider.pending_search_context, None);
+        assert!(!provider.search_in_flight);
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message)
+                if message == "Search worker disconnected unexpectedly."
         )));
     }
 
