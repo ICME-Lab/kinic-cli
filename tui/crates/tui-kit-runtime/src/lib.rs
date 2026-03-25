@@ -89,12 +89,54 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
     }
 }
 
+pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
+    match kinic_tabs::tab_kind(tab_id) {
+        kinic_tabs::TabKind::Memories => Some(PaneFocus::List),
+        kinic_tabs::TabKind::Form => Some(PaneFocus::Form),
+        kinic_tabs::TabKind::PlaceholderMarket
+        | kinic_tabs::TabKind::PlaceholderSettings
+        | kinic_tabs::TabKind::Unknown => Some(PaneFocus::Detail),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CreateModalFocus {
     #[default]
     Name,
     Description,
     Submit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum CreateSubmitState {
+    #[default]
+    Idle,
+    Submitting,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum CreateCostState {
+    #[default]
+    Hidden,
+    Loading,
+    Unavailable,
+    Error(String),
+    Ready(CreateCostDetails),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateCostDetails {
+    pub principal: String,
+    pub balance_kinic: String,
+    pub balance_base_units: String,
+    pub price_kinic: String,
+    pub price_base_units: String,
+    pub required_total_kinic: String,
+    pub required_total_base_units: String,
+    pub difference_kinic: String,
+    pub difference_base_units: String,
+    pub sufficient_balance: bool,
 }
 
 /// Domain-agnostic runtime state owned by the core.
@@ -116,9 +158,11 @@ pub struct CoreState {
     pub chat_scroll: usize,
     pub create_name: String,
     pub create_description: String,
-    pub create_submitting: bool,
+    pub create_submit_state: CreateSubmitState,
+    pub create_spinner_frame: usize,
     pub create_error: Option<String>,
     pub create_focus: CreateModalFocus,
+    pub create_cost_state: CreateCostState,
 }
 
 impl Default for CoreState {
@@ -140,9 +184,11 @@ impl Default for CoreState {
             chat_scroll: 0,
             create_name: String::new(),
             create_description: String::new(),
-            create_submitting: false,
+            create_submit_state: CreateSubmitState::default(),
+            create_spinner_frame: 0,
             create_error: None,
             create_focus: CreateModalFocus::default(),
+            create_cost_state: CreateCostState::default(),
         }
     }
 }
@@ -161,6 +207,7 @@ pub enum CoreAction {
     FocusSearch,
     FocusList,
     FocusDetail,
+    FocusForm,
     OpenSelected,
     Back,
     SearchInput(char),
@@ -178,6 +225,8 @@ pub enum CoreAction {
     CreateBackspace,
     CreateNextField,
     CreatePrevField,
+    CreateRefresh,
+    RefreshCurrentView,
     CreateSubmit,
     Submit,
     Cancel,
@@ -263,6 +312,8 @@ pub struct ProviderSnapshot {
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
+    pub create_cost_state: CreateCostState,
+    pub create_submit_state: CreateSubmitState,
 }
 
 /// Provider response to one action.
@@ -304,6 +355,10 @@ pub trait DataProvider {
         action: &CoreAction,
         state: &CoreState,
     ) -> CoreResult<ProviderOutput>;
+
+    fn poll_background(&mut self, _state: &CoreState) -> Option<ProviderOutput> {
+        None
+    }
 }
 
 /// Apply one core action to local runtime state.
@@ -321,6 +376,9 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 CreateModalFocus::Submit => {}
             }
             state.create_error = None;
+            if state.create_submit_state == CreateSubmitState::Error {
+                state.create_submit_state = CreateSubmitState::Idle;
+            }
         }
         CoreAction::CreateBackspace => match state.create_focus {
             CreateModalFocus::Name => {
@@ -345,8 +403,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 CreateModalFocus::Submit => CreateModalFocus::Description,
             };
         }
+        CoreAction::CreateRefresh => {
+            state.create_cost_state = CreateCostState::Loading;
+            state.create_spinner_frame = 0;
+        }
         CoreAction::CreateSubmit => {
-            state.create_submitting = true;
+            state.create_submit_state = CreateSubmitState::Submitting;
+            state.create_spinner_frame = 0;
             state.create_error = None;
         }
         CoreAction::SetQuery(q) => {
@@ -420,6 +483,10 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::FocusSearch => state.focus = PaneFocus::Search,
         CoreAction::FocusList => state.focus = PaneFocus::List,
         CoreAction::FocusDetail => state.focus = PaneFocus::Detail,
+        CoreAction::FocusForm => {
+            state.focus = PaneFocus::Form;
+            state.create_focus = CreateModalFocus::Name;
+        }
         CoreAction::OpenSelected => state.focus = PaneFocus::Detail,
         CoreAction::Back => {
             state.focus = if state.focus == PaneFocus::Extra {
@@ -569,7 +636,31 @@ pub fn dispatch_action(
 }
 
 /// Shared focus-aware keymap from abstract keys to core actions.
-pub fn action_for_key(key: CoreKey, focus: PaneFocus) -> Option<CoreAction> {
+pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> Option<CoreAction> {
+    if focus == PaneFocus::Tabs {
+        return match key {
+            CoreKey::Up | CoreKey::Char('k') => Some(CoreAction::SelectPrevTab),
+            CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::SelectNextTab),
+            CoreKey::Left | CoreKey::Char('h') => None,
+            CoreKey::Tab | CoreKey::Right | CoreKey::Char('l') | CoreKey::Enter => {
+                tab_entry_focus(current_tab_id).map(|focus| match focus {
+                    PaneFocus::Search => CoreAction::FocusSearch,
+                    PaneFocus::List => CoreAction::FocusList,
+                    PaneFocus::Tabs => CoreAction::FocusNext,
+                    PaneFocus::Detail => CoreAction::FocusDetail,
+                    PaneFocus::Form => CoreAction::FocusForm,
+                    PaneFocus::Extra => CoreAction::ToggleChat,
+                })
+            }
+            CoreKey::BackTab => Some(CoreAction::FocusPrev),
+            CoreKey::Char(c) if c.is_ascii_digit() && c != '0' => {
+                let idx = (c as u8 - b'1') as usize;
+                Some(CoreAction::SelectTabIndex(idx))
+            }
+            _ => None,
+        };
+    }
+
     match key {
         CoreKey::Slash => Some(CoreAction::FocusSearch),
         CoreKey::Tab => Some(CoreAction::FocusNext),
@@ -598,15 +689,7 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus) -> Option<CoreAction> {
                 }
                 _ => None,
             },
-            PaneFocus::Tabs => match key {
-                CoreKey::Up | CoreKey::Char('k') => Some(CoreAction::SelectPrevTab),
-                CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::SelectNextTab),
-                CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::FocusList),
-                CoreKey::Right | CoreKey::Char('l') | CoreKey::Enter => {
-                    Some(CoreAction::FocusDetail)
-                }
-                _ => None,
-            },
+            PaneFocus::Tabs => None,
             PaneFocus::Detail => match key {
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
                 CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::MovePageDown),
@@ -640,6 +723,8 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.selected_context = snapshot.selected_context;
     state.total_count = snapshot.total_count;
     state.status_message = snapshot.status_message;
+    state.create_cost_state = snapshot.create_cost_state;
+    state.create_submit_state = snapshot.create_submit_state;
 
     if let Some(sel) = state.selected_index {
         if sel >= state.list_items.len() {
@@ -694,6 +779,7 @@ mod tests {
             selected_context: None,
             total_count: 1,
             status_message: Some("ok".to_string()),
+            ..ProviderSnapshot::default()
         };
 
         apply_snapshot(&mut state, snapshot);
@@ -820,5 +906,152 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::Back);
         assert_eq!(state.focus, PaneFocus::Form);
+    }
+
+    #[test]
+    fn create_next_field_cycles_back_to_name() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            create_focus: CreateModalFocus::Submit,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::CreateNextField);
+        assert_eq!(state.create_focus, CreateModalFocus::Name);
+    }
+
+    #[test]
+    fn create_refresh_sets_loading_state() {
+        let mut state = CoreState::default();
+
+        apply_core_action(&mut state, &CoreAction::CreateRefresh);
+
+        assert_eq!(state.create_cost_state, CreateCostState::Loading);
+        assert_eq!(state.create_spinner_frame, 0);
+    }
+
+    #[test]
+    fn tab_entry_focus_matches_kinic_tabs() {
+        assert_eq!(
+            tab_entry_focus(kinic_tabs::KINIC_MEMORIES_TAB_ID),
+            Some(PaneFocus::List)
+        );
+        assert_eq!(
+            tab_entry_focus(kinic_tabs::KINIC_CREATE_TAB_ID),
+            Some(PaneFocus::Form)
+        );
+        assert_eq!(
+            tab_entry_focus(kinic_tabs::KINIC_MARKET_TAB_ID),
+            Some(PaneFocus::Detail)
+        );
+        assert_eq!(tab_entry_focus("unknown"), Some(PaneFocus::Detail));
+    }
+
+    #[test]
+    fn tabs_enter_targets_list_on_memories() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Enter,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::FocusList)
+        );
+    }
+
+    #[test]
+    fn tabs_tab_targets_list_on_memories() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Tab,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::FocusList)
+        );
+    }
+
+    #[test]
+    fn tabs_enter_targets_form_on_create() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Enter,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            Some(CoreAction::FocusForm)
+        );
+    }
+
+    #[test]
+    fn tabs_tab_targets_form_on_create() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Tab,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            Some(CoreAction::FocusForm)
+        );
+    }
+
+    #[test]
+    fn tabs_enter_targets_detail_on_placeholder() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Enter,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MARKET_TAB_ID
+            ),
+            Some(CoreAction::FocusDetail)
+        );
+    }
+
+    #[test]
+    fn tabs_tab_targets_detail_on_placeholder() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Tab,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MARKET_TAB_ID
+            ),
+            Some(CoreAction::FocusDetail)
+        );
+    }
+
+    #[test]
+    fn tabs_left_does_not_exit_tab_bar() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Left,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            None
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('h'),
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn focus_form_resets_create_entry_to_name() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
+            focus: PaneFocus::Tabs,
+            create_focus: CreateModalFocus::Submit,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusForm);
+
+        assert_eq!(state.focus, PaneFocus::Form);
+        assert_eq!(state.create_focus, CreateModalFocus::Name);
     }
 }

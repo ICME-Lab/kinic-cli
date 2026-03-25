@@ -8,7 +8,13 @@ use crate::{
 
 use super::CommandContext;
 
-const TRANSFER_FEE_E8S: u128 = 100_000;
+pub(crate) const TRANSFER_FEE_E8S: u128 = 100_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BalanceDelta {
+    Surplus(Nat),
+    Shortfall(Nat),
+}
 
 pub async fn handle(args: CreateArgs, ctx: &CommandContext) -> Result<()> {
     let id = create_memory(&ctx.agent_factory, &args.name, &args.description).await?;
@@ -39,8 +45,7 @@ pub(crate) async fn create_memory(
 
 fn ensure_sufficient_balance(price: &Nat, balance: u128) -> Result<()> {
     let required = required_balance(price);
-    let balance_nat = Nat::from(balance);
-    if balance_nat < required {
+    if matches!(balance_delta(price, balance), BalanceDelta::Shortfall(_)) {
         bail!(
             "Insufficient balance: need {} e8s (price + 2 * fee), have {} e8s",
             required,
@@ -50,9 +55,19 @@ fn ensure_sufficient_balance(price: &Nat, balance: u128) -> Result<()> {
     Ok(())
 }
 
-fn required_balance(price: &Nat) -> Nat {
+pub(crate) fn required_balance(price: &Nat) -> Nat {
     let fee = Nat::from(TRANSFER_FEE_E8S);
     price.clone() + fee.clone() + fee
+}
+
+pub(crate) fn balance_delta(price: &Nat, balance: u128) -> BalanceDelta {
+    let required = required_balance(price);
+    let balance_nat = Nat::from(balance);
+    if balance_nat >= required {
+        BalanceDelta::Surplus(balance_nat - required)
+    } else {
+        BalanceDelta::Shortfall(required - balance_nat)
+    }
 }
 
 #[cfg(test)]
@@ -73,5 +88,21 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("Insufficient balance: need"));
         assert!(message.contains("have 1699999 e8s"));
+    }
+
+    #[test]
+    fn balance_delta_returns_shortfall_below_required_balance() {
+        let price = Nat::from(1_500_000u128);
+        let delta = balance_delta(&price, 1_699_999);
+
+        assert_eq!(delta, BalanceDelta::Shortfall(Nat::from(1u128)));
+    }
+
+    #[test]
+    fn balance_delta_returns_surplus_at_required_balance_boundary() {
+        let price = Nat::from(1_500_000u128);
+        let delta = balance_delta(&price, 1_700_000);
+
+        assert_eq!(delta, BalanceDelta::Surplus(Nat::from(0u128)));
     }
 }

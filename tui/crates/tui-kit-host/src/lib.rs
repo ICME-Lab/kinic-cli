@@ -9,8 +9,8 @@ use crossterm::event::{
 };
 use std::time::Duration;
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateModalFocus, PaneFocus,
-    action_for_key, tab_focus_policy,
+    CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateCostState, CreateModalFocus,
+    CreateSubmitState, PaneFocus, action_for_key, tab_focus_policy,
 };
 
 /// Fallback tab ids used when host does not provide explicit tabs.
@@ -72,8 +72,12 @@ pub fn key_to_core_key(code: KeyCode) -> Option<CoreKey> {
 }
 
 /// Convert crossterm key code + runtime focus directly into core action.
-pub fn action_from_keycode(code: KeyCode, focus: PaneFocus) -> Option<CoreAction> {
-    key_to_core_key(code).and_then(|k| action_for_key(k, focus))
+pub fn action_from_keycode(
+    code: KeyCode,
+    focus: PaneFocus,
+    current_tab_id: &str,
+) -> Option<CoreAction> {
+    key_to_core_key(code).and_then(|k| action_for_key(k, focus, current_tab_id))
 }
 
 /// Resolve number-based tab action to concrete tab id using host configuration.
@@ -146,6 +150,7 @@ pub enum HostGlobalCommand {
     ToggleHelp,
     ToggleSettings,
     BackFromDetail,
+    RefreshCurrentView,
     ClearQuery,
     Quit,
 }
@@ -225,6 +230,9 @@ pub fn global_command_for_key(
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateTab;
     }
+    if code == KeyCode::F(5) && modifiers.is_empty() {
+        return HostGlobalCommand::RefreshCurrentView;
+    }
     if code == KeyCode::Esc {
         if focus == PaneFocus::Detail {
             return HostGlobalCommand::BackFromDetail;
@@ -258,7 +266,17 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             },
             CoreEffect::RequestRefresh => {}
             CoreEffect::CreateFormError(message) => {
-                state.create_submitting = false;
+                state.create_submit_state = if message.is_some() {
+                    CreateSubmitState::Error
+                } else {
+                    CreateSubmitState::Idle
+                };
+                if !matches!(state.create_cost_state, CreateCostState::Unavailable) {
+                    state.create_cost_state = match &state.create_cost_state {
+                        CreateCostState::Loading => CreateCostState::Hidden,
+                        other => other.clone(),
+                    };
+                }
                 state.create_error = message.clone();
             }
             CoreEffect::SelectFirstListItem => {
@@ -286,7 +304,8 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.current_tab_id = tab_id.clone();
                 state.create_name.clear();
                 state.create_description.clear();
-                state.create_submitting = false;
+                state.create_submit_state = CreateSubmitState::Idle;
+                state.create_spinner_frame = 0;
                 state.create_error = None;
                 state.create_focus = CreateModalFocus::Name;
             }
@@ -314,7 +333,7 @@ mod tests {
         #[test]
         fn action_from_keycode_maps_search_input() {
             assert_eq!(
-                action_from_keycode(KeyCode::Char('x'), PaneFocus::Search),
+                action_from_keycode(KeyCode::Char('x'), PaneFocus::Search, KINIC_MEMORIES_TAB_ID),
                 Some(CoreAction::SearchInput('x'))
             );
         }
@@ -352,7 +371,7 @@ mod tests {
                 current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
                 create_name: "stale".to_string(),
                 create_description: "stale".to_string(),
-                create_submitting: true,
+                create_submit_state: CreateSubmitState::Submitting,
                 create_error: Some("boom".to_string()),
                 ..CoreState::default()
             };
@@ -367,7 +386,7 @@ mod tests {
             assert_eq!(state.current_tab_id, KINIC_MEMORIES_TAB_ID);
             assert_eq!(state.create_name, "");
             assert_eq!(state.create_description, "");
-            assert!(!state.create_submitting);
+            assert_eq!(state.create_submit_state, CreateSubmitState::Idle);
             assert_eq!(state.create_error, None);
             assert_eq!(state.create_focus, CreateModalFocus::Name);
         }
@@ -420,6 +439,14 @@ mod tests {
                     KINIC_MEMORIES_TAB_ID,
                     true,
                     HostGlobalCommand::OpenCreateTab,
+                ),
+                (
+                    KeyCode::F(5),
+                    KeyModifiers::NONE,
+                    PaneFocus::List,
+                    KINIC_MEMORIES_TAB_ID,
+                    true,
+                    HostGlobalCommand::RefreshCurrentView,
                 ),
                 (
                     KeyCode::Char('q'),
