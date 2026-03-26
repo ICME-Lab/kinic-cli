@@ -473,6 +473,9 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     let previous_focus = state.focus;
     match action {
         CoreAction::InsertInput(c) => {
+            if insert_form_locked(state) {
+                return;
+            }
             match state.insert_focus {
                 InsertFormFocus::Mode | InsertFormFocus::Submit => {}
                 InsertFormFocus::MemoryId => state.insert_memory_id.push(*c),
@@ -486,31 +489,45 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 state.insert_submit_state = CreateSubmitState::Idle;
             }
         }
-        CoreAction::InsertBackspace => match state.insert_focus {
-            InsertFormFocus::Mode | InsertFormFocus::Submit => {}
-            InsertFormFocus::MemoryId => {
-                state.insert_memory_id.pop();
+        CoreAction::InsertBackspace => {
+            if insert_form_locked(state) {
+                return;
             }
-            InsertFormFocus::Tag => {
-                state.insert_tag.pop();
+            match state.insert_focus {
+                InsertFormFocus::Mode | InsertFormFocus::Submit => {}
+                InsertFormFocus::MemoryId => {
+                    state.insert_memory_id.pop();
+                }
+                InsertFormFocus::Tag => {
+                    state.insert_tag.pop();
+                }
+                InsertFormFocus::Text => {
+                    state.insert_text.pop();
+                }
+                InsertFormFocus::FilePath => {
+                    state.insert_file_path.pop();
+                }
+                InsertFormFocus::Embedding => {
+                    state.insert_embedding.pop();
+                }
             }
-            InsertFormFocus::Text => {
-                state.insert_text.pop();
-            }
-            InsertFormFocus::FilePath => {
-                state.insert_file_path.pop();
-            }
-            InsertFormFocus::Embedding => {
-                state.insert_embedding.pop();
-            }
-        },
+        }
         CoreAction::InsertNextField => {
+            if insert_form_locked(state) {
+                return;
+            }
             state.insert_focus = next_insert_focus(state.insert_mode, state.insert_focus);
         }
         CoreAction::InsertPrevField => {
+            if insert_form_locked(state) {
+                return;
+            }
             state.insert_focus = prev_insert_focus(state.insert_mode, state.insert_focus);
         }
         CoreAction::InsertCycleMode => {
+            if insert_form_locked(state) {
+                return;
+            }
             state.insert_mode = next_insert_mode(state.insert_mode);
             state.insert_focus = InsertFormFocus::Mode;
             state.insert_error = None;
@@ -854,6 +871,10 @@ fn next_insert_mode(mode: InsertMode) -> InsertMode {
         InsertMode::Raw => InsertMode::Pdf,
         InsertMode::Pdf => InsertMode::Normal,
     }
+}
+
+fn insert_form_locked(state: &CoreState) -> bool {
+    state.insert_submit_state == CreateSubmitState::Submitting
 }
 
 fn is_focus_allowed_for_policy(policy: TabFocusPolicy, focus: PaneFocus) -> bool {
@@ -1632,5 +1653,35 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::MoveNext);
         assert_eq!(state.selected_index, None);
+    }
+
+    #[test]
+    fn insert_input_is_ignored_while_submit_is_running() {
+        let mut state = CoreState {
+            insert_focus: InsertFormFocus::Text,
+            insert_text: "draft".to_string(),
+            insert_submit_state: CreateSubmitState::Submitting,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertInput('x'));
+
+        assert_eq!(state.insert_text, "draft");
+    }
+
+    #[test]
+    fn insert_navigation_is_ignored_while_submit_is_running() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::Normal,
+            insert_focus: InsertFormFocus::Text,
+            insert_submit_state: CreateSubmitState::Submitting,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertNextField);
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+
+        assert_eq!(state.insert_focus, InsertFormFocus::Text);
+        assert_eq!(state.insert_mode, InsertMode::Normal);
     }
 }

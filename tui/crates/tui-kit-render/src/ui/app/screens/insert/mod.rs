@@ -37,6 +37,10 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(" Esc ", self.theme.style_accent()),
                 Span::styled("step back one level", self.theme.style_muted()),
             ]),
+            Line::from(vec![
+                Span::styled(" While submitting ", self.theme.style_accent()),
+                Span::styled("wait for completion before editing", self.theme.style_muted()),
+            ]),
         ];
         Paragraph::new(intro)
             .wrap(Wrap { trim: false })
