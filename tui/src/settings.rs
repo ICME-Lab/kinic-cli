@@ -3,12 +3,11 @@
 //! What: stores session status and a minimal persisted preference set.
 //! Why: keep settings read-mostly in v1 while avoiding UI-specific ad hoc strings.
 
-#[cfg(test)]
-use std::{fs, path::Path};
-
 use serde::{Deserialize, Serialize};
 use tui_kit_host::settings::{SettingsError, load_yaml_or_default, save_yaml};
-use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
+use tui_kit_runtime::{
+    SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot,
+};
 
 use crate::tui::TuiAuth;
 
@@ -24,7 +23,6 @@ pub struct SessionSettingsSnapshot {
     pub principal_id: String,
     pub network: String,
     pub embedding_api_endpoint: String,
-    pub default_memory_id: Option<String>,
 }
 
 impl SessionSettingsSnapshot {
@@ -33,7 +31,6 @@ impl SessionSettingsSnapshot {
         use_mainnet: bool,
         principal_id: Option<String>,
         embedding_api_endpoint: String,
-        default_memory_id: Option<String>,
     ) -> Self {
         Self {
             auth_mode: auth_mode_label(auth),
@@ -41,13 +38,14 @@ impl SessionSettingsSnapshot {
             principal_id: principal_id.unwrap_or_else(|| UNAVAILABLE.to_string()),
             network: network_label(use_mainnet),
             embedding_api_endpoint,
-            default_memory_id,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct UserPreferences {
+    #[serde(default)]
     pub default_memory_id: Option<String>,
 }
 
@@ -93,7 +91,7 @@ pub fn build_settings_snapshot(
             entry("auth_mode", "Auth mode", session.auth_mode.clone(), None),
             entry("network", "Network", session.network.clone(), None),
             entry(
-                "default_memory",
+                SETTINGS_ENTRY_DEFAULT_MEMORY_ID,
                 "Default memory",
                 default_memory_display.clone(),
                 None,
@@ -137,7 +135,7 @@ pub fn build_settings_snapshot(
                 title: "Saved preferences".to_string(),
                 entries: vec![
                     entry(
-                        "default_memory",
+                        SETTINGS_ENTRY_DEFAULT_MEMORY_ID,
                         "Default memory",
                         default_memory_display,
                         None,
@@ -226,258 +224,5 @@ fn entry(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{
-        sync::atomic::{AtomicU64, Ordering},
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    fn unique_temp_path(name: &str) -> std::path::PathBuf {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time should move forward")
-            .as_nanos();
-        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("kinic-settings-{name}-{nanos}-{counter}.yaml"))
-    }
-
-    fn load_preferences_from_path(path: &Path) -> UserPreferences {
-        if !path.exists() {
-            return UserPreferences::default();
-        }
-        let content = fs::read_to_string(path).expect("preferences should be readable");
-        serde_yaml::from_str(&content).expect("preferences YAML should decode")
-    }
-
-    fn save_preferences_to_path(path: &Path, preferences: &UserPreferences) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("temp parent should be creatable");
-        }
-        let content = serde_yaml::to_string(preferences).expect("preferences should encode");
-        fs::write(path, content).expect("preferences should be writable");
-    }
-
-    fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {
-        snapshot
-            .quick_entries
-            .iter()
-            .find(|entry| entry.id == id)
-            .map(|entry| entry.value.as_str())
-            .expect("quick entry should exist")
-    }
-
-    fn section_entry_value<'a>(snapshot: &'a SettingsSnapshot, section: &str, id: &str) -> &'a str {
-        snapshot
-            .sections
-            .iter()
-            .find(|current| current.title == section)
-            .and_then(|current| current.entries.iter().find(|entry| entry.id == id))
-            .map(|entry| entry.value.as_str())
-            .expect("section entry should exist")
-    }
-
-    #[test]
-    fn session_snapshot_uses_keyring_identity_values() {
-        let snapshot = SessionSettingsSnapshot::new(
-            &TuiAuth::DeferredIdentity {
-                identity_name: "alice".to_string(),
-                cached_identity: Default::default(),
-            },
-            true,
-            Some("aaaaa-aa".to_string()),
-            "https://api.kinic.io".to_string(),
-            Some("bbbbb-bb".to_string()),
-        );
-
-        assert_eq!(snapshot.auth_mode, "keyring identity");
-        assert_eq!(snapshot.identity_name, "alice");
-        assert_eq!(snapshot.principal_id, "aaaaa-aa");
-        assert_eq!(snapshot.network, "mainnet");
-        assert_eq!(snapshot.default_memory_id.as_deref(), Some("bbbbb-bb"));
-    }
-
-    #[test]
-    fn session_snapshot_uses_unavailable_principal_for_mock_auth() {
-        let snapshot = SessionSettingsSnapshot::new(
-            &TuiAuth::Mock,
-            false,
-            None,
-            "https://api.kinic.io".to_string(),
-            None,
-        );
-
-        assert_eq!(snapshot.auth_mode, "mock");
-        assert_eq!(snapshot.identity_name, "mock");
-        assert_eq!(snapshot.principal_id, UNAVAILABLE);
-        assert_eq!(snapshot.network, "local");
-    }
-
-    #[test]
-    fn user_preferences_roundtrip_yaml() {
-        let path = unique_temp_path("roundtrip");
-        let preferences = UserPreferences {
-            default_memory_id: Some("aaaaa-aa".to_string()),
-        };
-
-        save_preferences_to_path(&path, &preferences);
-        let loaded = load_preferences_from_path(&path);
-
-        assert_eq!(loaded, preferences);
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn user_preferences_default_when_file_is_missing() {
-        let path = unique_temp_path("missing");
-        let loaded = load_preferences_from_path(&path);
-        assert_eq!(loaded, UserPreferences::default());
-    }
-
-    #[test]
-    fn settings_snapshot_marks_missing_default_memory() {
-        let session = SessionSettingsSnapshot::new(
-            &TuiAuth::DeferredIdentity {
-                identity_name: "alice".to_string(),
-                cached_identity: Default::default(),
-            },
-            false,
-            Some("principal-1".to_string()),
-            "https://api.kinic.io".to_string(),
-            Some("aaaaa-aa".to_string()),
-        );
-        let preferences = UserPreferences {
-            default_memory_id: Some("aaaaa-aa".to_string()),
-        };
-
-        let snapshot = build_settings_snapshot(
-            &session,
-            &preferences,
-            &["bbbbb-bb".to_string()],
-            &["Beta Memory".to_string()],
-            &PreferencesHealth::default(),
-        );
-
-        assert_eq!(quick_entry_value(&snapshot, "default_memory"), "aaaaa-aa (missing)");
-        assert_eq!(
-            section_entry_value(&snapshot, "Saved preferences", "default_memory"),
-            "aaaaa-aa (missing)"
-        );
-    }
-
-    #[test]
-    fn settings_snapshot_surfaces_preferences_load_error() {
-        let session = SessionSettingsSnapshot::new(
-            &TuiAuth::DeferredIdentity {
-                identity_name: "alice".to_string(),
-                cached_identity: Default::default(),
-            },
-            false,
-            Some("principal-1".to_string()),
-            "https://api.kinic.io".to_string(),
-            None,
-        );
-        let snapshot = build_settings_snapshot(
-            &session,
-            &UserPreferences::default(),
-            &[],
-            &[],
-            &PreferencesHealth {
-                load_error: Some("invalid YAML".to_string()),
-                save_error: None,
-            },
-        );
-
-        assert_eq!(
-            quick_entry_value(&snapshot, "preferences"),
-            "preferences unavailable"
-        );
-        assert_eq!(
-            section_entry_value(&snapshot, "Saved preferences", "preferences_status"),
-            "preferences unavailable"
-        );
-    }
-
-    #[test]
-    fn settings_snapshot_keeps_persisted_value_when_last_save_failed() {
-        let session = SessionSettingsSnapshot::new(
-            &TuiAuth::DeferredIdentity {
-                identity_name: "alice".to_string(),
-                cached_identity: Default::default(),
-            },
-            false,
-            Some("principal-1".to_string()),
-            "https://api.kinic.io".to_string(),
-            Some("aaaaa-aa".to_string()),
-        );
-        let snapshot = build_settings_snapshot(
-            &session,
-            &UserPreferences {
-                default_memory_id: Some("aaaaa-aa".to_string()),
-            },
-            &["aaaaa-aa".to_string()],
-            &["Alpha Memory".to_string()],
-            &PreferencesHealth {
-                load_error: None,
-                save_error: Some("permission denied".to_string()),
-            },
-        );
-
-        assert_eq!(quick_entry_value(&snapshot, "default_memory"), "Alpha Memory");
-        assert_eq!(quick_entry_value(&snapshot, "preferences"), "last save failed");
-        assert_eq!(
-            section_entry_value(&snapshot, "Saved preferences", "default_memory"),
-            "Alpha Memory"
-        );
-        assert_eq!(
-            section_entry_value(&snapshot, "Saved preferences", "preferences_status"),
-            "last save failed"
-        );
-    }
-
-    #[test]
-    fn settings_snapshot_prefers_memory_title_for_default_display() {
-        let session = SessionSettingsSnapshot::new(
-            &TuiAuth::DeferredIdentity {
-                identity_name: "alice".to_string(),
-                cached_identity: Default::default(),
-            },
-            false,
-            Some("principal-1".to_string()),
-            "https://api.kinic.io".to_string(),
-            Some("aaaaa-aa".to_string()),
-        );
-
-        let snapshot = build_settings_snapshot(
-            &session,
-            &UserPreferences {
-                default_memory_id: Some("aaaaa-aa".to_string()),
-            },
-            &["aaaaa-aa".to_string()],
-            &["Alpha Memory".to_string()],
-            &PreferencesHealth::default(),
-        );
-
-        assert_eq!(quick_entry_value(&snapshot, "default_memory"), "Alpha Memory");
-        assert_eq!(
-            section_entry_value(&snapshot, "Saved preferences", "default_memory"),
-            "Alpha Memory"
-        );
-    }
-
-    #[test]
-    fn session_snapshot_uses_neutral_labels_for_resolved_identity() {
-        let snapshot = SessionSettingsSnapshot::new(
-            &TuiAuth::resolved_for_tests(),
-            false,
-            Some("aaaaa-aa".to_string()),
-            "https://api.kinic.io".to_string(),
-            None,
-        );
-
-        assert_eq!(snapshot.identity_name, "provided");
-        assert_eq!(snapshot.auth_mode, "live identity");
-    }
-}
+#[path = "settings_tests.rs"]
+mod tests;

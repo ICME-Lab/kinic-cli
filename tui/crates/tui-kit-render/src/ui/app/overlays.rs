@@ -397,7 +397,9 @@ mod tests {
 
     #[test]
     fn default_memory_selector_window_keeps_selected_row_visible() {
-        let ids = (0..12).map(|index| format!("id-{index}")).collect::<Vec<_>>();
+        let ids = (0..12)
+            .map(|index| format!("id-{index}"))
+            .collect::<Vec<_>>();
         let labels = (0..12)
             .map(|index| format!("Memory {index}"))
             .collect::<Vec<_>>();

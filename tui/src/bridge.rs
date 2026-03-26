@@ -75,7 +75,6 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
 pub async fn load_session_settings(
     use_mainnet: bool,
     auth: TuiAuth,
-    default_memory_id: Option<String>,
 ) -> Result<SessionSettingsSnapshot, String> {
     let principal_id = auth.principal_text().map_err(|error| error.to_string())?;
 
@@ -84,7 +83,6 @@ pub async fn load_session_settings(
         use_mainnet,
         Some(principal_id),
         embedding_base_url(),
-        default_memory_id,
     ))
 }
 

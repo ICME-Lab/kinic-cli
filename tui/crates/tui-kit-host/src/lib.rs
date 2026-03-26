@@ -188,13 +188,17 @@ pub fn global_command_for_key(
         let tab_specific = if focus == PaneFocus::Form && focus_policy.allows_form {
             HostGlobalCommand::BackFromFormToTabs
         } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
+            && focus == PaneFocus::Content
+        {
+            HostGlobalCommand::BackFromContent
+        } else if focus == PaneFocus::Content {
+            HostGlobalCommand::BackToTabs
+        } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
             && matches!(focus, PaneFocus::Search | PaneFocus::Items)
             && query_is_empty
         {
             HostGlobalCommand::BackToTabs
         } else if focus == PaneFocus::Tabs && !focus_policy.allows_search {
-            HostGlobalCommand::BackToMemoriesTab
-        } else if focus == PaneFocus::Content && !focus_policy.allows_items {
             HostGlobalCommand::BackToMemoriesTab
         } else {
             HostGlobalCommand::None
@@ -248,9 +252,6 @@ pub fn global_command_for_key(
         return HostGlobalCommand::RefreshCurrentView;
     }
     if code == KeyCode::Esc {
-        if focus == PaneFocus::Content {
-            return HostGlobalCommand::BackFromContent;
-        }
         if !query_is_empty {
             return HostGlobalCommand::ClearQuery;
         }
@@ -459,6 +460,14 @@ mod tests {
                     true,
                     HostGlobalCommand::BackToTabs,
                 ),
+                (
+                    KeyCode::Esc,
+                    KeyModifiers::NONE,
+                    PaneFocus::Content,
+                    KINIC_MEMORIES_TAB_ID,
+                    true,
+                    HostGlobalCommand::BackFromContent,
+                ),
             ];
 
             for (code, modifiers, focus, tab_id, query_is_empty, expected) in cases {
@@ -503,12 +512,12 @@ mod tests {
                 (
                     PaneFocus::Content,
                     KINIC_MARKET_TAB_ID,
-                    HostGlobalCommand::BackToMemoriesTab,
+                    HostGlobalCommand::BackToTabs,
                 ),
                 (
                     PaneFocus::Content,
                     KINIC_SETTINGS_TAB_ID,
-                    HostGlobalCommand::BackToMemoriesTab,
+                    HostGlobalCommand::BackToTabs,
                 ),
             ];
 

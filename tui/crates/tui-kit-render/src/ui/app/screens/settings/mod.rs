@@ -164,7 +164,9 @@ fn settings_screen_lines_with_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
+    use tui_kit_runtime::{
+        SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot,
+    };
 
     #[test]
     fn settings_screen_lines_align_value_columns_within_section() {
@@ -214,7 +216,7 @@ mod tests {
                 title: "Saved preferences".to_string(),
                 entries: vec![
                     SettingsEntry {
-                        id: "default_memory".to_string(),
+                        id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                         label: "Default memory".to_string(),
                         value: "Alpha Memory".to_string(),
                         note: None,

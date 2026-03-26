@@ -7,6 +7,8 @@ pub mod kinic_tabs;
 
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
 
+pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
+
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
 
@@ -928,7 +930,7 @@ pub fn should_open_default_memory_picker(state: &CoreState) -> bool {
             .selected_index
             .and_then(|index| settings_entry(&state.settings, index))
             .map(|entry| entry.id.as_str())
-            == Some("default_memory")
+            == Some(SETTINGS_ENTRY_DEFAULT_MEMORY_ID)
 }
 
 #[cfg(test)]
@@ -1283,7 +1285,7 @@ mod tests {
                 title: "Saved preferences".to_string(),
                 entries: vec![
                     SettingsEntry {
-                        id: "default_memory".to_string(),
+                        id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                         label: "Preferred memory".to_string(),
                         value: "aaaaa-aa".to_string(),
                         note: None,
@@ -1330,7 +1332,7 @@ mod tests {
                     title: "Saved preferences".to_string(),
                     entries: vec![
                         SettingsEntry {
-                            id: "default_memory".to_string(),
+                            id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                             label: "Default memory".to_string(),
                             value: "aaaaa-aa".to_string(),
                             note: None,
@@ -1405,7 +1407,7 @@ mod tests {
                     title: "Saved preferences".to_string(),
                     entries: vec![
                         SettingsEntry {
-                            id: "default_memory".to_string(),
+                            id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                             label: "Default memory".to_string(),
                             value: "aaaaa-aa".to_string(),
                             note: None,
