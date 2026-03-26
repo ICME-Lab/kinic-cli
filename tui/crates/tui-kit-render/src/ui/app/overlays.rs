@@ -447,14 +447,14 @@ mod tests {
         );
 
         let visible = visible_default_memory_selector_lines(lines, 8);
-        let joined = visible
+        let visible_lines = visible
             .iter()
             .map(|(line, _)| line.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect::<Vec<_>>();
+        let joined = visible_lines.join("\n");
 
         assert!(joined.contains("Memory 10"));
-        assert!(!joined.contains("Memory 1"));
+        assert!(!visible_lines.iter().any(|line| *line == "  Memory 1"));
         assert!(joined.contains("Enter: save"));
     }
 

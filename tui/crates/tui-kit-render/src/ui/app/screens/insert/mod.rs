@@ -18,30 +18,7 @@ impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_insert_screen(&self, area: Rect, buf: &mut Buffer) {
         let layout = insert_layout(area, !self.tab_specs.is_empty());
         let form = insert_form_lines(self, layout.form_area.width.saturating_sub(6));
-        let intro = vec![
-            Line::from(vec![
-                Span::styled(" Insert ", self.theme.style_accent_bold()),
-                Span::styled(
-                    self.ui_config.insert.intro_description.as_str(),
-                    self.theme.style_normal(),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(" Enter ", self.theme.style_accent()),
-                Span::styled("switch mode or submit", self.theme.style_muted()),
-                Span::styled("  │  ", self.theme.style_dim()),
-                Span::styled(" Tab / Shift+Tab ", self.theme.style_accent()),
-                Span::styled("cycle fields", self.theme.style_muted()),
-                Span::styled("  │  ", self.theme.style_dim()),
-                Span::styled(" Esc ", self.theme.style_accent()),
-                Span::styled("step back one level", self.theme.style_muted()),
-            ]),
-            Line::from(vec![
-                Span::styled(" While submitting ", self.theme.style_accent()),
-                Span::styled("wait for completion before editing", self.theme.style_muted()),
-            ]),
-        ];
+        let intro = insert_intro_lines(self, layout.intro_area.height);
         Paragraph::new(intro)
             .wrap(Wrap { trim: false })
             .render(layout.intro_area, buf);
@@ -75,9 +52,92 @@ impl<'a> TuiKitUi<'a> {
     }
 }
 
+fn insert_intro_lines<'a>(ui: &'a TuiKitUi<'a>, intro_height: u16) -> Vec<Line<'a>> {
+    let mut intro = vec![
+        Line::from(vec![
+            Span::styled(" Insert ", ui.theme.style_accent_bold()),
+            Span::styled(
+                ui.ui_config.insert.intro_description.as_str(),
+                ui.theme.style_normal(),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" Enter ", ui.theme.style_accent()),
+            Span::styled("mode or submit", ui.theme.style_muted()),
+            Span::styled("  │  ", ui.theme.style_dim()),
+            Span::styled(" Tab / Shift+Tab ", ui.theme.style_accent()),
+            Span::styled("cycle fields", ui.theme.style_muted()),
+        ]),
+    ];
+
+    if intro_height >= 5 {
+        intro[2] = Line::from(vec![
+            Span::styled(" Enter ", ui.theme.style_accent()),
+            Span::styled("mode or submit", ui.theme.style_muted()),
+            Span::styled("  │  ", ui.theme.style_dim()),
+            Span::styled(" Tab / Shift+Tab ", ui.theme.style_accent()),
+            Span::styled("cycle fields", ui.theme.style_muted()),
+            Span::styled("  │  ", ui.theme.style_dim()),
+            Span::styled(" Esc ", ui.theme.style_accent()),
+            Span::styled("step back one level", ui.theme.style_muted()),
+        ]);
+        intro.push(Line::from(vec![
+            Span::styled(" While submitting ", ui.theme.style_accent()),
+            Span::styled("wait for completion before editing", ui.theme.style_muted()),
+        ]));
+    }
+
+    intro
+}
+
+#[cfg(test)]
+fn insert_intro_is_compact(intro_height: u16) -> bool {
+    intro_height < 5
+}
+
 struct InsertLayout {
     intro_area: Rect,
     form_area: Rect,
+}
+
+fn insert_intro_height(body_height: u16) -> u16 {
+    if body_height < 16 { 4 } else { 6 }
+}
+
+fn insert_layout(area: Rect, has_tabs: bool) -> InsertLayout {
+    let body = shared::layout::body_rect_for_area_with_tabs(area, has_tabs);
+    let intro_height = insert_intro_height(body.height);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(intro_height), Constraint::Min(10)])
+        .split(body);
+    InsertLayout {
+        intro_area: chunks[0],
+        form_area: chunks[1],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_intro_is_used_for_short_bodies() {
+        assert!(insert_intro_is_compact(insert_intro_height(12)));
+        assert!(!insert_intro_is_compact(insert_intro_height(20)));
+    }
+
+    #[test]
+    fn compact_layout_preserves_room_for_form() {
+        let area = Rect::new(0, 0, 80, 29);
+        let body = shared::layout::body_rect_for_area_with_tabs(area, true);
+        let layout = insert_layout(area, true);
+
+        assert_eq!(body.height, 14);
+        assert_eq!(layout.intro_area.height, 4);
+        assert!(layout.form_area.height >= 10);
+    }
 }
 
 struct InsertForm<'a> {
@@ -96,18 +156,6 @@ impl InsertForm<'_> {
             .find(|(field, _, _)| *field == focus)
             .map(|(_, _, width)| *width)
             .unwrap_or(0)
-    }
-}
-
-fn insert_layout(area: Rect, has_tabs: bool) -> InsertLayout {
-    let body = shared::layout::body_rect_for_area_with_tabs(area, has_tabs);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(6), Constraint::Min(12)])
-        .split(body);
-    InsertLayout {
-        intro_area: chunks[0],
-        form_area: chunks[1],
     }
 }
 

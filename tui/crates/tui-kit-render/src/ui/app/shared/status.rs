@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use tui_kit_runtime::kinic_tabs::{KINIC_SETTINGS_TAB_ID, TabKind, tab_kind};
+use tui_kit_runtime::kinic_tabs::{KINIC_INSERT_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind};
 
 use crate::ui::app::{Focus, TuiKitUi};
 
@@ -37,7 +37,7 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled("Tab/Shift+Tab", self.theme.style_accent()),
                 Span::styled(" fields ", self.theme.style_muted()),
                 Span::styled("Enter", self.theme.style_accent()),
-                Span::styled(" enter/submit ", self.theme.style_muted()),
+                Span::styled(form_enter_hint(tab_id), self.theme.style_muted()),
                 Span::styled("1-5", self.theme.style_accent()),
                 Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
                 Span::styled("│ ", self.theme.style_dim()),
@@ -198,5 +198,13 @@ impl<'a> TuiKitUi<'a> {
         Paragraph::new(status_line)
             .alignment(Alignment::Left)
             .render(inner, buf);
+    }
+}
+
+fn form_enter_hint(tab_id: &str) -> &'static str {
+    if tab_id == KINIC_INSERT_TAB_ID {
+        " mode/submit "
+    } else {
+        " submit "
     }
 }
