@@ -5,7 +5,10 @@ use std::{sync::mpsc, thread};
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::settings::{self, PreferencesHealth, SessionSettingsSnapshot, UserPreferences};
-use crate::{insert_service::InsertRequest, tui::TuiAuth};
+use crate::{
+    insert_service::{InsertRequest, validate_insert_request},
+    tui::TuiAuth,
+};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
@@ -741,6 +744,32 @@ impl KinicProvider {
         CoreEffect::Notify("Submitting insert request...".to_string())
     }
 
+    fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
+        let memory_id = state.insert_memory_id.trim().to_string();
+        let tag = state.insert_tag.trim().to_string();
+
+        match state.insert_mode {
+            InsertMode::Normal => InsertRequest::Normal {
+                memory_id,
+                tag,
+                text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
+                file_path: (!state.insert_file_path.trim().is_empty())
+                    .then(|| std::path::PathBuf::from(state.insert_file_path.trim())),
+            },
+            InsertMode::Raw => InsertRequest::Raw {
+                memory_id,
+                tag,
+                text: state.insert_text.clone(),
+                embedding_json: state.insert_embedding.clone(),
+            },
+            InsertMode::Pdf => InsertRequest::Pdf {
+                memory_id,
+                tag,
+                file_path: std::path::PathBuf::from(state.insert_file_path.trim()),
+            },
+        }
+    }
+
     fn status_message(&self, visible_count: usize) -> String {
         if self.tab_id == KINIC_INSERT_TAB_ID {
             return "kinic(insert): choose mode, target memory, and payload, then press Enter on submit.".to_string();
@@ -1145,7 +1174,9 @@ impl KinicProvider {
         let effects = match output.result {
             Ok(snapshot) => {
                 self.session_settings = snapshot;
-                vec![CoreEffect::Notify("Session settings refreshed.".to_string())]
+                vec![CoreEffect::Notify(
+                    "Session settings refreshed.".to_string(),
+                )]
             }
             Err(error) => vec![CoreEffect::Notify(format!(
                 "Session settings refresh failed: {error}"
@@ -1353,86 +1384,24 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::InsertSubmit => {
-                let memory_id = state.insert_memory_id.trim().to_string();
-                let tag = state.insert_tag.trim().to_string();
-                if memory_id.is_empty() || tag.is_empty() {
-                    effects.push(CoreEffect::InsertFormError(Some(
-                        "Memory ID and tag are required.".to_string(),
-                    )));
+                let request = self.build_insert_request(state);
+                if let Err(error) = validate_insert_request(&request) {
+                    effects.push(CoreEffect::InsertFormError(Some(error.to_string())));
                 } else if self.insert_submit_in_flight {
                     effects.push(CoreEffect::Notify(
                         "Insert request already running.".to_string(),
                     ));
                 } else {
-                    let request = match state.insert_mode {
-                        InsertMode::Normal => {
-                            let text = (!state.insert_text.trim().is_empty())
-                                .then(|| state.insert_text.trim().to_string());
-                            let file_path = (!state.insert_file_path.trim().is_empty())
-                                .then(|| std::path::PathBuf::from(state.insert_file_path.trim()));
-                            if text.is_none() && file_path.is_none() {
-                                effects.push(CoreEffect::InsertFormError(Some(
-                                    "Provide text or file path for normal insert.".to_string(),
-                                )));
-                                None
-                            } else {
-                                Some(InsertRequest::Normal {
-                                    memory_id,
-                                    tag,
-                                    text,
-                                    file_path,
-                                })
-                            }
-                        }
-                        InsertMode::Raw => {
-                            if state.insert_text.trim().is_empty() {
-                                effects.push(CoreEffect::InsertFormError(Some(
-                                    "Text is required for raw insert.".to_string(),
-                                )));
-                                None
-                            } else if state.insert_embedding.trim().is_empty() {
-                                effects.push(CoreEffect::InsertFormError(Some(
-                                    "Embedding JSON is required for raw insert.".to_string(),
-                                )));
-                                None
-                            } else {
-                                Some(InsertRequest::Raw {
-                                    memory_id,
-                                    tag,
-                                    text: state.insert_text.trim().to_string(),
-                                    embedding_json: state.insert_embedding.trim().to_string(),
-                                })
-                            }
-                        }
-                        InsertMode::Pdf => {
-                            if state.insert_file_path.trim().is_empty() {
-                                effects.push(CoreEffect::InsertFormError(Some(
-                                    "File path is required for PDF insert.".to_string(),
-                                )));
-                                None
-                            } else {
-                                Some(InsertRequest::Pdf {
-                                    memory_id,
-                                    tag,
-                                    file_path: std::path::PathBuf::from(
-                                        state.insert_file_path.trim(),
-                                    ),
-                                })
-                            }
-                        }
-                    };
-                    if let Some(request) = request {
-                        if self.is_live() {
-                            effects.push(self.start_insert_submit(request));
-                        } else {
-                            effects.push(CoreEffect::InsertFormError(None));
-                            effects.push(CoreEffect::ResetInsertFormForRepeat);
-                            effects.push(CoreEffect::Notify(format!(
-                                "Mock insert accepted for {} [{}]",
-                                state.insert_memory_id.trim(),
-                                state.insert_tag.trim()
-                            )));
-                        }
+                    if self.is_live() {
+                        effects.push(self.start_insert_submit(request));
+                    } else {
+                        effects.push(CoreEffect::InsertFormError(None));
+                        effects.push(CoreEffect::ResetInsertFormForRepeat);
+                        effects.push(CoreEffect::Notify(format!(
+                            "Mock insert accepted for {} [{}]",
+                            state.insert_memory_id.trim(),
+                            state.insert_tag.trim()
+                        )));
                     }
                 }
             }
@@ -1961,6 +1930,27 @@ Maintain keyboard-first behavior as baseline.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        env, fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn mock_config() -> TuiConfig {
+        TuiConfig {
+            auth: TuiAuth::Mock,
+            use_mainnet: false,
+        }
+    }
+
+    fn write_temp_markdown_file(contents: &str) -> String {
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let path = env::temp_dir().join(format!("kinic-provider-test-{unique_suffix}.md"));
+        fs::write(&path, contents).expect("temporary markdown file should be writable");
+        path.display().to_string()
+    }
 
     fn live_config() -> TuiConfig {
         TuiConfig {
@@ -3285,6 +3275,181 @@ mod tests {
                 .and_then(|snapshot| snapshot.selected_content.as_ref())
                 .map(|detail| detail.id.as_str()),
             Some("ccccc-cc")
+        );
+    }
+
+    #[test]
+    fn mock_insert_rejects_invalid_embedding_json() {
+        let mut provider = KinicProvider::new(mock_config());
+        let state = CoreState {
+            insert_mode: InsertMode::Raw,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            insert_tag: "docs".to_string(),
+            insert_text: "payload".to_string(),
+            insert_embedding: "not-json".to_string(),
+            ..CoreState::default()
+        };
+
+        let output = provider
+            .handle_action(&CoreAction::InsertSubmit, &state)
+            .expect("insert submit should succeed");
+
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::InsertFormError(Some(message))
+                if message.contains("Embedding must be a JSON array")
+        )));
+    }
+
+    #[test]
+    fn mock_insert_rejects_blank_raw_text() {
+        let mut provider = KinicProvider::new(mock_config());
+        let state = CoreState {
+            insert_mode: InsertMode::Raw,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            insert_tag: "docs".to_string(),
+            insert_text: "   ".to_string(),
+            insert_embedding: "[0.1]".to_string(),
+            ..CoreState::default()
+        };
+
+        let output = provider
+            .handle_action(&CoreAction::InsertSubmit, &state)
+            .expect("insert submit should succeed");
+
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::InsertFormError(Some(message))
+                if message == "Text is required for raw insert."
+        )));
+    }
+
+    #[test]
+    fn mock_insert_rejects_missing_pdf_path() {
+        let mut provider = KinicProvider::new(mock_config());
+        let state = CoreState {
+            insert_mode: InsertMode::Pdf,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            insert_tag: "docs".to_string(),
+            insert_file_path: String::new(),
+            ..CoreState::default()
+        };
+
+        let output = provider
+            .handle_action(&CoreAction::InsertSubmit, &state)
+            .expect("insert submit should succeed");
+
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::InsertFormError(Some(message))
+                if message == "File path is required for PDF insert."
+        )));
+    }
+
+    #[test]
+    fn live_and_mock_insert_share_validation_messages() {
+        let mut live_provider = KinicProvider::new(live_config());
+        let mut mock_provider = KinicProvider::new(mock_config());
+        let state = CoreState {
+            insert_mode: InsertMode::Raw,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            insert_tag: "docs".to_string(),
+            insert_text: "payload".to_string(),
+            insert_embedding: "not-json".to_string(),
+            ..CoreState::default()
+        };
+
+        let live_output = live_provider
+            .handle_action(&CoreAction::InsertSubmit, &state)
+            .expect("live validation should succeed");
+        let mock_output = mock_provider
+            .handle_action(&CoreAction::InsertSubmit, &state)
+            .expect("mock validation should succeed");
+
+        let live_message = live_output.effects.iter().find_map(|effect| match effect {
+            CoreEffect::InsertFormError(Some(message)) => Some(message.as_str()),
+            _ => None,
+        });
+        let mock_message = mock_output.effects.iter().find_map(|effect| match effect {
+            CoreEffect::InsertFormError(Some(message)) => Some(message.as_str()),
+            _ => None,
+        });
+
+        assert_eq!(live_message, mock_message);
+    }
+
+    #[test]
+    fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
+        let mut provider = KinicProvider::new(mock_config());
+        let state = CoreState {
+            insert_mode: InsertMode::Pdf,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            insert_tag: "docs".to_string(),
+            insert_file_path: "/path/that/does/not/need/to/exist.pdf".to_string(),
+            ..CoreState::default()
+        };
+
+        let output = provider
+            .handle_action(&CoreAction::InsertSubmit, &state)
+            .expect("insert submit should succeed");
+
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message)
+                if message == "Mock insert accepted for aaaaa-aa [docs]"
+        )));
+    }
+
+    #[test]
+    fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
+        let mut provider = KinicProvider::new(mock_config());
+        let file_path = write_temp_markdown_file("# title");
+        let state = CoreState {
+            insert_mode: InsertMode::Normal,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            insert_tag: "docs".to_string(),
+            insert_text: "   ".to_string(),
+            insert_file_path: file_path.clone(),
+            ..CoreState::default()
+        };
+
+        let output = provider
+            .handle_action(&CoreAction::InsertSubmit, &state)
+            .expect("insert submit should succeed");
+
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message)
+                if message == "Mock insert accepted for aaaaa-aa [docs]"
+        )));
+        fs::remove_file(file_path).expect("temporary markdown file should be removable");
+    }
+
+    #[test]
+    fn mock_insert_accepts_valid_request_only_after_validation() {
+        let mut provider = KinicProvider::new(mock_config());
+        let state = CoreState {
+            insert_mode: InsertMode::Normal,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            insert_tag: "docs".to_string(),
+            insert_text: "  keep spacing  ".to_string(),
+            ..CoreState::default()
+        };
+
+        let output = provider
+            .handle_action(&CoreAction::InsertSubmit, &state)
+            .expect("insert submit should succeed");
+
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message)
+                if message == "Mock insert accepted for aaaaa-aa [docs]"
+        )));
+        assert!(
+            output
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat))
         );
     }
 }
