@@ -120,9 +120,10 @@ impl<'a> TuiKitUi<'a> {
         }
         let cfg = &self.ui_config.settings;
         let lines = settings_overlay_lines(self.settings_snapshot, cfg);
-        let w = 68.min(area.width.saturating_sub(4));
-        let desired_height = lines.len().saturating_add(2) as u16;
-        let h = desired_height.clamp(10, area.height.saturating_sub(4));
+        let Some((w, h)) = fit_overlay_rect(area, 68, lines.len().saturating_add(2) as u16, 10)
+        else {
+            return;
+        };
         let settings_area = Rect {
             x: area.x + (area.width - w) / 2,
             y: area.y + (area.height - h) / 2,
@@ -210,9 +211,10 @@ impl<'a> TuiKitUi<'a> {
             self.default_memory_selector_index,
             self.default_memory_selector_selected_id,
         );
-        let w = 56.min(area.width.saturating_sub(4));
-        let desired_height = lines.len().saturating_add(2) as u16;
-        let h = desired_height.clamp(8, area.height.saturating_sub(4));
+        let Some((w, h)) = fit_overlay_rect(area, 56, lines.len().saturating_add(2) as u16, 8)
+        else {
+            return;
+        };
         let picker_area = Rect {
             x: area.x + (area.width - w) / 2,
             y: area.y + (area.height - h) / 2,
@@ -253,6 +255,27 @@ impl<'a> TuiKitUi<'a> {
             .wrap(Wrap { trim: false })
             .render(picker_area, buf);
     }
+}
+
+fn fit_overlay_rect(
+    area: Rect,
+    desired_width: u16,
+    desired_height: u16,
+    min_height: u16,
+) -> Option<(u16, u16)> {
+    let width = desired_width.min(area.width.saturating_sub(4));
+    let max_height = area.height.saturating_sub(4);
+    if width == 0 || max_height == 0 {
+        return None;
+    }
+
+    let height = if max_height < min_height {
+        max_height
+    } else {
+        desired_height.clamp(min_height, max_height)
+    };
+
+    Some((width, height))
 }
 
 fn settings_overlay_lines(
@@ -340,5 +363,33 @@ mod tests {
 
         assert!(joined.contains("Item 7: Value 7"));
         assert!(!joined.contains("Item 8: Value 8"));
+    }
+
+    #[test]
+    fn fit_overlay_rect_uses_available_height_when_terminal_is_short() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 11,
+        };
+
+        let rect = fit_overlay_rect(area, 56, 12, 8);
+
+        assert_eq!(rect, Some((56, 7)));
+    }
+
+    #[test]
+    fn fit_overlay_rect_returns_none_when_inner_area_is_unavailable() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 3,
+        };
+
+        let rect = fit_overlay_rect(area, 56, 12, 8);
+
+        assert_eq!(rect, None);
     }
 }
