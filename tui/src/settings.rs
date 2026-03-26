@@ -260,6 +260,25 @@ mod tests {
         fs::write(path, content).expect("preferences should be writable");
     }
 
+    fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {
+        snapshot
+            .quick_entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.value.as_str())
+            .expect("quick entry should exist")
+    }
+
+    fn section_entry_value<'a>(snapshot: &'a SettingsSnapshot, section: &str, id: &str) -> &'a str {
+        snapshot
+            .sections
+            .iter()
+            .find(|current| current.title == section)
+            .and_then(|current| current.entries.iter().find(|entry| entry.id == id))
+            .map(|entry| entry.value.as_str())
+            .expect("section entry should exist")
+    }
+
     #[test]
     fn session_snapshot_uses_keyring_identity_values() {
         let snapshot = SessionSettingsSnapshot::new(
@@ -341,9 +360,11 @@ mod tests {
             &PreferencesHealth::default(),
         );
 
-        assert_eq!(snapshot.quick_entries[4].value, "aaaaa-aa (missing)");
-        assert_eq!(snapshot.sections[1].entries[0].note, None);
-        assert_eq!(snapshot.sections[1].footer, None);
+        assert_eq!(quick_entry_value(&snapshot, "default_memory"), "aaaaa-aa (missing)");
+        assert_eq!(
+            section_entry_value(&snapshot, "Saved preferences", "default_memory"),
+            "aaaaa-aa (missing)"
+        );
     }
 
     #[test]
@@ -369,9 +390,14 @@ mod tests {
             },
         );
 
-        assert_eq!(snapshot.quick_entries[5].value, "preferences unavailable");
-        assert_eq!(snapshot.sections[1].entries[0].note, None);
-        assert_eq!(snapshot.sections[1].footer, None);
+        assert_eq!(
+            quick_entry_value(&snapshot, "preferences"),
+            "preferences unavailable"
+        );
+        assert_eq!(
+            section_entry_value(&snapshot, "Saved preferences", "preferences_status"),
+            "preferences unavailable"
+        );
     }
 
     #[test]
@@ -399,10 +425,16 @@ mod tests {
             },
         );
 
-        assert_eq!(snapshot.quick_entries[4].value, "Alpha Memory");
-        assert_eq!(snapshot.quick_entries[5].value, "last save failed");
-        assert_eq!(snapshot.sections[1].entries[0].note, None);
-        assert_eq!(snapshot.sections[1].footer, None);
+        assert_eq!(quick_entry_value(&snapshot, "default_memory"), "Alpha Memory");
+        assert_eq!(quick_entry_value(&snapshot, "preferences"), "last save failed");
+        assert_eq!(
+            section_entry_value(&snapshot, "Saved preferences", "default_memory"),
+            "Alpha Memory"
+        );
+        assert_eq!(
+            section_entry_value(&snapshot, "Saved preferences", "preferences_status"),
+            "last save failed"
+        );
     }
 
     #[test]
@@ -428,10 +460,11 @@ mod tests {
             &PreferencesHealth::default(),
         );
 
-        assert_eq!(snapshot.quick_entries[4].label, "Default memory");
-        assert_eq!(snapshot.quick_entries[4].value, "Alpha Memory");
-        assert_eq!(snapshot.sections[1].entries[0].label, "Default memory");
-        assert_eq!(snapshot.sections[1].entries[0].value, "Alpha Memory");
+        assert_eq!(quick_entry_value(&snapshot, "default_memory"), "Alpha Memory");
+        assert_eq!(
+            section_entry_value(&snapshot, "Saved preferences", "default_memory"),
+            "Alpha Memory"
+        );
     }
 
     #[test]

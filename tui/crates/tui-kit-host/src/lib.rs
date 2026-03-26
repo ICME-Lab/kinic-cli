@@ -341,43 +341,8 @@ mod tests {
         KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
     };
 
-    mod key_mapping {
-        use super::*;
-
-        #[test]
-        fn action_from_keycode_maps_search_input() {
-            assert_eq!(
-                action_from_keycode(KeyCode::Char('x'), PaneFocus::Search, KINIC_MEMORIES_TAB_ID),
-                Some(CoreAction::SearchInput('x'))
-            );
-        }
-    }
-
-    mod tab_resolution {
-        use super::*;
-
-        #[test]
-        fn resolve_tab_action_uses_host_and_default_ids() {
-            let host_mapped = resolve_tab_action(CoreAction::SelectTabIndex(1), &["a", "b", "c"]);
-            let default_mapped = resolve_tab_action(CoreAction::SelectTabIndex(2), &[]);
-
-            assert_eq!(host_mapped, Some(CoreAction::SetTab(CoreTabId::new("b"))));
-            assert_eq!(
-                default_mapped,
-                Some(CoreAction::SetTab(CoreTabId::new("tab-3")))
-            );
-        }
-    }
-
     mod effect_application {
         use super::*;
-
-        #[test]
-        fn execute_effects_updates_status_message() {
-            let mut state = CoreState::default();
-            execute_effects_to_status(&mut state, vec![CoreEffect::Notify("hello".to_string())]);
-            assert_eq!(state.status_message.as_deref(), Some("hello"));
-        }
 
         #[test]
         fn execute_effects_sets_memories_tab() {

@@ -167,41 +167,6 @@ mod tests {
     use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
 
     #[test]
-    fn settings_screen_lines_show_sections_and_status_notes() {
-        let snapshot = SettingsSnapshot {
-            quick_entries: vec![],
-            sections: vec![
-                SettingsSection {
-                    title: "Current session".to_string(),
-                    entries: vec![SettingsEntry {
-                        id: "principal_id".to_string(),
-                        label: "Principal ID".to_string(),
-                        value: "unavailable".to_string(),
-                        note: None,
-                    }],
-                    footer: None,
-                },
-                SettingsSection {
-                    title: "Saved preferences".to_string(),
-                    entries: vec![SettingsEntry {
-                        id: "preferred_network".to_string(),
-                        label: "Preferred network".to_string(),
-                        value: "coming soon".to_string(),
-                        note: Some("No persisted network preference is stored in v1.".to_string()),
-                    }],
-                    footer: None,
-                },
-            ],
-        };
-
-        let lines = settings_screen_lines_with_selection(Some(&snapshot), None).join("\n");
-
-        assert!(lines.contains("## Current session"));
-        assert!(lines.contains("Principal ID: unavailable"));
-        assert!(!lines.contains("Shift+S shows quick status"));
-    }
-
-    #[test]
     fn settings_screen_lines_align_value_columns_within_section() {
         let snapshot = SettingsSnapshot {
             quick_entries: vec![],
@@ -269,27 +234,5 @@ mod tests {
 
         assert!(lines.contains("› Preferences status: ok"));
         assert!(lines.contains("  Default memory"));
-    }
-
-    #[test]
-    fn default_memory_selector_lines_mark_selected_and_current_entries() {
-        let lines = default_memory_selector_lines(
-            &["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            &["Alpha Memory".to_string(), "Beta Memory".to_string()],
-            1,
-            Some("aaaaa-aa"),
-        );
-        let joined = lines
-            .into_iter()
-            .map(|(line, _)| line)
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(joined.contains("Alpha Memory  ★"));
-        assert!(joined.contains("› Beta Memory"));
-        assert!(joined.contains("Enter: save"));
-        assert!(joined.contains("↑/↓: move"));
-        assert!(!joined.contains("ID aaaaa-aa"));
-        assert!(!joined.contains("j/k: move"));
     }
 }

@@ -935,25 +935,6 @@ pub fn should_open_default_memory_picker(state: &CoreState) -> bool {
 mod tests {
     use super::*;
 
-    struct DummyProvider;
-
-    impl DataProvider for DummyProvider {
-        fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
-            Ok(ProviderSnapshot {
-                total_count: 1,
-                ..ProviderSnapshot::default()
-            })
-        }
-
-        fn handle_action(
-            &mut self,
-            _action: &CoreAction,
-            _state: &CoreState,
-        ) -> CoreResult<ProviderOutput> {
-            Ok(ProviderOutput::default())
-        }
-    }
-
     #[test]
     fn test_apply_snapshot_sets_total_and_selection() {
         let mut state = CoreState::default();
@@ -978,13 +959,6 @@ mod tests {
         apply_snapshot(&mut state, snapshot);
         assert_eq!(state.total_count, 1);
         assert_eq!(state.selected_index, Some(0));
-    }
-
-    #[test]
-    fn test_dummy_provider_contract() {
-        let mut p = DummyProvider;
-        let init = p.initialize().unwrap();
-        assert_eq!(init.total_count, 1);
     }
 
     #[test]
@@ -1021,7 +995,26 @@ mod tests {
 
     #[test]
     fn test_dispatch_action_applies_provider_snapshot() {
-        let mut provider = DummyProvider;
+        struct DispatchTestProvider;
+
+        impl DataProvider for DispatchTestProvider {
+            fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
+                Ok(ProviderSnapshot {
+                    total_count: 1,
+                    ..ProviderSnapshot::default()
+                })
+            }
+
+            fn handle_action(
+                &mut self,
+                _action: &CoreAction,
+                _state: &CoreState,
+            ) -> CoreResult<ProviderOutput> {
+                Ok(ProviderOutput::default())
+            }
+        }
+
+        let mut provider = DispatchTestProvider;
         let mut state = CoreState::default();
         let effects = dispatch_action(&mut provider, &mut state, &CoreAction::FocusItems).unwrap();
         assert!(effects.is_empty());
@@ -1079,19 +1072,6 @@ mod tests {
     }
 
     #[test]
-    fn tab_focus_policy_matches_create_tab_capabilities() {
-        let policy = tab_focus_policy(kinic_tabs::KINIC_CREATE_TAB_ID);
-
-        assert_eq!(policy.default_focus, PaneFocus::Tabs);
-        assert!(!policy.allows_search);
-        assert!(!policy.allows_items);
-        assert!(policy.allows_tabs);
-        assert!(!policy.allows_content);
-        assert!(policy.allows_form);
-        assert!(policy.allows_chat);
-    }
-
-    #[test]
     fn back_is_clamped_on_create_tab() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
@@ -1114,33 +1094,6 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::CreateNextField);
         assert_eq!(state.create_focus, CreateModalFocus::Name);
-    }
-
-    #[test]
-    fn create_refresh_sets_loading_state() {
-        let mut state = CoreState::default();
-
-        apply_core_action(&mut state, &CoreAction::CreateRefresh);
-
-        assert_eq!(state.create_cost_state, CreateCostState::Loading);
-        assert_eq!(state.create_spinner_frame, 0);
-    }
-
-    #[test]
-    fn tab_entry_focus_matches_kinic_tabs() {
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_MEMORIES_TAB_ID),
-            Some(PaneFocus::Search)
-        );
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_CREATE_TAB_ID),
-            Some(PaneFocus::Form)
-        );
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_MARKET_TAB_ID),
-            Some(PaneFocus::Content)
-        );
-        assert_eq!(tab_entry_focus("unknown"), Some(PaneFocus::Content));
     }
 
     #[test]

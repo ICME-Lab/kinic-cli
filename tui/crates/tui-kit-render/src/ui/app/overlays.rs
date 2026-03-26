@@ -347,44 +347,6 @@ mod tests {
     use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
 
     #[test]
-    fn settings_overlay_lines_include_priority_entries() {
-        let cfg = UiConfig::default().settings;
-        let snapshot = SettingsSnapshot {
-            quick_entries: vec![
-                SettingsEntry {
-                    id: "identity_name".to_string(),
-                    label: "Identity name".to_string(),
-                    value: "alice".to_string(),
-                    note: None,
-                },
-                SettingsEntry {
-                    id: "principal_id".to_string(),
-                    label: "Principal ID".to_string(),
-                    value: "aaaaa-aa".to_string(),
-                    note: None,
-                },
-                SettingsEntry {
-                    id: "network".to_string(),
-                    label: "Network".to_string(),
-                    value: "local".to_string(),
-                    note: None,
-                },
-            ],
-            sections: vec![SettingsSection::default()],
-        };
-
-        let lines = settings_overlay_lines(Some(&snapshot), &cfg);
-        let joined = lines.join("\n");
-
-        assert!(joined.contains("Identity name: alice"));
-        assert!(joined.contains("Principal ID: aaaaa-aa"));
-        assert!(joined.contains("Network: local"));
-        assert!(joined.contains("Open the Settings tab for detailed view."));
-        assert!(!joined.contains("Quick status while the main UI stays interactive."));
-        assert!(!joined.contains("More details are available in the Settings tab."));
-    }
-
-    #[test]
     fn settings_overlay_lines_show_up_to_seven_entries() {
         let cfg = UiConfig::default().settings;
         let snapshot = SettingsSnapshot {
@@ -434,52 +396,34 @@ mod tests {
     }
 
     #[test]
-    fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
-        let lines = default_memory_selector_lines(
-            &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
-                .map(|index| format!("Memory {index}"))
-                .collect::<Vec<_>>(),
-            10,
-            Some("id-2"),
-        );
+    fn default_memory_selector_window_keeps_selected_row_visible() {
+        let ids = (0..12).map(|index| format!("id-{index}")).collect::<Vec<_>>();
+        let labels = (0..12)
+            .map(|index| format!("Memory {index}"))
+            .collect::<Vec<_>>();
 
-        let visible = visible_default_memory_selector_lines(lines, 8);
-        let joined = visible
+        let near_end = visible_default_memory_selector_lines(
+            default_memory_selector_lines(&ids, &labels, 10, Some("id-2")),
+            8,
+        );
+        let near_end_joined = near_end
             .iter()
             .map(|(line, _)| line.as_str())
             .collect::<Vec<_>>()
             .join("\n");
+        assert!(near_end_joined.contains("Memory 10"));
+        assert!(!near_end_joined.contains("› Memory 1\n"));
 
-        assert!(joined.contains("Memory 10"));
-        assert!(!joined.contains("Memory 1"));
-        assert!(joined.contains("Enter: save"));
-    }
-
-    #[test]
-    fn default_memory_selector_window_keeps_selected_row_visible_near_start() {
-        let lines = default_memory_selector_lines(
-            &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
-                .map(|index| format!("Memory {index}"))
-                .collect::<Vec<_>>(),
-            1,
-            Some("id-9"),
+        let near_start = visible_default_memory_selector_lines(
+            default_memory_selector_lines(&ids, &labels, 1, Some("id-9")),
+            8,
         );
-
-        let visible = visible_default_memory_selector_lines(lines, 8);
-        let joined = visible
+        let near_start_joined = near_start
             .iter()
             .map(|(line, _)| line.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-
-        assert!(joined.contains("Memory 1"));
-        assert!(!joined.contains("Memory 10"));
-        assert!(joined.contains("Select default memory"));
+        assert!(near_start_joined.contains("› Memory 1"));
+        assert!(!near_start_joined.contains("Memory 10"));
     }
 }

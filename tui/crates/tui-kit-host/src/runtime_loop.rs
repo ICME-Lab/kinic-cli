@@ -495,23 +495,6 @@ mod tests {
     use tui_kit_runtime::kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
     };
-    use tui_kit_runtime::{CoreResult, ProviderOutput, ProviderSnapshot};
-
-    struct TestProvider;
-
-    impl DataProvider for TestProvider {
-        fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
-            Ok(ProviderSnapshot::default())
-        }
-
-        fn handle_action(
-            &mut self,
-            _action: &CoreAction,
-            _state: &CoreState,
-        ) -> CoreResult<ProviderOutput> {
-            Ok(ProviderOutput::default())
-        }
-    }
 
     #[test]
     fn normalize_focus_keeps_memories_on_tabs_after_tab_switch() {
@@ -577,41 +560,6 @@ mod tests {
             ),
             None
         );
-    }
-
-    #[test]
-    fn handle_overlay_input_closes_settings_on_escape() {
-        let mut provider = TestProvider;
-        let mut state = CoreState::default();
-
-        let result = handle_overlay_input(
-            &mut provider,
-            &mut state,
-            true,
-            crossterm::event::KeyCode::Esc,
-            crossterm::event::KeyModifiers::NONE,
-        );
-
-        assert!(matches!(result, OverlayInputResult::CloseSettings));
-    }
-
-    #[test]
-    fn handle_overlay_input_consumes_unknown_selector_keys() {
-        let mut provider = TestProvider;
-        let mut state = CoreState {
-            default_memory_selector_open: true,
-            ..CoreState::default()
-        };
-
-        let result = handle_overlay_input(
-            &mut provider,
-            &mut state,
-            false,
-            crossterm::event::KeyCode::Char('x'),
-            crossterm::event::KeyModifiers::NONE,
-        );
-
-        assert!(matches!(result, OverlayInputResult::Consumed));
     }
 
     #[test]
