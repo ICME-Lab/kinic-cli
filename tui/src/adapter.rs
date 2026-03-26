@@ -227,24 +227,45 @@ fn section_body(body: &str, marker: &str) -> Vec<String> {
     lines
 }
 
-fn pretty_payload(raw: &str) -> String {
-    serde_json::from_str::<Value>(raw)
+fn pretty_payload(payload: &str) -> String {
+    serde_json::from_str::<Value>(payload)
         .ok()
         .and_then(|value| serde_json::to_string_pretty(&value).ok())
-        .unwrap_or_else(|| raw.to_string())
+        .unwrap_or_else(|| payload.to_string())
 }
 
 fn summary_value(summary: &str) -> String {
     summary
-        .split(':')
-        .nth(1)
+        .strip_prefix("Status:")
         .map(str::trim)
         .unwrap_or(summary)
         .to_string()
 }
 
 fn short_id(id: &str) -> String {
-    id.chars().take(5).collect()
+    const EDGE_CHARS: usize = 5;
+    const MAX_CHARS: usize = EDGE_CHARS * 2 + 5;
+
+    let char_count = id.chars().count();
+    if char_count <= MAX_CHARS {
+        return id.to_string();
+    }
+
+    let prefix_end = nth_char_boundary(id, EDGE_CHARS);
+    let suffix_start = nth_char_boundary(id, char_count - EDGE_CHARS);
+    format!("{}...{}", &id[..prefix_end], &id[suffix_start..])
+}
+
+fn nth_char_boundary(value: &str, char_index: usize) -> usize {
+    if char_index == 0 {
+        return 0;
+    }
+
+    value
+        .char_indices()
+        .nth(char_index)
+        .map(|(index, _)| index)
+        .unwrap_or(value.len())
 }
 
 fn optional_row(label: &str, value: Option<String>) -> Option<UiRow> {
@@ -252,4 +273,27 @@ fn optional_row(label: &str, value: Option<String>) -> Option<UiRow> {
         label: label.to_string(),
         value,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::short_id;
+
+    #[test]
+    fn short_id_keeps_short_values() {
+        assert_eq!(short_id("aaaaa-aa"), "aaaaa-aa");
+    }
+
+    #[test]
+    fn short_id_truncates_long_ascii_values() {
+        assert_eq!(short_id("1234567890abcdefghij"), "12345...fghij");
+    }
+
+    #[test]
+    fn short_id_truncates_multibyte_values_on_char_boundaries() {
+        assert_eq!(
+            short_id("あいうえおかきくけこさしすせそた"),
+            "あいうえお...しすせそた"
+        );
+    }
 }

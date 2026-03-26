@@ -5,7 +5,7 @@ Command-line companion for deploying and operating Kinic “memory” canisters.
 ## Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain) and `cargo`
-- [dfx 0.28+](https://github.com/dfinity/sdk/releases/tag/0.28.0) with the `arm64` build on Apple Silicon
+- [dfx 0.31+](https://github.com/dfinity/sdk/releases/tag/0.31.0) with the `arm64` build on Apple Silicon
 - Local Internet Computer replica (`dfx start`)
 - macOS keychain (the CLI reads PEMs via the `keyring` crate)
 

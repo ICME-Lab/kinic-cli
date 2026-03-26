@@ -6,8 +6,8 @@ use ratatui::{
     style::Modifier,
     text::{Line, Span},
     widgets::{
-        block::BorderType, Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, StatefulWidget, Widget, Wrap,
+        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+        Widget, Wrap, block::BorderType,
     },
 };
 
@@ -20,7 +20,6 @@ pub struct ContextView<'a> {
     theme: &'a Theme,
     focused: bool,
     scroll_offset: usize,
-    show_link_hints: bool,
 }
 
 impl<'a> ContextView<'a> {
@@ -30,7 +29,6 @@ impl<'a> ContextView<'a> {
             theme,
             focused: false,
             scroll_offset: 0,
-            show_link_hints: false,
         }
     }
 
@@ -46,11 +44,6 @@ impl<'a> ContextView<'a> {
 
     pub fn focused(mut self, focused: bool) -> Self {
         self.focused = focused;
-        self
-    }
-
-    pub fn show_link_hints(mut self, show: bool) -> Self {
-        self.show_link_hints = show;
         self
     }
 
@@ -70,7 +63,7 @@ impl<'a> ContextView<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        let mut help = vec![
+        let help = vec![
             Line::from(""),
             Line::from(Span::styled(
                 "This panel shows context metadata. Select one to view details.",
@@ -82,15 +75,6 @@ impl<'a> ContextView<'a> {
                 self.theme.style_muted(),
             )),
         ];
-        if self.show_link_hints {
-            help.push(Line::from(""));
-            help.push(Line::from(vec![
-                Span::styled(" [o] ", self.theme.style_accent()),
-                Span::styled("primary link  ", self.theme.style_dim()),
-                Span::styled(" [c] ", self.theme.style_accent()),
-                Span::styled("secondary link", self.theme.style_dim()),
-            ]));
-        }
         Paragraph::new(help)
             .wrap(Wrap { trim: false })
             .render(inner, buf);
@@ -199,24 +183,6 @@ impl<'a> ContextView<'a> {
             let mut scrollbar_state = ScrollbarState::new(total_lines).position(scroll_offset);
             StatefulWidget::render(scrollbar, inner, buf, &mut scrollbar_state);
         }
-
-        if self.show_link_hints && inner.height > 0 {
-            let hint_y = inner.y + inner.height - 1;
-            let hint_line = Line::from(vec![
-                Span::styled(" [o] ", self.theme.style_accent()),
-                Span::styled("primary link  ", self.theme.style_dim()),
-                Span::styled(" [c] ", self.theme.style_accent()),
-                Span::styled("secondary link", self.theme.style_dim()),
-            ]);
-            Paragraph::new(hint_line).render(
-                Rect {
-                    y: hint_y,
-                    height: 1,
-                    ..inner
-                },
-                buf,
-            );
-        }
     }
 }
 
@@ -272,7 +238,10 @@ pub fn render_context_load_failed(theme: &Theme, area: Rect, buf: &mut Buffer, c
         ]),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled("Use [o]/[c] to open linked resources.", theme.style_dim()),
+            Span::styled(
+                "Linked resources are shown inline above.",
+                theme.style_dim(),
+            ),
         ]),
     ];
     Paragraph::new(lines)

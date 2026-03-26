@@ -1,7 +1,7 @@
 use tui_kit_model::{UiItemDetail, UiItemKind, UiItemSummary, UiSection, UiVisibility};
 use tui_kit_runtime::{
-    apply_snapshot, CoreAction, CoreResult, CoreState, DataProvider, ProviderOutput,
-    ProviderSnapshot,
+    CoreAction, CoreResult, CoreState, DataProvider, ProviderOutput, ProviderSnapshot,
+    apply_snapshot,
 };
 
 #[derive(Clone)]
@@ -90,6 +90,7 @@ impl DemoProvider {
             selected_context: None,
             total_count: self.all.len(),
             status_message: Some(format!("{} records", filtered.len())),
+            ..ProviderSnapshot::default()
         }
     }
 }

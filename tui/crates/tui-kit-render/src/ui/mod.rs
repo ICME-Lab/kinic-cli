@@ -12,8 +12,8 @@ pub mod theme;
 
 pub use animation::{AnimationState, Easing, SmoothScroll};
 pub use app::{
-    tabs_rect_for_area, BrandingText, ChatPanelText, Focus, HeaderText, TuiKitUi, TabId, TabSpec,
-    UiConfig,
+    BrandingText, ChatPanelText, Focus, HeaderText, TabId, TabSpec, TuiKitUi, UiConfig,
+    tabs_rect_for_area,
 };
 pub use context_view::ContextView;
 pub use inspector::InspectorPanel;
@@ -22,5 +22,5 @@ pub use model::{
     UiVisibility,
 };
 pub use search::{
-    filter_candidates, CandidateKind, CompletionCandidate, SearchBar, SearchCompletion,
+    CandidateKind, CompletionCandidate, SearchBar, SearchCompletion, filter_candidates,
 };

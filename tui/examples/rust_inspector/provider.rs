@@ -56,6 +56,7 @@ impl RustProvider {
             } else {
                 Some(format!("{} items match '{}'", filtered.len(), self.query))
             },
+            ..ProviderSnapshot::default()
         }
     }
 }

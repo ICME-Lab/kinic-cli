@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
-use tui_kit_runtime::CreateModalFocus;
+use tui_kit_runtime::{CreateModalFocus, CreateSubmitState};
 
 use super::TuiKitUi;
 
@@ -81,8 +81,8 @@ impl<'a> TuiKitUi<'a> {
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    if self.create_submitting {
-                        "Creating..."
+                    if self.create_submit_state == CreateSubmitState::Submitting {
+                        cfg.submit_pending_label.as_str()
                     } else {
                         cfg.submit_label.as_str()
                     },
@@ -132,16 +132,6 @@ impl<'a> TuiKitUi<'a> {
                 format!(" {} ", cfg.title),
                 self.theme.style_accent_bold(),
             )),
-            Line::from(""),
-            Line::from(Span::styled(
-                cfg.theme_label.clone(),
-                self.theme.style_dim(),
-            )),
-            Line::from(vec![
-                Span::raw("  Press "),
-                Span::styled(cfg.theme_action_key.clone(), self.theme.style_accent()),
-                Span::raw(" to cycle theme"),
-            ]),
             Line::from(""),
             Line::from(Span::styled(
                 cfg.close_hint.clone(),

@@ -74,7 +74,7 @@ impl RustAnalyzer {
         for item in syntax_tree.items {
             // Inline modules: expand inner items as first-class AnalyzedItems with synthetic path
             if let Item::Mod(md) = &item {
-                if let Some((_, ref content)) = &md.content {
+                if let Some((_, content)) = &md.content {
                     let child_path: Vec<String> = {
                         let mut p = module_path.clone();
                         p.push(md.ident.to_string());
@@ -88,7 +88,7 @@ impl RustAnalyzer {
             if let Some(mut analyzed) = self.analyze_item(&item, &path) {
                 Self::set_module_path(&mut analyzed, module_path.clone());
 
-                if let Some(ref file_path) = path {
+                if let Some(file_path) = path.as_ref() {
                     if let Some(span) = Self::get_item_span(&item) {
                         let line = span.start().line;
                         Self::set_source_location(&mut analyzed, file_path.clone(), line);
@@ -114,7 +114,7 @@ impl RustAnalyzer {
         let mut items = Vec::new();
         for item in content {
             if let Item::Mod(md) = item {
-                if let Some((_, ref inner_content)) = &md.content {
+                if let Some((_, inner_content)) = &md.content {
                     let child_path: Vec<String> = {
                         let mut p = module_path.clone();
                         p.push(md.ident.to_string());
@@ -126,7 +126,7 @@ impl RustAnalyzer {
             }
             if let Some(mut analyzed) = self.analyze_item(item, path) {
                 Self::set_module_path(&mut analyzed, module_path.clone());
-                if let Some(ref file_path) = path {
+                if let Some(file_path) = path.as_ref() {
                     if let Some(span) = Self::get_item_span(item) {
                         let line = span.start().line;
                         Self::set_source_location(&mut analyzed, file_path.clone(), line);

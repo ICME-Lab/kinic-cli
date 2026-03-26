@@ -20,7 +20,10 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use tui_kit_host::{
     HostGlobalCommand, action_from_keycode, global_command_for_key, resolve_tab_action_with_current,
 };
-use tui_kit_runtime::{CoreAction, CoreState, CoreTabId, PaneFocus, apply_core_action};
+use tui_kit_runtime::{
+    CoreAction, CoreState, CoreTabId, CreateCostState, CreateSubmitState, PaneFocus,
+    apply_core_action,
+};
 
 /// Side effects triggered by reducer (executed by outer runtime).
 #[derive(Debug, Clone)]
@@ -37,11 +40,9 @@ pub enum UiEffect {
 pub enum UiIntent {
     Quit,
     ToggleHelp,
-    CycleTheme,
     ToggleSettings,
     ToggleChat,
     OpenCreateModal,
-    CloseCreateModal,
     OpenGithub,
     OpenSponsor,
     EscapePressed,
@@ -104,9 +105,9 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
         code,
         modifiers,
         focus_to_pane(app.focus),
+        app.current_tab.id().0.as_str(),
         app.show_help,
         app.show_settings,
-        app.create_modal_open,
         app.search_input.is_empty(),
     ) {
         HostGlobalCommand::None => {}
@@ -120,21 +121,26 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
                 return vec![UiIntent::ToggleSettings];
             }
         }
-        HostGlobalCommand::ToggleTheme => {
-            if !in_chat_panel && app.focus != Focus::Search {
-                return vec![UiIntent::CycleTheme];
-            }
-        }
         HostGlobalCommand::ToggleChat => {
             if !in_chat_panel && app.focus != Focus::Search {
                 return vec![UiIntent::ToggleChat];
             }
         }
-        HostGlobalCommand::CloseCreateModal => return vec![UiIntent::CloseCreateModal],
-        HostGlobalCommand::OpenCreateModal => return vec![UiIntent::OpenCreateModal],
-        HostGlobalCommand::BackFromDetail | HostGlobalCommand::ClearQuery => {
+        HostGlobalCommand::CloseChat => {
+            if app.chat_open && !in_chat_panel && app.focus != Focus::Search {
+                return vec![UiIntent::ToggleChat];
+            }
+        }
+        HostGlobalCommand::BackFromFormToTabs => {
             return vec![UiIntent::EscapePressed];
         }
+        HostGlobalCommand::OpenCreateTab => return vec![UiIntent::OpenCreateModal],
+        HostGlobalCommand::BackToMemoriesTab
+        | HostGlobalCommand::BackFromDetail
+        | HostGlobalCommand::ClearQuery => {
+            return vec![UiIntent::EscapePressed];
+        }
+        HostGlobalCommand::RefreshCurrentView => {}
         HostGlobalCommand::Quit => {
             if !in_chat_panel && app.focus != Focus::Search {
                 return vec![UiIntent::Quit];
@@ -144,11 +150,6 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
 
     // App-specific globals not part of shared host command helper.
     match code {
-        KeyCode::Char('t')
-            if modifiers.is_empty() && !in_chat_panel && app.focus != Focus::Search =>
-        {
-            return vec![UiIntent::CycleTheme];
-        }
         KeyCode::Char('g')
             if modifiers.is_empty() && !in_chat_panel && app.focus != Focus::Search =>
         {
@@ -172,9 +173,6 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
 
     // Overlay handling.
     if app.show_settings {
-        if let KeyCode::Char('t') = code {
-            return vec![UiIntent::CycleTheme];
-        }
         return out;
     }
     if app.show_help {
@@ -219,6 +217,7 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
             _ => {}
         },
         Focus::Tabs => {}
+        Focus::Form => {}
         Focus::Inspector => match code {
             KeyCode::Char('o') if modifiers.is_empty() => out.push(UiIntent::InspectorOpenDocs),
             KeyCode::Char('c') if modifiers.is_empty() => out.push(UiIntent::InspectorOpenCratesIo),
@@ -248,6 +247,7 @@ fn focus_to_pane(focus: Focus) -> PaneFocus {
         Focus::Search => PaneFocus::Search,
         Focus::List => PaneFocus::List,
         Focus::Tabs => PaneFocus::Tabs,
+        Focus::Form => PaneFocus::Form,
         Focus::Inspector => PaneFocus::Detail,
         Focus::Chat => PaneFocus::Extra,
     }
@@ -258,6 +258,7 @@ fn pane_to_focus(focus: PaneFocus) -> Focus {
         PaneFocus::Search => Focus::Search,
         PaneFocus::List => Focus::List,
         PaneFocus::Tabs => Focus::Tabs,
+        PaneFocus::Form => Focus::Form,
         PaneFocus::Detail => Focus::Inspector,
         PaneFocus::Extra => Focus::Chat,
     }
@@ -299,8 +300,8 @@ pub fn try_apply_runtime_action(
         let mut core = core_state_from_app(app);
         apply_core_action(&mut core, &action);
         if matches!(action, CoreAction::CreateSubmit) {
-            core.create_modal_open = false;
-            core.create_submitting = false;
+            app.create_modal_open = false;
+            core.create_submit_state = CreateSubmitState::Idle;
             core.create_error = Some("Create action is not implemented in this example.".into());
             core.status_message =
                 Some("Create action is not implemented in this example.".to_string());
@@ -312,7 +313,11 @@ pub fn try_apply_runtime_action(
         };
     }
 
-    let Some(base_action) = action_from_keycode(code, focus_to_pane(app.focus)) else {
+    let Some(base_action) = action_from_keycode(
+        code,
+        focus_to_pane(app.focus),
+        app.current_tab.id().0.as_str(),
+    ) else {
         return RuntimeApplyResult::default();
     };
     let tab_ids = tab_id_refs(app);
@@ -452,7 +457,6 @@ pub fn apply_intent(
     match intent {
         UiIntent::Quit => app.should_quit = true,
         UiIntent::ToggleHelp => app.toggle_help(),
-        UiIntent::CycleTheme => app.cycle_theme(),
         UiIntent::ToggleSettings => app.toggle_settings(),
         UiIntent::OpenGithub => effects.push(UiEffect::OpenUrl {
             url: "https://github.com/yashksaini-coder/oracle".to_string(),
@@ -472,14 +476,12 @@ pub fn apply_intent(
             }
         }
         UiIntent::OpenCreateModal => {
-            let mut core = core_state_from_app(app);
-            apply_core_action(&mut core, &CoreAction::OpenCreateModal);
-            apply_core_state_to_app(app, core);
-        }
-        UiIntent::CloseCreateModal => {
-            let mut core = core_state_from_app(app);
-            apply_core_action(&mut core, &CoreAction::CloseCreateModal);
-            apply_core_state_to_app(app, core);
+            app.create_modal_open = true;
+            app.create_name.clear();
+            app.create_description.clear();
+            app.create_submitting = false;
+            app.create_error = None;
+            app.create_focus = tui_kit_runtime::CreateModalFocus::Name;
         }
         UiIntent::EscapePressed => {
             if app.show_settings {
@@ -574,12 +576,17 @@ fn core_state_from_app(app: &App) -> CoreState {
         chat_input: app.chat_input.clone(),
         chat_loading: app.chat_loading,
         chat_scroll: app.chat_scroll,
-        create_modal_open: app.create_modal_open,
         create_name: app.create_name.clone(),
         create_description: app.create_description.clone(),
-        create_submitting: app.create_submitting,
+        create_submit_state: if app.create_submitting {
+            CreateSubmitState::Submitting
+        } else {
+            CreateSubmitState::Idle
+        },
+        create_spinner_frame: 0,
         create_error: app.create_error.clone(),
         create_focus: app.create_focus,
+        create_cost_state: CreateCostState::Hidden,
     }
 }
 
@@ -592,10 +599,9 @@ fn apply_core_state_to_app(app: &mut App, core: CoreState) {
     app.chat_input = core.chat_input;
     app.chat_loading = core.chat_loading;
     app.chat_scroll = core.chat_scroll;
-    app.create_modal_open = core.create_modal_open;
     app.create_name = core.create_name;
     app.create_description = core.create_description;
-    app.create_submitting = core.create_submitting;
+    app.create_submitting = core.create_submit_state == CreateSubmitState::Submitting;
     app.create_error = core.create_error;
     app.create_focus = core.create_focus;
     if let Some(status_message) = core.status_message {

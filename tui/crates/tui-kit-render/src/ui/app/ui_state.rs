@@ -1,0 +1,100 @@
+//! Shared TUI app state object; screen modules render from this immutable snapshot.
+
+use crate::ui::animation::AnimationState;
+use crate::ui::model::{UiContextNode, UiItemDetail, UiItemSummary};
+use crate::ui::search::CompletionCandidate;
+use crate::ui::theme::Theme;
+use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState};
+
+use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
+
+/// Main tui-kit UI widget, data and builder; rendering is delegated to screen modules.
+pub struct TuiKitUi<'a> {
+    pub(super) candidates: &'a [CompletionCandidate],
+    pub(super) context_tree: &'a [(String, usize)],
+    pub(super) filtered_context_indices: &'a [usize],
+    pub(super) context_details_loading: bool,
+    pub(super) context_details_failed: bool,
+    pub(super) ui_summaries: &'a [UiItemSummary],
+    pub(super) ui_selected_detail: Option<&'a UiItemDetail>,
+    pub(super) ui_context_node: Option<&'a UiContextNode>,
+    pub(super) ui_total_count: usize,
+    pub(super) in_context_items_view: bool,
+    pub(super) show_context_panel: bool,
+    pub(super) target_size_bytes: Option<u64>,
+    pub(super) search_input: &'a str,
+    pub(super) current_tab_id: TabId,
+    pub(super) tab_specs: Vec<TabSpec>,
+    pub(super) ui_config: UiConfig,
+    pub(super) focus: Focus,
+    pub(super) list_selected: Option<usize>,
+    pub(super) list_scroll_offset: Option<usize>,
+    pub(super) completion_selected: usize,
+    pub(super) show_completion: bool,
+    pub(super) show_help: bool,
+    pub(super) show_settings: bool,
+    pub(super) show_create_modal: bool,
+    pub(super) create_name: &'a str,
+    pub(super) create_description: &'a str,
+    pub(super) create_submit_state: CreateSubmitState,
+    pub(super) create_spinner_frame: usize,
+    pub(super) create_error: Option<&'a str>,
+    pub(super) create_focus: CreateModalFocus,
+    pub(super) create_cost_state: &'a CreateCostState,
+    pub(super) status_message: &'a str,
+    pub(super) inspector_scroll: usize,
+    pub(super) animation: Option<&'a AnimationState>,
+    pub(super) theme: &'a Theme,
+    pub(super) show_chat_panel: bool,
+    pub(super) chat_messages: &'a [(String, String)],
+    pub(super) chat_input: &'a str,
+    pub(super) chat_loading: bool,
+    pub(super) chat_scroll: usize,
+}
+
+impl<'a> TuiKitUi<'a> {
+    pub fn new(theme: &'a Theme) -> Self {
+        Self {
+            candidates: &[],
+            context_tree: &[],
+            filtered_context_indices: &[],
+            context_details_loading: false,
+            context_details_failed: false,
+            ui_summaries: &[],
+            ui_selected_detail: None,
+            ui_context_node: None,
+            ui_total_count: 0,
+            in_context_items_view: false,
+            show_context_panel: false,
+            target_size_bytes: None,
+            search_input: "",
+            current_tab_id: TabId::new("tab-1"),
+            tab_specs: default_tab_specs(),
+            ui_config: UiConfig::default(),
+            focus: Focus::default(),
+            list_selected: None,
+            list_scroll_offset: None,
+            completion_selected: 0,
+            show_completion: false,
+            show_help: false,
+            show_settings: false,
+            show_create_modal: false,
+            create_name: "",
+            create_description: "",
+            create_submit_state: CreateSubmitState::Idle,
+            create_spinner_frame: 0,
+            create_error: None,
+            create_focus: CreateModalFocus::Name,
+            create_cost_state: &CreateCostState::Hidden,
+            status_message: "",
+            inspector_scroll: 0,
+            animation: None,
+            theme,
+            show_chat_panel: false,
+            chat_messages: &[],
+            chat_input: "",
+            chat_loading: false,
+            chat_scroll: 0,
+        }
+    }
+}
