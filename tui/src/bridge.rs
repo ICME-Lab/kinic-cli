@@ -77,12 +77,7 @@ pub async fn load_session_settings(
     auth: TuiAuth,
     default_memory_id: Option<String>,
 ) -> Result<SessionSettingsSnapshot, String> {
-    let factory = resolve_agent_factory(use_mainnet, &auth).map_err(|error| error.to_string())?;
-    let agent = factory.build().await.map_err(|error| error.to_string())?;
-    let principal_id = agent
-        .get_principal()
-        .map(|principal| principal.to_text())
-        .map_err(|error| error.to_string())?;
+    let principal_id = auth.principal_text().map_err(|error| error.to_string())?;
 
     Ok(SessionSettingsSnapshot::new(
         &auth,

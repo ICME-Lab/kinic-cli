@@ -235,6 +235,16 @@ pub enum CoreAction {
     MovePageUp,
     MoveHome,
     MoveEnd,
+    SettingsMoveNext,
+    SettingsMovePrev,
+    SettingsMovePageDown,
+    SettingsMovePageUp,
+    SettingsMoveHome,
+    SettingsMoveEnd,
+    ScrollContentPageDown,
+    ScrollContentPageUp,
+    ScrollContentHome,
+    ScrollContentEnd,
     FocusNext,
     FocusPrev,
     FocusSearch,
@@ -595,7 +605,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::ChatScrollHome => state.chat_scroll = 0,
         CoreAction::ChatScrollEnd => state.chat_scroll = state.chat_scroll.saturating_add(9999),
         CoreAction::MoveNext => {
-            let len = selectable_len(state);
+            let len = item_selectable_len(state);
             if len == 0 {
                 state.selected_index = None;
             } else {
@@ -608,18 +618,18 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             state.selected_index = Some(idx.saturating_sub(1));
         }
         CoreAction::MoveHome => {
-            state.selected_index = if selectable_len(state) == 0 {
+            state.selected_index = if item_selectable_len(state) == 0 {
                 None
             } else {
                 Some(0)
             };
         }
         CoreAction::MoveEnd => {
-            let len = selectable_len(state);
+            let len = item_selectable_len(state);
             state.selected_index = if len == 0 { None } else { Some(len - 1) };
         }
         CoreAction::MovePageDown => {
-            let len = selectable_len(state);
+            let len = item_selectable_len(state);
             if len == 0 {
                 state.selected_index = None;
             } else {
@@ -628,6 +638,43 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::MovePageUp => {
+            let idx = state.selected_index.unwrap_or(0);
+            state.selected_index = Some(idx.saturating_sub(10));
+        }
+        CoreAction::SettingsMoveNext => {
+            let len = settings_selectable_len(&state.settings);
+            if len == 0 {
+                state.selected_index = None;
+            } else {
+                let idx = state.selected_index.unwrap_or(0);
+                state.selected_index = Some((idx + 1).min(len - 1));
+            }
+        }
+        CoreAction::SettingsMovePrev => {
+            let idx = state.selected_index.unwrap_or(0);
+            state.selected_index = Some(idx.saturating_sub(1));
+        }
+        CoreAction::SettingsMoveHome => {
+            state.selected_index = if settings_selectable_len(&state.settings) == 0 {
+                None
+            } else {
+                Some(0)
+            };
+        }
+        CoreAction::SettingsMoveEnd => {
+            let len = settings_selectable_len(&state.settings);
+            state.selected_index = if len == 0 { None } else { Some(len - 1) };
+        }
+        CoreAction::SettingsMovePageDown => {
+            let len = settings_selectable_len(&state.settings);
+            if len == 0 {
+                state.selected_index = None;
+            } else {
+                let idx = state.selected_index.unwrap_or(0);
+                state.selected_index = Some((idx + 10).min(len - 1));
+            }
+        }
+        CoreAction::SettingsMovePageUp => {
             let idx = state.selected_index.unwrap_or(0);
             state.selected_index = Some(idx.saturating_sub(10));
         }
@@ -762,17 +809,33 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
                 CoreKey::Enter if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => None,
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
                 CoreKey::Down if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::MoveNext)
+                    Some(CoreAction::SettingsMoveNext)
                 }
                 CoreKey::Up if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::MovePrev)
+                    Some(CoreAction::SettingsMovePrev)
                 }
-                CoreKey::Down => Some(CoreAction::MovePageDown),
-                CoreKey::Up => Some(CoreAction::MovePageUp),
-                CoreKey::PageDown => Some(CoreAction::MovePageDown),
-                CoreKey::PageUp => Some(CoreAction::MovePageUp),
-                CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::MoveHome),
-                CoreKey::End | CoreKey::Char('G') => Some(CoreAction::MoveEnd),
+                CoreKey::PageDown if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
+                    Some(CoreAction::SettingsMovePageDown)
+                }
+                CoreKey::PageUp if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
+                    Some(CoreAction::SettingsMovePageUp)
+                }
+                CoreKey::Home | CoreKey::Char('g')
+                    if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID =>
+                {
+                    Some(CoreAction::SettingsMoveHome)
+                }
+                CoreKey::End | CoreKey::Char('G')
+                    if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID =>
+                {
+                    Some(CoreAction::SettingsMoveEnd)
+                }
+                CoreKey::Down => Some(CoreAction::ScrollContentPageDown),
+                CoreKey::Up => Some(CoreAction::ScrollContentPageUp),
+                CoreKey::PageDown => Some(CoreAction::ScrollContentPageDown),
+                CoreKey::PageUp => Some(CoreAction::ScrollContentPageUp),
+                CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::ScrollContentHome),
+                CoreKey::End | CoreKey::Char('G') => Some(CoreAction::ScrollContentEnd),
                 _ => None,
             },
             PaneFocus::Form => None,
@@ -825,10 +888,18 @@ fn selectable_len(state: &CoreState) -> usize {
     if state.current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID
         && state.focus == PaneFocus::Content
     {
-        settings_entry_count(&state.settings)
-    } else {
-        state.list_items.len()
+        return settings_selectable_len(&state.settings);
     }
+
+    item_selectable_len(state)
+}
+
+fn item_selectable_len(state: &CoreState) -> usize {
+    state.list_items.len()
+}
+
+fn settings_selectable_len(settings: &SettingsSnapshot) -> usize {
+    settings_entry_count(settings)
 }
 
 fn settings_entry_count(settings: &SettingsSnapshot) -> usize {
@@ -1327,5 +1398,82 @@ mod tests {
         apply_snapshot(&mut state, snapshot);
 
         assert_eq!(state.selected_index, Some(1));
+    }
+
+    #[test]
+    fn settings_content_arrow_keys_map_to_settings_actions() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Down,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
+            ),
+            Some(CoreAction::SettingsMoveNext)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::End,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
+            ),
+            Some(CoreAction::SettingsMoveEnd)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::PageUp,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
+            ),
+            Some(CoreAction::SettingsMovePageUp)
+        );
+    }
+
+    #[test]
+    fn memories_content_end_maps_to_scroll_end() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::End,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::ScrollContentEnd)
+        );
+    }
+
+    #[test]
+    fn settings_move_actions_update_settings_selection_only() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(0),
+            settings: SettingsSnapshot {
+                quick_entries: vec![],
+                sections: vec![SettingsSection {
+                    title: "Saved preferences".to_string(),
+                    entries: vec![
+                        SettingsEntry {
+                            id: "default_memory".to_string(),
+                            label: "Default memory".to_string(),
+                            value: "aaaaa-aa".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "preferences_status".to_string(),
+                            label: "Preferences status".to_string(),
+                            value: "ok".to_string(),
+                            note: None,
+                        },
+                    ],
+                    footer: None,
+                }],
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::SettingsMoveNext);
+        assert_eq!(state.selected_index, Some(1));
+
+        apply_core_action(&mut state, &CoreAction::MoveNext);
+        assert_eq!(state.selected_index, None);
     }
 }

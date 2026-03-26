@@ -320,22 +320,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 
             if let Some(action) = action {
                 handled = true;
-                if matches!(
-                    action,
-                    CoreAction::MovePageDown | CoreAction::MovePageUp | CoreAction::MoveHome
-                ) && state.focus == PaneFocus::Content
+                if state.focus == PaneFocus::Content
                     && state.current_tab_id != KINIC_SETTINGS_TAB_ID
+                    && apply_content_scroll_action(&action, &mut inspector_scroll)
                 {
-                    match action {
-                        CoreAction::MovePageDown => {
-                            inspector_scroll = inspector_scroll.saturating_add(10)
-                        }
-                        CoreAction::MovePageUp => {
-                            inspector_scroll = inspector_scroll.saturating_sub(10)
-                        }
-                        CoreAction::MoveHome => inspector_scroll = 0,
-                        _ => {}
-                    }
                     continue;
                 }
 
@@ -347,6 +335,12 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::MoveEnd
                         | CoreAction::MovePageDown
                         | CoreAction::MovePageUp
+                        | CoreAction::SettingsMoveNext
+                        | CoreAction::SettingsMovePrev
+                        | CoreAction::SettingsMoveHome
+                        | CoreAction::SettingsMoveEnd
+                        | CoreAction::SettingsMovePageDown
+                        | CoreAction::SettingsMovePageUp
                         | CoreAction::OpenSelected
                 );
                 match dispatch_action(provider, &mut state, &action) {
@@ -473,6 +467,28 @@ fn keep_selection_visible_scroll(
     offset.min(max_offset)
 }
 
+fn apply_content_scroll_action(action: &CoreAction, inspector_scroll: &mut usize) -> bool {
+    match action {
+        CoreAction::ScrollContentPageDown => {
+            *inspector_scroll = inspector_scroll.saturating_add(10);
+            true
+        }
+        CoreAction::ScrollContentPageUp => {
+            *inspector_scroll = inspector_scroll.saturating_sub(10);
+            true
+        }
+        CoreAction::ScrollContentHome => {
+            *inspector_scroll = 0;
+            true
+        }
+        CoreAction::ScrollContentEnd => {
+            *inspector_scroll = inspector_scroll.saturating_add(9999);
+            true
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,5 +612,22 @@ mod tests {
         );
 
         assert!(matches!(result, OverlayInputResult::Consumed));
+    }
+
+    #[test]
+    fn content_scroll_helper_handles_scroll_end_only() {
+        let mut inspector_scroll = 3usize;
+
+        assert!(apply_content_scroll_action(
+            &CoreAction::ScrollContentEnd,
+            &mut inspector_scroll
+        ));
+        assert_eq!(inspector_scroll, 10002);
+
+        assert!(!apply_content_scroll_action(
+            &CoreAction::MoveEnd,
+            &mut inspector_scroll
+        ));
+        assert_eq!(inspector_scroll, 10002);
     }
 }

@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 use std::{sync::mpsc, thread};
 
 use super::adapter;
@@ -185,6 +187,27 @@ struct DefaultMemoryController<'a> {
 }
 
 impl<'a> DefaultMemoryController<'a> {
+    fn apply_reloaded_preferences(
+        &mut self,
+        updated_preferences: UserPreferences,
+        reloaded_preferences: Result<UserPreferences, tui_kit_host::settings::SettingsError>,
+    ) {
+        *self.user_preferences = match reloaded_preferences {
+            Ok(preferences) => {
+                *self.preferences_health = PreferencesHealth::default();
+                preferences
+            }
+            Err(error) => {
+                *self.preferences_health = PreferencesHealth {
+                    load_error: Some(error.to_string()),
+                    save_error: None,
+                };
+                updated_preferences
+            }
+        };
+        self.session_settings.default_memory_id = self.user_preferences.default_memory_id.clone();
+    }
+
     fn selection(&self) -> DefaultMemorySelection<'_> {
         DefaultMemorySelection {
             memory_records: self.memory_records,
@@ -209,12 +232,16 @@ impl<'a> DefaultMemoryController<'a> {
         let updated_preferences = UserPreferences {
             default_memory_id: Some(memory_id.clone()),
         };
+        #[cfg(test)]
+        let _settings_io_lock = settings_io_lock()
+            .lock()
+            .expect("settings io lock should be available");
         match settings::save_user_preferences(&updated_preferences) {
             Ok(()) => {
-                *self.user_preferences = updated_preferences;
-                self.session_settings.default_memory_id =
-                    self.user_preferences.default_memory_id.clone();
-                self.preferences_health.save_error = None;
+                self.apply_reloaded_preferences(
+                    updated_preferences,
+                    settings::load_user_preferences(),
+                );
                 CoreEffect::Notify(format!("Default memory set to {memory_id}"))
             }
             Err(error) => {
@@ -225,8 +252,18 @@ impl<'a> DefaultMemoryController<'a> {
     }
 }
 
+#[cfg(test)]
+fn settings_io_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
+        #[cfg(test)]
+        let _settings_io_lock = settings_io_lock()
+            .lock()
+            .expect("settings io lock should be available");
         let (user_preferences, preferences_health) = match settings::load_user_preferences() {
             Ok(preferences) => (preferences, PreferencesHealth::default()),
             Err(error) => (
@@ -506,6 +543,12 @@ impl KinicProvider {
         self.invalidate_pending_search();
     }
 
+    fn should_handle_memory_navigation(&self, state: &CoreState) -> bool {
+        state.current_tab_id == KINIC_MEMORIES_TAB_ID
+            && self.tab_id == KINIC_MEMORIES_TAB_ID
+            && self.memories_mode == MemoriesMode::Browser
+    }
+
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
         let filtered = self.current_records();
         let default_memory = self.default_memory_selection();
@@ -522,7 +565,9 @@ impl KinicProvider {
                 summary
             })
             .collect::<Vec<_>>();
-        let selected_content = if self.is_live() && self.memories_mode == MemoriesMode::Browser {
+        let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
+            None
+        } else if self.is_live() && self.memories_mode == MemoriesMode::Browser {
             if self.memory_records.is_empty() {
                 filtered.first().copied().map(adapter::to_content)
             } else {
@@ -1147,17 +1192,27 @@ impl DataProvider for KinicProvider {
                     effects.push(effect);
                 }
             }
-            CoreAction::MoveNext => self.move_active_memory(1),
-            CoreAction::MovePrev => self.move_active_memory(-1),
-            CoreAction::MoveHome => self.set_active_memory(0),
-            CoreAction::MoveEnd => {
+            CoreAction::MoveNext if self.should_handle_memory_navigation(state) => {
+                self.move_active_memory(1)
+            }
+            CoreAction::MovePrev if self.should_handle_memory_navigation(state) => {
+                self.move_active_memory(-1)
+            }
+            CoreAction::MoveHome if self.should_handle_memory_navigation(state) => {
+                self.set_active_memory(0)
+            }
+            CoreAction::MoveEnd if self.should_handle_memory_navigation(state) => {
                 let visible_count = self.visible_memory_count();
                 if visible_count != 0 {
                     self.set_active_memory(visible_count - 1);
                 }
             }
-            CoreAction::MovePageDown => self.move_active_memory(10),
-            CoreAction::MovePageUp => self.move_active_memory(-10),
+            CoreAction::MovePageDown if self.should_handle_memory_navigation(state) => {
+                self.move_active_memory(10)
+            }
+            CoreAction::MovePageUp if self.should_handle_memory_navigation(state) => {
+                self.move_active_memory(-10)
+            }
             CoreAction::SetTab(id) => {
                 effects.extend(self.set_tab(id.0.as_str()));
             }
@@ -1219,6 +1274,16 @@ impl DataProvider for KinicProvider {
             CoreAction::CloseDefaultMemoryPicker => {}
             CoreAction::MoveDefaultMemoryPickerNext => {}
             CoreAction::MoveDefaultMemoryPickerPrev => {}
+            CoreAction::SettingsMoveNext => {}
+            CoreAction::SettingsMovePrev => {}
+            CoreAction::SettingsMovePageDown => {}
+            CoreAction::SettingsMovePageUp => {}
+            CoreAction::SettingsMoveHome => {}
+            CoreAction::SettingsMoveEnd => {}
+            CoreAction::ScrollContentPageDown => {}
+            CoreAction::ScrollContentPageUp => {}
+            CoreAction::ScrollContentHome => {}
+            CoreAction::ScrollContentEnd => {}
             CoreAction::SubmitDefaultMemoryPicker => {
                 let Some(memory_id) = state
                     .default_memory_selector_items
@@ -2238,7 +2303,13 @@ mod tests {
         provider.session_settings.default_memory_id = Some("aaaaa-aa".to_string());
 
         let _ = provider
-            .handle_action(&CoreAction::MoveNext, &CoreState::default())
+            .handle_action(
+                &CoreAction::MoveNext,
+                &CoreState {
+                    current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                    ..CoreState::default()
+                },
+            )
             .expect("move next output");
 
         assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
@@ -2250,6 +2321,53 @@ mod tests {
             provider.session_settings.default_memory_id.as_deref(),
             Some("aaaaa-aa")
         );
+    }
+
+    #[test]
+    fn settings_navigation_does_not_change_active_memory() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+
+        let state = CoreState {
+            current_tab_id: KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            ..CoreState::default()
+        };
+
+        let _ = provider
+            .handle_action(&CoreAction::SettingsMoveNext, &state)
+            .expect("settings move output");
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+    }
+
+    #[test]
+    fn move_next_does_not_change_active_memory_outside_memories_tab() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+
+        let state = CoreState {
+            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+            ..CoreState::default()
+        };
+
+        let _ = provider
+            .handle_action(&CoreAction::MoveNext, &state)
+            .expect("move next output");
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
     }
 
     #[test]
@@ -2380,6 +2498,37 @@ mod tests {
     }
 
     #[test]
+    fn saving_default_memory_recovers_preferences_health_after_reload() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("bbbbb-bb", "Beta Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.preferences_health.load_error = Some("invalid YAML".to_string());
+        provider.session_settings.default_memory_id = Some("aaaaa-aa".to_string());
+        provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+
+        provider
+            .default_memory_controller()
+            .apply_reloaded_preferences(
+                UserPreferences {
+                    default_memory_id: Some("bbbbb-bb".to_string()),
+                },
+                Ok(UserPreferences {
+                    default_memory_id: Some("bbbbb-bb".to_string()),
+                }),
+            );
+
+        assert_eq!(provider.preferences_health, PreferencesHealth::default());
+        assert_eq!(
+            provider.user_preferences.default_memory_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+        assert_eq!(
+            provider.session_settings.default_memory_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+    }
+
+    #[test]
     fn build_snapshot_marks_default_memory_in_items_list() {
         let mut provider = KinicProvider::new(live_config());
         provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
@@ -2418,6 +2567,21 @@ mod tests {
             snapshot.default_memory_selector_labels,
             vec!["Alpha Memory".to_string(), "bbbbb-bb".to_string()]
         );
+    }
+
+    #[test]
+    fn build_snapshot_hides_selected_content_on_settings_tab() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+
+        let snapshot = provider.build_snapshot(&CoreState {
+            current_tab_id: KINIC_SETTINGS_TAB_ID.to_string(),
+            ..CoreState::default()
+        });
+
+        assert!(snapshot.selected_content.is_none());
     }
 
     #[test]
@@ -2614,7 +2778,13 @@ mod tests {
         provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
         provider.search_in_flight = true;
         provider
-            .handle_action(&CoreAction::MoveNext, &CoreState::default())
+            .handle_action(
+                &CoreAction::MoveNext,
+                &CoreState {
+                    current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                    ..CoreState::default()
+                },
+            )
             .expect("active memory update should succeed");
         tx.send(SearchTaskOutput {
             request_id: 0,
@@ -2860,7 +3030,13 @@ mod tests {
         provider.query = "b".to_string();
 
         let output = provider
-            .handle_action(&CoreAction::MoveNext, &CoreState::default())
+            .handle_action(
+                &CoreAction::MoveNext,
+                &CoreState {
+                    current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                    ..CoreState::default()
+                },
+            )
             .expect("move next should succeed");
 
         assert_eq!(provider.active_memory_id.as_deref(), Some("ccccc-cc"));
@@ -2891,12 +3067,24 @@ mod tests {
         provider.active_memory_id = Some("ccccc-cc".to_string());
 
         provider
-            .handle_action(&CoreAction::MoveHome, &CoreState::default())
+            .handle_action(
+                &CoreAction::MoveHome,
+                &CoreState {
+                    current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                    ..CoreState::default()
+                },
+            )
             .expect("move home should succeed");
         assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
 
         let output = provider
-            .handle_action(&CoreAction::MoveEnd, &CoreState::default())
+            .handle_action(
+                &CoreAction::MoveEnd,
+                &CoreState {
+                    current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                    ..CoreState::default()
+                },
+            )
             .expect("move end should succeed");
         assert_eq!(provider.active_memory_id.as_deref(), Some("ccccc-cc"));
         assert_eq!(

@@ -361,13 +361,23 @@ pub fn try_apply_runtime_action(
     if app.focus == Focus::Content
         && matches!(
             action,
-            CoreAction::MovePageDown | CoreAction::MovePageUp | CoreAction::MoveHome
+            CoreAction::ScrollContentPageDown
+                | CoreAction::ScrollContentPageUp
+                | CoreAction::ScrollContentHome
+                | CoreAction::ScrollContentEnd
         )
     {
         match action {
-            CoreAction::MovePageDown => *inspector_scroll = inspector_scroll.saturating_add(10),
-            CoreAction::MovePageUp => *inspector_scroll = inspector_scroll.saturating_sub(10),
-            CoreAction::MoveHome => *inspector_scroll = 0,
+            CoreAction::ScrollContentPageDown => {
+                *inspector_scroll = inspector_scroll.saturating_add(10)
+            }
+            CoreAction::ScrollContentPageUp => {
+                *inspector_scroll = inspector_scroll.saturating_sub(10)
+            }
+            CoreAction::ScrollContentHome => *inspector_scroll = 0,
+            CoreAction::ScrollContentEnd => {
+                *inspector_scroll = inspector_scroll.saturating_add(9999)
+            }
             _ => {}
         }
         return RuntimeApplyResult {

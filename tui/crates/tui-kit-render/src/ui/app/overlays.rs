@@ -223,7 +223,7 @@ impl<'a> TuiKitUi<'a> {
         };
         Clear.render(picker_area, buf);
 
-        let text = lines
+        let text = visible_default_memory_selector_lines(lines, h)
             .into_iter()
             .map(|(line, kind)| match kind {
                 DefaultMemorySelectorLineKind::Selected => {
@@ -276,6 +276,46 @@ fn fit_overlay_rect(
     };
 
     Some((width, height))
+}
+
+fn visible_default_memory_selector_lines(
+    lines: Vec<(String, DefaultMemorySelectorLineKind)>,
+    overlay_height: u16,
+) -> Vec<(String, DefaultMemorySelectorLineKind)> {
+    let fixed_prefix_len = 2usize;
+    let fixed_suffix_len = 2usize;
+    if lines.len() <= fixed_prefix_len + fixed_suffix_len {
+        return lines;
+    }
+
+    let candidate_rows = overlay_height.saturating_sub(2) as usize;
+    let visible_body_len = candidate_rows.saturating_sub(fixed_prefix_len + fixed_suffix_len);
+    if visible_body_len == 0 {
+        return lines;
+    }
+
+    let body_start = fixed_prefix_len;
+    let body_end = lines.len().saturating_sub(fixed_suffix_len);
+    let body = &lines[body_start..body_end];
+    if body.len() <= visible_body_len {
+        return lines;
+    }
+
+    let selected_in_body = body
+        .iter()
+        .position(|(_, kind)| *kind == DefaultMemorySelectorLineKind::Selected)
+        .unwrap_or(0);
+    let max_start = body.len().saturating_sub(visible_body_len);
+    let start = selected_in_body
+        .saturating_sub(visible_body_len / 2)
+        .min(max_start);
+    let end = start + visible_body_len;
+
+    let mut visible = Vec::with_capacity(fixed_prefix_len + visible_body_len + fixed_suffix_len);
+    visible.extend_from_slice(&lines[..fixed_prefix_len]);
+    visible.extend_from_slice(&body[start..end]);
+    visible.extend_from_slice(&lines[body_end..]);
+    visible
 }
 
 fn settings_overlay_lines(
@@ -391,5 +431,55 @@ mod tests {
         let rect = fit_overlay_rect(area, 56, 12, 8);
 
         assert_eq!(rect, None);
+    }
+
+    #[test]
+    fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
+        let lines = default_memory_selector_lines(
+            &(0..12)
+                .map(|index| format!("id-{index}"))
+                .collect::<Vec<_>>(),
+            &(0..12)
+                .map(|index| format!("Memory {index}"))
+                .collect::<Vec<_>>(),
+            10,
+            Some("id-2"),
+        );
+
+        let visible = visible_default_memory_selector_lines(lines, 8);
+        let joined = visible
+            .iter()
+            .map(|(line, _)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("Memory 10"));
+        assert!(!joined.contains("Memory 1"));
+        assert!(joined.contains("Enter: save"));
+    }
+
+    #[test]
+    fn default_memory_selector_window_keeps_selected_row_visible_near_start() {
+        let lines = default_memory_selector_lines(
+            &(0..12)
+                .map(|index| format!("id-{index}"))
+                .collect::<Vec<_>>(),
+            &(0..12)
+                .map(|index| format!("Memory {index}"))
+                .collect::<Vec<_>>(),
+            1,
+            Some("id-9"),
+        );
+
+        let visible = visible_default_memory_selector_lines(lines, 8);
+        let joined = visible
+            .iter()
+            .map(|(line, _)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("Memory 1"));
+        assert!(!joined.contains("Memory 10"));
+        assert!(joined.contains("Select default memory"));
     }
 }

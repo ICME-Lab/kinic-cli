@@ -25,7 +25,6 @@ tracing-subscriber = "0.3.20"
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 icrc-ledger-types = "0.1.12"
 serde = { version =  "1.0", features = ["derive"] }
-serde_yaml = "0.9"
 thiserror = "2.0.17"
 reqwest = { version = "0.12.7", default-features = false, features = ["json", "rustls-tls"] }
 dotenvy = "0.15.7"
@@ -41,6 +40,9 @@ tui-kit-host = { path = "tui/crates/tui-kit-host" }
 tui-kit-runtime = { path = "tui/crates/tui-kit-runtime" }
 tui-kit-model = { path = "tui/crates/tui-kit-model" }
 tui-kit-render = { path = "tui/crates/tui-kit-render" }
+
+[dev-dependencies]
+serde_yaml = "0.9"
 
 [features]
 default = []
