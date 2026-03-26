@@ -221,7 +221,7 @@ fn create_form_border_is_focused_only_for_form_focus() {
         theme.style_border()
     );
     assert_eq!(
-        create_form_border_style(&TuiKitUi::new(&theme).focus(Focus::Inspector)),
+        create_form_border_style(&TuiKitUi::new(&theme).focus(Focus::Content)),
         theme.style_border()
     );
 }

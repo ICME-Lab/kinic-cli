@@ -5,11 +5,12 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
+    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{CreateModalFocus, CreateSubmitState};
+use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::TuiKitUi;
+use super::screens::settings::{DefaultMemorySelectorLineKind, default_memory_selector_lines};
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_create_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -117,8 +118,11 @@ impl<'a> TuiKitUi<'a> {
         if !self.show_settings {
             return;
         }
-        let w = 48.min(area.width.saturating_sub(4));
-        let h = 10.min(area.height.saturating_sub(4));
+        let cfg = &self.ui_config.settings;
+        let lines = settings_overlay_lines(self.settings_snapshot, cfg);
+        let w = 68.min(area.width.saturating_sub(4));
+        let desired_height = lines.len().saturating_add(2) as u16;
+        let h = desired_height.clamp(10, area.height.saturating_sub(4));
         let settings_area = Rect {
             x: area.x + (area.width - w) / 2,
             y: area.y + (area.height - h) / 2,
@@ -126,25 +130,30 @@ impl<'a> TuiKitUi<'a> {
             height: h,
         };
         Clear.render(settings_area, buf);
-        let cfg = &self.ui_config.settings;
-        let text = vec![
-            Line::from(Span::styled(
-                format!(" {} ", cfg.title),
-                self.theme.style_accent_bold(),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                cfg.close_hint.clone(),
-                self.theme.style_muted(),
-            )),
-        ];
-        let block = Paragraph::new(text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(self.theme.style_border_focused())
-                .title(format!(" {} ", cfg.title))
-                .style(Style::default().bg(self.theme.bg_panel)),
-        );
+        let text = lines
+            .into_iter()
+            .map(|line| {
+                if line == cfg.content_hint || line == cfg.close_hint {
+                    Line::from(Span::styled(line, self.theme.style_muted()))
+                } else if line.starts_with(' ') {
+                    Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(line.trim_start().to_string(), self.theme.style_normal()),
+                    ])
+                } else {
+                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
+                }
+            })
+            .collect::<Vec<_>>();
+        let block = Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(self.theme.style_border_focused())
+                    .title(format!(" {} ", cfg.title))
+                    .style(Style::default().bg(self.theme.bg_panel)),
+            )
+            .wrap(Wrap { trim: false });
         block.render(settings_area, buf);
     }
 
@@ -188,5 +197,148 @@ impl<'a> TuiKitUi<'a> {
                 .style(Style::default().bg(self.theme.bg_panel)),
         );
         help.render(help_area, buf);
+    }
+
+    pub(super) fn render_default_memory_selector_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.default_memory_selector_open {
+            return;
+        }
+
+        let lines = default_memory_selector_lines(
+            self.default_memory_selector_items,
+            self.default_memory_selector_labels,
+            self.default_memory_selector_index,
+            self.default_memory_selector_selected_id,
+        );
+        let w = 56.min(area.width.saturating_sub(4));
+        let desired_height = lines.len().saturating_add(2) as u16;
+        let h = desired_height.clamp(8, area.height.saturating_sub(4));
+        let picker_area = Rect {
+            x: area.x + (area.width - w) / 2,
+            y: area.y + (area.height - h) / 2,
+            width: w,
+            height: h,
+        };
+        Clear.render(picker_area, buf);
+
+        let text = lines
+            .into_iter()
+            .map(|(line, kind)| match kind {
+                DefaultMemorySelectorLineKind::Selected => {
+                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
+                }
+                DefaultMemorySelectorLineKind::CurrentDefault => {
+                    Line::from(Span::styled(line, self.theme.style_accent()))
+                }
+                DefaultMemorySelectorLineKind::Hint => {
+                    Line::from(Span::styled(line, self.theme.style_muted()))
+                }
+                DefaultMemorySelectorLineKind::Normal => {
+                    Line::from(Span::styled(line, self.theme.style_normal()))
+                }
+                DefaultMemorySelectorLineKind::Title => {
+                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(self.theme.style_border_focused())
+                    .title(" Select Default Memory ")
+                    .style(Style::default().bg(self.theme.bg_panel)),
+            )
+            .wrap(Wrap { trim: false })
+            .render(picker_area, buf);
+    }
+}
+
+fn settings_overlay_lines(
+    snapshot: Option<&SettingsSnapshot>,
+    cfg: &super::types::SettingsOverlayText,
+) -> Vec<String> {
+    let mut lines = vec![format!(" {} ", cfg.title), String::new()];
+    if let Some(snapshot) = snapshot {
+        if snapshot.quick_entries.is_empty() {
+            lines.push(" No settings available yet.".to_string());
+        } else {
+            for entry in snapshot.quick_entries.iter().take(7) {
+                lines.push(format!(" {}: {}", entry.label, entry.value));
+            }
+        }
+    } else {
+        lines.push(" No settings available yet.".to_string());
+    }
+    lines.push(String::new());
+    lines.push(cfg.content_hint.clone());
+    lines.push(cfg.close_hint.clone());
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::app::UiConfig;
+    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
+
+    #[test]
+    fn settings_overlay_lines_include_priority_entries() {
+        let cfg = UiConfig::default().settings;
+        let snapshot = SettingsSnapshot {
+            quick_entries: vec![
+                SettingsEntry {
+                    id: "identity_name".to_string(),
+                    label: "Identity name".to_string(),
+                    value: "alice".to_string(),
+                    note: None,
+                },
+                SettingsEntry {
+                    id: "principal_id".to_string(),
+                    label: "Principal ID".to_string(),
+                    value: "aaaaa-aa".to_string(),
+                    note: None,
+                },
+                SettingsEntry {
+                    id: "network".to_string(),
+                    label: "Network".to_string(),
+                    value: "local".to_string(),
+                    note: None,
+                },
+            ],
+            sections: vec![SettingsSection::default()],
+        };
+
+        let lines = settings_overlay_lines(Some(&snapshot), &cfg);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("Identity name: alice"));
+        assert!(joined.contains("Principal ID: aaaaa-aa"));
+        assert!(joined.contains("Network: local"));
+        assert!(joined.contains("Open the Settings tab for detailed view."));
+        assert!(!joined.contains("Quick status while the main UI stays interactive."));
+        assert!(!joined.contains("More details are available in the Settings tab."));
+    }
+
+    #[test]
+    fn settings_overlay_lines_show_up_to_seven_entries() {
+        let cfg = UiConfig::default().settings;
+        let snapshot = SettingsSnapshot {
+            quick_entries: (1..=8)
+                .map(|index| SettingsEntry {
+                    id: format!("item_{index}"),
+                    label: format!("Item {index}"),
+                    value: format!("Value {index}"),
+                    note: None,
+                })
+                .collect(),
+            sections: vec![SettingsSection::default()],
+        };
+
+        let joined = settings_overlay_lines(Some(&snapshot), &cfg).join("\n");
+
+        assert!(joined.contains("Item 7: Value 7"));
+        assert!(!joined.contains("Item 8: Value 8"));
     }
 }

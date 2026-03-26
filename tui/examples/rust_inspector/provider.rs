@@ -1,6 +1,6 @@
 //! Rust-domain provider for domain-agnostic runtime contracts.
 
-use crate::adapter::{item_to_detail, item_to_summary};
+use crate::adapter::{item_to_content, item_to_summary};
 use crate::domain_rust::analyzer::AnalyzedItem;
 use tui_kit_model::UiItemSummary;
 use tui_kit_runtime::{
@@ -44,11 +44,11 @@ impl RustProvider {
         let filtered = self.filtered();
         let items: Vec<UiItemSummary> = filtered.iter().map(|it| item_to_summary(it)).collect();
         let sel = state.selected_index.unwrap_or(0);
-        let selected_detail = filtered.get(sel).map(|it| item_to_detail(it));
+        let selected_content = filtered.get(sel).map(|it| item_to_content(it));
 
         ProviderSnapshot {
             items,
-            selected_detail,
+            selected_content,
             selected_context: None,
             total_count: self.base_items.len(),
             status_message: if self.query.is_empty() {
@@ -132,6 +132,6 @@ mod tests {
             .handle_action(&CoreAction::OpenSelected, &state)
             .unwrap();
         let snap = out.snapshot.unwrap();
-        assert!(snap.selected_detail.is_some());
+        assert!(snap.selected_content.is_some());
     }
 }

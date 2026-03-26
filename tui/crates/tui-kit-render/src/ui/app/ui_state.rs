@@ -1,10 +1,10 @@
 //! Shared TUI app state object; screen modules render from this immutable snapshot.
 
 use crate::ui::animation::AnimationState;
-use crate::ui::model::{UiContextNode, UiItemDetail, UiItemSummary};
+use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
-use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState};
+use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
 
@@ -16,7 +16,7 @@ pub struct TuiKitUi<'a> {
     pub(super) context_details_loading: bool,
     pub(super) context_details_failed: bool,
     pub(super) ui_summaries: &'a [UiItemSummary],
-    pub(super) ui_selected_detail: Option<&'a UiItemDetail>,
+    pub(super) ui_selected_content: Option<&'a UiItemContent>,
     pub(super) ui_context_node: Option<&'a UiContextNode>,
     pub(super) ui_total_count: usize,
     pub(super) in_context_items_view: bool,
@@ -41,6 +41,12 @@ pub struct TuiKitUi<'a> {
     pub(super) create_error: Option<&'a str>,
     pub(super) create_focus: CreateModalFocus,
     pub(super) create_cost_state: &'a CreateCostState,
+    pub(super) settings_snapshot: Option<&'a SettingsSnapshot>,
+    pub(super) default_memory_selector_open: bool,
+    pub(super) default_memory_selector_index: usize,
+    pub(super) default_memory_selector_items: &'a [String],
+    pub(super) default_memory_selector_labels: &'a [String],
+    pub(super) default_memory_selector_selected_id: Option<&'a str>,
     pub(super) status_message: &'a str,
     pub(super) inspector_scroll: usize,
     pub(super) animation: Option<&'a AnimationState>,
@@ -61,7 +67,7 @@ impl<'a> TuiKitUi<'a> {
             context_details_loading: false,
             context_details_failed: false,
             ui_summaries: &[],
-            ui_selected_detail: None,
+            ui_selected_content: None,
             ui_context_node: None,
             ui_total_count: 0,
             in_context_items_view: false,
@@ -86,6 +92,12 @@ impl<'a> TuiKitUi<'a> {
             create_error: None,
             create_focus: CreateModalFocus::Name,
             create_cost_state: &CreateCostState::Hidden,
+            settings_snapshot: None,
+            default_memory_selector_open: false,
+            default_memory_selector_index: 0,
+            default_memory_selector_items: &[],
+            default_memory_selector_labels: &[],
+            default_memory_selector_selected_id: None,
             status_message: "",
             inspector_scroll: 0,
             animation: None,

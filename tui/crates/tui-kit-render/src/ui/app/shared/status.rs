@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
+use tui_kit_runtime::kinic_tabs::{KINIC_SETTINGS_TAB_ID, TabKind, tab_kind};
 
 use crate::ui::app::{Focus, TuiKitUi};
 
@@ -17,9 +17,9 @@ impl<'a> TuiKitUi<'a> {
         let tab_id = self.current_tab_id.0.as_str();
         let focus_indicator = match self.focus {
             Focus::Search => ("🔍", "Search"),
-            Focus::List => ("📋", "List"),
+            Focus::Items => ("📋", "Items"),
             Focus::Tabs => ("🗂", "Tabs"),
-            Focus::Inspector => ("🔬", "Content"),
+            Focus::Content => ("🔬", "Content"),
             Focus::Form => ("✍", "Form"),
             Focus::Chat => ("💬", "Chat"),
         };
@@ -58,25 +58,42 @@ impl<'a> TuiKitUi<'a> {
             tab_kind(tab_id),
             TabKind::PlaceholderMarket | TabKind::PlaceholderSettings
         ) {
-            let mut spans = vec![
-                Span::styled("Tab", self.theme.style_accent()),
-                Span::styled(" switch ", self.theme.style_muted()),
-                Span::styled("1-4", self.theme.style_accent()),
-                Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
-                Span::styled("│ ", self.theme.style_dim()),
-                Span::styled(focus_indicator.0, self.theme.style_accent()),
-                Span::styled(format!(" {}", focus_indicator.1), self.theme.style_dim()),
-            ];
-            if self.focus == Focus::Inspector {
-                spans.splice(
-                    4..4,
-                    [
-                        Span::styled("Esc", self.theme.style_accent()),
-                        Span::styled(" tabs ", self.theme.style_muted()),
-                    ],
-                );
+            if tab_id == KINIC_SETTINGS_TAB_ID && self.focus == Focus::Content {
+                Line::from(vec![
+                    Span::styled("↑/↓", self.theme.style_accent()),
+                    Span::styled(" choose row ", self.theme.style_muted()),
+                    Span::styled("Enter", self.theme.style_accent()),
+                    Span::styled(" open Default memory ", self.theme.style_muted()),
+                    Span::styled("Esc", self.theme.style_accent()),
+                    Span::styled(" tabs ", self.theme.style_muted()),
+                    Span::styled("│ ", self.theme.style_dim()),
+                    Span::styled("Shift+D", self.theme.style_accent()),
+                    Span::styled(
+                        " saves current memory from Memories",
+                        self.theme.style_muted(),
+                    ),
+                ])
+            } else {
+                let mut spans = vec![
+                    Span::styled("Tab", self.theme.style_accent()),
+                    Span::styled(" switch ", self.theme.style_muted()),
+                    Span::styled("1-4", self.theme.style_accent()),
+                    Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
+                    Span::styled("│ ", self.theme.style_dim()),
+                    Span::styled(focus_indicator.0, self.theme.style_accent()),
+                    Span::styled(format!(" {}", focus_indicator.1), self.theme.style_dim()),
+                ];
+                if self.focus == Focus::Content {
+                    spans.splice(
+                        4..4,
+                        [
+                            Span::styled("Esc", self.theme.style_accent()),
+                            Span::styled(" tabs ", self.theme.style_muted()),
+                        ],
+                    );
+                }
+                Line::from(spans)
             }
-            Line::from(spans)
         } else if self.show_context_panel && self.in_context_items_view {
             let selection_info = if let Some(selected) = self.list_selected {
                 format!("[{}/{}]", selected + 1, self.ui_summaries.len())
@@ -104,7 +121,7 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(format!("{}: ", cfg.commands_label), self.theme.style_dim()),
                 Span::styled("Tab", self.theme.style_accent()),
                 Span::styled(" focus ", self.theme.style_muted()),
-                Span::styled("↑/↓ j/k", self.theme.style_accent()),
+                Span::styled("↑/↓", self.theme.style_accent()),
                 Span::styled(" list ", self.theme.style_muted()),
                 Span::styled("Enter →", self.theme.style_accent()),
                 Span::styled(" open ", self.theme.style_muted()),
@@ -144,7 +161,7 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(format!("{}: ", cfg.commands_label), self.theme.style_dim()),
                 Span::styled("Tab", self.theme.style_accent()),
                 Span::styled(" focus ", self.theme.style_muted()),
-                Span::styled("↑/↓ j/k", self.theme.style_accent()),
+                Span::styled("↑/↓", self.theme.style_accent()),
                 Span::styled(" list ", self.theme.style_muted()),
                 Span::styled("Enter →", self.theme.style_accent()),
                 Span::styled(" open ", self.theme.style_muted()),

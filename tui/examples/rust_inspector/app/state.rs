@@ -1,7 +1,8 @@
 //! Application state management
 
 use crate::adapter::{
-    crate_doc_to_node, crate_info_to_node, installed_crate_to_node, item_to_detail, item_to_summary,
+    crate_doc_to_node, crate_info_to_node, installed_crate_to_node, item_to_content,
+    item_to_summary,
 };
 use crate::app::Tab;
 use crate::config::Settings;
@@ -14,7 +15,7 @@ use crate::ui::theme::Theme;
 use crate::ui::{
     CandidateKind, CompletionCandidate, Focus, TabId, TabSpec, UiConfig, filter_candidates,
 };
-use crate::ui::{UiContextNode, UiItemDetail, UiItemSummary};
+use crate::ui::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::utils::dir_size;
 
 use ratatui::widgets::ListState;
@@ -58,7 +59,7 @@ pub struct App {
     pub candidates: Vec<CompletionCandidate>,
     pub filtered_candidates: Vec<CompletionCandidate>,
     pub ui_summaries: Vec<UiItemSummary>,
-    pub ui_selected_detail: Option<UiItemDetail>,
+    pub ui_selected_content: Option<UiItemContent>,
     pub ui_dependency_node: Option<UiContextNode>,
     pub ui_total_count: usize,
     pub ui_in_crate_items_view: bool,
@@ -129,7 +130,7 @@ impl App {
             candidates: Vec::new(),
             filtered_candidates: Vec::new(),
             ui_summaries: Vec::new(),
-            ui_selected_detail: None,
+            ui_selected_content: None,
             ui_dependency_node: None,
             ui_total_count: 0,
             ui_in_crate_items_view: false,
@@ -911,7 +912,7 @@ impl App {
         if self.chat_open && self.selected_item().is_some() {
             self.focus = Focus::Chat;
         } else if !self.chat_open && self.focus == Focus::Chat {
-            self.focus = Focus::Inspector;
+            self.focus = Focus::Content;
         }
     }
 
@@ -930,7 +931,7 @@ impl App {
             .into_iter()
             .map(item_to_summary)
             .collect();
-        self.ui_selected_detail = self.selected_item().map(item_to_detail);
+        self.ui_selected_content = self.selected_item().map(item_to_content);
 
         self.ui_dependency_node = if self.current_tab == Tab::Crates {
             if self.ui_in_crate_items_view {

@@ -86,7 +86,7 @@ pub struct CreateOverlayText {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsOverlayText {
     pub title: String,
-    pub detail_hint: String,
+    pub content_hint: String,
     pub close_hint: String,
 }
 
@@ -157,7 +157,7 @@ impl Default for UiConfig {
             },
             settings: SettingsOverlayText {
                 title: "Settings".to_string(),
-                detail_hint: "Open the Settings tab for detailed view.".to_string(),
+                content_hint: "Open the Settings tab for detailed view.".to_string(),
                 close_hint: "Esc: close".to_string(),
             },
             help: HelpOverlayText {
@@ -168,8 +168,8 @@ impl Default for UiConfig {
                     "/: focus search".to_string(),
                     "Esc: back / clear / close".to_string(),
                     "F5: refresh current view".to_string(),
-                    "↑/↓ or j/k: move selection".to_string(),
-                    "Enter or →: open/focus detail".to_string(),
+                    "↑/↓: move selection".to_string(),
+                    "Enter or →: open/focus content".to_string(),
                     "C: toggle chat panel".to_string(),
                     "?: toggle help".to_string(),
                     "q: quit".to_string(),
@@ -227,21 +227,21 @@ fn default_branding_lines() -> Vec<String> {
 pub enum Focus {
     #[default]
     Search,
-    List,
+    Items,
     Tabs,
-    Inspector,
+    Content,
     Form,
     /// In-TUI chat panel (only when chat is open)
     Chat,
 }
 
 impl Focus {
-    /// Next focus; when `chat_open` is true, Inspector -> Chat -> Search.
+    /// Next focus; when `chat_open` is true, Content -> Chat -> Search.
     pub fn next(&self, chat_open: bool) -> Self {
         match self {
-            Focus::Search => Focus::List,
-            Focus::List => Focus::Inspector,
-            Focus::Inspector => {
+            Focus::Search => Focus::Items,
+            Focus::Items => Focus::Content,
+            Focus::Content => {
                 if chat_open {
                     Focus::Chat
                 } else {
@@ -258,15 +258,15 @@ impl Focus {
     pub fn prev(&self, chat_open: bool) -> Self {
         match self {
             Focus::Search => Focus::Tabs,
-            Focus::List => Focus::Search,
-            Focus::Inspector => Focus::List,
+            Focus::Items => Focus::Search,
+            Focus::Content => Focus::Items,
             Focus::Form => Focus::Tabs,
-            Focus::Chat => Focus::Inspector,
+            Focus::Chat => Focus::Content,
             Focus::Tabs => {
                 if chat_open {
                     Focus::Chat
                 } else {
-                    Focus::Inspector
+                    Focus::Content
                 }
             }
         }

@@ -381,11 +381,11 @@ Maintain keyboard-first behavior as baseline.
             .map(|r| adapter::to_summary(r))
             .collect::<Vec<_>>();
         let sel = state.selected_index.unwrap_or(0);
-        let selected_detail = filtered.get(sel).map(|r| adapter::to_detail(r));
+        let selected_content = filtered.get(sel).map(|r| adapter::to_detail(r));
 
         ProviderSnapshot {
             items,
-            selected_detail,
+            selected_content,
             selected_context: None,
             total_count: self.all.len(),
             status_message: Some(format!(

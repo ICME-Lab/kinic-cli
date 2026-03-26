@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RuntimeLoopConfig {
             initial_tab_id: "mail-inbox",
             tab_ids: &["mail-inbox", "mail-invoices", "mail-alerts", "mail-news"],
-            initial_focus: PaneFocus::List,
+            initial_focus: PaneFocus::Items,
             ui_config: mail_ui_config,
         },
     )

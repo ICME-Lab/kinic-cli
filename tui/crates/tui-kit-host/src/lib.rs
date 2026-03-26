@@ -143,13 +143,15 @@ pub enum HostGlobalCommand {
     CloseHelp,
     CloseSettings,
     CloseChat,
+    BackToTabs,
     BackFromFormToTabs,
     BackToMemoriesTab,
     OpenCreateTab,
     ToggleChat,
     ToggleHelp,
     ToggleSettings,
-    BackFromDetail,
+    SetDefaultFromSelection,
+    BackFromContent,
     RefreshCurrentView,
     ClearQuery,
     Quit,
@@ -185,9 +187,14 @@ pub fn global_command_for_key(
     if code == KeyCode::Esc {
         let tab_specific = if focus == PaneFocus::Form && focus_policy.allows_form {
             HostGlobalCommand::BackFromFormToTabs
+        } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
+            && matches!(focus, PaneFocus::Search | PaneFocus::Items)
+            && query_is_empty
+        {
+            HostGlobalCommand::BackToTabs
         } else if focus == PaneFocus::Tabs && !focus_policy.allows_search {
             HostGlobalCommand::BackToMemoriesTab
-        } else if focus == PaneFocus::Detail && !focus_policy.allows_list {
+        } else if focus == PaneFocus::Content && !focus_policy.allows_items {
             HostGlobalCommand::BackToMemoriesTab
         } else {
             HostGlobalCommand::None
@@ -227,6 +234,13 @@ pub fn global_command_for_key(
     {
         return HostGlobalCommand::ToggleSettings;
     }
+    if code == KeyCode::Char('D')
+        && modifiers.contains(KeyModifiers::SHIFT)
+        && current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
+        && matches!(focus, PaneFocus::Items | PaneFocus::Content)
+    {
+        return HostGlobalCommand::SetDefaultFromSelection;
+    }
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateTab;
     }
@@ -234,8 +248,8 @@ pub fn global_command_for_key(
         return HostGlobalCommand::RefreshCurrentView;
     }
     if code == KeyCode::Esc {
-        if focus == PaneFocus::Detail {
-            return HostGlobalCommand::BackFromDetail;
+        if focus == PaneFocus::Content {
+            return HostGlobalCommand::BackFromContent;
         }
         if !query_is_empty {
             return HostGlobalCommand::ClearQuery;
@@ -290,9 +304,9 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 let focus_policy = tab_focus_policy(state.current_tab_id.as_str());
                 let allows_focus = match pane {
                     PaneFocus::Search => focus_policy.allows_search,
-                    PaneFocus::List => focus_policy.allows_list,
+                    PaneFocus::Items => focus_policy.allows_items,
                     PaneFocus::Tabs => focus_policy.allows_tabs,
-                    PaneFocus::Detail => focus_policy.allows_detail,
+                    PaneFocus::Content => focus_policy.allows_content,
                     PaneFocus::Form => focus_policy.allows_form,
                     PaneFocus::Extra => focus_policy.allows_chat,
                 };
@@ -399,9 +413,9 @@ mod tests {
                 ..CoreState::default()
             };
 
-            execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::List)]);
+            execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::Items)]);
 
-            assert_eq!(state.focus, PaneFocus::List);
+            assert_eq!(state.focus, PaneFocus::Items);
         }
 
         #[test]
@@ -412,7 +426,7 @@ mod tests {
                 ..CoreState::default()
             };
 
-            execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::List)]);
+            execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::Items)]);
 
             assert_eq!(state.focus, PaneFocus::Form);
         }
@@ -427,7 +441,7 @@ mod tests {
                 (
                     KeyCode::Esc,
                     KeyModifiers::NONE,
-                    PaneFocus::List,
+                    PaneFocus::Items,
                     KINIC_MEMORIES_TAB_ID,
                     false,
                     HostGlobalCommand::ClearQuery,
@@ -435,7 +449,7 @@ mod tests {
                 (
                     KeyCode::Char('n'),
                     KeyModifiers::CONTROL,
-                    PaneFocus::List,
+                    PaneFocus::Items,
                     KINIC_MEMORIES_TAB_ID,
                     true,
                     HostGlobalCommand::OpenCreateTab,
@@ -443,7 +457,7 @@ mod tests {
                 (
                     KeyCode::F(5),
                     KeyModifiers::NONE,
-                    PaneFocus::List,
+                    PaneFocus::Items,
                     KINIC_MEMORIES_TAB_ID,
                     true,
                     HostGlobalCommand::RefreshCurrentView,
@@ -451,7 +465,7 @@ mod tests {
                 (
                     KeyCode::Char('q'),
                     KeyModifiers::NONE,
-                    PaneFocus::List,
+                    PaneFocus::Items,
                     KINIC_MEMORIES_TAB_ID,
                     true,
                     HostGlobalCommand::Quit,
@@ -467,10 +481,18 @@ mod tests {
                 (
                     KeyCode::Esc,
                     KeyModifiers::NONE,
-                    PaneFocus::List,
+                    PaneFocus::Items,
                     KINIC_MEMORIES_TAB_ID,
                     true,
-                    HostGlobalCommand::None,
+                    HostGlobalCommand::BackToTabs,
+                ),
+                (
+                    KeyCode::Esc,
+                    KeyModifiers::NONE,
+                    PaneFocus::Search,
+                    KINIC_MEMORIES_TAB_ID,
+                    true,
+                    HostGlobalCommand::BackToTabs,
                 ),
             ];
 
@@ -494,6 +516,16 @@ mod tests {
         fn global_command_resolves_escape_for_special_tabs() {
             let cases = [
                 (
+                    PaneFocus::Items,
+                    KINIC_MEMORIES_TAB_ID,
+                    HostGlobalCommand::BackToTabs,
+                ),
+                (
+                    PaneFocus::Search,
+                    KINIC_MEMORIES_TAB_ID,
+                    HostGlobalCommand::BackToTabs,
+                ),
+                (
                     PaneFocus::Tabs,
                     KINIC_CREATE_TAB_ID,
                     HostGlobalCommand::BackToMemoriesTab,
@@ -504,12 +536,12 @@ mod tests {
                     HostGlobalCommand::BackFromFormToTabs,
                 ),
                 (
-                    PaneFocus::Detail,
+                    PaneFocus::Content,
                     KINIC_MARKET_TAB_ID,
                     HostGlobalCommand::BackToMemoriesTab,
                 ),
                 (
-                    PaneFocus::Detail,
+                    PaneFocus::Content,
                     KINIC_SETTINGS_TAB_ID,
                     HostGlobalCommand::BackToMemoriesTab,
                 ),

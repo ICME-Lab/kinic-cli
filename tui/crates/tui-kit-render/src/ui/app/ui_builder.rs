@@ -1,9 +1,9 @@
 //! Builder-style setters for constructing a render snapshot.
 
 use crate::ui::animation::AnimationState;
-use crate::ui::model::{UiContextNode, UiItemDetail, UiItemSummary};
+use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
-use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState};
+use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
 
@@ -15,8 +15,8 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn ui_selected_detail(mut self, detail: Option<&'a UiItemDetail>) -> Self {
-        self.ui_selected_detail = detail;
+    pub fn ui_selected_content(mut self, content: Option<&'a UiItemContent>) -> Self {
+        self.ui_selected_content = content;
         self
     }
 
@@ -192,6 +192,42 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn create_cost_state(mut self, value: &'a CreateCostState) -> Self {
         self.create_cost_state = value;
+        self
+    }
+
+    #[must_use]
+    pub fn settings_snapshot(mut self, value: Option<&'a SettingsSnapshot>) -> Self {
+        self.settings_snapshot = value;
+        self
+    }
+
+    #[must_use]
+    pub fn default_memory_selector_open(mut self, value: bool) -> Self {
+        self.default_memory_selector_open = value;
+        self
+    }
+
+    #[must_use]
+    pub fn default_memory_selector_index(mut self, value: usize) -> Self {
+        self.default_memory_selector_index = value;
+        self
+    }
+
+    #[must_use]
+    pub fn default_memory_selector_items(mut self, value: &'a [String]) -> Self {
+        self.default_memory_selector_items = value;
+        self
+    }
+
+    #[must_use]
+    pub fn default_memory_selector_labels(mut self, value: &'a [String]) -> Self {
+        self.default_memory_selector_labels = value;
+        self
+    }
+
+    #[must_use]
+    pub fn default_memory_selector_selected_id(mut self, value: Option<&'a str>) -> Self {
+        self.default_memory_selector_selected_id = value;
         self
     }
 

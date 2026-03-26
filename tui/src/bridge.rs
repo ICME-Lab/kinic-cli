@@ -11,9 +11,10 @@ use crate::{
         memory::MemoryClient,
     },
     commands::create::{BalanceDelta, balance_delta, required_balance},
-    embedding::fetch_embedding,
+    embedding::{embedding_base_url, fetch_embedding},
     ledger::fetch_balance,
     tui::TuiAuth,
+    tui::settings::SessionSettingsSnapshot,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +70,27 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     let states = client.list_memories().await?;
 
     Ok(states.into_iter().map(memory_summary_from_state).collect())
+}
+
+pub async fn load_session_settings(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    default_memory_id: Option<String>,
+) -> Result<SessionSettingsSnapshot, String> {
+    let factory = resolve_agent_factory(use_mainnet, &auth).map_err(|error| error.to_string())?;
+    let agent = factory.build().await.map_err(|error| error.to_string())?;
+    let principal_id = agent
+        .get_principal()
+        .map(|principal| principal.to_text())
+        .map_err(|error| error.to_string())?;
+
+    Ok(SessionSettingsSnapshot::new(
+        &auth,
+        use_mainnet,
+        Some(principal_id),
+        embedding_base_url(),
+        default_memory_id,
+    ))
 }
 
 pub async fn create_memory(

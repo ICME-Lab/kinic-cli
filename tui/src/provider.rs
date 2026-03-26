@@ -2,6 +2,7 @@ use std::{sync::mpsc, thread};
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
+use super::settings::{self, PreferencesHealth, SessionSettingsSnapshot, UserPreferences};
 use crate::tui::TuiAuth;
 use serde::Deserialize;
 use tokio::runtime::Runtime;
@@ -63,6 +64,9 @@ pub struct KinicProvider {
     query: String,
     tab_id: String,
     config: TuiConfig,
+    session_settings: SessionSettingsSnapshot,
+    user_preferences: UserPreferences,
+    preferences_health: PreferencesHealth,
     active_memory_id: Option<String>,
     memory_records: Vec<KinicRecord>,
     result_records: Vec<KinicRecord>,
@@ -80,6 +84,10 @@ pub struct KinicProvider {
     pending_create_submit: Option<mpsc::Receiver<CreateSubmitTaskOutput>>,
     pending_create_submit_request_id: Option<u64>,
     create_submit_in_flight: bool,
+    pending_session_settings: Option<mpsc::Receiver<SessionSettingsTaskOutput>>,
+    pending_session_settings_request_id: Option<u64>,
+    session_settings_in_flight: bool,
+    next_session_settings_request_id: u64,
     next_create_request_id: u64,
 }
 
@@ -111,13 +119,140 @@ struct CreateSubmitTaskOutput {
     result: Result<bridge::CreateMemorySuccess, bridge::CreateMemoryError>,
 }
 
+struct SessionSettingsTaskOutput {
+    request_id: u64,
+    result: Result<SessionSettingsSnapshot, String>,
+}
+
+#[derive(Clone, Copy)]
+struct DefaultMemorySelection<'a> {
+    memory_records: &'a [KinicRecord],
+    user_preferences: &'a UserPreferences,
+}
+
+impl<'a> DefaultMemorySelection<'a> {
+    fn available_memory_ids(self) -> Vec<String> {
+        self.memory_records
+            .iter()
+            .map(|record| record.id.clone())
+            .collect()
+    }
+
+    fn preferred_initial_memory_id(self) -> Option<String> {
+        let default_memory_id = self.user_preferences.default_memory_id.as_deref()?;
+        self.memory_records
+            .iter()
+            .find(|record| record.id == default_memory_id)
+            .map(|record| record.id.clone())
+    }
+
+    fn selected_default_memory_id(self) -> Option<String> {
+        self.user_preferences.default_memory_id.clone()
+    }
+
+    fn is_default_memory(self, memory_id: &str) -> bool {
+        self.user_preferences.default_memory_id.as_deref() == Some(memory_id)
+    }
+
+    fn selector_snapshot(self) -> (Vec<String>, Option<String>) {
+        (
+            self.available_memory_ids(),
+            self.selected_default_memory_id(),
+        )
+    }
+
+    fn selector_labels(self) -> Vec<String> {
+        self.memory_records
+            .iter()
+            .map(|record| {
+                let title = record.title.trim();
+                if title.is_empty() {
+                    record.id.clone()
+                } else {
+                    title.to_string()
+                }
+            })
+            .collect()
+    }
+}
+
+struct DefaultMemoryController<'a> {
+    is_live: bool,
+    memory_records: &'a [KinicRecord],
+    user_preferences: &'a mut UserPreferences,
+    session_settings: &'a mut SessionSettingsSnapshot,
+    preferences_health: &'a mut PreferencesHealth,
+}
+
+impl<'a> DefaultMemoryController<'a> {
+    fn selection(&self) -> DefaultMemorySelection<'_> {
+        DefaultMemorySelection {
+            memory_records: self.memory_records,
+            user_preferences: self.user_preferences,
+        }
+    }
+
+    fn selected_default_memory_id(&self) -> Option<String> {
+        self.selection().selected_default_memory_id()
+    }
+
+    fn set_default_memory_preference(&mut self, memory_id: String) -> CoreEffect {
+        if !self.is_live {
+            return CoreEffect::Notify(
+                "Default memory is only available in live mode.".to_string(),
+            );
+        }
+        if self.user_preferences.default_memory_id.as_deref() == Some(memory_id.as_str()) {
+            return CoreEffect::Notify(format!("Default memory already set to {memory_id}"));
+        }
+
+        let updated_preferences = UserPreferences {
+            default_memory_id: Some(memory_id.clone()),
+        };
+        match settings::save_user_preferences(&updated_preferences) {
+            Ok(()) => {
+                *self.user_preferences = updated_preferences;
+                self.session_settings.default_memory_id =
+                    self.user_preferences.default_memory_id.clone();
+                self.preferences_health.save_error = None;
+                CoreEffect::Notify(format!("Default memory set to {memory_id}"))
+            }
+            Err(error) => {
+                self.preferences_health.save_error = Some(error.to_string());
+                CoreEffect::Notify(format!("Default memory save failed: {error}"))
+            }
+        }
+    }
+}
+
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
+        let (user_preferences, preferences_health) = match settings::load_user_preferences() {
+            Ok(preferences) => (preferences, PreferencesHealth::default()),
+            Err(error) => (
+                UserPreferences::default(),
+                PreferencesHealth {
+                    load_error: Some(error.to_string()),
+                    save_error: None,
+                },
+            ),
+        };
+        let session_settings = SessionSettingsSnapshot::new(
+            &config.auth,
+            config.use_mainnet,
+            None,
+            crate::embedding::embedding_base_url(),
+            user_preferences.default_memory_id.clone(),
+        );
+
         Self {
             all: sample_records(),
             query: String::new(),
             tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
             config,
+            session_settings,
+            user_preferences,
+            preferences_health,
             active_memory_id: None,
             memory_records: Vec::new(),
             result_records: Vec::new(),
@@ -135,6 +270,10 @@ impl KinicProvider {
             pending_create_submit: None,
             pending_create_submit_request_id: None,
             create_submit_in_flight: false,
+            pending_session_settings: None,
+            pending_session_settings_request_id: None,
+            session_settings_in_flight: false,
+            next_session_settings_request_id: 0,
             next_create_request_id: 0,
         }
     }
@@ -369,30 +508,103 @@ impl KinicProvider {
 
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
         let filtered = self.current_records();
+        let default_memory = self.default_memory_selection();
+        let (default_memory_selector_items, default_memory_selector_selected_id) =
+            default_memory.selector_snapshot();
+        let default_memory_selector_labels = default_memory.selector_labels();
         let items = filtered
             .iter()
-            .map(|r| adapter::to_summary(r))
+            .map(|record| {
+                let mut summary = adapter::to_summary(record);
+                if record.group == "memories" && default_memory.is_default_memory(&record.id) {
+                    summary.leading_marker = Some("★".to_string());
+                }
+                summary
+            })
             .collect::<Vec<_>>();
-        let selected_detail = if self.is_live() && self.memories_mode == MemoriesMode::Browser {
+        let selected_content = if self.is_live() && self.memories_mode == MemoriesMode::Browser {
             if self.memory_records.is_empty() {
-                filtered.first().copied().map(adapter::to_detail)
+                filtered.first().copied().map(adapter::to_content)
             } else {
-                self.active_visible_memory_record().map(adapter::to_detail)
+                self.active_visible_memory_record().map(adapter::to_content)
             }
         } else {
             let sel = state.selected_index.unwrap_or(0);
-            filtered.get(sel).map(|r| adapter::to_detail(r))
+            filtered.get(sel).map(|r| adapter::to_content(r))
         };
 
         ProviderSnapshot {
             items,
-            selected_detail,
+            selected_content,
             selected_context: None,
             total_count: filtered.len(),
             status_message: Some(self.status_message(filtered.len())),
             create_cost_state: self.create_cost_state.clone(),
             create_submit_state: state.create_submit_state.clone(),
+            settings: settings::build_settings_snapshot(
+                &self.session_settings,
+                &self.user_preferences,
+                &default_memory_selector_items,
+                &default_memory_selector_labels,
+                &self.preferences_health,
+            ),
+            default_memory_selector_items,
+            default_memory_selector_labels,
+            default_memory_selector_selected_id,
         }
+    }
+
+    fn default_memory_selection(&self) -> DefaultMemorySelection<'_> {
+        DefaultMemorySelection {
+            memory_records: &self.memory_records,
+            user_preferences: &self.user_preferences,
+        }
+    }
+
+    fn default_memory_controller(&mut self) -> DefaultMemoryController<'_> {
+        DefaultMemoryController {
+            is_live: self.is_live(),
+            memory_records: &self.memory_records,
+            user_preferences: &mut self.user_preferences,
+            session_settings: &mut self.session_settings,
+            preferences_health: &mut self.preferences_health,
+        }
+    }
+
+    fn start_session_settings_refresh(&mut self) -> Option<CoreEffect> {
+        if !self.is_live() {
+            return None;
+        }
+        if self.session_settings_in_flight {
+            return None;
+        }
+
+        let request_id = self.next_session_settings_request_id;
+        self.next_session_settings_request_id += 1;
+        self.pending_session_settings_request_id = Some(request_id);
+        self.session_settings_in_flight = true;
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        let default_memory_id = self
+            .default_memory_controller()
+            .selected_default_memory_id();
+        let (tx, rx) = mpsc::channel();
+        self.pending_session_settings = Some(rx);
+
+        thread::spawn(move || {
+            let runtime =
+                Runtime::new().expect("failed to create tokio runtime for settings refresh");
+            let result = runtime.block_on(bridge::load_session_settings(
+                use_mainnet,
+                auth,
+                default_memory_id,
+            ));
+            let _ = tx.send(SessionSettingsTaskOutput { request_id, result });
+        });
+
+        Some(CoreEffect::Notify(
+            "Refreshing session settings...".to_string(),
+        ))
     }
 
     fn start_create_cost_refresh(&mut self) -> Option<CoreEffect> {
@@ -449,11 +661,30 @@ impl KinicProvider {
     }
 
     fn status_message(&self, visible_count: usize) -> String {
-        if !self.is_live() {
-            return format!(
+        let base = if !self.is_live() {
+            format!(
                 "kinic(mock): {visible_count} filtered / {} total",
                 self.all.len()
-            );
+            )
+        } else {
+            match self.memories_mode {
+                MemoriesMode::Browser => match self.active_memory_id.as_deref() {
+                    Some(memory_id) => format!(
+                        "kinic(live): target {memory_id} | Enter in search runs remote search | Shift+D saves default"
+                    ),
+                    None => "kinic(live): no memory selected".to_string(),
+                },
+                MemoriesMode::Results => match self.active_memory_id.as_deref() {
+                    Some(memory_id) => format!(
+                        "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
+                    ),
+                    None => format!("kinic(live): {visible_count} search results"),
+                },
+            }
+        };
+
+        if !self.is_live() {
+            return base;
         }
 
         if self.initial_memories_in_flight {
@@ -463,20 +694,13 @@ impl KinicProvider {
             return "kinic(live): memories unavailable | F5 retries loading".to_string();
         }
 
-        match self.memories_mode {
-            MemoriesMode::Browser => match self.active_memory_id.as_deref() {
-                Some(memory_id) => format!(
-                    "kinic(live): target {memory_id} | j/k selects memory canister | Enter in search runs remote search"
-                ),
-                None => "kinic(live): no memory selected | j/k selects memory canister".to_string(),
-            },
-            MemoriesMode::Results => match self.active_memory_id.as_deref() {
-                Some(memory_id) => format!(
-                    "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns"
-                ),
-                None => format!("kinic(live): {visible_count} search results"),
-            },
+        if let Some(error) = &self.preferences_health.save_error {
+            return format!("{base} | preferences save failed: {error}");
         }
+        if let Some(error) = &self.preferences_health.load_error {
+            return format!("{base} | preferences load failed: {error}");
+        }
+        base
     }
 
     fn invalidate_pending_search(&mut self) {
@@ -489,6 +713,10 @@ impl KinicProvider {
 
     fn invalidate_pending_create_submit(&mut self) {
         self.pending_create_submit_request_id = None;
+    }
+
+    fn invalidate_pending_session_settings(&mut self) {
+        self.pending_session_settings_request_id = None;
     }
 
     fn search_context(request_id: u64, memory_id: String, query: String) -> SearchRequestContext {
@@ -605,7 +833,7 @@ impl KinicProvider {
                 self.memories_mode = MemoriesMode::Results;
                 let mut effects = vec![CoreEffect::SelectFirstListItem];
                 if state.current_tab_id == KINIC_MEMORIES_TAB_ID {
-                    effects.push(CoreEffect::FocusPane(PaneFocus::List));
+                    effects.push(CoreEffect::FocusPane(PaneFocus::Items));
                 }
                 effects.push(CoreEffect::Notify(format!(
                     "Loaded {} search results for {}",
@@ -656,7 +884,10 @@ impl KinicProvider {
                     .map(record_from_memory_summary)
                     .collect();
                 self.all = self.memory_records.clone();
-                self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
+                self.active_memory_id = self
+                    .default_memory_selection()
+                    .preferred_initial_memory_id()
+                    .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
                 Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
                     effects: vec![CoreEffect::Notify("Loaded memories.".to_string())],
@@ -773,7 +1004,7 @@ impl KinicProvider {
                 effects.push(CoreEffect::ResetCreateFormAndSetTab {
                     tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
                 });
-                effects.push(CoreEffect::FocusPane(PaneFocus::List));
+                effects.push(CoreEffect::FocusPane(PaneFocus::Items));
                 let status = if let Some(warning) = success.refresh_warning {
                     format!("Created memory {}. {}", success.id, warning)
                 } else {
@@ -787,6 +1018,53 @@ impl KinicProvider {
                 )));
             }
         }
+
+        Some(ProviderOutput {
+            snapshot: Some(self.build_snapshot(state)),
+            effects,
+        })
+    }
+
+    fn poll_session_settings_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.pending_session_settings.as_ref()?;
+        let output = match receiver.try_recv() {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_session_settings = None;
+                self.invalidate_pending_session_settings();
+                self.session_settings_in_flight = false;
+                return Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: vec![CoreEffect::Notify(
+                        "Session settings refresh failed unexpectedly.".to_string(),
+                    )],
+                });
+            }
+        };
+
+        self.pending_session_settings = None;
+        self.session_settings_in_flight = false;
+        let is_current = self.pending_session_settings_request_id == Some(output.request_id);
+        self.invalidate_pending_session_settings();
+        if !is_current {
+            return Some(ProviderOutput {
+                snapshot: Some(self.build_snapshot(state)),
+                effects: Vec::new(),
+            });
+        }
+
+        let effects = match output.result {
+            Ok(snapshot) => {
+                self.session_settings = snapshot;
+                vec![CoreEffect::Notify(
+                    "Session settings refreshed.".to_string(),
+                )]
+            }
+            Err(error) => vec![CoreEffect::Notify(format!(
+                "Session settings refresh failed: {error}"
+            ))],
+        };
 
         Some(ProviderOutput {
             snapshot: Some(self.build_snapshot(state)),
@@ -822,9 +1100,7 @@ impl KinicProvider {
                     "Market is not implemented yet.".to_string(),
                 )]
             }
-            KINIC_SETTINGS_TAB_ID => vec![CoreEffect::Notify(
-                "Use Shift+S or the future settings tab flow.".to_string(),
-            )],
+            KINIC_SETTINGS_TAB_ID => self.start_session_settings_refresh().into_iter().collect(),
             _ => vec![CoreEffect::Notify(format!("Switched kinic tab: {tab_id}"))],
         }
     }
@@ -911,7 +1187,7 @@ impl DataProvider for KinicProvider {
                         "memories",
                         "Status: mock".to_string(),
                         format!(
-                            "## Memory\n\n- Id: `{new_id}`\n- Status: `mock`\n\n### Detail\n{}\n",
+                            "## Memory\n\n- Id: `{new_id}`\n- Status: `mock`\n\n### Content\n{}\n",
                             state.create_description.trim()
                         ),
                     );
@@ -922,7 +1198,7 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::ResetCreateFormAndSetTab {
                         tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
                     });
-                    effects.push(CoreEffect::FocusPane(PaneFocus::List));
+                    effects.push(CoreEffect::FocusPane(PaneFocus::Items));
                     effects.push(CoreEffect::Notify(format!("Created mock memory {name}")));
                 }
             }
@@ -933,6 +1209,47 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::RefreshCurrentView => {
                 effects.extend(self.refresh_current_view());
+            }
+            CoreAction::ToggleSettings => {
+                if let Some(effect) = self.start_session_settings_refresh() {
+                    effects.push(effect);
+                }
+            }
+            CoreAction::OpenDefaultMemoryPicker => {}
+            CoreAction::CloseDefaultMemoryPicker => {}
+            CoreAction::MoveDefaultMemoryPickerNext => {}
+            CoreAction::MoveDefaultMemoryPickerPrev => {}
+            CoreAction::SubmitDefaultMemoryPicker => {
+                let Some(memory_id) = state
+                    .default_memory_selector_items
+                    .get(state.default_memory_selector_index)
+                    .cloned()
+                else {
+                    effects.push(CoreEffect::Notify("No memories available yet.".to_string()));
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                };
+                effects.push(
+                    self.default_memory_controller()
+                        .set_default_memory_preference(memory_id),
+                );
+            }
+            CoreAction::SetDefaultMemoryFromSelection => {
+                let Some(memory_id) = self.active_memory_id.clone() else {
+                    effects.push(CoreEffect::Notify(
+                        "Select a memory before setting the default.".to_string(),
+                    ));
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                };
+                effects.push(
+                    self.default_memory_controller()
+                        .set_default_memory_preference(memory_id),
+                );
             }
             _ => {}
         }
@@ -947,6 +1264,7 @@ impl DataProvider for KinicProvider {
         self.poll_initial_memories_background(state)
             .or_else(|| self.poll_create_submit_background(state))
             .or_else(|| self.poll_create_cost_background(state))
+            .or_else(|| self.poll_session_settings_background(state))
             .or_else(|| self.poll_search_background(state))
     }
 }
@@ -978,7 +1296,7 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         "memories",
         format!("Status: {}", memory.status),
         format!(
-            "## Memory\n\n- Id: `{}`\n- Status: `{}`\n\n### Detail\n{}\n\n### Search\nSelect this item, then type a query and press Enter in the search box.",
+            "## Memory\n\n- Id: `{}`\n- Status: `{}`\n\n### Content\n{}\n\n### Search\nSelect this item, then type a query and press Enter in the search box.",
             memory.id, memory.status, memory.detail
         ),
     )
@@ -1207,7 +1525,7 @@ Use `◇ Content` naming consistently.
             r#"## Keyboard Matrix
 - `Tab`: next focus
 - `Shift+Tab`: previous focus
-- Tabs focus: `j/k` or `↑/↓` to switch tab
+- Tabs focus: `↑/↓` to switch tab
 
 ### Regression Check
 - Ensure `Enter` from Tabs reaches Content.
@@ -1432,6 +1750,17 @@ mod tests {
         }
     }
 
+    fn refreshed_session_settings() -> SessionSettingsSnapshot {
+        SessionSettingsSnapshot {
+            auth_mode: "live identity".to_string(),
+            identity_name: "provided".to_string(),
+            principal_id: "aaaaa-aa".to_string(),
+            network: "local".to_string(),
+            embedding_api_endpoint: "https://api.kinic.io".to_string(),
+            default_memory_id: Some("aaaaa-aa".to_string()),
+        }
+    }
+
     #[test]
     fn current_records_returns_live_browser_memories() {
         let mut provider = KinicProvider::new(live_config());
@@ -1473,7 +1802,7 @@ mod tests {
         assert_eq!(snapshot.items.len(), 1);
         assert_eq!(
             snapshot
-                .selected_detail
+                .selected_content
                 .as_ref()
                 .map(|detail| detail.id.as_str()),
             Some("kinic-live-error")
@@ -1678,7 +2007,7 @@ mod tests {
             output
                 .effects
                 .iter()
-                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::List)))
+                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Items)))
         );
         assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
     }
@@ -1706,6 +2035,88 @@ mod tests {
             CreateCostState::Ready(ready_cost_details())
         );
         assert!(!provider.create_cost_in_flight);
+    }
+
+    #[test]
+    fn toggle_settings_starts_background_refresh_without_blocking() {
+        let mut provider = KinicProvider::new(live_config());
+
+        let output = provider
+            .handle_action(&CoreAction::ToggleSettings, &CoreState::default())
+            .expect("toggle settings output");
+
+        assert!(provider.session_settings_in_flight);
+        assert!(provider.pending_session_settings.is_some());
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Refreshing session settings..."
+        )));
+    }
+
+    #[test]
+    fn set_tab_settings_uses_background_refresh_path() {
+        let mut provider = KinicProvider::new(live_config());
+
+        let effects = provider.set_tab(KINIC_SETTINGS_TAB_ID);
+
+        assert_eq!(provider.tab_id, KINIC_SETTINGS_TAB_ID);
+        assert!(provider.session_settings_in_flight);
+        assert!(provider.pending_session_settings.is_some());
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Refreshing session settings..."
+        )));
+    }
+
+    #[test]
+    fn poll_background_applies_refreshed_session_settings() {
+        let mut provider = KinicProvider::new(live_config());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_session_settings = Some(rx);
+        provider.pending_session_settings_request_id = Some(4);
+        provider.session_settings_in_flight = true;
+        tx.send(SessionSettingsTaskOutput {
+            request_id: 4,
+            result: Ok(refreshed_session_settings()),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("settings refresh output");
+
+        assert!(!provider.session_settings_in_flight);
+        assert_eq!(provider.session_settings.principal_id, "aaaaa-aa");
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Session settings refreshed."
+        )));
+    }
+
+    #[test]
+    fn poll_background_keeps_existing_session_settings_when_refresh_fails() {
+        let mut provider = KinicProvider::new(live_config());
+        let original = provider.session_settings.clone();
+        let (tx, rx) = mpsc::channel();
+        provider.pending_session_settings = Some(rx);
+        provider.pending_session_settings_request_id = Some(6);
+        provider.session_settings_in_flight = true;
+        tx.send(SessionSettingsTaskOutput {
+            request_id: 6,
+            result: Err("boom".to_string()),
+        })
+        .unwrap();
+
+        let output = provider
+            .poll_background(&CoreState::default())
+            .expect("settings refresh output");
+
+        assert!(!provider.session_settings_in_flight);
+        assert_eq!(provider.session_settings, original);
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Session settings refresh failed: boom"
+        )));
     }
 
     #[test]
@@ -1777,6 +2188,236 @@ mod tests {
                 if message.contains("Created memory aaaaa-aa.")
                     && message.contains("Press F5 to refresh")
         )));
+    }
+
+    #[test]
+    fn poll_background_does_not_change_default_memory_preference_after_create() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.tab_id = KINIC_CREATE_TAB_ID.to_string();
+        provider.user_preferences.default_memory_id = Some("bbbbb-bb".to_string());
+        provider.session_settings.default_memory_id = Some("bbbbb-bb".to_string());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_create_submit = Some(rx);
+        provider.pending_create_submit_request_id = Some(7);
+        provider.create_submit_in_flight = true;
+        tx.send(CreateSubmitTaskOutput {
+            request_id: 7,
+            result: Ok(bridge::CreateMemorySuccess {
+                id: "aaaaa-aa".to_string(),
+                memories: None,
+                refresh_warning: None,
+            }),
+        })
+        .unwrap();
+
+        let _ = provider
+            .poll_background(&CoreState::default())
+            .expect("create submit output");
+
+        assert_eq!(
+            provider.user_preferences.default_memory_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+        assert_eq!(
+            provider.session_settings.default_memory_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+    }
+
+    #[test]
+    fn move_next_does_not_change_default_memory_preference() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+        provider.session_settings.default_memory_id = Some("aaaaa-aa".to_string());
+
+        let _ = provider
+            .handle_action(&CoreAction::MoveNext, &CoreState::default())
+            .expect("move next output");
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+        assert_eq!(
+            provider.user_preferences.default_memory_id.as_deref(),
+            Some("aaaaa-aa")
+        );
+        assert_eq!(
+            provider.session_settings.default_memory_id.as_deref(),
+            Some("aaaaa-aa")
+        );
+    }
+
+    #[test]
+    fn poll_initial_memories_background_prefers_saved_default_for_initial_selection() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.user_preferences.default_memory_id = Some("bbbbb-bb".to_string());
+        provider.session_settings.default_memory_id = Some("bbbbb-bb".to_string());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_initial_memories = Some(rx);
+        provider.initial_memories_in_flight = true;
+        tx.send(InitialMemoriesTaskOutput {
+            result: Ok(vec![
+                MemorySummary {
+                    id: "aaaaa-aa".to_string(),
+                    status: "running".to_string(),
+                    detail: "first".to_string(),
+                },
+                MemorySummary {
+                    id: "bbbbb-bb".to_string(),
+                    status: "running".to_string(),
+                    detail: "second".to_string(),
+                },
+            ]),
+        })
+        .unwrap();
+
+        let _ = provider
+            .poll_initial_memories_background(&CoreState::default())
+            .expect("initial memories output");
+
+        assert_eq!(provider.memory_records[0].id, "aaaaa-aa");
+        assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    }
+
+    #[test]
+    fn poll_initial_memories_background_falls_back_to_first_when_default_missing() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.user_preferences.default_memory_id = Some("zzzzz-zz".to_string());
+        provider.session_settings.default_memory_id = Some("zzzzz-zz".to_string());
+        let (tx, rx) = mpsc::channel();
+        provider.pending_initial_memories = Some(rx);
+        provider.initial_memories_in_flight = true;
+        tx.send(InitialMemoriesTaskOutput {
+            result: Ok(vec![
+                MemorySummary {
+                    id: "aaaaa-aa".to_string(),
+                    status: "running".to_string(),
+                    detail: "first".to_string(),
+                },
+                MemorySummary {
+                    id: "bbbbb-bb".to_string(),
+                    status: "running".to_string(),
+                    detail: "second".to_string(),
+                },
+            ]),
+        })
+        .unwrap();
+
+        let _ = provider
+            .poll_initial_memories_background(&CoreState::default())
+            .expect("initial memories output");
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+    }
+
+    #[test]
+    fn set_default_memory_from_selection_updates_default_only() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.active_memory_id = Some("bbbbb-bb".to_string());
+        provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+        provider.session_settings.default_memory_id = Some("aaaaa-aa".to_string());
+
+        let output = provider
+            .handle_action(
+                &CoreAction::SetDefaultMemoryFromSelection,
+                &CoreState::default(),
+            )
+            .expect("set default output");
+
+        assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+        assert_eq!(
+            provider.user_preferences.default_memory_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+        assert_eq!(
+            provider.session_settings.default_memory_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Default memory set to bbbbb-bb"
+        )));
+    }
+
+    #[test]
+    fn submit_default_memory_selector_updates_default_memory() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+        provider.session_settings.default_memory_id = Some("aaaaa-aa".to_string());
+        let state = CoreState {
+            default_memory_selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            default_memory_selector_index: 1,
+            ..CoreState::default()
+        };
+
+        let output = provider
+            .handle_action(&CoreAction::SubmitDefaultMemoryPicker, &state)
+            .expect("picker submit output");
+
+        assert_eq!(
+            provider.user_preferences.default_memory_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+        assert_eq!(
+            provider.session_settings.default_memory_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+        assert!(output.effects.iter().any(|effect| matches!(
+            effect,
+            CoreEffect::Notify(message) if message == "Default memory set to bbbbb-bb"
+        )));
+    }
+
+    #[test]
+    fn build_snapshot_marks_default_memory_in_items_list() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.user_preferences.default_memory_id = Some("bbbbb-bb".to_string());
+        provider.session_settings.default_memory_id = Some("bbbbb-bb".to_string());
+
+        let snapshot = provider.build_snapshot(&CoreState::default());
+
+        assert_eq!(snapshot.items[0].name, "Alpha Memory");
+        assert_eq!(snapshot.items[0].leading_marker, None);
+        assert_eq!(snapshot.items[1].name, "Beta Memory");
+        assert_eq!(snapshot.items[1].leading_marker.as_deref(), Some("★"));
+    }
+
+    #[test]
+    fn build_snapshot_exposes_selector_titles_without_changing_ids() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", ""),
+        ];
+        provider.all = provider.memory_records.clone();
+
+        let snapshot = provider.build_snapshot(&CoreState::default());
+
+        assert_eq!(
+            snapshot.default_memory_selector_items,
+            vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()]
+        );
+        assert_eq!(
+            snapshot.default_memory_selector_labels,
+            vec!["Alpha Memory".to_string(), "bbbbb-bb".to_string()]
+        );
     }
 
     #[test]
@@ -1862,7 +2503,7 @@ mod tests {
             output
                 .effects
                 .iter()
-                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::List)))
+                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Items)))
         );
         assert!(output.effects.iter().any(|effect| matches!(
             effect,
@@ -1905,7 +2546,7 @@ mod tests {
             !output
                 .effects
                 .iter()
-                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::List)))
+                .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Items)))
         );
         assert!(output.effects.iter().any(|effect| matches!(
             effect,
@@ -1998,7 +2639,7 @@ mod tests {
             output
                 .snapshot
                 .as_ref()
-                .and_then(|snapshot| snapshot.selected_detail.as_ref())
+                .and_then(|snapshot| snapshot.selected_content.as_ref())
                 .map(|detail| detail.id.as_str()),
             Some("bbbbb-bb")
         );
@@ -2151,7 +2792,7 @@ mod tests {
 
         assert_eq!(provider.active_memory_id, None);
         let snapshot = provider.build_snapshot(&CoreState::default());
-        assert!(snapshot.selected_detail.is_none());
+        assert!(snapshot.selected_content.is_none());
         assert!(snapshot.items.is_empty());
     }
 
@@ -2176,7 +2817,7 @@ mod tests {
         assert_eq!(
             provider
                 .build_snapshot(&CoreState::default())
-                .selected_detail
+                .selected_content
                 .as_ref()
                 .map(|detail| detail.id.as_str()),
             Some("aaaaa-aa")
@@ -2227,7 +2868,7 @@ mod tests {
             output
                 .snapshot
                 .as_ref()
-                .and_then(|snapshot| snapshot.selected_detail.as_ref())
+                .and_then(|snapshot| snapshot.selected_content.as_ref())
                 .map(|detail| detail.id.as_str()),
             Some("ccccc-cc")
         );
@@ -2262,7 +2903,7 @@ mod tests {
             output
                 .snapshot
                 .as_ref()
-                .and_then(|snapshot| snapshot.selected_detail.as_ref())
+                .and_then(|snapshot| snapshot.selected_content.as_ref())
                 .map(|detail| detail.id.as_str()),
             Some("ccccc-cc")
         );

@@ -12,7 +12,7 @@ use crate::ui::app::{Focus, TuiKitUi};
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_context_list_panel(&self, area: Rect, buf: &mut Buffer) {
-        let border_style = if self.focus == Focus::List {
+        let border_style = if self.focus == Focus::Items {
             self.theme.style_border_focused()
         } else {
             self.theme.style_border()

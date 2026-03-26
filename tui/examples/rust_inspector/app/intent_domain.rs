@@ -18,7 +18,7 @@ pub fn apply_crates_qualified_enter(app: &mut App) {
     if app.current_tab == Tab::Crates && app.selected_installed_crate.is_some() {
         app.search_qualified_path();
         app.filter_items();
-        app.focus = Focus::List;
+        app.focus = Focus::Items;
     }
 }
 
@@ -30,13 +30,13 @@ pub fn apply_list_enter(app: &mut App) {
                 app.list_state.select(Some(0));
                 app.refresh_ui_cache();
             } else {
-                app.focus = Focus::Inspector;
+                app.focus = Focus::Content;
             }
         } else {
-            app.focus = Focus::Inspector;
+            app.focus = Focus::Content;
         }
     } else {
-        app.focus = Focus::Inspector;
+        app.focus = Focus::Content;
     }
 }
 

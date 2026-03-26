@@ -5,6 +5,7 @@ pub fn to_summary(record: &MailRecord) -> UiItemSummary {
     UiItemSummary {
         id: record.id.clone(),
         name: record.subject.clone(),
+        leading_marker: None,
         kind: UiItemKind::Custom("mail".to_string()),
         visibility: UiVisibility::Private,
         qualified_name: Some(record.from.clone()),

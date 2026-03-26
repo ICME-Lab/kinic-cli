@@ -57,11 +57,14 @@ impl<'a> TuiKitUi<'a> {
                     self.theme.style_dim()
                 };
                 let prefix = if is_selected { "▸ " } else { "  " };
-                let vis = match item.visibility {
-                    UiVisibility::Public => "●",
-                    UiVisibility::Internal => "◐",
-                    UiVisibility::Private => "○",
-                };
+                let vis = item
+                    .leading_marker
+                    .as_deref()
+                    .unwrap_or(match item.visibility {
+                        UiVisibility::Public => "●",
+                        UiVisibility::Internal => "◐",
+                        UiVisibility::Private => "○",
+                    });
                 let mut spans = vec![
                     Span::styled(
                         prefix,
@@ -96,7 +99,7 @@ impl<'a> TuiKitUi<'a> {
             })
             .collect();
 
-        let border_style = if self.focus == Focus::List {
+        let border_style = if self.focus == Focus::Items {
             self.theme.style_border_focused()
         } else {
             self.theme.style_border()

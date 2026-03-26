@@ -97,11 +97,11 @@ impl TaskProvider {
             .collect::<Vec<_>>();
 
         let sel = state.selected_index.unwrap_or(0);
-        let selected_detail = filtered.get(sel).map(|t| adapter::to_detail(t));
+        let selected_content = filtered.get(sel).map(|t| adapter::to_detail(t));
 
         ProviderSnapshot {
             items,
-            selected_detail,
+            selected_content,
             selected_context: None,
             total_count: self.all.len(),
             status_message: Some(format!(
