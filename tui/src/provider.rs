@@ -160,10 +160,6 @@ impl<'a> DefaultMemorySelection<'a> {
             self.selected_default_memory_id(),
         )
     }
-
-    fn selector_labels(self) -> Vec<String> {
-        self.available_memory_ids()
-    }
 }
 
 struct DefaultMemoryController<'a> {
@@ -224,12 +220,6 @@ impl<'a> DefaultMemoryController<'a> {
             }
         }
     }
-}
-
-#[cfg(test)]
-fn settings_io_lock() -> &'static std::sync::Mutex<()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
 impl KinicProvider {
@@ -527,7 +517,6 @@ impl KinicProvider {
         let default_memory = self.default_memory_selection();
         let (default_memory_selector_items, default_memory_selector_selected_id) =
             default_memory.selector_snapshot();
-        let default_memory_selector_labels = default_memory.selector_labels();
         let items = filtered
             .iter()
             .map(|record| {
@@ -566,7 +555,6 @@ impl KinicProvider {
                 &self.preferences_health,
             ),
             default_memory_selector_items,
-            default_memory_selector_labels,
             default_memory_selector_selected_id,
         }
     }
@@ -1722,6 +1710,12 @@ Maintain keyboard-first behavior as baseline.
 "#,
         ),
     ]
+}
+
+#[cfg(test)]
+fn settings_io_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
 #[cfg(test)]

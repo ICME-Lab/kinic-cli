@@ -207,7 +207,6 @@ impl<'a> TuiKitUi<'a> {
 
         let lines = default_memory_selector_lines(
             self.default_memory_selector_items,
-            self.default_memory_selector_labels,
             self.default_memory_selector_index,
             self.default_memory_selector_selected_id,
         );

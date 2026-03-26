@@ -138,7 +138,6 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .default_memory_selector_open(state.default_memory_selector_open)
                     .default_memory_selector_index(state.default_memory_selector_index)
                     .default_memory_selector_items(&state.default_memory_selector_items)
-                    .default_memory_selector_labels(&state.default_memory_selector_labels)
                     .default_memory_selector_selected_id(
                         state.default_memory_selector_selected_id.as_deref(),
                     )

@@ -220,12 +220,6 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn default_memory_selector_labels(mut self, value: &'a [String]) -> Self {
-        self.default_memory_selector_labels = value;
-        self
-    }
-
-    #[must_use]
     pub fn default_memory_selector_selected_id(mut self, value: Option<&'a str>) -> Self {
         self.default_memory_selector_selected_id = value;
         self

@@ -190,7 +190,6 @@ pub struct CoreState {
     pub default_memory_selector_open: bool,
     pub default_memory_selector_index: usize,
     pub default_memory_selector_items: Vec<String>,
-    pub default_memory_selector_labels: Vec<String>,
     pub default_memory_selector_selected_id: Option<String>,
 }
 
@@ -222,7 +221,6 @@ impl Default for CoreState {
             default_memory_selector_open: false,
             default_memory_selector_index: 0,
             default_memory_selector_items: Vec::new(),
-            default_memory_selector_labels: Vec::new(),
             default_memory_selector_selected_id: None,
         }
     }
@@ -361,7 +359,6 @@ pub struct ProviderSnapshot {
     pub create_submit_state: CreateSubmitState,
     pub settings: SettingsSnapshot,
     pub default_memory_selector_items: Vec<String>,
-    pub default_memory_selector_labels: Vec<String>,
     pub default_memory_selector_selected_id: Option<String>,
 }
 
@@ -816,7 +813,6 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.create_submit_state = snapshot.create_submit_state;
     state.settings = snapshot.settings;
     state.default_memory_selector_items = snapshot.default_memory_selector_items;
-    state.default_memory_selector_labels = snapshot.default_memory_selector_labels;
     state.default_memory_selector_selected_id = snapshot.default_memory_selector_selected_id;
     if state.default_memory_selector_items.is_empty() {
         state.default_memory_selector_index = 0;

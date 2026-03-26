@@ -72,7 +72,6 @@ impl<'a> TuiKitUi<'a> {
 
 pub(crate) fn default_memory_selector_lines(
     items: &[String],
-    labels: &[String],
     selected_index: usize,
     current_default_id: Option<&str>,
 ) -> Vec<(String, DefaultMemorySelectorLineKind)> {
@@ -95,7 +94,6 @@ pub(crate) fn default_memory_selector_lines(
             let is_default = current_default_id == Some(item.as_str());
             let prefix = if is_selected { "›" } else { " " };
             let suffix = if is_default { "  ★" } else { "" };
-            let label = labels.get(index).map_or(item.as_str(), String::as_str);
             let kind = if is_selected {
                 DefaultMemorySelectorLineKind::Selected
             } else if is_default {
@@ -103,7 +101,7 @@ pub(crate) fn default_memory_selector_lines(
             } else {
                 DefaultMemorySelectorLineKind::Normal
             };
-            lines.push((format!(" {prefix} {label}{suffix}"), kind));
+            lines.push((format!(" {prefix} {item}{suffix}"), kind));
         }
     }
 

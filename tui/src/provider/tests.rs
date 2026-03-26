@@ -317,7 +317,7 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
     let snapshot = provider.build_snapshot(&CoreState::default());
     assert_eq!(snapshot.items[1].leading_marker.as_deref(), Some("★"));
     assert_eq!(
-        snapshot.default_memory_selector_labels,
+        snapshot.default_memory_selector_items,
         vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()]
     );
 }
