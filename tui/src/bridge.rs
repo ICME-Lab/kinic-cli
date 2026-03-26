@@ -12,6 +12,7 @@ use crate::{
     },
     commands::create::{BalanceDelta, balance_delta, required_balance},
     embedding::{embedding_base_url, fetch_embedding},
+    insert_service::{InsertExecutionResult, InsertRequest, execute_insert_request},
     ledger::fetch_balance,
     tui::TuiAuth,
     tui::settings::SessionSettingsSnapshot,
@@ -38,6 +39,14 @@ pub struct CreateMemorySuccess {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InsertMemorySuccess {
+    pub mode: String,
+    pub memory_id: String,
+    pub tag: String,
+    pub inserted_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateCostFetchError {
     Principal(String),
     Balance(String),
@@ -57,6 +66,12 @@ pub enum CreateMemoryError {
     },
     Approve(String),
     Deploy(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InsertMemoryError {
+    Principal(String),
+    Execute(String),
 }
 
 fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<crate::agent::AgentFactory> {
@@ -207,6 +222,27 @@ pub async fn search_memory(
         .collect())
 }
 
+pub async fn run_insert(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    request: InsertRequest,
+) -> Result<InsertMemorySuccess, InsertMemoryError> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)
+        .map_err(|error| InsertMemoryError::Principal(short_error(&error.to_string())))?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| InsertMemoryError::Principal(short_error(&error.to_string())))?;
+    let memory = Principal::from_text(request.memory_id())
+        .map_err(|error| InsertMemoryError::Principal(short_error(&error.to_string())))?;
+    let client = MemoryClient::new(agent, memory);
+    let result = execute_insert_request(&client, &request)
+        .await
+        .map_err(|error| InsertMemoryError::Execute(short_error(&error.to_string())))?;
+
+    Ok(insert_success_from_result(result))
+}
+
 fn memory_summary_from_state(state: State) -> MemorySummary {
     match state {
         State::Empty(message) => MemorySummary {
@@ -271,6 +307,19 @@ fn format_e8s_to_kinic_string(value: &Nat) -> String {
 
 fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
+}
+
+fn insert_success_from_result(result: InsertExecutionResult) -> InsertMemorySuccess {
+    InsertMemorySuccess {
+        mode: match result.mode {
+            crate::insert_service::InsertMode::Normal => "insert".to_string(),
+            crate::insert_service::InsertMode::Raw => "insert-raw".to_string(),
+            crate::insert_service::InsertMode::Pdf => "insert-pdf".to_string(),
+        },
+        memory_id: result.memory_id,
+        tag: result.tag,
+        inserted_count: result.inserted_count,
+    }
 }
 
 #[cfg(test)]

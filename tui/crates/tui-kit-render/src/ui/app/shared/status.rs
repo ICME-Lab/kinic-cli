@@ -24,7 +24,7 @@ impl<'a> TuiKitUi<'a> {
             Focus::Chat => ("💬", "Chat"),
         };
 
-        let status_line = if matches!(tab_kind(tab_id), TabKind::Form) {
+        let status_line = if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
             let tab_label = self
                 .tab_specs
                 .iter()
@@ -38,7 +38,7 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(" fields ", self.theme.style_muted()),
                 Span::styled("Enter", self.theme.style_accent()),
                 Span::styled(" enter/submit ", self.theme.style_muted()),
-                Span::styled("1-4", self.theme.style_accent()),
+                Span::styled("1-5", self.theme.style_accent()),
                 Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
                 Span::styled("│ ", self.theme.style_dim()),
                 Span::styled(focus_indicator.0, self.theme.style_accent()),
@@ -68,16 +68,13 @@ impl<'a> TuiKitUi<'a> {
                     Span::styled(" tabs ", self.theme.style_muted()),
                     Span::styled("│ ", self.theme.style_dim()),
                     Span::styled("Shift+D", self.theme.style_accent()),
-                    Span::styled(
-                        " saves current memory from Memories",
-                        self.theme.style_muted(),
-                    ),
+                    Span::styled(" saves current memory from Memories", self.theme.style_muted()),
                 ])
             } else {
                 let mut spans = vec![
                     Span::styled("Tab", self.theme.style_accent()),
                     Span::styled(" switch ", self.theme.style_muted()),
-                    Span::styled("1-4", self.theme.style_accent()),
+                    Span::styled("1-5", self.theme.style_accent()),
                     Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
                     Span::styled("│ ", self.theme.style_dim()),
                     Span::styled(focus_indicator.0, self.theme.style_accent()),
@@ -169,7 +166,7 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(" search ", self.theme.style_muted()),
             ];
             if !self.tab_specs.is_empty() {
-                spans.push(Span::styled("1-4", self.theme.style_accent()));
+                spans.push(Span::styled("1-5", self.theme.style_accent()));
                 spans.push(Span::styled(
                     format!(" {} ", cfg.tabs_label),
                     self.theme.style_muted(),

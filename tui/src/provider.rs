@@ -5,14 +5,15 @@ use std::{sync::mpsc, thread};
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::settings::{self, PreferencesHealth, SessionSettingsSnapshot, UserPreferences};
-use crate::tui::TuiAuth;
+use crate::{insert_service::InsertRequest, tui::TuiAuth};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, CreateCostDetails, CreateCostState,
-    DataProvider, PaneFocus, ProviderOutput, ProviderSnapshot,
+    DataProvider, InsertMode, PaneFocus, ProviderOutput, ProviderSnapshot,
     kinic_tabs::{
-        KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
+        KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
+        KINIC_SETTINGS_TAB_ID,
     },
 };
 
@@ -91,6 +92,10 @@ pub struct KinicProvider {
     session_settings_in_flight: bool,
     next_session_settings_request_id: u64,
     next_create_request_id: u64,
+    pending_insert_submit: Option<mpsc::Receiver<InsertSubmitTaskOutput>>,
+    pending_insert_submit_request_id: Option<u64>,
+    insert_submit_in_flight: bool,
+    next_insert_request_id: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,6 +263,11 @@ fn settings_io_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+struct InsertSubmitTaskOutput {
+    request_id: u64,
+    result: Result<bridge::InsertMemorySuccess, bridge::InsertMemoryError>,
+}
+
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
         #[cfg(test)]
@@ -312,6 +322,10 @@ impl KinicProvider {
             session_settings_in_flight: false,
             next_session_settings_request_id: 0,
             next_create_request_id: 0,
+            pending_insert_submit: None,
+            pending_insert_submit_request_id: None,
+            insert_submit_in_flight: false,
+            next_insert_request_id: 0,
         }
     }
 
@@ -379,6 +393,9 @@ impl KinicProvider {
     fn refresh_current_view(&mut self) -> Vec<CoreEffect> {
         match self.tab_id.as_str() {
             KINIC_CREATE_TAB_ID => self.start_create_cost_refresh().into_iter().collect(),
+            KINIC_INSERT_TAB_ID => vec![CoreEffect::Notify(
+                "Insert tab is ready. Submit to write into a memory.".to_string(),
+            )],
             KINIC_MEMORIES_TAB_ID => self
                 .start_live_memories_load(Some("Refreshing memories..."), true)
                 .into_iter()
@@ -705,7 +722,29 @@ impl KinicProvider {
         CoreEffect::Notify("Creating memory...".to_string())
     }
 
+    fn start_insert_submit(&mut self, request: InsertRequest) -> CoreEffect {
+        let request_id = self.next_insert_request_id;
+        self.next_insert_request_id += 1;
+        self.pending_insert_submit_request_id = Some(request_id);
+        self.insert_submit_in_flight = true;
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        let (tx, rx) = mpsc::channel();
+        self.pending_insert_submit = Some(rx);
+
+        thread::spawn(move || {
+            let runtime = Runtime::new().expect("failed to create tokio runtime for insert submit");
+            let result = runtime.block_on(bridge::run_insert(use_mainnet, auth, request));
+            let _ = tx.send(InsertSubmitTaskOutput { request_id, result });
+        });
+
+        CoreEffect::Notify("Submitting insert request...".to_string())
+    }
+
     fn status_message(&self, visible_count: usize) -> String {
+        if self.tab_id == KINIC_INSERT_TAB_ID {
+            return "kinic(insert): choose mode, target memory, and payload, then press Enter on submit.".to_string();
+        }
         let base = if !self.is_live() {
             format!(
                 "kinic(mock): {visible_count} filtered / {} total",
@@ -762,6 +801,10 @@ impl KinicProvider {
 
     fn invalidate_pending_session_settings(&mut self) {
         self.pending_session_settings_request_id = None;
+    }
+
+    fn invalidate_pending_insert_submit(&mut self) {
+        self.pending_insert_submit_request_id = None;
     }
 
     fn search_context(request_id: u64, memory_id: String, query: String) -> SearchRequestContext {
@@ -1102,12 +1145,59 @@ impl KinicProvider {
         let effects = match output.result {
             Ok(snapshot) => {
                 self.session_settings = snapshot;
-                vec![CoreEffect::Notify(
-                    "Session settings refreshed.".to_string(),
-                )]
+                vec![CoreEffect::Notify("Session settings refreshed.".to_string())]
             }
             Err(error) => vec![CoreEffect::Notify(format!(
                 "Session settings refresh failed: {error}"
+            ))],
+        };
+
+        Some(ProviderOutput {
+            snapshot: Some(self.build_snapshot(state)),
+            effects,
+        })
+    }
+
+    fn poll_insert_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.pending_insert_submit.as_ref()?;
+        let output = match receiver.try_recv() {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_insert_submit = None;
+                self.invalidate_pending_insert_submit();
+                self.insert_submit_in_flight = false;
+                return Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: vec![CoreEffect::InsertFormError(Some(
+                        "Insert request failed: background worker disconnected.".to_string(),
+                    ))],
+                });
+            }
+        };
+
+        self.pending_insert_submit = None;
+        self.insert_submit_in_flight = false;
+        let is_current = self.pending_insert_submit_request_id == Some(output.request_id);
+        self.invalidate_pending_insert_submit();
+        if !is_current {
+            return Some(ProviderOutput {
+                snapshot: Some(self.build_snapshot(state)),
+                effects: Vec::new(),
+            });
+        }
+
+        let effects = match output.result {
+            Ok(success) => vec![
+                CoreEffect::InsertFormError(None),
+                CoreEffect::ResetInsertFormForRepeat,
+                CoreEffect::Notify(format!(
+                    "Inserted {} item(s) via {} into {} [{}]",
+                    success.inserted_count, success.mode, success.memory_id, success.tag
+                )),
+            ],
+            Err(error) => vec![CoreEffect::InsertFormError(Some(
+                format_insert_submit_error(&error),
             ))],
         };
 
@@ -1132,6 +1222,11 @@ impl KinicProvider {
             KINIC_MEMORIES_TAB_ID => {
                 self.reset_memories_browser();
                 vec![CoreEffect::Notify("Switched to memories.".to_string())]
+            }
+            KINIC_INSERT_TAB_ID => {
+                vec![CoreEffect::Notify(
+                    "Insert text, embeddings, or PDFs into an existing memory.".to_string(),
+                )]
             }
             KINIC_CREATE_TAB_ID => {
                 let mut effects = vec![CoreEffect::Notify("Create a new memory.".to_string())];
@@ -1257,6 +1352,90 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::Notify(format!("Created mock memory {name}")));
                 }
             }
+            CoreAction::InsertSubmit => {
+                let memory_id = state.insert_memory_id.trim().to_string();
+                let tag = state.insert_tag.trim().to_string();
+                if memory_id.is_empty() || tag.is_empty() {
+                    effects.push(CoreEffect::InsertFormError(Some(
+                        "Memory ID and tag are required.".to_string(),
+                    )));
+                } else if self.insert_submit_in_flight {
+                    effects.push(CoreEffect::Notify(
+                        "Insert request already running.".to_string(),
+                    ));
+                } else {
+                    let request = match state.insert_mode {
+                        InsertMode::Normal => {
+                            let text = (!state.insert_text.trim().is_empty())
+                                .then(|| state.insert_text.trim().to_string());
+                            let file_path = (!state.insert_file_path.trim().is_empty())
+                                .then(|| std::path::PathBuf::from(state.insert_file_path.trim()));
+                            if text.is_none() && file_path.is_none() {
+                                effects.push(CoreEffect::InsertFormError(Some(
+                                    "Provide text or file path for normal insert.".to_string(),
+                                )));
+                                None
+                            } else {
+                                Some(InsertRequest::Normal {
+                                    memory_id,
+                                    tag,
+                                    text,
+                                    file_path,
+                                })
+                            }
+                        }
+                        InsertMode::Raw => {
+                            if state.insert_text.trim().is_empty() {
+                                effects.push(CoreEffect::InsertFormError(Some(
+                                    "Text is required for raw insert.".to_string(),
+                                )));
+                                None
+                            } else if state.insert_embedding.trim().is_empty() {
+                                effects.push(CoreEffect::InsertFormError(Some(
+                                    "Embedding JSON is required for raw insert.".to_string(),
+                                )));
+                                None
+                            } else {
+                                Some(InsertRequest::Raw {
+                                    memory_id,
+                                    tag,
+                                    text: state.insert_text.trim().to_string(),
+                                    embedding_json: state.insert_embedding.trim().to_string(),
+                                })
+                            }
+                        }
+                        InsertMode::Pdf => {
+                            if state.insert_file_path.trim().is_empty() {
+                                effects.push(CoreEffect::InsertFormError(Some(
+                                    "File path is required for PDF insert.".to_string(),
+                                )));
+                                None
+                            } else {
+                                Some(InsertRequest::Pdf {
+                                    memory_id,
+                                    tag,
+                                    file_path: std::path::PathBuf::from(
+                                        state.insert_file_path.trim(),
+                                    ),
+                                })
+                            }
+                        }
+                    };
+                    if let Some(request) = request {
+                        if self.is_live() {
+                            effects.push(self.start_insert_submit(request));
+                        } else {
+                            effects.push(CoreEffect::InsertFormError(None));
+                            effects.push(CoreEffect::ResetInsertFormForRepeat);
+                            effects.push(CoreEffect::Notify(format!(
+                                "Mock insert accepted for {} [{}]",
+                                state.insert_memory_id.trim(),
+                                state.insert_tag.trim()
+                            )));
+                        }
+                    }
+                }
+            }
             CoreAction::CreateRefresh => {
                 if let Some(effect) = self.start_create_cost_refresh() {
                     effects.push(effect);
@@ -1328,6 +1507,7 @@ impl DataProvider for KinicProvider {
     fn poll_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
         self.poll_initial_memories_background(state)
             .or_else(|| self.poll_create_submit_background(state))
+            .or_else(|| self.poll_insert_submit_background(state))
             .or_else(|| self.poll_create_cost_background(state))
             .or_else(|| self.poll_session_settings_background(state))
             .or_else(|| self.poll_search_background(state))
@@ -1485,6 +1665,17 @@ fn format_create_submit_error(error: &bridge::CreateMemoryError) -> String {
         }
         bridge::CreateMemoryError::Deploy(reason) => {
             format!("Deploy step failed. Cause: {reason}")
+        }
+    }
+}
+
+fn format_insert_submit_error(error: &bridge::InsertMemoryError) -> String {
+    match error {
+        bridge::InsertMemoryError::Principal(reason) => {
+            format!("Could not resolve memory canister. Cause: {reason}")
+        }
+        bridge::InsertMemoryError::Execute(reason) => {
+            format!("Insert failed. Cause: {reason}")
         }
     }
 }

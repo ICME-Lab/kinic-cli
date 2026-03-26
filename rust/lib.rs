@@ -5,6 +5,7 @@ pub(crate) mod clients;
 mod commands;
 mod embedding;
 pub(crate) mod identity_store;
+pub(crate) mod insert_service;
 mod ledger;
 #[cfg(feature = "python-bindings")]
 mod python;

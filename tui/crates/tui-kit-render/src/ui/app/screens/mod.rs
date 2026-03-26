@@ -1,6 +1,7 @@
 //! Screen-oriented modules for the app body.
 
 pub mod create;
+pub mod insert;
 pub mod memories;
 pub mod placeholder;
 pub mod settings;
@@ -31,8 +32,12 @@ fn placeholder_screen_spec(kind: TabKind) -> Option<PlaceholderScreenSpec<'stati
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_tab_screen(&self, area: Rect, buf: &mut Buffer) -> bool {
         match tab_kind(self.current_tab_id.0.as_str()) {
-            TabKind::Form => {
+            TabKind::CreateForm => {
                 self.render_create_screen(area, buf);
+                true
+            }
+            TabKind::InsertForm => {
+                self.render_insert_screen(area, buf);
                 true
             }
             TabKind::PlaceholderSettings => {

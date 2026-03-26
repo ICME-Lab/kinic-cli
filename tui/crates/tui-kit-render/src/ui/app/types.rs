@@ -25,6 +25,7 @@ pub struct UiConfig {
     pub branding: BrandingText,
     pub header: HeaderText,
     pub chat: ChatPanelText,
+    pub insert: InsertScreenText,
     pub create: CreateOverlayText,
     pub settings: SettingsOverlayText,
     pub help: HelpOverlayText,
@@ -82,6 +83,21 @@ pub struct CreateOverlayText {
     pub error_prefix: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InsertScreenText {
+    pub title: String,
+    pub intro_description: String,
+    pub mode_label: String,
+    pub memory_id_label: String,
+    pub tag_label: String,
+    pub text_label: String,
+    pub file_path_label: String,
+    pub embedding_label: String,
+    pub submit_label: String,
+    pub submit_pending_label: String,
+    pub close_hint: String,
+}
+
 /// Settings overlay text configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsOverlayText {
@@ -125,6 +141,23 @@ impl Default for UiConfig {
                 title: " ◇ Chat ".to_string(),
                 loading_hint: "  … Assistant is thinking…".to_string(),
                 input_placeholder: "Ask about this item… (Enter to send, Esc to close)".to_string(),
+            },
+            insert: InsertScreenText {
+                title: "Insert Memory Content".to_string(),
+                intro_description:
+                    "Insert text, raw embeddings, or PDFs without leaving the tab view."
+                        .to_string(),
+                mode_label: "Mode".to_string(),
+                memory_id_label: "Memory ID".to_string(),
+                tag_label: "Tag".to_string(),
+                text_label: "Text".to_string(),
+                file_path_label: "File Path".to_string(),
+                embedding_label: "Embedding JSON".to_string(),
+                submit_label: "Insert".to_string(),
+                submit_pending_label: "Inserting...".to_string(),
+                close_hint:
+                    "Tab: cycle fields, Enter: cycle mode or submit, Esc: back to tab focus"
+                        .to_string(),
             },
             create: CreateOverlayText {
                 title: "Create Memory".to_string(),

@@ -293,6 +293,14 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 }
                 state.create_error = message.clone();
             }
+            CoreEffect::InsertFormError(message) => {
+                state.insert_submit_state = if message.is_some() {
+                    CreateSubmitState::Error
+                } else {
+                    CreateSubmitState::Idle
+                };
+                state.insert_error = message.clone();
+            }
             CoreEffect::SelectFirstListItem => {
                 state.selected_index = if state.list_items.is_empty() {
                     None
@@ -322,6 +330,14 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.create_spinner_frame = 0;
                 state.create_error = None;
                 state.create_focus = CreateModalFocus::Name;
+            }
+            CoreEffect::ResetInsertFormForRepeat => {
+                state.insert_text.clear();
+                state.insert_file_path.clear();
+                state.insert_embedding.clear();
+                state.insert_submit_state = CreateSubmitState::Idle;
+                state.insert_spinner_frame = 0;
+                state.insert_error = None;
             }
             CoreEffect::Custom { id, payload } => {
                 state.status_message = Some(match payload {

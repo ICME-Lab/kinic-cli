@@ -3,7 +3,10 @@
 use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
-use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState, SettingsSnapshot};
+use tui_kit_runtime::{
+    CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode,
+    SettingsSnapshot,
+};
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
 
@@ -228,6 +231,66 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn default_memory_selector_selected_id(mut self, value: Option<&'a str>) -> Self {
         self.default_memory_selector_selected_id = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_mode(mut self, value: InsertMode) -> Self {
+        self.insert_mode = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_memory_id(mut self, value: &'a str) -> Self {
+        self.insert_memory_id = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_tag(mut self, value: &'a str) -> Self {
+        self.insert_tag = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_text(mut self, value: &'a str) -> Self {
+        self.insert_text = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_file_path(mut self, value: &'a str) -> Self {
+        self.insert_file_path = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_embedding(mut self, value: &'a str) -> Self {
+        self.insert_embedding = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_submit_state(mut self, value: CreateSubmitState) -> Self {
+        self.insert_submit_state = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_spinner_frame(mut self, value: usize) -> Self {
+        self.insert_spinner_frame = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_error(mut self, value: Option<&'a str>) -> Self {
+        self.insert_error = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_focus(mut self, value: InsertFormFocus) -> Self {
+        self.insert_focus = value;
         self
     }
 

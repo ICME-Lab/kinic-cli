@@ -157,10 +157,13 @@ impl RuntimeLoopHooks<provider::KinicProvider> for KinicRuntimeHooks {
     fn on_tick(&mut self, provider: &mut provider::KinicProvider, state: &mut CoreState) {
         if state.create_submit_state == CreateSubmitState::Submitting
             || matches!(state.create_cost_state, CreateCostState::Loading)
+            || state.insert_submit_state == CreateSubmitState::Submitting
         {
             state.create_spinner_frame = state.create_spinner_frame.wrapping_add(1);
+            state.insert_spinner_frame = state.insert_spinner_frame.wrapping_add(1);
         } else {
             state.create_spinner_frame = 0;
+            state.insert_spinner_frame = 0;
         }
         if let Some(output) = provider.poll_background(state) {
             if let Some(snapshot) = output.snapshot {

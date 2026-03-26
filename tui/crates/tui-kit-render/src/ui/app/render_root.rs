@@ -38,8 +38,10 @@ impl<'a> TuiKitUi<'a> {
         {
             return None;
         }
-        if matches!(tab_kind(self.current_tab_id.0.as_str()), TabKind::Form) {
-            return self.create_cursor_position_for_area(area);
+        match tab_kind(self.current_tab_id.0.as_str()) {
+            TabKind::CreateForm => return self.create_cursor_position_for_area(area),
+            TabKind::InsertForm => return self.insert_cursor_position_for_area(area),
+            _ => {}
         }
         self.memories_cursor_position_for_area(area)
     }

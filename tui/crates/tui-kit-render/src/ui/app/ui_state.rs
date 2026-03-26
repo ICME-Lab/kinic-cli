@@ -4,7 +4,10 @@ use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
-use tui_kit_runtime::{CreateCostState, CreateModalFocus, CreateSubmitState, SettingsSnapshot};
+use tui_kit_runtime::{
+    CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode,
+    SettingsSnapshot,
+};
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
 
@@ -47,6 +50,16 @@ pub struct TuiKitUi<'a> {
     pub(super) default_memory_selector_items: &'a [String],
     pub(super) default_memory_selector_labels: &'a [String],
     pub(super) default_memory_selector_selected_id: Option<&'a str>,
+    pub(super) insert_mode: InsertMode,
+    pub(super) insert_memory_id: &'a str,
+    pub(super) insert_tag: &'a str,
+    pub(super) insert_text: &'a str,
+    pub(super) insert_file_path: &'a str,
+    pub(super) insert_embedding: &'a str,
+    pub(super) insert_submit_state: CreateSubmitState,
+    pub(super) insert_spinner_frame: usize,
+    pub(super) insert_error: Option<&'a str>,
+    pub(super) insert_focus: InsertFormFocus,
     pub(super) status_message: &'a str,
     pub(super) inspector_scroll: usize,
     pub(super) animation: Option<&'a AnimationState>,
@@ -98,6 +111,16 @@ impl<'a> TuiKitUi<'a> {
             default_memory_selector_items: &[],
             default_memory_selector_labels: &[],
             default_memory_selector_selected_id: None,
+            insert_mode: InsertMode::Normal,
+            insert_memory_id: "",
+            insert_tag: "",
+            insert_text: "",
+            insert_file_path: "",
+            insert_embedding: "",
+            insert_submit_state: CreateSubmitState::Idle,
+            insert_spinner_frame: 0,
+            insert_error: None,
+            insert_focus: InsertFormFocus::Mode,
             status_message: "",
             inspector_scroll: 0,
             animation: None,

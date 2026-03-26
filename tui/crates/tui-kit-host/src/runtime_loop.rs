@@ -18,7 +18,7 @@ use crate::{
     global_command_for_key, poll_host_input, resolve_tab_action_with_current,
     terminal::with_terminal,
 };
-use form_tab_flow::{form_tab_action_from_key, reset_create_focus, reset_create_form_state};
+use form_tab_flow::{form_tab_action_from_key, reset_form_focus, reset_form_state_for_tab};
 
 pub struct RuntimeLoopConfig {
     pub initial_tab_id: &'static str,
@@ -142,6 +142,16 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .default_memory_selector_selected_id(
                         state.default_memory_selector_selected_id.as_deref(),
                     )
+                    .insert_mode(state.insert_mode)
+                    .insert_memory_id(&state.insert_memory_id)
+                    .insert_tag(&state.insert_tag)
+                    .insert_text(&state.insert_text)
+                    .insert_file_path(&state.insert_file_path)
+                    .insert_embedding(&state.insert_embedding)
+                    .insert_submit_state(state.insert_submit_state.clone())
+                    .insert_spinner_frame(state.insert_spinner_frame)
+                    .insert_error(state.insert_error.as_deref())
+                    .insert_focus(state.insert_focus)
                     .show_completion(false)
                     .context_details_loading(false)
                     .context_details_failed(false)
@@ -371,8 +381,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 }
 
 fn normalize_focus_after_set_tab(state: &mut CoreState) {
-    if matches!(tab_kind(state.current_tab_id.as_str()), TabKind::Form) {
-        reset_create_focus(state);
+    if matches!(
+        tab_kind(state.current_tab_id.as_str()),
+        TabKind::InsertForm | TabKind::CreateForm
+    ) {
+        reset_form_focus(state);
     }
     state.focus = PaneFocus::Tabs;
 }
@@ -434,9 +447,9 @@ fn open_form_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
 ) {
     if reset_form_state
         && state.current_tab_id != tab_id
-        && matches!(tab_kind(tab_id), TabKind::Form)
+        && matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm)
     {
-        reset_create_form_state(state);
+        reset_form_state_for_tab(state, tab_id);
     }
     if let Ok(effects) = dispatch_action(provider, state, &CoreAction::SetTab(tab_id.into())) {
         hooks.on_effects(provider, state, &effects);
@@ -493,7 +506,7 @@ fn apply_content_scroll_action(action: &CoreAction, inspector_scroll: &mut usize
 mod tests {
     use super::*;
     use tui_kit_runtime::kinic_tabs::{
-        KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
+        KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
     };
     use tui_kit_runtime::{CoreResult, ProviderOutput, ProviderSnapshot};
 
@@ -539,6 +552,21 @@ mod tests {
 
         assert_eq!(state.focus, PaneFocus::Tabs);
         assert_eq!(state.create_focus, tui_kit_runtime::CreateModalFocus::Name);
+    }
+
+    #[test]
+    fn normalize_focus_resets_insert_tab_to_tabs_and_mode_field() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            insert_focus: tui_kit_runtime::InsertFormFocus::Submit,
+            ..CoreState::default()
+        };
+
+        normalize_focus_after_set_tab(&mut state);
+
+        assert_eq!(state.focus, PaneFocus::Tabs);
+        assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Mode);
     }
 
     #[test]

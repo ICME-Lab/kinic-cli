@@ -66,7 +66,7 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
             allows_form: false,
             allows_chat: true,
         },
-        kinic_tabs::TabKind::Form => TabFocusPolicy {
+        kinic_tabs::TabKind::InsertForm | kinic_tabs::TabKind::CreateForm => TabFocusPolicy {
             default_focus: PaneFocus::Tabs,
             allows_search: false,
             allows_items: false,
@@ -92,7 +92,7 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
 pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
     match kinic_tabs::tab_kind(tab_id) {
         kinic_tabs::TabKind::Memories => Some(PaneFocus::Search),
-        kinic_tabs::TabKind::Form => Some(PaneFocus::Form),
+        kinic_tabs::TabKind::InsertForm | kinic_tabs::TabKind::CreateForm => Some(PaneFocus::Form),
         kinic_tabs::TabKind::PlaceholderMarket
         | kinic_tabs::TabKind::PlaceholderSettings
         | kinic_tabs::TabKind::Unknown => Some(PaneFocus::Content),
@@ -104,6 +104,26 @@ pub enum CreateModalFocus {
     #[default]
     Name,
     Description,
+    Submit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InsertMode {
+    #[default]
+    Normal,
+    Raw,
+    Pdf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InsertFormFocus {
+    #[default]
+    Mode,
+    MemoryId,
+    Tag,
+    Text,
+    FilePath,
+    Embedding,
     Submit,
 }
 
@@ -190,6 +210,16 @@ pub struct CoreState {
     pub default_memory_selector_items: Vec<String>,
     pub default_memory_selector_labels: Vec<String>,
     pub default_memory_selector_selected_id: Option<String>,
+    pub insert_mode: InsertMode,
+    pub insert_memory_id: String,
+    pub insert_tag: String,
+    pub insert_text: String,
+    pub insert_file_path: String,
+    pub insert_embedding: String,
+    pub insert_submit_state: CreateSubmitState,
+    pub insert_spinner_frame: usize,
+    pub insert_error: Option<String>,
+    pub insert_focus: InsertFormFocus,
 }
 
 impl Default for CoreState {
@@ -222,6 +252,16 @@ impl Default for CoreState {
             default_memory_selector_items: Vec::new(),
             default_memory_selector_labels: Vec::new(),
             default_memory_selector_selected_id: None,
+            insert_mode: InsertMode::default(),
+            insert_memory_id: String::new(),
+            insert_tag: String::new(),
+            insert_text: String::new(),
+            insert_file_path: String::new(),
+            insert_embedding: String::new(),
+            insert_submit_state: CreateSubmitState::default(),
+            insert_spinner_frame: 0,
+            insert_error: None,
+            insert_focus: InsertFormFocus::default(),
         }
     }
 }
@@ -277,6 +317,12 @@ pub enum CoreAction {
     CreateRefresh,
     RefreshCurrentView,
     CreateSubmit,
+    InsertInput(char),
+    InsertBackspace,
+    InsertNextField,
+    InsertPrevField,
+    InsertCycleMode,
+    InsertSubmit,
     Submit,
     Cancel,
     ChatInput(char),
@@ -338,6 +384,8 @@ pub enum CoreEffect {
     RequestRefresh,
     /// Validation or async error for the create form (clears submitting state).
     CreateFormError(Option<String>),
+    /// Validation or async error for the insert form (clears submitting state).
+    InsertFormError(Option<String>),
     /// Select the first row in the list (no-op when empty).
     SelectFirstListItem,
     /// Move keyboard focus to a pane.
@@ -346,6 +394,8 @@ pub enum CoreEffect {
     ResetCreateFormAndSetTab {
         tab_id: String,
     },
+    /// Clear insert content fields while keeping target selection for repeated inserts.
+    ResetInsertFormForRepeat,
     /// Escape hatch for domain-specific integrations (examples, experiments).
     Custom {
         id: String,
@@ -422,6 +472,57 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     let has_tabs = !state.current_tab_id.is_empty();
     let previous_focus = state.focus;
     match action {
+        CoreAction::InsertInput(c) => {
+            match state.insert_focus {
+                InsertFormFocus::Mode | InsertFormFocus::Submit => {}
+                InsertFormFocus::MemoryId => state.insert_memory_id.push(*c),
+                InsertFormFocus::Tag => state.insert_tag.push(*c),
+                InsertFormFocus::Text => state.insert_text.push(*c),
+                InsertFormFocus::FilePath => state.insert_file_path.push(*c),
+                InsertFormFocus::Embedding => state.insert_embedding.push(*c),
+            }
+            state.insert_error = None;
+            if state.insert_submit_state == CreateSubmitState::Error {
+                state.insert_submit_state = CreateSubmitState::Idle;
+            }
+        }
+        CoreAction::InsertBackspace => match state.insert_focus {
+            InsertFormFocus::Mode | InsertFormFocus::Submit => {}
+            InsertFormFocus::MemoryId => {
+                state.insert_memory_id.pop();
+            }
+            InsertFormFocus::Tag => {
+                state.insert_tag.pop();
+            }
+            InsertFormFocus::Text => {
+                state.insert_text.pop();
+            }
+            InsertFormFocus::FilePath => {
+                state.insert_file_path.pop();
+            }
+            InsertFormFocus::Embedding => {
+                state.insert_embedding.pop();
+            }
+        },
+        CoreAction::InsertNextField => {
+            state.insert_focus = next_insert_focus(state.insert_mode, state.insert_focus);
+        }
+        CoreAction::InsertPrevField => {
+            state.insert_focus = prev_insert_focus(state.insert_mode, state.insert_focus);
+        }
+        CoreAction::InsertCycleMode => {
+            state.insert_mode = next_insert_mode(state.insert_mode);
+            state.insert_focus = InsertFormFocus::Mode;
+            state.insert_error = None;
+            if state.insert_submit_state == CreateSubmitState::Error {
+                state.insert_submit_state = CreateSubmitState::Idle;
+            }
+        }
+        CoreAction::InsertSubmit => {
+            state.insert_submit_state = CreateSubmitState::Submitting;
+            state.insert_spinner_frame = 0;
+            state.insert_error = None;
+        }
         CoreAction::CreateInput(c) => {
             match state.create_focus {
                 CreateModalFocus::Name => state.create_name.push(*c),
@@ -539,7 +640,15 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::FocusContent => state.focus = PaneFocus::Content,
         CoreAction::FocusForm => {
             state.focus = PaneFocus::Form;
-            state.create_focus = CreateModalFocus::Name;
+            match kinic_tabs::tab_kind(state.current_tab_id.as_str()) {
+                kinic_tabs::TabKind::CreateForm => {
+                    state.create_focus = CreateModalFocus::Name;
+                }
+                kinic_tabs::TabKind::InsertForm => {
+                    state.insert_focus = InsertFormFocus::Mode;
+                }
+                _ => {}
+            }
         }
         CoreAction::OpenSelected => state.focus = PaneFocus::Content,
         CoreAction::Back => {
@@ -697,6 +806,54 @@ fn normalize_focus_for_tab(state: &mut CoreState, previous_focus: PaneFocus) {
     }
 
     state.focus = default_focus_for_policy(policy, state.chat_open);
+}
+
+fn insert_focus_order(mode: InsertMode) -> &'static [InsertFormFocus] {
+    match mode {
+        InsertMode::Normal => &[
+            InsertFormFocus::Mode,
+            InsertFormFocus::MemoryId,
+            InsertFormFocus::Tag,
+            InsertFormFocus::Text,
+            InsertFormFocus::FilePath,
+            InsertFormFocus::Submit,
+        ],
+        InsertMode::Raw => &[
+            InsertFormFocus::Mode,
+            InsertFormFocus::MemoryId,
+            InsertFormFocus::Tag,
+            InsertFormFocus::Text,
+            InsertFormFocus::Embedding,
+            InsertFormFocus::Submit,
+        ],
+        InsertMode::Pdf => &[
+            InsertFormFocus::Mode,
+            InsertFormFocus::MemoryId,
+            InsertFormFocus::Tag,
+            InsertFormFocus::FilePath,
+            InsertFormFocus::Submit,
+        ],
+    }
+}
+
+fn next_insert_focus(mode: InsertMode, focus: InsertFormFocus) -> InsertFormFocus {
+    let order = insert_focus_order(mode);
+    let current = order.iter().position(|candidate| *candidate == focus).unwrap_or(0);
+    order[(current + 1) % order.len()]
+}
+
+fn prev_insert_focus(mode: InsertMode, focus: InsertFormFocus) -> InsertFormFocus {
+    let order = insert_focus_order(mode);
+    let current = order.iter().position(|candidate| *candidate == focus).unwrap_or(0);
+    order[(current + order.len() - 1) % order.len()]
+}
+
+fn next_insert_mode(mode: InsertMode) -> InsertMode {
+    match mode {
+        InsertMode::Normal => InsertMode::Raw,
+        InsertMode::Raw => InsertMode::Pdf,
+        InsertMode::Pdf => InsertMode::Normal,
+    }
 }
 
 fn is_focus_allowed_for_policy(policy: TabFocusPolicy, focus: PaneFocus) -> bool {
