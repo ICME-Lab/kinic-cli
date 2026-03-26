@@ -775,29 +775,10 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             },
             PaneFocus::Tabs => None,
             PaneFocus::Content => match key {
-                CoreKey::Enter if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => None,
+                CoreKey::Enter if is_settings_content(current_tab_id, PaneFocus::Content) => None,
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
-                CoreKey::Down if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::MoveNext)
-                }
-                CoreKey::Up if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::MovePrev)
-                }
-                CoreKey::PageDown if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::MovePageDown)
-                }
-                CoreKey::PageUp if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::MovePageUp)
-                }
-                CoreKey::Home | CoreKey::Char('g')
-                    if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID =>
-                {
-                    Some(CoreAction::MoveHome)
-                }
-                CoreKey::End | CoreKey::Char('G')
-                    if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID =>
-                {
-                    Some(CoreAction::MoveEnd)
+                _ if is_settings_content(current_tab_id, PaneFocus::Content) => {
+                    settings_content_action_for_key(key)
                 }
                 CoreKey::Down => Some(CoreAction::ScrollContentPageDown),
                 CoreKey::Up => Some(CoreAction::ScrollContentPageUp),
@@ -854,9 +835,7 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
 }
 
 fn selectable_len(state: &CoreState) -> usize {
-    if state.current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID
-        && state.focus == PaneFocus::Content
-    {
+    if is_settings_content(state.current_tab_id.as_str(), state.focus) {
         return settings_selectable_len(&state.settings);
     }
 
@@ -891,13 +870,28 @@ pub fn settings_entry(settings: &SettingsSnapshot, index: usize) -> Option<&Sett
 }
 
 pub fn should_open_default_memory_picker(state: &CoreState) -> bool {
-    state.current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID
-        && state.focus == PaneFocus::Content
+    is_settings_content(state.current_tab_id.as_str(), state.focus)
         && state
             .selected_index
             .and_then(|index| settings_entry(&state.settings, index))
             .map(|entry| entry.id.as_str())
             == Some(SETTINGS_ENTRY_DEFAULT_MEMORY_ID)
+}
+
+fn is_settings_content(current_tab_id: &str, focus: PaneFocus) -> bool {
+    current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID && focus == PaneFocus::Content
+}
+
+fn settings_content_action_for_key(key: CoreKey) -> Option<CoreAction> {
+    match key {
+        CoreKey::Down => Some(CoreAction::MoveNext),
+        CoreKey::Up => Some(CoreAction::MovePrev),
+        CoreKey::PageDown => Some(CoreAction::MovePageDown),
+        CoreKey::PageUp => Some(CoreAction::MovePageUp),
+        CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::MoveHome),
+        CoreKey::End | CoreKey::Char('G') => Some(CoreAction::MoveEnd),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
