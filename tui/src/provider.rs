@@ -1237,12 +1237,6 @@ impl DataProvider for KinicProvider {
             CoreAction::CloseDefaultMemoryPicker => {}
             CoreAction::MoveDefaultMemoryPickerNext => {}
             CoreAction::MoveDefaultMemoryPickerPrev => {}
-            CoreAction::SettingsMoveNext => {}
-            CoreAction::SettingsMovePrev => {}
-            CoreAction::SettingsMovePageDown => {}
-            CoreAction::SettingsMovePageUp => {}
-            CoreAction::SettingsMoveHome => {}
-            CoreAction::SettingsMoveEnd => {}
             CoreAction::ScrollContentPageDown => {}
             CoreAction::ScrollContentPageUp => {}
             CoreAction::ScrollContentHome => {}

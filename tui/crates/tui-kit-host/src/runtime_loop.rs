@@ -335,12 +335,6 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::MoveEnd
                         | CoreAction::MovePageDown
                         | CoreAction::MovePageUp
-                        | CoreAction::SettingsMoveNext
-                        | CoreAction::SettingsMovePrev
-                        | CoreAction::SettingsMoveHome
-                        | CoreAction::SettingsMoveEnd
-                        | CoreAction::SettingsMovePageDown
-                        | CoreAction::SettingsMovePageUp
                         | CoreAction::OpenSelected
                 );
                 match dispatch_action(provider, &mut state, &action) {
