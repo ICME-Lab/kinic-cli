@@ -162,23 +162,12 @@ impl<'a> DefaultMemorySelection<'a> {
     }
 
     fn selector_labels(self) -> Vec<String> {
-        self.memory_records
-            .iter()
-            .map(|record| {
-                let title = record.title.trim();
-                if title.is_empty() {
-                    record.id.clone()
-                } else {
-                    title.to_string()
-                }
-            })
-            .collect()
+        self.available_memory_ids()
     }
 }
 
 struct DefaultMemoryController<'a> {
     is_live: bool,
-    memory_records: &'a [KinicRecord],
     user_preferences: &'a mut UserPreferences,
     preferences_health: &'a mut PreferencesHealth,
 }
@@ -204,30 +193,14 @@ impl<'a> DefaultMemoryController<'a> {
         };
     }
 
-    fn display_label_for_memory_id(&self, memory_id: &str) -> String {
-        self.memory_records
-            .iter()
-            .find(|record| record.id == memory_id)
-            .map(|record| {
-                let title = record.title.trim();
-                if title.is_empty() {
-                    record.id.clone()
-                } else {
-                    title.to_string()
-                }
-            })
-            .unwrap_or_else(|| memory_id.to_string())
-    }
-
     fn set_default_memory_preference(&mut self, memory_id: String) -> CoreEffect {
         if !self.is_live {
             return CoreEffect::Notify(
                 "Default memory is only available in live mode.".to_string(),
             );
         }
-        let display_label = self.display_label_for_memory_id(memory_id.as_str());
         if self.user_preferences.default_memory_id.as_deref() == Some(memory_id.as_str()) {
-            return CoreEffect::Notify(format!("Default memory already set to {display_label}"));
+            return CoreEffect::Notify(format!("Default memory already set to {memory_id}"));
         }
 
         let updated_preferences = UserPreferences {
@@ -243,7 +216,7 @@ impl<'a> DefaultMemoryController<'a> {
                     updated_preferences,
                     settings::load_user_preferences(),
                 );
-                CoreEffect::Notify(format!("Default memory set to {display_label}"))
+                CoreEffect::Notify(format!("Default memory set to {memory_id}"))
             }
             Err(error) => {
                 self.preferences_health.save_error = Some(error.to_string());
@@ -590,7 +563,6 @@ impl KinicProvider {
                 &self.session_settings,
                 &self.user_preferences,
                 &default_memory_selector_items,
-                &default_memory_selector_labels,
                 &self.preferences_health,
             ),
             default_memory_selector_items,
@@ -609,7 +581,6 @@ impl KinicProvider {
     fn default_memory_controller(&mut self) -> DefaultMemoryController<'_> {
         DefaultMemoryController {
             is_live: self.is_live(),
-            memory_records: &self.memory_records,
             user_preferences: &mut self.user_preferences,
             preferences_health: &mut self.preferences_health,
         }

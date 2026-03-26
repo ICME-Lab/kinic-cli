@@ -107,31 +107,8 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             "not set",
             UserPreferences::default(),
             Vec::<String>::new(),
-            Vec::<String>::new(),
             PreferencesHealth::default(),
             NOT_SET,
-            "ok",
-        ),
-        (
-            "known memory prefers title",
-            UserPreferences {
-                default_memory_id: Some("aaaaa-aa".to_string()),
-            },
-            vec!["aaaaa-aa".to_string()],
-            vec!["Alpha Memory".to_string()],
-            PreferencesHealth::default(),
-            "Alpha Memory",
-            "ok",
-        ),
-        (
-            "known id without loaded labels keeps raw id",
-            UserPreferences {
-                default_memory_id: Some("aaaaa-aa".to_string()),
-            },
-            Vec::<String>::new(),
-            Vec::<String>::new(),
-            PreferencesHealth::default(),
-            "aaaaa-aa",
             "ok",
         ),
         (
@@ -140,7 +117,6 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
                 default_memory_id: Some("aaaaa-aa".to_string()),
             },
             vec!["bbbbb-bb".to_string()],
-            vec!["Beta Memory".to_string()],
             PreferencesHealth::default(),
             "aaaaa-aa (missing)",
             "ok",
@@ -148,7 +124,6 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
         (
             "load error wins over save status",
             UserPreferences::default(),
-            Vec::<String>::new(),
             Vec::<String>::new(),
             PreferencesHealth {
                 load_error: Some("invalid YAML".to_string()),
@@ -163,24 +138,18 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
                 default_memory_id: Some("aaaaa-aa".to_string()),
             },
             vec!["aaaaa-aa".to_string()],
-            vec!["Alpha Memory".to_string()],
             PreferencesHealth {
                 load_error: None,
                 save_error: Some("permission denied".to_string()),
             },
-            "Alpha Memory",
+            "aaaaa-aa",
             "last save failed",
         ),
     ];
 
-    for (name, preferences, memory_ids, memory_labels, health, default_memory, status) in cases {
-        let snapshot = build_settings_snapshot(
-            &deferred_session(),
-            &preferences,
-            &memory_ids,
-            &memory_labels,
-            &health,
-        );
+    for (name, preferences, memory_ids, health, default_memory, status) in cases {
+        let snapshot =
+            build_settings_snapshot(&deferred_session(), &preferences, &memory_ids, &health);
 
         assert_eq!(
             quick_entry_value(&snapshot, SETTINGS_ENTRY_DEFAULT_MEMORY_ID),

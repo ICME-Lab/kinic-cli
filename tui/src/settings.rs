@@ -67,11 +67,9 @@ pub fn build_settings_snapshot(
     session: &SessionSettingsSnapshot,
     preferences: &UserPreferences,
     available_memory_ids: &[String],
-    available_memory_labels: &[String],
     health: &PreferencesHealth,
 ) -> SettingsSnapshot {
-    let default_memory_display =
-        default_memory_display(preferences, available_memory_ids, available_memory_labels);
+    let default_memory_display = default_memory_display(preferences, available_memory_ids);
     let preferences_status = preferences_status_label(health);
 
     SettingsSnapshot {
@@ -180,23 +178,13 @@ fn network_label(use_mainnet: bool) -> String {
 fn default_memory_display(
     preferences: &UserPreferences,
     available_memory_ids: &[String],
-    available_memory_labels: &[String],
 ) -> String {
     match &preferences.default_memory_id {
         Some(memory_id) if available_memory_ids.is_empty() => memory_id.clone(),
-        Some(memory_id) => available_memory_ids
-            .iter()
-            .position(|id| id == memory_id)
-            .and_then(|index| available_memory_labels.get(index))
-            .filter(|label| !label.trim().is_empty())
-            .cloned()
-            .unwrap_or_else(|| {
-                if available_memory_ids.iter().any(|id| id == memory_id) {
-                    memory_id.clone()
-                } else {
-                    format!("{memory_id} (missing)")
-                }
-            }),
+        Some(memory_id) if available_memory_ids.iter().any(|id| id == memory_id) => {
+            memory_id.clone()
+        }
+        Some(memory_id) => format!("{memory_id} (missing)"),
         None => NOT_SET.to_string(),
     }
 }
