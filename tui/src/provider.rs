@@ -13,7 +13,7 @@ use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, CreateCostDetails, CreateCostState,
-    DataProvider, InsertMode, PaneFocus, ProviderOutput, ProviderSnapshot,
+    DataProvider, InsertMode, PaneFocus, ProviderOutput, ProviderSnapshot, SelectorContext,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -186,6 +186,58 @@ impl<'a> DefaultMemorySelection<'a> {
     }
 }
 
+fn saved_tag_selection<'a>(preferences: &'a UserPreferences) -> Vec<String> {
+    settings::normalize_saved_tags(preferences.saved_tags.clone())
+}
+
+fn selector_snapshot_for_context(
+    context: SelectorContext,
+    state: &CoreState,
+    memory_selection: DefaultMemorySelection<'_>,
+    user_preferences: &UserPreferences,
+) -> (Vec<String>, Vec<String>, Option<String>) {
+    match context {
+        SelectorContext::DefaultMemory | SelectorContext::InsertTarget => {
+            let items = memory_selection.available_memory_ids();
+            let labels = memory_selection.selector_labels();
+            let selected_id = memory_selection.selected_default_memory_id();
+            (items, labels, selected_id)
+        }
+        SelectorContext::InsertTag => {
+            let items = saved_tag_selection(user_preferences);
+            let labels = items.clone();
+            let selected_id = if state.selector_mode == tui_kit_runtime::SelectorMode::AddTag
+                || state.selector_index == items.len()
+            {
+                None
+            } else {
+                state
+                    .selector_selected_id
+                    .clone()
+                    .filter(|selected| items.iter().any(|item| item == selected))
+                    .or_else(|| items.get(state.selector_index).cloned())
+            };
+            (items, labels, selected_id)
+        }
+        SelectorContext::TagManagement => {
+            let items = saved_tag_selection(user_preferences);
+            let labels = items.clone();
+            let selected_id = if state.selector_mode == tui_kit_runtime::SelectorMode::AddTag
+                || state.selector_index == items.len()
+            {
+                None
+            } else {
+                state
+                    .selector_selected_id
+                    .clone()
+                    .filter(|selected| items.iter().any(|item| item == selected))
+                    .or_else(|| items.get(state.selector_index).cloned())
+            };
+            (items, labels, selected_id)
+        }
+    }
+}
+
 struct DefaultMemoryController<'a> {
     is_live: bool,
     memory_records: &'a [KinicRecord],
@@ -200,20 +252,13 @@ impl<'a> DefaultMemoryController<'a> {
         updated_preferences: UserPreferences,
         reloaded_preferences: Result<UserPreferences, tui_kit_host::settings::SettingsError>,
     ) {
-        *self.user_preferences = match reloaded_preferences {
-            Ok(preferences) => {
-                *self.preferences_health = PreferencesHealth::default();
-                preferences
-            }
-            Err(error) => {
-                *self.preferences_health = PreferencesHealth {
-                    load_error: Some(error.to_string()),
-                    save_error: None,
-                };
-                updated_preferences
-            }
-        };
-        self.session_settings.default_memory_id = self.user_preferences.default_memory_id.clone();
+        apply_reloaded_preferences(
+            self.user_preferences,
+            self.preferences_health,
+            self.session_settings,
+            updated_preferences,
+            reloaded_preferences,
+        );
     }
 
     fn selection(&self) -> DefaultMemorySelection<'_> {
@@ -239,6 +284,7 @@ impl<'a> DefaultMemoryController<'a> {
 
         let updated_preferences = UserPreferences {
             default_memory_id: Some(memory_id.clone()),
+            saved_tags: self.user_preferences.saved_tags.clone(),
         };
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -258,6 +304,29 @@ impl<'a> DefaultMemoryController<'a> {
             }
         }
     }
+}
+
+fn apply_reloaded_preferences(
+    user_preferences: &mut UserPreferences,
+    preferences_health: &mut PreferencesHealth,
+    session_settings: &mut SessionSettingsSnapshot,
+    updated_preferences: UserPreferences,
+    reloaded_preferences: Result<UserPreferences, tui_kit_host::settings::SettingsError>,
+) {
+    *user_preferences = match reloaded_preferences {
+        Ok(preferences) => {
+            *preferences_health = PreferencesHealth::default();
+            preferences
+        }
+        Err(error) => {
+            *preferences_health = PreferencesHealth {
+                load_error: Some(error.to_string()),
+                save_error: None,
+            };
+            updated_preferences
+        }
+    };
+    session_settings.default_memory_id = user_preferences.default_memory_id.clone();
 }
 
 #[cfg(test)]
@@ -572,9 +641,15 @@ impl KinicProvider {
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
         let filtered = self.current_records();
         let default_memory = self.default_memory_selection();
-        let (default_memory_selector_items, default_memory_selector_selected_id) =
+        let (default_memory_selector_items, _default_memory_selector_selected_id) =
             default_memory.selector_snapshot();
         let default_memory_selector_labels = default_memory.selector_labels();
+        let (selector_items, selector_labels, selector_selected_id) = selector_snapshot_for_context(
+            state.selector_context,
+            state,
+            default_memory,
+            &self.user_preferences,
+        );
         let items = filtered
             .iter()
             .map(|record| {
@@ -613,9 +688,9 @@ impl KinicProvider {
                 &default_memory_selector_labels,
                 &self.preferences_health,
             ),
-            default_memory_selector_items,
-            default_memory_selector_labels,
-            default_memory_selector_selected_id,
+            selector_items,
+            selector_labels,
+            selector_selected_id,
         }
     }
 
@@ -633,6 +708,39 @@ impl KinicProvider {
             user_preferences: &mut self.user_preferences,
             session_settings: &mut self.session_settings,
             preferences_health: &mut self.preferences_health,
+        }
+    }
+
+    fn save_tags_to_preferences(&mut self, tag: String) -> CoreEffect {
+        let normalized_tag = tag.trim().to_string();
+        if normalized_tag.is_empty() {
+            return CoreEffect::Notify("Tag cannot be empty.".to_string());
+        }
+
+        let mut updated_preferences = self.user_preferences.clone();
+        updated_preferences.saved_tags.push(normalized_tag.clone());
+        updated_preferences.saved_tags =
+            settings::normalize_saved_tags(updated_preferences.saved_tags);
+
+        #[cfg(test)]
+        let _settings_io_lock = settings_io_lock()
+            .lock()
+            .expect("settings io lock should be available");
+        match settings::save_user_preferences(&updated_preferences) {
+            Ok(()) => {
+                apply_reloaded_preferences(
+                    &mut self.user_preferences,
+                    &mut self.preferences_health,
+                    &mut self.session_settings,
+                    updated_preferences,
+                    settings::load_user_preferences(),
+                );
+                CoreEffect::Notify(format!("Saved tag {normalized_tag}"))
+            }
+            Err(error) => {
+                self.preferences_health.save_error = Some(error.to_string());
+                CoreEffect::Notify(format!("Tag save failed: {error}"))
+            }
         }
     }
 
@@ -1418,10 +1526,14 @@ impl DataProvider for KinicProvider {
                     effects.push(effect);
                 }
             }
-            CoreAction::OpenDefaultMemoryPicker => {}
-            CoreAction::CloseDefaultMemoryPicker => {}
-            CoreAction::MoveDefaultMemoryPickerNext => {}
-            CoreAction::MoveDefaultMemoryPickerPrev => {}
+            CoreAction::OpenSelector(_)
+            | CoreAction::CloseSelector
+            | CoreAction::MoveSelectorNext
+            | CoreAction::MoveSelectorPrev
+            | CoreAction::StartAddTag
+            | CoreAction::AddTagInput(_)
+            | CoreAction::AddTagBackspace
+            | CoreAction::CancelAddTag => {}
             CoreAction::SettingsMoveNext => {}
             CoreAction::SettingsMovePrev => {}
             CoreAction::SettingsMovePageDown => {}
@@ -1432,23 +1544,39 @@ impl DataProvider for KinicProvider {
             CoreAction::ScrollContentPageUp => {}
             CoreAction::ScrollContentHome => {}
             CoreAction::ScrollContentEnd => {}
-            CoreAction::SubmitDefaultMemoryPicker => {
-                let Some(memory_id) = state
-                    .default_memory_selector_items
-                    .get(state.default_memory_selector_index)
-                    .cloned()
-                else {
+            CoreAction::SubmitSelector
+                if matches!(
+                    state.selector_context,
+                    SelectorContext::DefaultMemory | SelectorContext::InsertTarget
+                ) =>
+            {
+                if let Some(memory_id) = state
+                    .selector_selected_id
+                    .clone()
+                    .or_else(|| state.selector_items.get(state.selector_index).cloned())
+                {
+                    effects.push(
+                        self.default_memory_controller()
+                            .set_default_memory_preference(memory_id),
+                    );
+                } else {
                     effects.push(CoreEffect::Notify("No memories available yet.".to_string()));
-                    return Ok(ProviderOutput {
-                        snapshot: Some(self.build_snapshot(state)),
-                        effects,
-                    });
-                };
-                effects.push(
-                    self.default_memory_controller()
-                        .set_default_memory_preference(memory_id),
-                );
+                }
             }
+            CoreAction::SubmitSelector => {}
+            CoreAction::ConfirmAddTag
+                if matches!(
+                    state.selector_context,
+                    SelectorContext::InsertTag | SelectorContext::TagManagement
+                ) =>
+            {
+                let tag = state
+                    .selector_selected_id
+                    .clone()
+                    .unwrap_or_else(|| state.selector_add_tag_input.trim().to_string());
+                effects.push(self.save_tags_to_preferences(tag));
+            }
+            CoreAction::ConfirmAddTag => {}
             CoreAction::SetDefaultMemoryFromSelection => {
                 let Some(memory_id) = self.active_memory_id.clone() else {
                     effects.push(CoreEffect::Notify(
@@ -2650,18 +2778,22 @@ mod tests {
     }
 
     #[test]
-    fn submit_default_memory_selector_updates_default_memory() {
+    fn submit_selector_updates_default_memory() {
         let mut provider = KinicProvider::new(live_config());
         provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
         provider.session_settings.default_memory_id = Some("aaaaa-aa".to_string());
         let state = CoreState {
-            default_memory_selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            default_memory_selector_index: 1,
+            selector_open: true,
+            selector_context: SelectorContext::DefaultMemory,
+            selector_mode: tui_kit_runtime::SelectorMode::List,
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_index: 1,
+            selector_selected_id: Some("bbbbb-bb".to_string()),
             ..CoreState::default()
         };
 
         let output = provider
-            .handle_action(&CoreAction::SubmitDefaultMemoryPicker, &state)
+            .handle_action(&CoreAction::SubmitSelector, &state)
             .expect("picker submit output");
 
         assert_eq!(
@@ -2692,9 +2824,11 @@ mod tests {
             .apply_reloaded_preferences(
                 UserPreferences {
                     default_memory_id: Some("bbbbb-bb".to_string()),
+                    saved_tags: vec![],
                 },
                 Ok(UserPreferences {
                     default_memory_id: Some("bbbbb-bb".to_string()),
+                    saved_tags: vec![],
                 }),
             );
 
@@ -2741,13 +2875,34 @@ mod tests {
         let snapshot = provider.build_snapshot(&CoreState::default());
 
         assert_eq!(
-            snapshot.default_memory_selector_items,
+            snapshot.selector_items,
             vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()]
         );
         assert_eq!(
-            snapshot.default_memory_selector_labels,
+            snapshot.selector_labels,
             vec!["Alpha Memory".to_string(), "bbbbb-bb".to_string()]
         );
+    }
+
+    #[test]
+    fn build_snapshot_uses_saved_default_memory_for_default_picker_selection() {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_records = vec![
+            live_memory("aaaaa-aa", "Alpha Memory"),
+            live_memory("bbbbb-bb", "Beta Memory"),
+        ];
+        provider.all = provider.memory_records.clone();
+        provider.user_preferences.default_memory_id = Some("bbbbb-bb".to_string());
+
+        let snapshot = provider.build_snapshot(&CoreState {
+            selector_open: true,
+            selector_context: SelectorContext::DefaultMemory,
+            selector_selected_id: Some("aaaaa-aa".to_string()),
+            selector_index: 0,
+            ..CoreState::default()
+        });
+
+        assert_eq!(snapshot.selector_selected_id.as_deref(), Some("bbbbb-bb"));
     }
 
     #[test]

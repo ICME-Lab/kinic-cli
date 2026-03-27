@@ -47,8 +47,10 @@ impl SessionSettingsSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+// The current on-disk schema is intentionally fixed; unsupported legacy shapes fail to decode.
 pub struct UserPreferences {
     pub default_memory_id: Option<String>,
+    pub saved_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -58,7 +60,10 @@ pub struct PreferencesHealth {
 }
 
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
-    load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)
+    // Legacy tui.yaml files are intentionally unsupported; decode failures fall back in provider.
+    let mut preferences: UserPreferences = load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)?;
+    preferences.saved_tags = normalize_saved_tags(preferences.saved_tags);
+    Ok(preferences)
 }
 
 pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), SettingsError> {
@@ -75,6 +80,7 @@ pub fn build_settings_snapshot(
     let default_memory_display =
         default_memory_display(preferences, available_memory_ids, available_memory_labels);
     let preferences_status = preferences_status_label(health);
+    let saved_tags_display = saved_tags_display(preferences);
 
     SettingsSnapshot {
         quick_entries: vec![
@@ -98,6 +104,7 @@ pub fn build_settings_snapshot(
                 default_memory_display.clone(),
                 None,
             ),
+            entry("saved_tags", "Saved tags", saved_tags_display.clone(), None),
             entry("preferences", "Preferences", preferences_status, None),
             entry(
                 "embedding_api_endpoint",
@@ -142,6 +149,7 @@ pub fn build_settings_snapshot(
                         default_memory_display,
                         None,
                     ),
+                    entry("saved_tags", "Saved tags", saved_tags_display, None),
                     entry(
                         "preferences_status",
                         "Preferences status",
@@ -209,6 +217,25 @@ fn preferences_status_label(health: &PreferencesHealth) -> String {
         (None, Some(_)) => "last save failed".to_string(),
         (None, None) => "ok".to_string(),
     }
+}
+
+pub(crate) fn normalize_saved_tags(mut tags: Vec<String>) -> Vec<String> {
+    tags = tags
+        .into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    tags.sort();
+    tags.dedup();
+    tags
+}
+
+fn saved_tags_display(preferences: &UserPreferences) -> String {
+    if preferences.saved_tags.is_empty() {
+        return NOT_SET.to_string();
+    }
+
+    preferences.saved_tags.join(", ")
 }
 
 fn entry(
@@ -301,6 +328,7 @@ mod tests {
         let path = unique_temp_path("roundtrip");
         let preferences = UserPreferences {
             default_memory_id: Some("aaaaa-aa".to_string()),
+            saved_tags: vec!["docs".to_string(), "research".to_string()],
         };
 
         save_preferences_to_path(&path, &preferences);
@@ -318,6 +346,19 @@ mod tests {
     }
 
     #[test]
+    fn normalize_saved_tags_trims_and_dedups() {
+        let tags = normalize_saved_tags(vec![
+            " docs ".to_string(),
+            "".to_string(),
+            "research".to_string(),
+            "docs".to_string(),
+            "research ".to_string(),
+        ]);
+
+        assert_eq!(tags, vec!["docs".to_string(), "research".to_string()]);
+    }
+
+    #[test]
     fn settings_snapshot_marks_missing_default_memory() {
         let session = SessionSettingsSnapshot::new(
             &TuiAuth::DeferredIdentity {
@@ -331,6 +372,7 @@ mod tests {
         );
         let preferences = UserPreferences {
             default_memory_id: Some("aaaaa-aa".to_string()),
+            saved_tags: vec![],
         };
 
         let snapshot = build_settings_snapshot(
@@ -343,6 +385,7 @@ mod tests {
 
         assert_eq!(snapshot.quick_entries[4].value, "aaaaa-aa (missing)");
         assert_eq!(snapshot.sections[1].entries[0].note, None);
+        assert_eq!(snapshot.sections[1].entries[1].value, "not set");
         assert_eq!(snapshot.sections[1].footer, None);
     }
 
@@ -369,8 +412,10 @@ mod tests {
             },
         );
 
-        assert_eq!(snapshot.quick_entries[5].value, "preferences unavailable");
+        assert_eq!(snapshot.quick_entries[6].value, "preferences unavailable");
         assert_eq!(snapshot.sections[1].entries[0].note, None);
+        assert_eq!(snapshot.sections[1].entries[1].value, "not set");
+        assert_eq!(snapshot.sections[1].entries[2].value, "preferences unavailable");
         assert_eq!(snapshot.sections[1].footer, None);
     }
 
@@ -390,6 +435,7 @@ mod tests {
             &session,
             &UserPreferences {
                 default_memory_id: Some("aaaaa-aa".to_string()),
+                saved_tags: vec![],
             },
             &["aaaaa-aa".to_string()],
             &["Alpha Memory".to_string()],
@@ -400,8 +446,10 @@ mod tests {
         );
 
         assert_eq!(snapshot.quick_entries[4].value, "Alpha Memory");
-        assert_eq!(snapshot.quick_entries[5].value, "last save failed");
+        assert_eq!(snapshot.quick_entries[6].value, "last save failed");
         assert_eq!(snapshot.sections[1].entries[0].note, None);
+        assert_eq!(snapshot.sections[1].entries[1].value, "not set");
+        assert_eq!(snapshot.sections[1].entries[2].value, "last save failed");
         assert_eq!(snapshot.sections[1].footer, None);
     }
 
@@ -422,6 +470,7 @@ mod tests {
             &session,
             &UserPreferences {
                 default_memory_id: Some("aaaaa-aa".to_string()),
+                saved_tags: vec![],
             },
             &["aaaaa-aa".to_string()],
             &["Alpha Memory".to_string()],
@@ -432,6 +481,8 @@ mod tests {
         assert_eq!(snapshot.quick_entries[4].value, "Alpha Memory");
         assert_eq!(snapshot.sections[1].entries[0].label, "Default memory");
         assert_eq!(snapshot.sections[1].entries[0].value, "Alpha Memory");
+        assert_eq!(snapshot.sections[1].entries[1].label, "Saved tags");
+        assert_eq!(snapshot.sections[1].entries[1].value, "not set");
     }
 
     #[test]

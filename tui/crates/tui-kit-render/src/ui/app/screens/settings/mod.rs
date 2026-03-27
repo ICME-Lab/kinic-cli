@@ -9,12 +9,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::SettingsSnapshot;
+use tui_kit_runtime::{SelectorContext, SelectorMode, SettingsSnapshot};
 
 use crate::ui::app::{Focus, TuiKitUi};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DefaultMemorySelectorLineKind {
+pub(crate) enum SelectorLineKind {
     Title,
     Selected,
     CurrentDefault,
@@ -70,24 +70,23 @@ impl<'a> TuiKitUi<'a> {
     }
 }
 
-pub(crate) fn default_memory_selector_lines(
+pub(crate) fn selector_lines(
+    context: SelectorContext,
+    mode: SelectorMode,
     items: &[String],
     labels: &[String],
     selected_index: usize,
     current_default_id: Option<&str>,
-) -> Vec<(String, DefaultMemorySelectorLineKind)> {
+) -> Vec<(String, SelectorLineKind)> {
     let mut lines = vec![
-        (
-            " Select default memory ".to_string(),
-            DefaultMemorySelectorLineKind::Title,
-        ),
-        (String::new(), DefaultMemorySelectorLineKind::Normal),
+        (format!(" {} ", selector_title(context, mode)), SelectorLineKind::Title),
+        (String::new(), SelectorLineKind::Normal),
     ];
 
     if items.is_empty() {
         lines.push((
-            " No memories available yet.".to_string(),
-            DefaultMemorySelectorLineKind::Normal,
+            selector_empty_message(context).to_string(),
+            SelectorLineKind::Normal,
         ));
     } else {
         for (index, item) in items.iter().enumerate() {
@@ -97,22 +96,51 @@ pub(crate) fn default_memory_selector_lines(
             let suffix = if is_default { "  ★" } else { "" };
             let label = labels.get(index).map_or(item.as_str(), String::as_str);
             let kind = if is_selected {
-                DefaultMemorySelectorLineKind::Selected
+                SelectorLineKind::Selected
             } else if is_default {
-                DefaultMemorySelectorLineKind::CurrentDefault
+                SelectorLineKind::CurrentDefault
             } else {
-                DefaultMemorySelectorLineKind::Normal
+                SelectorLineKind::Normal
             };
             lines.push((format!(" {prefix} {label}{suffix}"), kind));
         }
     }
 
-    lines.push((String::new(), DefaultMemorySelectorLineKind::Normal));
+    if selector_has_add_row(context, mode) {
+        lines.push((String::new(), SelectorLineKind::Normal));
+        lines.push((
+            " + Add new tag".to_string(),
+            if selected_index == items.len() {
+                SelectorLineKind::Selected
+            } else {
+                SelectorLineKind::Normal
+            },
+        ));
+    }
+
+    lines.push((String::new(), SelectorLineKind::Normal));
     lines.push((
-        " Enter: save  ↑/↓: move  Esc: close".to_string(),
-        DefaultMemorySelectorLineKind::Hint,
+        selector_hint(context, mode).to_string(),
+        SelectorLineKind::Hint,
     ));
     lines
+}
+
+#[cfg(test)]
+pub(crate) fn default_memory_selector_lines(
+    items: &[String],
+    labels: &[String],
+    selected_index: usize,
+    current_default_id: Option<&str>,
+) -> Vec<(String, SelectorLineKind)> {
+    selector_lines(
+        SelectorContext::DefaultMemory,
+        SelectorMode::List,
+        items,
+        labels,
+        selected_index,
+        current_default_id,
+    )
 }
 
 fn settings_screen_lines_with_selection(
@@ -159,6 +187,45 @@ fn settings_screen_lines_with_selection(
     }
 
     lines
+}
+
+fn selector_title(context: SelectorContext, mode: SelectorMode) -> &'static str {
+    match (context, mode) {
+        (_, SelectorMode::AddTag) => "Add tag",
+        (SelectorContext::DefaultMemory, SelectorMode::List) => "Select default memory",
+        (SelectorContext::InsertTarget, SelectorMode::List) => "Select insert target",
+        (SelectorContext::InsertTag, SelectorMode::List) => "Select insert tag",
+        (SelectorContext::TagManagement, SelectorMode::List) => "Saved tags",
+    }
+}
+
+fn selector_empty_message(context: SelectorContext) -> &'static str {
+    match context {
+        SelectorContext::DefaultMemory | SelectorContext::InsertTarget => {
+            " No memories available yet."
+        }
+        SelectorContext::InsertTag | SelectorContext::TagManagement => " No saved tags yet.",
+    }
+}
+
+fn selector_has_add_row(context: SelectorContext, mode: SelectorMode) -> bool {
+    mode == SelectorMode::List
+        && matches!(
+            context,
+            SelectorContext::InsertTag | SelectorContext::TagManagement
+        )
+}
+
+fn selector_hint(context: SelectorContext, mode: SelectorMode) -> &'static str {
+    match mode {
+        SelectorMode::AddTag => " Enter: save tag  Esc: return",
+        SelectorMode::List => match context {
+            SelectorContext::DefaultMemory => " Enter: save  ↑/↓: move  Esc: close",
+            SelectorContext::InsertTarget => " Enter: save  ↑/↓: move  Esc: close",
+            SelectorContext::InsertTag => " Enter: choose  ↑/↓: move  Esc: close",
+            SelectorContext::TagManagement => " Enter: add/select  ↑/↓: move  Esc: close",
+        },
+    }
 }
 
 #[cfg(test)]

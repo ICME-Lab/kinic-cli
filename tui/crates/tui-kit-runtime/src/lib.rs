@@ -127,6 +127,27 @@ pub enum InsertFormFocus {
     Submit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectorContext {
+    DefaultMemory,
+    InsertTarget,
+    InsertTag,
+    TagManagement,
+}
+
+impl Default for SelectorContext {
+    fn default() -> Self {
+        Self::DefaultMemory
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SelectorMode {
+    #[default]
+    List,
+    AddTag,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CreateSubmitState {
     #[default]
@@ -205,11 +226,14 @@ pub struct CoreState {
     pub create_focus: CreateModalFocus,
     pub create_cost_state: CreateCostState,
     pub settings: SettingsSnapshot,
-    pub default_memory_selector_open: bool,
-    pub default_memory_selector_index: usize,
-    pub default_memory_selector_items: Vec<String>,
-    pub default_memory_selector_labels: Vec<String>,
-    pub default_memory_selector_selected_id: Option<String>,
+    pub selector_open: bool,
+    pub selector_context: SelectorContext,
+    pub selector_mode: SelectorMode,
+    pub selector_index: usize,
+    pub selector_items: Vec<String>,
+    pub selector_labels: Vec<String>,
+    pub selector_selected_id: Option<String>,
+    pub selector_add_tag_input: String,
     pub insert_mode: InsertMode,
     pub insert_memory_id: String,
     pub insert_tag: String,
@@ -247,11 +271,14 @@ impl Default for CoreState {
             create_focus: CreateModalFocus::default(),
             create_cost_state: CreateCostState::default(),
             settings: SettingsSnapshot::default(),
-            default_memory_selector_open: false,
-            default_memory_selector_index: 0,
-            default_memory_selector_items: Vec::new(),
-            default_memory_selector_labels: Vec::new(),
-            default_memory_selector_selected_id: None,
+            selector_open: false,
+            selector_context: SelectorContext::default(),
+            selector_mode: SelectorMode::default(),
+            selector_index: 0,
+            selector_items: Vec::new(),
+            selector_labels: Vec::new(),
+            selector_selected_id: None,
+            selector_add_tag_input: String::new(),
             insert_mode: InsertMode::default(),
             insert_memory_id: String::new(),
             insert_tag: String::new(),
@@ -304,11 +331,16 @@ pub enum CoreAction {
     ToggleHelp,
     ToggleSettings,
     ToggleChat,
-    OpenDefaultMemoryPicker,
-    CloseDefaultMemoryPicker,
-    MoveDefaultMemoryPickerNext,
-    MoveDefaultMemoryPickerPrev,
-    SubmitDefaultMemoryPicker,
+    OpenSelector(SelectorContext),
+    CloseSelector,
+    MoveSelectorNext,
+    MoveSelectorPrev,
+    SubmitSelector,
+    StartAddTag,
+    AddTagInput(char),
+    AddTagBackspace,
+    ConfirmAddTag,
+    CancelAddTag,
     SetDefaultMemoryFromSelection,
     CreateInput(char),
     CreateBackspace,
@@ -414,9 +446,9 @@ pub struct ProviderSnapshot {
     pub create_cost_state: CreateCostState,
     pub create_submit_state: CreateSubmitState,
     pub settings: SettingsSnapshot,
-    pub default_memory_selector_items: Vec<String>,
-    pub default_memory_selector_labels: Vec<String>,
-    pub default_memory_selector_selected_id: Option<String>,
+    pub selector_items: Vec<String>,
+    pub selector_labels: Vec<String>,
+    pub selector_selected_id: Option<String>,
 }
 
 /// Provider response to one action.
@@ -479,7 +511,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             match state.insert_focus {
                 InsertFormFocus::Mode | InsertFormFocus::Submit => {}
                 InsertFormFocus::MemoryId => state.insert_memory_id.push(*c),
-                InsertFormFocus::Tag => state.insert_tag.push(*c),
+                InsertFormFocus::Tag => {}
                 InsertFormFocus::Text => state.insert_text.push(*c),
                 InsertFormFocus::FilePath => state.insert_file_path.push(*c),
                 InsertFormFocus::Embedding => state.insert_embedding.push(*c),
@@ -498,9 +530,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 InsertFormFocus::MemoryId => {
                     state.insert_memory_id.pop();
                 }
-                InsertFormFocus::Tag => {
-                    state.insert_tag.pop();
-                }
+                InsertFormFocus::Tag => {}
                 InsertFormFocus::Text => {
                     state.insert_text.pop();
                 }
@@ -539,6 +569,59 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             state.insert_submit_state = CreateSubmitState::Submitting;
             state.insert_spinner_frame = 0;
             state.insert_error = None;
+        }
+        CoreAction::OpenSelector(context) => {
+            open_selector(state, *context);
+        }
+        CoreAction::CloseSelector => {
+            close_selector(state);
+        }
+        CoreAction::MoveSelectorNext => {
+            move_selector_next(state);
+        }
+        CoreAction::MoveSelectorPrev => {
+            move_selector_prev(state);
+        }
+        CoreAction::SubmitSelector => {
+            submit_selector(state);
+        }
+        CoreAction::StartAddTag => {
+            if selector_allows_add_tag(state) {
+                state.selector_mode = SelectorMode::AddTag;
+                state.selector_add_tag_input.clear();
+                state.selector_selected_id = None;
+            }
+        }
+        CoreAction::AddTagInput(c) => {
+            if state.selector_open && state.selector_mode == SelectorMode::AddTag {
+                state.selector_add_tag_input.push(*c);
+            }
+        }
+        CoreAction::AddTagBackspace => {
+            if state.selector_open && state.selector_mode == SelectorMode::AddTag {
+                state.selector_add_tag_input.pop();
+            }
+        }
+        CoreAction::ConfirmAddTag => {
+            if state.selector_open && state.selector_mode == SelectorMode::AddTag {
+                let tag = state.selector_add_tag_input.trim().to_string();
+                if !tag.is_empty() {
+                    state.selector_selected_id = Some(tag.clone());
+                    if state.selector_context == SelectorContext::InsertTag {
+                        state.insert_tag = tag;
+                    }
+                }
+                state.selector_open = false;
+                state.selector_mode = SelectorMode::List;
+                state.selector_add_tag_input.clear();
+            }
+        }
+        CoreAction::CancelAddTag => {
+            if state.selector_open && state.selector_mode == SelectorMode::AddTag {
+                state.selector_mode = SelectorMode::List;
+                state.selector_add_tag_input.clear();
+                state.selector_selected_id = None;
+            }
         }
         CoreAction::CreateInput(c) => {
             match state.create_focus {
@@ -598,7 +681,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::SetTab(tab_id) => {
             state.current_tab_id = tab_id.0.clone();
             state.selected_index = Some(0);
-            state.default_memory_selector_open = false;
+            close_selector(state);
         }
         CoreAction::SelectTabIndex(index) => {
             state.current_tab_id = format!("tab-{}", index + 1);
@@ -682,33 +765,6 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             } else if state.focus == PaneFocus::Extra {
                 state.focus = focus_after_chat_close(state.current_tab_id.as_str());
             }
-        }
-        CoreAction::OpenDefaultMemoryPicker => {
-            state.default_memory_selector_open = true;
-            state.default_memory_selector_index = state
-                .default_memory_selector_selected_id
-                .as_ref()
-                .and_then(|selected| {
-                    state
-                        .default_memory_selector_items
-                        .iter()
-                        .position(|item| item == selected)
-                })
-                .unwrap_or(0);
-        }
-        CoreAction::CloseDefaultMemoryPicker | CoreAction::SubmitDefaultMemoryPicker => {
-            state.default_memory_selector_open = false;
-        }
-        CoreAction::MoveDefaultMemoryPickerNext => {
-            let len = state.default_memory_selector_items.len();
-            if len != 0 {
-                state.default_memory_selector_index =
-                    (state.default_memory_selector_index + 1).min(len - 1);
-            }
-        }
-        CoreAction::MoveDefaultMemoryPickerPrev => {
-            state.default_memory_selector_index =
-                state.default_memory_selector_index.saturating_sub(1);
         }
         CoreAction::ChatInput(c) => {
             state.chat_input.push(*c);
@@ -1043,13 +1099,51 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.create_cost_state = snapshot.create_cost_state;
     state.create_submit_state = snapshot.create_submit_state;
     state.settings = snapshot.settings;
-    state.default_memory_selector_items = snapshot.default_memory_selector_items;
-    state.default_memory_selector_labels = snapshot.default_memory_selector_labels;
-    state.default_memory_selector_selected_id = snapshot.default_memory_selector_selected_id;
-    if state.default_memory_selector_items.is_empty() {
-        state.default_memory_selector_index = 0;
-    } else if state.default_memory_selector_index >= state.default_memory_selector_items.len() {
-        state.default_memory_selector_index = state.default_memory_selector_items.len() - 1;
+    state.selector_items = snapshot.selector_items;
+    state.selector_labels = snapshot.selector_labels;
+    state.selector_selected_id = snapshot.selector_selected_id;
+    let selector_len = selector_selectable_len(state);
+    if selector_len == 0 {
+        state.selector_index = 0;
+    } else if state.selector_open
+        && state.selector_mode == SelectorMode::List
+        && matches!(
+            state.selector_context,
+            SelectorContext::DefaultMemory | SelectorContext::InsertTarget
+        )
+    {
+        if let Some(selected_id) = state.selector_selected_id.as_deref() {
+            if let Some(index) = state
+                .selector_items
+                .iter()
+                .position(|item| item == selected_id)
+            {
+                state.selector_index = index;
+            } else if state.selector_index >= selector_len {
+                state.selector_index = selector_len - 1;
+            }
+        } else if state.selector_index >= selector_len {
+            state.selector_index = selector_len - 1;
+        }
+    } else if state.selector_open
+        && state.selector_mode == SelectorMode::List
+        && !selector_is_add_row(state)
+    {
+        if let Some(selected_id) = state.selector_selected_id.as_deref() {
+            if let Some(index) = state
+                .selector_items
+                .iter()
+                .position(|item| item == selected_id)
+            {
+                state.selector_index = index;
+            } else if state.selector_index >= selector_len {
+                state.selector_index = selector_len - 1;
+            }
+        } else if state.selector_index >= selector_len {
+            state.selector_index = selector_len - 1;
+        }
+    } else if state.selector_index >= selector_len {
+        state.selector_index = selector_len - 1;
     }
 
     let selectable_len = selectable_len(state);
@@ -1107,6 +1201,114 @@ pub fn should_open_default_memory_picker(state: &CoreState) -> bool {
             .and_then(|index| settings_entry(&state.settings, index))
             .map(|entry| entry.id.as_str())
             == Some("default_memory")
+}
+
+pub fn should_open_saved_tags_picker(state: &CoreState) -> bool {
+    state.current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID
+        && state.focus == PaneFocus::Content
+        && state
+            .selected_index
+            .and_then(|index| settings_entry(&state.settings, index))
+            .map(|entry| entry.id.as_str())
+            == Some("saved_tags")
+}
+
+fn open_selector(state: &mut CoreState, context: SelectorContext) {
+    state.selector_open = true;
+    state.selector_context = context;
+    state.selector_mode = SelectorMode::List;
+    state.selector_add_tag_input.clear();
+    match context {
+        SelectorContext::DefaultMemory | SelectorContext::InsertTarget => {
+            state.selector_index = 0;
+            state.selector_selected_id = None;
+        }
+        SelectorContext::InsertTag => {
+            let current_tag = state.insert_tag.trim();
+            if let Some(index) = state.selector_items.iter().position(|item| item == current_tag) {
+                state.selector_index = index;
+                state.selector_selected_id = state.selector_items.get(index).cloned();
+            } else {
+                state.selector_index = 0;
+                state.selector_selected_id = state.selector_items.get(0).cloned();
+            }
+        }
+        SelectorContext::TagManagement => {
+            state.selector_index = 0;
+            state.selector_selected_id = state.selector_items.get(0).cloned();
+        }
+    }
+}
+
+fn close_selector(state: &mut CoreState) {
+    state.selector_open = false;
+    state.selector_mode = SelectorMode::List;
+    state.selector_add_tag_input.clear();
+}
+
+fn move_selector_next(state: &mut CoreState) {
+    let len = selector_selectable_len(state);
+    if len == 0 {
+        state.selector_index = 0;
+        state.selector_selected_id = None;
+        return;
+    }
+    state.selector_index = (state.selector_index + 1).min(len - 1);
+    update_selector_selected_id_for_index(state);
+}
+
+fn move_selector_prev(state: &mut CoreState) {
+    state.selector_index = state.selector_index.saturating_sub(1);
+    update_selector_selected_id_for_index(state);
+}
+
+fn submit_selector(state: &mut CoreState) {
+    if !state.selector_open {
+        return;
+    }
+    if state.selector_mode == SelectorMode::AddTag {
+        state.selector_open = false;
+        state.selector_mode = SelectorMode::List;
+        state.selector_add_tag_input.clear();
+        state.selector_selected_id = None;
+        return;
+    }
+    if selector_is_add_row(state) {
+        state.selector_mode = SelectorMode::AddTag;
+        state.selector_add_tag_input.clear();
+        state.selector_selected_id = None;
+        return;
+    }
+    if let Some(selected) = state.selector_items.get(state.selector_index).cloned() {
+        state.selector_selected_id = Some(selected.clone());
+        if state.selector_context == SelectorContext::InsertTag {
+            state.insert_tag = selected;
+        }
+    }
+    close_selector(state);
+}
+
+fn selector_is_add_row(state: &CoreState) -> bool {
+    selector_allows_add_tag(state) && state.selector_index == state.selector_items.len()
+}
+
+fn selector_allows_add_tag(state: &CoreState) -> bool {
+    matches!(
+        state.selector_context,
+        SelectorContext::InsertTag | SelectorContext::TagManagement
+    )
+}
+
+fn selector_selectable_len(state: &CoreState) -> usize {
+    state.selector_items.len() + usize::from(selector_allows_add_tag(state))
+}
+
+fn update_selector_selected_id_for_index(state: &mut CoreState) {
+    if selector_is_add_row(state) {
+        state.selector_selected_id = None;
+        return;
+    }
+    state.selector_selected_id = state.selector_items.get(state.selector_index).cloned();
 }
 
 #[cfg(test)]
@@ -1683,5 +1885,106 @@ mod tests {
 
         assert_eq!(state.insert_focus, InsertFormFocus::Text);
         assert_eq!(state.insert_mode, InsertMode::Normal);
+    }
+
+    #[test]
+    fn selector_move_next_can_land_on_add_row_for_tag_management() {
+        let mut state = CoreState {
+            selector_open: true,
+            selector_context: SelectorContext::TagManagement,
+            selector_items: vec!["docs".to_string()],
+            selector_index: 0,
+            selector_selected_id: Some("docs".to_string()),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::MoveSelectorNext);
+
+        assert_eq!(state.selector_index, 1);
+        assert_eq!(state.selector_selected_id, None);
+    }
+
+    #[test]
+    fn selector_move_next_tracks_item_selection_for_tag_management() {
+        let mut state = CoreState {
+            selector_open: true,
+            selector_context: SelectorContext::TagManagement,
+            selector_items: vec!["docs".to_string(), "research".to_string()],
+            selector_index: 0,
+            selector_selected_id: Some("docs".to_string()),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::MoveSelectorNext);
+
+        assert_eq!(state.selector_index, 1);
+        assert_eq!(state.selector_selected_id.as_deref(), Some("research"));
+    }
+
+    #[test]
+    fn selector_snapshot_keeps_add_row_selection_visible_after_refresh() {
+        let mut state = CoreState {
+            selector_open: true,
+            selector_context: SelectorContext::TagManagement,
+            selector_mode: SelectorMode::List,
+            selector_items: vec!["docs".to_string()],
+            selector_index: 1,
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            selector_items: vec!["docs".to_string()],
+            selector_labels: vec!["docs".to_string()],
+            selector_selected_id: Some("docs".to_string()),
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.selector_index, 1);
+    }
+
+    #[test]
+    fn selector_snapshot_keeps_insert_tag_add_row_selection_visible_after_refresh() {
+        let mut state = CoreState {
+            selector_open: true,
+            selector_context: SelectorContext::InsertTag,
+            selector_mode: SelectorMode::List,
+            selector_items: vec!["docs".to_string()],
+            selector_index: 1,
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            selector_items: vec!["docs".to_string()],
+            selector_labels: vec!["docs".to_string()],
+            selector_selected_id: Some("docs".to_string()),
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.selector_index, 1);
+    }
+
+    #[test]
+    fn selector_snapshot_uses_snapshot_default_memory_selection() {
+        let mut state = CoreState {
+            selector_open: true,
+            selector_context: SelectorContext::DefaultMemory,
+            selector_mode: SelectorMode::List,
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_selected_id: Some("aaaaa-aa".to_string()),
+            selector_index: 0,
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
+            selector_selected_id: Some("bbbbb-bb".to_string()),
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.selector_index, 1);
     }
 }

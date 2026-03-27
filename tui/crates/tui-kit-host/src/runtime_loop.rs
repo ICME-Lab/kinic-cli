@@ -10,7 +10,7 @@ use tui_kit_runtime::{
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
-    should_open_default_memory_picker,
+    should_open_default_memory_picker, should_open_saved_tags_picker,
 };
 
 use crate::{
@@ -135,13 +135,14 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .create_focus(state.create_focus)
                     .create_cost_state(&state.create_cost_state)
                     .settings_snapshot(Some(&state.settings))
-                    .default_memory_selector_open(state.default_memory_selector_open)
-                    .default_memory_selector_index(state.default_memory_selector_index)
-                    .default_memory_selector_items(&state.default_memory_selector_items)
-                    .default_memory_selector_labels(&state.default_memory_selector_labels)
-                    .default_memory_selector_selected_id(
-                        state.default_memory_selector_selected_id.as_deref(),
-                    )
+                    .selector_open(state.selector_open)
+                    .selector_context(state.selector_context)
+                    .selector_mode(state.selector_mode)
+                    .selector_index(state.selector_index)
+                    .selector_items(&state.selector_items)
+                    .selector_labels(&state.selector_labels)
+                    .selector_selected_id(state.selector_selected_id.as_deref())
+                    .selector_add_tag_input(&state.selector_add_tag_input)
                     .insert_mode(state.insert_mode)
                     .insert_memory_id(&state.insert_memory_id)
                     .insert_tag(&state.insert_tag)
@@ -314,7 +315,15 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 if code == crossterm::event::KeyCode::Enter
                     && should_open_default_memory_picker(&state)
                 {
-                    return Some(CoreAction::OpenDefaultMemoryPicker);
+                    return Some(CoreAction::OpenSelector(
+                        tui_kit_runtime::SelectorContext::DefaultMemory,
+                    ));
+                }
+                if code == crossterm::event::KeyCode::Enter && should_open_saved_tags_picker(&state)
+                {
+                    return Some(CoreAction::OpenSelector(
+                        tui_kit_runtime::SelectorContext::TagManagement,
+                    ));
                 }
                 action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
                     |a| {
@@ -408,8 +417,8 @@ fn handle_overlay_input<P: DataProvider>(
     code: crossterm::event::KeyCode,
     modifiers: crossterm::event::KeyModifiers,
 ) -> OverlayInputResult {
-    if state.default_memory_selector_open {
-        let Some(action) = selector_overlay_action(code, modifiers) else {
+    if state.selector_open {
+        let Some(action) = selector_overlay_action(state.selector_mode, code, modifiers) else {
             return OverlayInputResult::Consumed;
         };
         return match dispatch_action(provider, state, &action) {
@@ -426,15 +435,27 @@ fn handle_overlay_input<P: DataProvider>(
 }
 
 fn selector_overlay_action(
+    mode: tui_kit_runtime::SelectorMode,
     code: crossterm::event::KeyCode,
     _modifiers: crossterm::event::KeyModifiers,
 ) -> Option<CoreAction> {
-    match code {
-        crossterm::event::KeyCode::Esc => Some(CoreAction::CloseDefaultMemoryPicker),
-        crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitDefaultMemoryPicker),
-        crossterm::event::KeyCode::Down => Some(CoreAction::MoveDefaultMemoryPickerNext),
-        crossterm::event::KeyCode::Up => Some(CoreAction::MoveDefaultMemoryPickerPrev),
-        _ => None,
+    match mode {
+        tui_kit_runtime::SelectorMode::List => match code {
+            crossterm::event::KeyCode::Esc => Some(CoreAction::CloseSelector),
+            crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitSelector),
+            crossterm::event::KeyCode::Down => Some(CoreAction::MoveSelectorNext),
+            crossterm::event::KeyCode::Up => Some(CoreAction::MoveSelectorPrev),
+            _ => None,
+        },
+        tui_kit_runtime::SelectorMode::AddTag => match code {
+            crossterm::event::KeyCode::Esc => Some(CoreAction::CancelAddTag),
+            crossterm::event::KeyCode::Enter => Some(CoreAction::ConfirmAddTag),
+            crossterm::event::KeyCode::Backspace => Some(CoreAction::AddTagBackspace),
+            crossterm::event::KeyCode::Char(c) if !c.is_control() => {
+                Some(CoreAction::AddTagInput(c))
+            }
+            _ => None,
+        },
     }
 }
 
@@ -586,20 +607,23 @@ mod tests {
     fn selector_overlay_action_maps_arrow_keys_only() {
         assert_eq!(
             selector_overlay_action(
+                tui_kit_runtime::SelectorMode::List,
                 crossterm::event::KeyCode::Down,
                 crossterm::event::KeyModifiers::NONE
             ),
-            Some(CoreAction::MoveDefaultMemoryPickerNext)
+            Some(CoreAction::MoveSelectorNext)
         );
         assert_eq!(
             selector_overlay_action(
+                tui_kit_runtime::SelectorMode::List,
                 crossterm::event::KeyCode::Up,
                 crossterm::event::KeyModifiers::NONE
             ),
-            Some(CoreAction::MoveDefaultMemoryPickerPrev)
+            Some(CoreAction::MoveSelectorPrev)
         );
         assert_eq!(
             selector_overlay_action(
+                tui_kit_runtime::SelectorMode::List,
                 crossterm::event::KeyCode::Char('j'),
                 crossterm::event::KeyModifiers::NONE
             ),
@@ -627,7 +651,7 @@ mod tests {
     fn handle_overlay_input_consumes_unknown_selector_keys() {
         let mut provider = TestProvider;
         let mut state = CoreState {
-            default_memory_selector_open: true,
+            selector_open: true,
             ..CoreState::default()
         };
 

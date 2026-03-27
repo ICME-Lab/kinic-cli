@@ -7,10 +7,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
+use tui_kit_runtime::{
+    CreateModalFocus, CreateSubmitState, SelectorContext, SelectorMode, SettingsSnapshot,
+};
 
 use super::TuiKitUi;
-use super::screens::settings::{DefaultMemorySelectorLineKind, default_memory_selector_lines};
+use super::screens::settings::{SelectorLineKind, selector_lines};
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_create_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -200,18 +202,25 @@ impl<'a> TuiKitUi<'a> {
         help.render(help_area, buf);
     }
 
-    pub(super) fn render_default_memory_selector_overlay(&self, area: Rect, buf: &mut Buffer) {
-        if !self.default_memory_selector_open {
+    pub(super) fn render_selector_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.selector_open {
             return;
         }
 
-        let lines = default_memory_selector_lines(
-            self.default_memory_selector_items,
-            self.default_memory_selector_labels,
-            self.default_memory_selector_index,
-            self.default_memory_selector_selected_id,
+        if self.selector_mode == SelectorMode::AddTag {
+            self.render_selector_add_tag_overlay(area, buf);
+            return;
+        }
+
+        let lines = selector_lines(
+            self.selector_context,
+            self.selector_mode,
+            self.selector_items,
+            self.selector_labels,
+            self.selector_index,
+            self.selector_selected_id,
         );
-        let Some((w, h)) = fit_overlay_rect(area, 56, lines.len().saturating_add(2) as u16, 8)
+        let Some((w, h)) = fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
         else {
             return;
         };
@@ -223,22 +232,20 @@ impl<'a> TuiKitUi<'a> {
         };
         Clear.render(picker_area, buf);
 
-        let text = visible_default_memory_selector_lines(lines, h)
+        let text = visible_selector_lines(lines, h)
             .into_iter()
             .map(|(line, kind)| match kind {
-                DefaultMemorySelectorLineKind::Selected => {
+                SelectorLineKind::Selected => {
                     Line::from(Span::styled(line, self.theme.style_accent_bold()))
                 }
-                DefaultMemorySelectorLineKind::CurrentDefault => {
+                SelectorLineKind::CurrentDefault => {
                     Line::from(Span::styled(line, self.theme.style_accent()))
                 }
-                DefaultMemorySelectorLineKind::Hint => {
-                    Line::from(Span::styled(line, self.theme.style_muted()))
-                }
-                DefaultMemorySelectorLineKind::Normal => {
+                SelectorLineKind::Hint => Line::from(Span::styled(line, self.theme.style_muted())),
+                SelectorLineKind::Normal => {
                     Line::from(Span::styled(line, self.theme.style_normal()))
                 }
-                DefaultMemorySelectorLineKind::Title => {
+                SelectorLineKind::Title => {
                     Line::from(Span::styled(line, self.theme.style_accent_bold()))
                 }
             })
@@ -249,11 +256,50 @@ impl<'a> TuiKitUi<'a> {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(self.theme.style_border_focused())
-                    .title(" Select Default Memory ")
+                    .title(format!(" {} ", selector_title(self.selector_context)))
                     .style(Style::default().bg(self.theme.bg_panel)),
             )
             .wrap(Wrap { trim: false })
             .render(picker_area, buf);
+    }
+
+    fn render_selector_add_tag_overlay(&self, area: Rect, buf: &mut Buffer) {
+        let w = 52.min(area.width.saturating_sub(4));
+        let h = 9.min(area.height.saturating_sub(4));
+        let add_area = Rect {
+            x: area.x + (area.width - w) / 2,
+            y: area.y + (area.height - h) / 2,
+            width: w,
+            height: h,
+        };
+        Clear.render(add_area, buf);
+
+        let input = if self.selector_add_tag_input.is_empty() {
+            "<enter a new tag>".to_string()
+        } else {
+            self.selector_add_tag_input.to_string()
+        };
+        let lines = vec![
+            Line::from(Span::styled(" Add tag ", self.theme.style_accent_bold())),
+            Line::from(""),
+            Line::from(Span::styled(format!("  {input}"), self.theme.style_accent_bold())),
+            Line::from(""),
+            Line::from(Span::styled(
+                " Enter: save tag  Esc: return",
+                self.theme.style_muted(),
+            )),
+        ];
+
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(self.theme.style_border_focused())
+                    .title(" Add tag ")
+                    .style(Style::default().bg(self.theme.bg_panel)),
+            )
+            .wrap(Wrap { trim: false })
+            .render(add_area, buf);
     }
 }
 
@@ -278,10 +324,10 @@ fn fit_overlay_rect(
     Some((width, height))
 }
 
-fn visible_default_memory_selector_lines(
-    lines: Vec<(String, DefaultMemorySelectorLineKind)>,
+fn visible_selector_lines(
+    lines: Vec<(String, SelectorLineKind)>,
     overlay_height: u16,
-) -> Vec<(String, DefaultMemorySelectorLineKind)> {
+) -> Vec<(String, SelectorLineKind)> {
     let fixed_prefix_len = 2usize;
     let fixed_suffix_len = 2usize;
     if lines.len() <= fixed_prefix_len + fixed_suffix_len {
@@ -303,7 +349,7 @@ fn visible_default_memory_selector_lines(
 
     let selected_in_body = body
         .iter()
-        .position(|(_, kind)| *kind == DefaultMemorySelectorLineKind::Selected)
+        .position(|(_, kind)| *kind == SelectorLineKind::Selected)
         .unwrap_or(0);
     let max_start = body.len().saturating_sub(visible_body_len);
     let start = selected_in_body
@@ -316,6 +362,15 @@ fn visible_default_memory_selector_lines(
     visible.extend_from_slice(&body[start..end]);
     visible.extend_from_slice(&lines[body_end..]);
     visible
+}
+
+fn selector_title(context: SelectorContext) -> &'static str {
+    match context {
+        SelectorContext::DefaultMemory => "Select default memory",
+        SelectorContext::InsertTarget => "Select insert target",
+        SelectorContext::InsertTag => "Select insert tag",
+        SelectorContext::TagManagement => "Saved tags",
+    }
 }
 
 fn settings_overlay_lines(
@@ -344,6 +399,7 @@ fn settings_overlay_lines(
 mod tests {
     use super::*;
     use crate::ui::app::UiConfig;
+    use super::super::screens::settings::default_memory_selector_lines;
     use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
 
     #[test]
@@ -446,7 +502,7 @@ mod tests {
             Some("id-2"),
         );
 
-        let visible = visible_default_memory_selector_lines(lines, 8);
+        let visible = visible_selector_lines(lines, 8);
         let visible_lines = visible
             .iter()
             .map(|(line, _)| line.as_str())
@@ -471,7 +527,7 @@ mod tests {
             Some("id-9"),
         );
 
-        let visible = visible_default_memory_selector_lines(lines, 8);
+        let visible = visible_selector_lines(lines, 8);
         let joined = visible
             .iter()
             .map(|(line, _)| line.as_str())

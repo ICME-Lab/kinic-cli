@@ -34,7 +34,7 @@ impl<'a> TuiKitUi<'a> {
         if self.show_help
             || self.show_settings
             || self.show_create_modal
-            || self.default_memory_selector_open
+            || self.selector_open
         {
             return None;
         }
@@ -93,7 +93,7 @@ impl Widget for TuiKitUi<'_> {
         self.render_status(chunks[3], buf);
         self.render_create_overlay(area, buf);
         self.render_settings_overlay(area, buf);
-        self.render_default_memory_selector_overlay(area, buf);
+        self.render_selector_overlay(area, buf);
         self.render_help_overlay(area, buf);
     }
 }

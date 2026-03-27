@@ -5,7 +5,7 @@ use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
     CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode,
-    SettingsSnapshot,
+    SelectorContext, SelectorMode, SettingsSnapshot,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -205,32 +205,50 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn default_memory_selector_open(mut self, value: bool) -> Self {
-        self.default_memory_selector_open = value;
+    pub fn selector_open(mut self, value: bool) -> Self {
+        self.selector_open = value;
         self
     }
 
     #[must_use]
-    pub fn default_memory_selector_index(mut self, value: usize) -> Self {
-        self.default_memory_selector_index = value;
+    pub fn selector_context(mut self, value: SelectorContext) -> Self {
+        self.selector_context = value;
         self
     }
 
     #[must_use]
-    pub fn default_memory_selector_items(mut self, value: &'a [String]) -> Self {
-        self.default_memory_selector_items = value;
+    pub fn selector_mode(mut self, value: SelectorMode) -> Self {
+        self.selector_mode = value;
         self
     }
 
     #[must_use]
-    pub fn default_memory_selector_labels(mut self, value: &'a [String]) -> Self {
-        self.default_memory_selector_labels = value;
+    pub fn selector_index(mut self, value: usize) -> Self {
+        self.selector_index = value;
         self
     }
 
     #[must_use]
-    pub fn default_memory_selector_selected_id(mut self, value: Option<&'a str>) -> Self {
-        self.default_memory_selector_selected_id = value;
+    pub fn selector_items(mut self, value: &'a [String]) -> Self {
+        self.selector_items = value;
+        self
+    }
+
+    #[must_use]
+    pub fn selector_labels(mut self, value: &'a [String]) -> Self {
+        self.selector_labels = value;
+        self
+    }
+
+    #[must_use]
+    pub fn selector_selected_id(mut self, value: Option<&'a str>) -> Self {
+        self.selector_selected_id = value;
+        self
+    }
+
+    #[must_use]
+    pub fn selector_add_tag_input(mut self, value: &'a str) -> Self {
+        self.selector_add_tag_input = value;
         self
     }
 

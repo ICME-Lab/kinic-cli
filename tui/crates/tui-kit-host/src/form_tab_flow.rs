@@ -2,7 +2,7 @@
 
 use crossterm::event::KeyCode;
 use tui_kit_runtime::{
-    CoreAction, CoreState, CreateModalFocus, InsertFormFocus, PaneFocus,
+    CoreAction, CoreState, CreateModalFocus, InsertFormFocus, PaneFocus, SelectorContext,
     kinic_tabs::{is_form_tab, is_kinic_create_tab, is_kinic_insert_tab},
 };
 
@@ -33,18 +33,18 @@ pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<
         KeyCode::Backspace => Some(CoreAction::InsertBackspace),
         KeyCode::Enter => match state.insert_focus {
             InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
+            InsertFormFocus::Tag => Some(CoreAction::OpenSelector(SelectorContext::InsertTag)),
             InsertFormFocus::Submit => Some(CoreAction::InsertSubmit),
             _ => None,
         },
         KeyCode::Char(c) if !c.is_control() => match state.insert_focus {
             InsertFormFocus::MemoryId
-            | InsertFormFocus::Tag
             | InsertFormFocus::Text
             | InsertFormFocus::FilePath
             | InsertFormFocus::Embedding => {
                 Some(CoreAction::InsertInput(c))
             }
-            InsertFormFocus::Mode | InsertFormFocus::Submit => None,
+            InsertFormFocus::Mode | InsertFormFocus::Submit | InsertFormFocus::Tag => None,
         },
         _ => None,
     }
@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_form_routes_chars_into_active_field() {
+    fn insert_tag_field_uses_selector_instead_of_free_input() {
         let mut state = CoreState {
             current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
             focus: PaneFocus::Form,
@@ -141,7 +141,24 @@ mod tests {
 
         let action = form_tab_action_from_key(KeyCode::Char('x'), &mut state);
 
-        assert_eq!(action, Some(CoreAction::InsertInput('x')));
+        assert_eq!(action, None);
+    }
+
+    #[test]
+    fn insert_tag_field_opens_selector_on_enter() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            insert_focus: InsertFormFocus::Tag,
+            ..CoreState::default()
+        };
+
+        let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+        assert_eq!(
+            action,
+            Some(CoreAction::OpenSelector(SelectorContext::InsertTag))
+        );
     }
 
     #[test]
