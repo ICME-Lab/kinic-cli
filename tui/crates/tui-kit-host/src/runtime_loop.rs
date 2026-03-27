@@ -7,7 +7,10 @@ use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, apply_snapshot, dispatch_action,
-    kinic_tabs::{KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, TabKind, tab_kind},
+    kinic_tabs::{
+        KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
+    },
+    should_open_default_memory_picker,
 };
 
 use crate::{
@@ -43,6 +46,13 @@ pub trait RuntimeLoopHooks<P: DataProvider> {
 pub struct NoopRuntimeHooks;
 
 impl<P: DataProvider> RuntimeLoopHooks<P> for NoopRuntimeHooks {}
+
+enum OverlayInputResult {
+    NotHandled,
+    Consumed,
+    CloseSettings,
+    ApplyEffects(Vec<CoreEffect>),
+}
 
 pub fn run_provider_app<P: DataProvider>(
     provider: &mut P,
@@ -106,7 +116,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 let ui = TuiKitUi::new(&theme)
                     .ui_config((cfg.ui_config)())
                     .ui_summaries(&state.list_items)
-                    .ui_selected_detail(state.selected_detail.as_ref())
+                    .ui_selected_content(state.selected_content.as_ref())
                     .ui_total_count(state.total_count)
                     .list_selected(state.selected_index)
                     .list_scroll(list_scroll_offset)
@@ -124,6 +134,13 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .create_error(state.create_error.as_deref())
                     .create_focus(state.create_focus)
                     .create_cost_state(&state.create_cost_state)
+                    .settings_snapshot(Some(&state.settings))
+                    .default_memory_selector_open(state.default_memory_selector_open)
+                    .default_memory_selector_index(state.default_memory_selector_index)
+                    .default_memory_selector_items(&state.default_memory_selector_items)
+                    .default_memory_selector_selected_id(
+                        state.default_memory_selector_selected_id.as_deref(),
+                    )
                     .show_completion(false)
                     .context_details_loading(false)
                     .context_details_failed(false)
@@ -158,6 +175,20 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 continue;
             };
 
+            match handle_overlay_input(provider, &mut state, show_settings, code, modifiers) {
+                OverlayInputResult::NotHandled => {}
+                OverlayInputResult::Consumed => continue,
+                OverlayInputResult::CloseSettings => {
+                    show_settings = false;
+                    continue;
+                }
+                OverlayInputResult::ApplyEffects(effects) => {
+                    hooks.on_effects(provider, &mut state, &effects);
+                    execute_effects_to_status(&mut state, effects);
+                    continue;
+                }
+            }
+
             match global_command_for_key(
                 code,
                 modifiers,
@@ -183,6 +214,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         hooks.on_effects(provider, &mut state, &effects);
                         execute_effects_to_status(&mut state, effects);
                     }
+                    continue;
+                }
+                HostGlobalCommand::BackToTabs => {
+                    state.focus = PaneFocus::Tabs;
                     continue;
                 }
                 HostGlobalCommand::BackFromFormToTabs => {
@@ -219,11 +254,28 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     continue;
                 }
                 HostGlobalCommand::ToggleSettings => {
+                    if let Ok(effects) =
+                        dispatch_action(provider, &mut state, &CoreAction::ToggleSettings)
+                    {
+                        hooks.on_effects(provider, &mut state, &effects);
+                        execute_effects_to_status(&mut state, effects);
+                    }
                     show_settings = true;
                     continue;
                 }
-                HostGlobalCommand::BackFromDetail => {
-                    state.focus = PaneFocus::List;
+                HostGlobalCommand::SetDefaultFromSelection => {
+                    if let Ok(effects) = dispatch_action(
+                        provider,
+                        &mut state,
+                        &CoreAction::SetDefaultMemoryFromSelection,
+                    ) {
+                        hooks.on_effects(provider, &mut state, &effects);
+                        execute_effects_to_status(&mut state, effects);
+                    }
+                    continue;
+                }
+                HostGlobalCommand::BackFromContent => {
+                    state.focus = PaneFocus::Items;
                     continue;
                 }
                 HostGlobalCommand::RefreshCurrentView => {
@@ -248,6 +300,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             }
 
             let action = form_tab_action_from_key(code, &mut state).or_else(|| {
+                if code == crossterm::event::KeyCode::Enter
+                    && should_open_default_memory_picker(&state)
+                {
+                    return Some(CoreAction::OpenDefaultMemoryPicker);
+                }
                 action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
                     |a| {
                         resolve_tab_action_with_current(
@@ -262,21 +319,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 
             if let Some(action) = action {
                 handled = true;
-                if matches!(
-                    action,
-                    CoreAction::MovePageDown | CoreAction::MovePageUp | CoreAction::MoveHome
-                ) && state.focus == PaneFocus::Detail
+                if state.focus == PaneFocus::Content
+                    && state.current_tab_id != KINIC_SETTINGS_TAB_ID
+                    && apply_content_scroll_action(&action, &mut inspector_scroll)
                 {
-                    match action {
-                        CoreAction::MovePageDown => {
-                            inspector_scroll = inspector_scroll.saturating_add(10)
-                        }
-                        CoreAction::MovePageUp => {
-                            inspector_scroll = inspector_scroll.saturating_sub(10)
-                        }
-                        CoreAction::MoveHome => inspector_scroll = 0,
-                        _ => {}
-                    }
                     continue;
                 }
 
@@ -327,11 +373,48 @@ fn normalize_focus_after_set_tab(state: &mut CoreState) {
 fn ui_focus_from_pane(focus: PaneFocus) -> Focus {
     match focus {
         PaneFocus::Search => Focus::Search,
-        PaneFocus::List => Focus::List,
+        PaneFocus::Items => Focus::Items,
         PaneFocus::Tabs => Focus::Tabs,
-        PaneFocus::Detail => Focus::Inspector,
+        PaneFocus::Content => Focus::Content,
         PaneFocus::Form => Focus::Form,
         PaneFocus::Extra => Focus::Chat,
+    }
+}
+
+fn handle_overlay_input<P: DataProvider>(
+    provider: &mut P,
+    state: &mut CoreState,
+    show_settings: bool,
+    code: crossterm::event::KeyCode,
+    modifiers: crossterm::event::KeyModifiers,
+) -> OverlayInputResult {
+    if state.default_memory_selector_open {
+        let Some(action) = selector_overlay_action(code, modifiers) else {
+            return OverlayInputResult::Consumed;
+        };
+        return match dispatch_action(provider, state, &action) {
+            Ok(effects) => OverlayInputResult::ApplyEffects(effects),
+            Err(_) => OverlayInputResult::Consumed,
+        };
+    }
+
+    if show_settings && matches!(code, crossterm::event::KeyCode::Esc) {
+        return OverlayInputResult::CloseSettings;
+    }
+
+    OverlayInputResult::NotHandled
+}
+
+fn selector_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Esc => Some(CoreAction::CloseDefaultMemoryPicker),
+        crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitDefaultMemoryPicker),
+        crossterm::event::KeyCode::Down => Some(CoreAction::MoveDefaultMemoryPickerNext),
+        crossterm::event::KeyCode::Up => Some(CoreAction::MoveDefaultMemoryPickerPrev),
+        _ => None,
     }
 }
 
@@ -377,6 +460,28 @@ fn keep_selection_visible_scroll(
     offset.min(max_offset)
 }
 
+fn apply_content_scroll_action(action: &CoreAction, inspector_scroll: &mut usize) -> bool {
+    match action {
+        CoreAction::ScrollContentPageDown => {
+            *inspector_scroll = inspector_scroll.saturating_add(10);
+            true
+        }
+        CoreAction::ScrollContentPageUp => {
+            *inspector_scroll = inspector_scroll.saturating_sub(10);
+            true
+        }
+        CoreAction::ScrollContentHome => {
+            *inspector_scroll = 0;
+            true
+        }
+        CoreAction::ScrollContentEnd => {
+            *inspector_scroll = inspector_scroll.saturating_add(9999);
+            true
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,7 +493,7 @@ mod tests {
     fn normalize_focus_keeps_memories_on_tabs_after_tab_switch() {
         let mut state = CoreState {
             current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
-            focus: PaneFocus::List,
+            focus: PaneFocus::Items,
             ..CoreState::default()
         };
 
@@ -401,7 +506,7 @@ mod tests {
     fn normalize_focus_resets_create_tab_to_tabs_and_name_field() {
         let mut state = CoreState {
             current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
-            focus: PaneFocus::Detail,
+            focus: PaneFocus::Content,
             create_focus: tui_kit_runtime::CreateModalFocus::Submit,
             ..CoreState::default()
         };
@@ -416,12 +521,54 @@ mod tests {
     fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
         let mut state = CoreState {
             current_tab_id: KINIC_MARKET_TAB_ID.to_string(),
-            focus: PaneFocus::Detail,
+            focus: PaneFocus::Content,
             ..CoreState::default()
         };
 
         normalize_focus_after_set_tab(&mut state);
 
         assert_eq!(state.focus, PaneFocus::Tabs);
+    }
+
+    #[test]
+    fn selector_overlay_action_maps_arrow_keys_only() {
+        assert_eq!(
+            selector_overlay_action(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE
+            ),
+            Some(CoreAction::MoveDefaultMemoryPickerNext)
+        );
+        assert_eq!(
+            selector_overlay_action(
+                crossterm::event::KeyCode::Up,
+                crossterm::event::KeyModifiers::NONE
+            ),
+            Some(CoreAction::MoveDefaultMemoryPickerPrev)
+        );
+        assert_eq!(
+            selector_overlay_action(
+                crossterm::event::KeyCode::Char('j'),
+                crossterm::event::KeyModifiers::NONE
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn content_scroll_helper_handles_scroll_end_only() {
+        let mut inspector_scroll = 3usize;
+
+        assert!(apply_content_scroll_action(
+            &CoreAction::ScrollContentEnd,
+            &mut inspector_scroll
+        ));
+        assert_eq!(inspector_scroll, 10002);
+
+        assert!(!apply_content_scroll_action(
+            &CoreAction::MoveEnd,
+            &mut inspector_scroll
+        ));
+        assert_eq!(inspector_scroll, 10002);
     }
 }

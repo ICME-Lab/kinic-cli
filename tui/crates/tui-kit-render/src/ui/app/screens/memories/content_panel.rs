@@ -1,13 +1,13 @@
-//! Detail and context-detail panel for the memories screen.
+//! Content and context-content panel for the memories screen.
 
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use crate::ui::app::{Focus, TuiKitUi};
+use crate::ui::content::ContentPanel;
 use crate::ui::context_view::{self, ContextView};
-use crate::ui::inspector::InspectorPanel;
 
 impl<'a> TuiKitUi<'a> {
-    pub(super) fn render_detail_panel(&self, area: Rect, buf: &mut Buffer) {
+    pub(super) fn render_content_panel(&self, area: Rect, buf: &mut Buffer) {
         if self.show_context_panel {
             let selected_context_name = self
                 .list_selected
@@ -30,16 +30,16 @@ impl<'a> TuiKitUi<'a> {
 
             let context_view = ContextView::new(self.theme)
                 .ui_node(self.ui_context_node)
-                .focused(self.focus == Focus::Inspector)
+                .focused(self.focus == Focus::Content)
                 .scroll(self.inspector_scroll);
             context_view.render(area, buf);
             return;
         }
 
-        let inspector = InspectorPanel::new(self.theme)
-            .ui_detail(self.ui_selected_detail)
-            .focused(self.focus == Focus::Inspector)
+        let content = ContentPanel::new(self.theme)
+            .ui_content(self.ui_selected_content)
+            .focused(self.focus == Focus::Content)
             .scroll(self.inspector_scroll);
-        inspector.render(area, buf);
+        content.render(area, buf);
     }
 }

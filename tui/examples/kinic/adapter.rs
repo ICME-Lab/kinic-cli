@@ -7,6 +7,7 @@ pub fn to_summary(record: &KinicRecord) -> UiItemSummary {
     UiItemSummary {
         id: record.id.clone(),
         name: record.title.clone(),
+        leading_marker: None,
         kind: UiItemKind::Custom("entry".to_string()),
         visibility: UiVisibility::Public,
         qualified_name: Some(format!("kinic::{}", record.group)),

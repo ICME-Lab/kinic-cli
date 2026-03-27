@@ -1,4 +1,4 @@
-//! Inspector panel for displaying generic UI item details.
+//! Content panel for displaying generic UI item content.
 
 use ratatui::{
     buffer::Buffer,
@@ -11,29 +11,29 @@ use ratatui::{
     },
 };
 
-use crate::ui::model::UiItemDetail;
+use crate::ui::model::UiItemContent;
 use crate::ui::theme::Theme;
 
-/// Panel for inspecting item details with scrolling support.
-pub struct InspectorPanel<'a> {
-    detail: Option<&'a UiItemDetail>,
+/// Panel for rendering item content with scrolling support.
+pub struct ContentPanel<'a> {
+    content: Option<&'a UiItemContent>,
     theme: &'a Theme,
     focused: bool,
     scroll_offset: usize,
 }
 
-impl<'a> InspectorPanel<'a> {
+impl<'a> ContentPanel<'a> {
     pub fn new(theme: &'a Theme) -> Self {
         Self {
-            detail: None,
+            content: None,
             theme,
             focused: false,
             scroll_offset: 0,
         }
     }
 
-    pub fn ui_detail(mut self, detail: Option<&'a UiItemDetail>) -> Self {
-        self.detail = detail;
+    pub fn ui_content(mut self, content: Option<&'a UiItemContent>) -> Self {
+        self.content = content;
         self
     }
 
@@ -80,19 +80,19 @@ impl<'a> InspectorPanel<'a> {
             Line::from(""),
             Line::from(Span::styled("  No item selected", self.theme.style_muted())),
             Line::from(""),
-            Line::from("  Select an item from the list to view details."),
+            Line::from("  Select an item from Items to view content."),
             Line::from(""),
             self.section_header("Navigation"),
             Line::from(""),
             Line::from(vec![
                 Span::raw("  "),
-                Span::styled("↑/↓ j/k", self.theme.style_accent()),
-                Span::raw("  Navigate list"),
+                Span::styled("↑/↓", self.theme.style_accent()),
+                Span::raw("  Navigate items"),
             ]),
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled("Enter/→", self.theme.style_accent()),
-                Span::raw("  Focus inspector"),
+                Span::raw("  Focus content"),
             ]),
             Line::from(vec![
                 Span::raw("  "),
@@ -106,16 +106,16 @@ impl<'a> InspectorPanel<'a> {
             .render(inner, buf);
     }
 
-    fn render_detail(&self, detail: &UiItemDetail, area: Rect, buf: &mut Buffer) {
+    fn render_content(&self, content: &UiItemContent, area: Rect, buf: &mut Buffer) {
         let mut title_spans = Vec::new();
-        if !detail.kind.label().is_empty() {
+        if !content.kind.label().is_empty() {
             title_spans.push(Span::styled(
-                format!("{} ", detail.kind.label()),
+                format!("{} ", content.kind.label()),
                 self.theme.style_keyword().add_modifier(Modifier::BOLD),
             ));
         }
         title_spans.push(Span::styled(
-            detail.title.clone(),
+            content.title.clone(),
             self.theme
                 .style_accent_bold()
                 .add_modifier(Modifier::UNDERLINED),
@@ -123,17 +123,17 @@ impl<'a> InspectorPanel<'a> {
 
         let mut lines = vec![Line::from(title_spans)];
 
-        if !detail.definition.trim().is_empty() {
+        if !content.definition.trim().is_empty() {
             lines.push(Line::from(""));
             lines.push(self.section_header("Definition"));
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(detail.definition.clone(), self.theme.style_type()),
+                Span::styled(content.definition.clone(), self.theme.style_type()),
             ]));
         }
 
-        if let Some(loc) = &detail.location {
+        if let Some(loc) = &content.location {
             lines.push(Line::from(""));
             lines.push(self.section_header("Source"));
             lines.push(Line::from(""));
@@ -152,17 +152,17 @@ impl<'a> InspectorPanel<'a> {
             }
         }
 
-        if !detail.badges.is_empty() {
+        if !content.badges.is_empty() {
             lines.push(Line::from(""));
             lines.push(self.section_header("Badges"));
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(detail.badges.join(", "), self.theme.style_keyword()),
+                Span::styled(content.badges.join(", "), self.theme.style_keyword()),
             ]));
         }
 
-        for section in &detail.sections {
+        for section in &content.sections {
             lines.push(Line::from(""));
             lines.push(self.section_header(&section.heading));
             lines.push(Line::from(""));
@@ -214,10 +214,10 @@ impl<'a> InspectorPanel<'a> {
     }
 }
 
-impl Widget for InspectorPanel<'_> {
+impl Widget for ContentPanel<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        match self.detail {
-            Some(detail) => self.render_detail(detail, area, buf),
+        match self.content {
+            Some(content) => self.render_content(content, area, buf),
             None => self.render_empty(area, buf),
         }
     }

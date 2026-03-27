@@ -1,11 +1,12 @@
 use super::provider::KinicRecord;
 use serde_json::Value;
-use tui_kit_model::{UiItemDetail, UiItemKind, UiItemSummary, UiRow, UiSection, UiVisibility};
+use tui_kit_model::{UiItemContent, UiItemKind, UiItemSummary, UiRow, UiSection, UiVisibility};
 
 pub fn to_summary(record: &KinicRecord) -> UiItemSummary {
     UiItemSummary {
         id: record.id.clone(),
         name: record.title.clone(),
+        leading_marker: None,
         kind: summary_kind(record),
         visibility: UiVisibility::Public,
         qualified_name: Some(format!("kinic::{}", record.group)),
@@ -14,11 +15,11 @@ pub fn to_summary(record: &KinicRecord) -> UiItemSummary {
     }
 }
 
-pub fn to_detail(record: &KinicRecord) -> UiItemDetail {
+pub fn to_content(record: &KinicRecord) -> UiItemContent {
     match record.group.as_str() {
-        "search-result" => search_result_detail(record),
-        "memories" => memory_detail(record),
-        _ => generic_detail(record),
+        "search-result" => search_result_content(record),
+        "memories" => memory_content(record),
+        _ => generic_content(record),
     }
 }
 
@@ -30,8 +31,8 @@ fn summary_kind(record: &KinicRecord) -> UiItemKind {
     }
 }
 
-fn generic_detail(record: &KinicRecord) -> UiItemDetail {
-    UiItemDetail {
+fn generic_content(record: &KinicRecord) -> UiItemContent {
+    UiItemContent {
         id: record.id.clone(),
         title: record.title.clone(),
         kind: summary_kind(record),
@@ -57,11 +58,11 @@ fn generic_detail(record: &KinicRecord) -> UiItemDetail {
     }
 }
 
-fn memory_detail(record: &KinicRecord) -> UiItemDetail {
-    let detail_text = section_body(&record.content_md, "### Detail");
+fn memory_content(record: &KinicRecord) -> UiItemContent {
+    let content_text = section_body(&record.content_md, "### Content");
     let guidance = section_body(&record.content_md, "### Search");
 
-    UiItemDetail {
+    UiItemContent {
         id: record.id.clone(),
         title: format!("Memory {}", short_id(&record.id)),
         kind: summary_kind(record),
@@ -87,12 +88,12 @@ fn memory_detail(record: &KinicRecord) -> UiItemDetail {
                 ],
             },
             UiSection {
-                heading: "Detail".to_string(),
+                heading: "Content".to_string(),
                 rows: vec![],
-                body_lines: if detail_text.is_empty() {
-                    vec!["No additional detail available.".to_string()]
+                body_lines: if content_text.is_empty() {
+                    vec!["No additional content available.".to_string()]
                 } else {
-                    detail_text
+                    content_text
                 },
             },
             UiSection {
@@ -112,7 +113,7 @@ fn memory_detail(record: &KinicRecord) -> UiItemDetail {
     }
 }
 
-fn search_result_detail(record: &KinicRecord) -> UiItemDetail {
+fn search_result_content(record: &KinicRecord) -> UiItemContent {
     let memory_id = row_value(&record.content_md, "- Memory:");
     let score = row_value(&record.content_md, "- Score:");
     let tag = row_value(&record.content_md, "- Tag:");
@@ -120,7 +121,7 @@ fn search_result_detail(record: &KinicRecord) -> UiItemDetail {
     let raw_payload = section_body(&record.content_md, "### Raw Payload").join("\n");
     let pretty_payload = pretty_payload(&raw_payload);
 
-    UiItemDetail {
+    UiItemContent {
         id: record.id.clone(),
         title: record.title.clone(),
         kind: summary_kind(record),

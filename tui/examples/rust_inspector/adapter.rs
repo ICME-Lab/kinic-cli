@@ -5,7 +5,7 @@ use crate::domain_rust::analyzer::{
 };
 use crate::domain_rust::crates_io::CrateDocInfo;
 use tui_kit_model::{
-    UiContextNode, UiItemDetail, UiItemKind, UiItemSummary, UiRow, UiSection, UiSourceLocation,
+    UiContextNode, UiItemContent, UiItemKind, UiItemSummary, UiRow, UiSection, UiSourceLocation,
     UiVisibility,
 };
 
@@ -14,6 +14,7 @@ pub fn item_to_summary(item: &AnalyzedItem) -> UiItemSummary {
     UiItemSummary {
         id: item.qualified_name(),
         name: item.name().to_string(),
+        leading_marker: None,
         kind: map_item_kind(item),
         visibility: map_visibility(item.visibility()),
         qualified_name: Some(item.qualified_name()),
@@ -22,8 +23,8 @@ pub fn item_to_summary(item: &AnalyzedItem) -> UiItemSummary {
     }
 }
 
-/// Convert an analyzer item into a detail payload for inspector-like views.
-pub fn item_to_detail(item: &AnalyzedItem) -> UiItemDetail {
+/// Convert an analyzer item into a content payload for content-pane views.
+pub fn item_to_content(item: &AnalyzedItem) -> UiItemContent {
     let docs = item.documentation().map(ToString::to_string);
     let mut sections = vec![UiSection {
         heading: "Overview".to_string(),
@@ -56,7 +57,7 @@ pub fn item_to_detail(item: &AnalyzedItem) -> UiItemDetail {
         });
     }
 
-    UiItemDetail {
+    UiItemContent {
         id: item.qualified_name(),
         title: item.name().to_string(),
         kind: map_item_kind(item),

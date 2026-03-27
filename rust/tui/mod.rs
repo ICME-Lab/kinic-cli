@@ -18,6 +18,8 @@ mod adapter;
 mod bridge;
 #[path = "../../tui/src/provider.rs"]
 mod provider;
+#[path = "../../tui/src/settings.rs"]
+mod settings;
 #[path = "../../tui/src/ui_config.rs"]
 mod ui_config;
 
@@ -59,7 +61,7 @@ impl TuiAuth {
         !matches!(self, Self::Mock)
     }
 
-    pub(crate) fn agent_factory(&self, use_mainnet: bool) -> Result<crate::agent::AgentFactory> {
+    fn resolved_identity(&self) -> Result<Arc<dyn Identity>> {
         match self {
             Self::Mock => anyhow::bail!("mock auth cannot be used for live TUI operations"),
             Self::DeferredIdentity {
@@ -72,26 +74,31 @@ impl TuiAuth {
                     .as_ref()
                     .cloned()
                 {
-                    return Ok(crate::agent::AgentFactory::new_with_arc_identity(
-                        use_mainnet,
-                        identity,
-                    ));
+                    return Ok(identity);
                 }
 
                 let identity = load_identity_from_keyring(identity_name)?;
                 let mut cached = cached_identity
                     .lock()
                     .map_err(|_| anyhow!("cached identity mutex poisoned"))?;
-                let resolved = cached.get_or_insert_with(|| identity.clone()).clone();
-                Ok(crate::agent::AgentFactory::new_with_arc_identity(
-                    use_mainnet,
-                    resolved,
-                ))
+                Ok(cached.get_or_insert_with(|| identity.clone()).clone())
             }
-            Self::ResolvedIdentity(identity) => Ok(
-                crate::agent::AgentFactory::new_with_arc_identity(use_mainnet, identity.clone()),
-            ),
+            Self::ResolvedIdentity(identity) => Ok(identity.clone()),
         }
+    }
+
+    pub(crate) fn principal_text(&self) -> Result<String> {
+        self.resolved_identity()?
+            .sender()
+            .map(|principal| principal.to_text())
+            .map_err(anyhow::Error::msg)
+    }
+
+    pub(crate) fn agent_factory(&self, use_mainnet: bool) -> Result<crate::agent::AgentFactory> {
+        Ok(crate::agent::AgentFactory::new_with_arc_identity(
+            use_mainnet,
+            self.resolved_identity()?,
+        ))
     }
 
     #[cfg(test)]
@@ -214,6 +221,15 @@ mod tests {
 
         assert!(matches!(config.auth, TuiAuth::Mock));
         assert!(!config.use_mainnet);
+    }
+
+    #[test]
+    fn resolved_auth_principal_text_uses_identity_sender() {
+        let auth = TuiAuth::resolved_for_tests();
+
+        let principal = auth.principal_text().unwrap();
+
+        assert_eq!(principal, "2vxsx-fae");
     }
 
     #[test]

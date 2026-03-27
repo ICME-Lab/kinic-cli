@@ -120,11 +120,11 @@ impl MailProvider {
             .collect::<Vec<_>>();
 
         let sel = state.selected_index.unwrap_or(0);
-        let selected_detail = filtered.get(sel).map(|m| adapter::to_detail(m));
+        let selected_content = filtered.get(sel).map(|m| adapter::to_detail(m));
 
         ProviderSnapshot {
             items,
-            selected_detail,
+            selected_content,
             selected_context: None,
             total_count: self.all.len(),
             status_message: Some(format!(

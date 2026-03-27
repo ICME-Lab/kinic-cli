@@ -5,6 +5,7 @@ pub fn to_summary(record: &TaskRecord) -> UiItemSummary {
     UiItemSummary {
         id: record.id.clone(),
         name: record.title.clone(),
+        leading_marker: None,
         kind: UiItemKind::Custom("task".to_string()),
         visibility: UiVisibility::Private,
         qualified_name: Some(record.project.clone()),

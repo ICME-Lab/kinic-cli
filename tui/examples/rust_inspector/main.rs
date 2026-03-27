@@ -120,7 +120,7 @@ fn run_app(terminal: &mut HostTerminal, app: &mut App) -> Result<()> {
                 .filtered_context_indices(render_context.filtered_context_indices)
                 .context_details_loading(render_context.context_details_loading)
                 .context_details_failed(render_context.context_details_failed)
-                .ui_selected_detail(app.ui_selected_detail.as_ref())
+                .ui_selected_content(app.ui_selected_content.as_ref())
                 .ui_context_node(render_context.ui_context_node)
                 .target_size_bytes(app.target_size_bytes)
                 .search_input(&app.search_input)

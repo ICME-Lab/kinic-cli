@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let items = vec![UiItemSummary {
         id: "example:item:1".to_string(),
         name: "Inbox Item".to_string(),
+        leading_marker: None,
         kind: UiItemKind::Custom("mail".to_string()),
         visibility: UiVisibility::Private,
         qualified_name: None,

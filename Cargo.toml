@@ -41,6 +41,9 @@ tui-kit-runtime = { path = "tui/crates/tui-kit-runtime" }
 tui-kit-model = { path = "tui/crates/tui-kit-model" }
 tui-kit-render = { path = "tui/crates/tui-kit-render" }
 
+[dev-dependencies]
+serde_yaml = "0.9"
+
 [features]
 default = []
 python-bindings = ["pyo3"]

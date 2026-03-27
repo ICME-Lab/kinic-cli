@@ -3,8 +3,8 @@
 pub mod animation;
 pub mod app;
 pub mod components;
+pub mod content;
 pub mod context_view;
-pub mod inspector;
 pub mod model;
 pub mod search;
 pub mod splash;
@@ -15,10 +15,10 @@ pub use app::{
     BrandingText, ChatPanelText, Focus, HeaderText, TabId, TabSpec, TuiKitUi, UiConfig,
     tabs_rect_for_area,
 };
+pub use content::ContentPanel;
 pub use context_view::ContextView;
-pub use inspector::InspectorPanel;
 pub use model::{
-    UiContextNode, UiItemDetail, UiItemKind, UiItemSummary, UiRow, UiSection, UiSourceLocation,
+    UiContextNode, UiItemContent, UiItemKind, UiItemSummary, UiRow, UiSection, UiSourceLocation,
     UiVisibility,
 };
 pub use search::{

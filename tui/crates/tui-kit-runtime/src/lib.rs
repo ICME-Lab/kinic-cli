@@ -5,7 +5,9 @@
 
 pub mod kinic_tabs;
 
-use tui_kit_model::{UiContextNode, UiItemDetail, UiItemSummary};
+use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
+
+pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
 
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -37,9 +39,9 @@ impl std::error::Error for CoreError {}
 pub enum PaneFocus {
     #[default]
     Search,
-    List,
+    Items,
     Tabs,
-    Detail,
+    Content,
     Form,
     Extra,
 }
@@ -48,9 +50,9 @@ pub enum PaneFocus {
 pub struct TabFocusPolicy {
     pub default_focus: PaneFocus,
     pub allows_search: bool,
-    pub allows_list: bool,
+    pub allows_items: bool,
     pub allows_tabs: bool,
-    pub allows_detail: bool,
+    pub allows_content: bool,
     pub allows_form: bool,
     pub allows_chat: bool,
 }
@@ -60,18 +62,18 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
         kinic_tabs::TabKind::Memories | kinic_tabs::TabKind::Unknown => TabFocusPolicy {
             default_focus: PaneFocus::Search,
             allows_search: true,
-            allows_list: true,
+            allows_items: true,
             allows_tabs: true,
-            allows_detail: true,
+            allows_content: true,
             allows_form: false,
             allows_chat: true,
         },
         kinic_tabs::TabKind::Form => TabFocusPolicy {
             default_focus: PaneFocus::Tabs,
             allows_search: false,
-            allows_list: false,
+            allows_items: false,
             allows_tabs: true,
-            allows_detail: false,
+            allows_content: false,
             allows_form: true,
             allows_chat: true,
         },
@@ -79,9 +81,9 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
             TabFocusPolicy {
                 default_focus: PaneFocus::Tabs,
                 allows_search: false,
-                allows_list: false,
+                allows_items: false,
                 allows_tabs: true,
-                allows_detail: true,
+                allows_content: true,
                 allows_form: false,
                 allows_chat: true,
             }
@@ -91,11 +93,11 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
 
 pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
     match kinic_tabs::tab_kind(tab_id) {
-        kinic_tabs::TabKind::Memories => Some(PaneFocus::List),
+        kinic_tabs::TabKind::Memories => Some(PaneFocus::Search),
         kinic_tabs::TabKind::Form => Some(PaneFocus::Form),
         kinic_tabs::TabKind::PlaceholderMarket
         | kinic_tabs::TabKind::PlaceholderSettings
-        | kinic_tabs::TabKind::Unknown => Some(PaneFocus::Detail),
+        | kinic_tabs::TabKind::Unknown => Some(PaneFocus::Content),
     }
 }
 
@@ -139,6 +141,27 @@ pub struct CreateCostDetails {
     pub sufficient_balance: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsEntry {
+    pub id: String,
+    pub label: String,
+    pub value: String,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsSection {
+    pub title: String,
+    pub entries: Vec<SettingsEntry>,
+    pub footer: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsSnapshot {
+    pub quick_entries: Vec<SettingsEntry>,
+    pub sections: Vec<SettingsSection>,
+}
+
 /// Domain-agnostic runtime state owned by the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoreState {
@@ -147,7 +170,7 @@ pub struct CoreState {
     pub query: String,
     pub selected_index: Option<usize>,
     pub list_items: Vec<UiItemSummary>,
-    pub selected_detail: Option<UiItemDetail>,
+    pub selected_content: Option<UiItemContent>,
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
@@ -163,6 +186,11 @@ pub struct CoreState {
     pub create_error: Option<String>,
     pub create_focus: CreateModalFocus,
     pub create_cost_state: CreateCostState,
+    pub settings: SettingsSnapshot,
+    pub default_memory_selector_open: bool,
+    pub default_memory_selector_index: usize,
+    pub default_memory_selector_items: Vec<String>,
+    pub default_memory_selector_selected_id: Option<String>,
 }
 
 impl Default for CoreState {
@@ -173,7 +201,7 @@ impl Default for CoreState {
             query: String::new(),
             selected_index: None,
             list_items: Vec::new(),
-            selected_detail: None,
+            selected_content: None,
             selected_context: None,
             total_count: 0,
             status_message: None,
@@ -189,6 +217,11 @@ impl Default for CoreState {
             create_error: None,
             create_focus: CreateModalFocus::default(),
             create_cost_state: CreateCostState::default(),
+            settings: SettingsSnapshot::default(),
+            default_memory_selector_open: false,
+            default_memory_selector_index: 0,
+            default_memory_selector_items: Vec::new(),
+            default_memory_selector_selected_id: None,
         }
     }
 }
@@ -202,11 +235,15 @@ pub enum CoreAction {
     MovePageUp,
     MoveHome,
     MoveEnd,
+    ScrollContentPageDown,
+    ScrollContentPageUp,
+    ScrollContentHome,
+    ScrollContentEnd,
     FocusNext,
     FocusPrev,
     FocusSearch,
-    FocusList,
-    FocusDetail,
+    FocusItems,
+    FocusContent,
     FocusForm,
     OpenSelected,
     Back,
@@ -221,6 +258,12 @@ pub enum CoreAction {
     ToggleHelp,
     ToggleSettings,
     ToggleChat,
+    OpenDefaultMemoryPicker,
+    CloseDefaultMemoryPicker,
+    MoveDefaultMemoryPickerNext,
+    MoveDefaultMemoryPickerPrev,
+    SubmitDefaultMemoryPicker,
+    SetDefaultMemoryFromSelection,
     CreateInput(char),
     CreateBackspace,
     CreateNextField,
@@ -308,12 +351,15 @@ pub enum CoreEffect {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProviderSnapshot {
     pub items: Vec<UiItemSummary>,
-    pub selected_detail: Option<UiItemDetail>,
+    pub selected_content: Option<UiItemContent>,
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
     pub create_cost_state: CreateCostState,
     pub create_submit_state: CreateSubmitState,
+    pub settings: SettingsSnapshot,
+    pub default_memory_selector_items: Vec<String>,
+    pub default_memory_selector_selected_id: Option<String>,
 }
 
 /// Provider response to one action.
@@ -427,6 +473,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::SetTab(tab_id) => {
             state.current_tab_id = tab_id.0.clone();
             state.selected_index = Some(0);
+            state.default_memory_selector_open = false;
         }
         CoreAction::SelectTabIndex(index) => {
             state.current_tab_id = format!("tab-{}", index + 1);
@@ -434,9 +481,9 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         CoreAction::FocusNext => {
             state.focus = match state.focus {
-                PaneFocus::Search => PaneFocus::List,
-                PaneFocus::List => PaneFocus::Detail,
-                PaneFocus::Detail => {
+                PaneFocus::Search => PaneFocus::Items,
+                PaneFocus::Items => PaneFocus::Content,
+                PaneFocus::Content => {
                     if state.chat_open {
                         PaneFocus::Extra
                     } else if has_tabs {
@@ -464,35 +511,35 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                     } else if state.chat_open {
                         PaneFocus::Extra
                     } else {
-                        PaneFocus::Detail
+                        PaneFocus::Content
                     }
                 }
-                PaneFocus::List => PaneFocus::Search,
-                PaneFocus::Detail => PaneFocus::List,
+                PaneFocus::Items => PaneFocus::Search,
+                PaneFocus::Content => PaneFocus::Items,
                 PaneFocus::Form => PaneFocus::Tabs,
-                PaneFocus::Extra => PaneFocus::Detail,
+                PaneFocus::Extra => PaneFocus::Content,
                 PaneFocus::Tabs => {
                     if state.chat_open {
                         PaneFocus::Extra
                     } else {
-                        PaneFocus::Detail
+                        PaneFocus::Content
                     }
                 }
             };
         }
         CoreAction::FocusSearch => state.focus = PaneFocus::Search,
-        CoreAction::FocusList => state.focus = PaneFocus::List,
-        CoreAction::FocusDetail => state.focus = PaneFocus::Detail,
+        CoreAction::FocusItems => state.focus = PaneFocus::Items,
+        CoreAction::FocusContent => state.focus = PaneFocus::Content,
         CoreAction::FocusForm => {
             state.focus = PaneFocus::Form;
             state.create_focus = CreateModalFocus::Name;
         }
-        CoreAction::OpenSelected => state.focus = PaneFocus::Detail,
+        CoreAction::OpenSelected => state.focus = PaneFocus::Content,
         CoreAction::Back => {
             state.focus = if state.focus == PaneFocus::Extra {
-                PaneFocus::Detail
+                PaneFocus::Content
             } else {
-                PaneFocus::List
+                PaneFocus::Items
             };
         }
         CoreAction::ToggleChat => {
@@ -502,6 +549,33 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             } else if state.focus == PaneFocus::Extra {
                 state.focus = focus_after_chat_close(state.current_tab_id.as_str());
             }
+        }
+        CoreAction::OpenDefaultMemoryPicker => {
+            state.default_memory_selector_open = true;
+            state.default_memory_selector_index = state
+                .default_memory_selector_selected_id
+                .as_ref()
+                .and_then(|selected| {
+                    state
+                        .default_memory_selector_items
+                        .iter()
+                        .position(|item| item == selected)
+                })
+                .unwrap_or(0);
+        }
+        CoreAction::CloseDefaultMemoryPicker | CoreAction::SubmitDefaultMemoryPicker => {
+            state.default_memory_selector_open = false;
+        }
+        CoreAction::MoveDefaultMemoryPickerNext => {
+            let len = state.default_memory_selector_items.len();
+            if len != 0 {
+                state.default_memory_selector_index =
+                    (state.default_memory_selector_index + 1).min(len - 1);
+            }
+        }
+        CoreAction::MoveDefaultMemoryPickerPrev => {
+            state.default_memory_selector_index =
+                state.default_memory_selector_index.saturating_sub(1);
         }
         CoreAction::ChatInput(c) => {
             state.chat_input.push(*c);
@@ -524,7 +598,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::ChatScrollHome => state.chat_scroll = 0,
         CoreAction::ChatScrollEnd => state.chat_scroll = state.chat_scroll.saturating_add(9999),
         CoreAction::MoveNext => {
-            let len = state.list_items.len();
+            let len = selectable_len(state);
             if len == 0 {
                 state.selected_index = None;
             } else {
@@ -533,25 +607,27 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::MovePrev => {
-            let idx = state.selected_index.unwrap_or(0);
-            state.selected_index = Some(idx.saturating_sub(1));
+            let len = selectable_len(state);
+            if len == 0 {
+                state.selected_index = None;
+            } else {
+                let idx = state.selected_index.unwrap_or(0);
+                state.selected_index = Some(idx.saturating_sub(1));
+            }
         }
         CoreAction::MoveHome => {
-            state.selected_index = if state.list_items.is_empty() {
+            state.selected_index = if selectable_len(state) == 0 {
                 None
             } else {
                 Some(0)
             };
         }
         CoreAction::MoveEnd => {
-            state.selected_index = if state.list_items.is_empty() {
-                None
-            } else {
-                Some(state.list_items.len() - 1)
-            };
+            let len = selectable_len(state);
+            state.selected_index = if len == 0 { None } else { Some(len - 1) };
         }
         CoreAction::MovePageDown => {
-            let len = state.list_items.len();
+            let len = selectable_len(state);
             if len == 0 {
                 state.selected_index = None;
             } else {
@@ -560,8 +636,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::MovePageUp => {
-            let idx = state.selected_index.unwrap_or(0);
-            state.selected_index = Some(idx.saturating_sub(10));
+            let len = selectable_len(state);
+            if len == 0 {
+                state.selected_index = None;
+            } else {
+                let idx = state.selected_index.unwrap_or(0);
+                state.selected_index = Some(idx.saturating_sub(10));
+            }
         }
         _ => {}
     }
@@ -587,9 +668,9 @@ fn normalize_focus_for_tab(state: &mut CoreState, previous_focus: PaneFocus) {
 fn is_focus_allowed_for_policy(policy: TabFocusPolicy, focus: PaneFocus) -> bool {
     match focus {
         PaneFocus::Search => policy.allows_search,
-        PaneFocus::List => policy.allows_list,
+        PaneFocus::Items => policy.allows_items,
         PaneFocus::Tabs => policy.allows_tabs,
-        PaneFocus::Detail => policy.allows_detail,
+        PaneFocus::Content => policy.allows_content,
         PaneFocus::Form => policy.allows_form,
         PaneFocus::Extra => policy.allows_chat,
     }
@@ -609,11 +690,11 @@ fn focus_after_chat_close(tab_id: &str) -> PaneFocus {
     if policy.allows_form {
         return PaneFocus::Form;
     }
-    if policy.allows_detail {
-        return PaneFocus::Detail;
+    if policy.allows_content {
+        return PaneFocus::Content;
     }
-    if policy.allows_list {
-        return PaneFocus::List;
+    if policy.allows_items {
+        return PaneFocus::Items;
     }
 
     policy.default_focus
@@ -639,15 +720,15 @@ pub fn dispatch_action(
 pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> Option<CoreAction> {
     if focus == PaneFocus::Tabs {
         return match key {
-            CoreKey::Up | CoreKey::Char('k') => Some(CoreAction::SelectPrevTab),
-            CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::SelectNextTab),
+            CoreKey::Up => Some(CoreAction::SelectPrevTab),
+            CoreKey::Down => Some(CoreAction::SelectNextTab),
             CoreKey::Left | CoreKey::Char('h') => None,
             CoreKey::Tab | CoreKey::Right | CoreKey::Char('l') | CoreKey::Enter => {
                 tab_entry_focus(current_tab_id).map(|focus| match focus {
                     PaneFocus::Search => CoreAction::FocusSearch,
-                    PaneFocus::List => CoreAction::FocusList,
+                    PaneFocus::Items => CoreAction::FocusItems,
                     PaneFocus::Tabs => CoreAction::FocusNext,
-                    PaneFocus::Detail => CoreAction::FocusDetail,
+                    PaneFocus::Content => CoreAction::FocusContent,
                     PaneFocus::Form => CoreAction::FocusForm,
                     PaneFocus::Extra => CoreAction::ToggleChat,
                 })
@@ -673,13 +754,13 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             PaneFocus::Search => match key {
                 CoreKey::Backspace => Some(CoreAction::SearchBackspace),
                 CoreKey::Enter => Some(CoreAction::SearchSubmit),
-                CoreKey::Down => Some(CoreAction::FocusList),
+                CoreKey::Down => Some(CoreAction::FocusItems),
                 CoreKey::Char(c) if !c.is_control() => Some(CoreAction::SearchInput(c)),
                 _ => None,
             },
-            PaneFocus::List => match key {
-                CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::MoveNext),
-                CoreKey::Up | CoreKey::Char('k') => Some(CoreAction::MovePrev),
+            PaneFocus::Items => match key {
+                CoreKey::Down => Some(CoreAction::MoveNext),
+                CoreKey::Up => Some(CoreAction::MovePrev),
                 CoreKey::PageDown => Some(CoreAction::MovePageDown),
                 CoreKey::PageUp => Some(CoreAction::MovePageUp),
                 CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::MoveHome),
@@ -690,13 +771,18 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
                 _ => None,
             },
             PaneFocus::Tabs => None,
-            PaneFocus::Detail => match key {
+            PaneFocus::Content => match key {
+                CoreKey::Enter if is_settings_content(current_tab_id, PaneFocus::Content) => None,
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
-                CoreKey::Down | CoreKey::Char('j') => Some(CoreAction::MovePageDown),
-                CoreKey::Up | CoreKey::Char('k') => Some(CoreAction::MovePageUp),
-                CoreKey::PageDown => Some(CoreAction::MovePageDown),
-                CoreKey::PageUp => Some(CoreAction::MovePageUp),
-                CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::MoveHome),
+                _ if is_settings_content(current_tab_id, PaneFocus::Content) => {
+                    settings_content_action_for_key(key)
+                }
+                CoreKey::Down => Some(CoreAction::ScrollContentPageDown),
+                CoreKey::Up => Some(CoreAction::ScrollContentPageUp),
+                CoreKey::PageDown => Some(CoreAction::ScrollContentPageDown),
+                CoreKey::PageUp => Some(CoreAction::ScrollContentPageUp),
+                CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::ScrollContentHome),
+                CoreKey::End | CoreKey::Char('G') => Some(CoreAction::ScrollContentEnd),
                 _ => None,
             },
             PaneFocus::Form => None,
@@ -719,48 +805,94 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
 /// Apply a new snapshot to core runtime state.
 pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.list_items = snapshot.items;
-    state.selected_detail = snapshot.selected_detail;
+    state.selected_content = snapshot.selected_content;
     state.selected_context = snapshot.selected_context;
     state.total_count = snapshot.total_count;
     state.status_message = snapshot.status_message;
     state.create_cost_state = snapshot.create_cost_state;
     state.create_submit_state = snapshot.create_submit_state;
+    state.settings = snapshot.settings;
+    state.default_memory_selector_items = snapshot.default_memory_selector_items;
+    state.default_memory_selector_selected_id = snapshot.default_memory_selector_selected_id;
+    if state.default_memory_selector_items.is_empty() {
+        state.default_memory_selector_index = 0;
+    } else if state.default_memory_selector_index >= state.default_memory_selector_items.len() {
+        state.default_memory_selector_index = state.default_memory_selector_items.len() - 1;
+    }
 
+    let selectable_len = selectable_len(state);
     if let Some(sel) = state.selected_index {
-        if sel >= state.list_items.len() {
-            state.selected_index = if state.list_items.is_empty() {
-                None
-            } else {
-                Some(0)
-            };
+        if sel >= selectable_len {
+            state.selected_index = if selectable_len == 0 { None } else { Some(0) };
         }
-    } else if !state.list_items.is_empty() {
+    } else if selectable_len != 0 {
         state.selected_index = Some(0);
+    }
+}
+
+fn selectable_len(state: &CoreState) -> usize {
+    if is_settings_content(state.current_tab_id.as_str(), state.focus) {
+        return settings_selectable_len(&state.settings);
+    }
+
+    item_selectable_len(state)
+}
+
+fn item_selectable_len(state: &CoreState) -> usize {
+    state.list_items.len()
+}
+
+fn settings_selectable_len(settings: &SettingsSnapshot) -> usize {
+    settings_entry_count(settings)
+}
+
+fn settings_entry_count(settings: &SettingsSnapshot) -> usize {
+    settings
+        .sections
+        .iter()
+        .map(|section| section.entries.len())
+        .sum()
+}
+
+pub fn settings_entry(settings: &SettingsSnapshot, index: usize) -> Option<&SettingsEntry> {
+    let mut remaining = index;
+    for section in &settings.sections {
+        if remaining < section.entries.len() {
+            return section.entries.get(remaining);
+        }
+        remaining = remaining.saturating_sub(section.entries.len());
+    }
+    None
+}
+
+pub fn should_open_default_memory_picker(state: &CoreState) -> bool {
+    is_settings_content(state.current_tab_id.as_str(), state.focus)
+        && state
+            .selected_index
+            .and_then(|index| settings_entry(&state.settings, index))
+            .map(|entry| entry.id.as_str())
+            == Some(SETTINGS_ENTRY_DEFAULT_MEMORY_ID)
+}
+
+fn is_settings_content(current_tab_id: &str, focus: PaneFocus) -> bool {
+    current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID && focus == PaneFocus::Content
+}
+
+fn settings_content_action_for_key(key: CoreKey) -> Option<CoreAction> {
+    match key {
+        CoreKey::Down => Some(CoreAction::MoveNext),
+        CoreKey::Up => Some(CoreAction::MovePrev),
+        CoreKey::PageDown => Some(CoreAction::MovePageDown),
+        CoreKey::PageUp => Some(CoreAction::MovePageUp),
+        CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::MoveHome),
+        CoreKey::End | CoreKey::Char('G') => Some(CoreAction::MoveEnd),
+        _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct DummyProvider;
-
-    impl DataProvider for DummyProvider {
-        fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
-            Ok(ProviderSnapshot {
-                total_count: 1,
-                ..ProviderSnapshot::default()
-            })
-        }
-
-        fn handle_action(
-            &mut self,
-            _action: &CoreAction,
-            _state: &CoreState,
-        ) -> CoreResult<ProviderOutput> {
-            Ok(ProviderOutput::default())
-        }
-    }
 
     #[test]
     fn test_apply_snapshot_sets_total_and_selection() {
@@ -769,13 +901,14 @@ mod tests {
             items: vec![UiItemSummary {
                 id: "1".to_string(),
                 name: "item".to_string(),
+                leading_marker: None,
                 kind: tui_kit_model::UiItemKind::Custom("x".to_string()),
                 visibility: tui_kit_model::UiVisibility::Private,
                 qualified_name: None,
                 subtitle: None,
                 tags: vec![],
             }],
-            selected_detail: None,
+            selected_content: None,
             selected_context: None,
             total_count: 1,
             status_message: Some("ok".to_string()),
@@ -788,19 +921,13 @@ mod tests {
     }
 
     #[test]
-    fn test_dummy_provider_contract() {
-        let mut p = DummyProvider;
-        let init = p.initialize().unwrap();
-        assert_eq!(init.total_count, 1);
-    }
-
-    #[test]
     fn test_apply_core_action_updates_selection() {
         let mut state = CoreState {
             list_items: vec![
                 UiItemSummary {
                     id: "1".to_string(),
                     name: "a".to_string(),
+                    leading_marker: None,
                     kind: tui_kit_model::UiItemKind::Custom("x".to_string()),
                     visibility: tui_kit_model::UiVisibility::Private,
                     qualified_name: None,
@@ -810,6 +937,7 @@ mod tests {
                 UiItemSummary {
                     id: "2".to_string(),
                     name: "b".to_string(),
+                    leading_marker: None,
                     kind: tui_kit_model::UiItemKind::Custom("x".to_string()),
                     visibility: tui_kit_model::UiVisibility::Private,
                     qualified_name: None,
@@ -826,9 +954,28 @@ mod tests {
 
     #[test]
     fn test_dispatch_action_applies_provider_snapshot() {
-        let mut provider = DummyProvider;
+        struct DispatchTestProvider;
+
+        impl DataProvider for DispatchTestProvider {
+            fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
+                Ok(ProviderSnapshot {
+                    total_count: 1,
+                    ..ProviderSnapshot::default()
+                })
+            }
+
+            fn handle_action(
+                &mut self,
+                _action: &CoreAction,
+                _state: &CoreState,
+            ) -> CoreResult<ProviderOutput> {
+                Ok(ProviderOutput::default())
+            }
+        }
+
+        let mut provider = DispatchTestProvider;
         let mut state = CoreState::default();
-        let effects = dispatch_action(&mut provider, &mut state, &CoreAction::FocusList).unwrap();
+        let effects = dispatch_action(&mut provider, &mut state, &CoreAction::FocusItems).unwrap();
         assert!(effects.is_empty());
     }
 
@@ -884,19 +1031,6 @@ mod tests {
     }
 
     #[test]
-    fn tab_focus_policy_matches_create_tab_capabilities() {
-        let policy = tab_focus_policy(kinic_tabs::KINIC_CREATE_TAB_ID);
-
-        assert_eq!(policy.default_focus, PaneFocus::Tabs);
-        assert!(!policy.allows_search);
-        assert!(!policy.allows_list);
-        assert!(policy.allows_tabs);
-        assert!(!policy.allows_detail);
-        assert!(policy.allows_form);
-        assert!(policy.allows_chat);
-    }
-
-    #[test]
     fn back_is_clamped_on_create_tab() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
@@ -922,53 +1056,46 @@ mod tests {
     }
 
     #[test]
-    fn create_refresh_sets_loading_state() {
-        let mut state = CoreState::default();
-
-        apply_core_action(&mut state, &CoreAction::CreateRefresh);
-
-        assert_eq!(state.create_cost_state, CreateCostState::Loading);
-        assert_eq!(state.create_spinner_frame, 0);
-    }
-
-    #[test]
-    fn tab_entry_focus_matches_kinic_tabs() {
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_MEMORIES_TAB_ID),
-            Some(PaneFocus::List)
-        );
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_CREATE_TAB_ID),
-            Some(PaneFocus::Form)
-        );
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_MARKET_TAB_ID),
-            Some(PaneFocus::Detail)
-        );
-        assert_eq!(tab_entry_focus("unknown"), Some(PaneFocus::Detail));
-    }
-
-    #[test]
-    fn tabs_enter_targets_list_on_memories() {
+    fn tabs_enter_targets_search_on_memories() {
         assert_eq!(
             action_for_key(
                 CoreKey::Enter,
                 PaneFocus::Tabs,
                 kinic_tabs::KINIC_MEMORIES_TAB_ID
             ),
-            Some(CoreAction::FocusList)
+            Some(CoreAction::FocusSearch)
         );
     }
 
     #[test]
-    fn tabs_tab_targets_list_on_memories() {
+    fn tabs_tab_targets_search_on_memories() {
         assert_eq!(
             action_for_key(
                 CoreKey::Tab,
                 PaneFocus::Tabs,
                 kinic_tabs::KINIC_MEMORIES_TAB_ID
             ),
-            Some(CoreAction::FocusList)
+            Some(CoreAction::FocusSearch)
+        );
+    }
+
+    #[test]
+    fn tabs_jk_no_longer_switch_tabs() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('j'),
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            None
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('k'),
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            None
         );
     }
 
@@ -1004,7 +1131,7 @@ mod tests {
                 PaneFocus::Tabs,
                 kinic_tabs::KINIC_MARKET_TAB_ID
             ),
-            Some(CoreAction::FocusDetail)
+            Some(CoreAction::FocusContent)
         );
     }
 
@@ -1016,7 +1143,7 @@ mod tests {
                 PaneFocus::Tabs,
                 kinic_tabs::KINIC_MARKET_TAB_ID
             ),
-            Some(CoreAction::FocusDetail)
+            Some(CoreAction::FocusContent)
         );
     }
 
@@ -1053,5 +1180,247 @@ mod tests {
 
         assert_eq!(state.focus, PaneFocus::Form);
         assert_eq!(state.create_focus, CreateModalFocus::Name);
+    }
+
+    #[test]
+    fn settings_content_enter_does_not_open_without_row_context() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Enter,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn items_jk_no_longer_move_selection() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('j'),
+                PaneFocus::Items,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            None
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('k'),
+                PaneFocus::Items,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn content_jk_no_longer_move_or_scroll() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('j'),
+                PaneFocus::Content,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            None
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('k'),
+                PaneFocus::Content,
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn should_open_default_memory_picker_only_on_default_memory_row() {
+        let settings = SettingsSnapshot {
+            quick_entries: vec![],
+            sections: vec![SettingsSection {
+                title: "Saved preferences".to_string(),
+                entries: vec![
+                    SettingsEntry {
+                        id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
+                        label: "Preferred memory".to_string(),
+                        value: "aaaaa-aa".to_string(),
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: "preferences_status".to_string(),
+                        label: "Preferences status".to_string(),
+                        value: "ok".to_string(),
+                        note: None,
+                    },
+                ],
+                footer: None,
+            }],
+        };
+        let state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(0),
+            settings: settings.clone(),
+            ..CoreState::default()
+        };
+        let other_row_state = CoreState {
+            selected_index: Some(1),
+            settings,
+            ..state.clone()
+        };
+
+        assert!(should_open_default_memory_picker(&state));
+        assert!(!should_open_default_memory_picker(&other_row_state));
+    }
+
+    #[test]
+    fn apply_snapshot_preserves_settings_row_selection() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(1),
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            settings: SettingsSnapshot {
+                quick_entries: vec![],
+                sections: vec![SettingsSection {
+                    title: "Saved preferences".to_string(),
+                    entries: vec![
+                        SettingsEntry {
+                            id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
+                            label: "Default memory".to_string(),
+                            value: "aaaaa-aa".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "preferences_status".to_string(),
+                            label: "Preferences status".to_string(),
+                            value: "ok".to_string(),
+                            note: None,
+                        },
+                    ],
+                    footer: None,
+                }],
+            },
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.selected_index, Some(1));
+    }
+
+    #[test]
+    fn settings_content_arrow_keys_map_to_settings_actions() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Down,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
+            ),
+            Some(CoreAction::MoveNext)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::End,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
+            ),
+            Some(CoreAction::MoveEnd)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::PageUp,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
+            ),
+            Some(CoreAction::MovePageUp)
+        );
+    }
+
+    #[test]
+    fn memories_content_end_maps_to_scroll_end() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::End,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::ScrollContentEnd)
+        );
+    }
+
+    #[test]
+    fn move_actions_follow_settings_selection_length() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(0),
+            list_items: vec![
+                UiItemSummary {
+                    id: "memory-1".to_string(),
+                    name: "memory-1".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+                UiItemSummary {
+                    id: "memory-2".to_string(),
+                    name: "memory-2".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+            ],
+            settings: SettingsSnapshot {
+                quick_entries: vec![],
+                sections: vec![SettingsSection {
+                    title: "Saved preferences".to_string(),
+                    entries: vec![
+                        SettingsEntry {
+                            id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
+                            label: "Default memory".to_string(),
+                            value: "aaaaa-aa".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "preferences_status".to_string(),
+                            label: "Preferences status".to_string(),
+                            value: "ok".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "preferences_mode".to_string(),
+                            label: "Preferences mode".to_string(),
+                            value: "live".to_string(),
+                            note: None,
+                        },
+                    ],
+                    footer: None,
+                }],
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::MoveNext);
+        assert_eq!(state.selected_index, Some(1));
+
+        apply_core_action(&mut state, &CoreAction::MoveNext);
+        assert_eq!(state.selected_index, Some(2));
+
+        apply_core_action(&mut state, &CoreAction::MoveNext);
+        assert_eq!(state.selected_index, Some(2));
+
+        state.selected_index = Some(0);
+        apply_core_action(&mut state, &CoreAction::MoveEnd);
+        assert_eq!(state.selected_index, Some(2));
     }
 }

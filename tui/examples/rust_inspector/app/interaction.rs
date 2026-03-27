@@ -134,9 +134,13 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
         HostGlobalCommand::BackFromFormToTabs => {
             return vec![UiIntent::EscapePressed];
         }
+        HostGlobalCommand::BackToTabs => {
+            return vec![UiIntent::EscapePressed];
+        }
+        HostGlobalCommand::SetDefaultFromSelection => {}
         HostGlobalCommand::OpenCreateTab => return vec![UiIntent::OpenCreateModal],
         HostGlobalCommand::BackToMemoriesTab
-        | HostGlobalCommand::BackFromDetail
+        | HostGlobalCommand::BackFromContent
         | HostGlobalCommand::ClearQuery => {
             return vec![UiIntent::EscapePressed];
         }
@@ -209,7 +213,7 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
                 out.push(UiIntent::CratesQualifiedEnter);
             }
         }
-        Focus::List => match code {
+        Focus::Items => match code {
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => out.push(UiIntent::ListEnter),
             KeyCode::Char('o') if modifiers.is_empty() => out.push(UiIntent::ListOpenDocs),
             KeyCode::Char('c') if modifiers.is_empty() => out.push(UiIntent::ListOpenCratesIo),
@@ -218,7 +222,7 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
         },
         Focus::Tabs => {}
         Focus::Form => {}
-        Focus::Inspector => match code {
+        Focus::Content => match code {
             KeyCode::Char('o') if modifiers.is_empty() => out.push(UiIntent::InspectorOpenDocs),
             KeyCode::Char('c') if modifiers.is_empty() => out.push(UiIntent::InspectorOpenCratesIo),
             _ => {}
@@ -245,10 +249,10 @@ pub fn intents_for_key(app: &App, code: KeyCode, modifiers: KeyModifiers) -> Vec
 fn focus_to_pane(focus: Focus) -> PaneFocus {
     match focus {
         Focus::Search => PaneFocus::Search,
-        Focus::List => PaneFocus::List,
+        Focus::Items => PaneFocus::Items,
         Focus::Tabs => PaneFocus::Tabs,
         Focus::Form => PaneFocus::Form,
-        Focus::Inspector => PaneFocus::Detail,
+        Focus::Content => PaneFocus::Content,
         Focus::Chat => PaneFocus::Extra,
     }
 }
@@ -256,10 +260,10 @@ fn focus_to_pane(focus: Focus) -> PaneFocus {
 fn pane_to_focus(focus: PaneFocus) -> Focus {
     match focus {
         PaneFocus::Search => Focus::Search,
-        PaneFocus::List => Focus::List,
+        PaneFocus::Items => Focus::Items,
         PaneFocus::Tabs => Focus::Tabs,
         PaneFocus::Form => Focus::Form,
-        PaneFocus::Detail => Focus::Inspector,
+        PaneFocus::Content => Focus::Content,
         PaneFocus::Extra => Focus::Chat,
     }
 }
@@ -338,7 +342,7 @@ pub fn try_apply_runtime_action(
                     | CoreAction::SearchBackspace
                     | CoreAction::FocusNext
                     | CoreAction::FocusPrev
-                    | CoreAction::FocusList
+                    | CoreAction::FocusItems
             )
         {
             return RuntimeApplyResult::default();
@@ -354,16 +358,26 @@ pub fn try_apply_runtime_action(
     }
 
     // Inspector scroll is local UI state; apply it here and consume the key.
-    if app.focus == Focus::Inspector
+    if app.focus == Focus::Content
         && matches!(
             action,
-            CoreAction::MovePageDown | CoreAction::MovePageUp | CoreAction::MoveHome
+            CoreAction::ScrollContentPageDown
+                | CoreAction::ScrollContentPageUp
+                | CoreAction::ScrollContentHome
+                | CoreAction::ScrollContentEnd
         )
     {
         match action {
-            CoreAction::MovePageDown => *inspector_scroll = inspector_scroll.saturating_add(10),
-            CoreAction::MovePageUp => *inspector_scroll = inspector_scroll.saturating_sub(10),
-            CoreAction::MoveHome => *inspector_scroll = 0,
+            CoreAction::ScrollContentPageDown => {
+                *inspector_scroll = inspector_scroll.saturating_add(10)
+            }
+            CoreAction::ScrollContentPageUp => {
+                *inspector_scroll = inspector_scroll.saturating_sub(10)
+            }
+            CoreAction::ScrollContentHome => *inspector_scroll = 0,
+            CoreAction::ScrollContentEnd => {
+                *inspector_scroll = inspector_scroll.saturating_add(9999)
+            }
             _ => {}
         }
         return RuntimeApplyResult {
@@ -503,7 +517,7 @@ pub fn apply_intent(
             if app.show_completion {
                 app.next_completion();
             } else {
-                app.focus = Focus::List;
+                app.focus = Focus::Items;
             }
         }
         UiIntent::CompletionUp => {
@@ -519,7 +533,7 @@ pub fn apply_intent(
                     app.search_qualified_path();
                 }
                 app.filter_items();
-                app.focus = Focus::List;
+                app.focus = Focus::Items;
             }
         }
         UiIntent::CompletionTab => {
@@ -567,7 +581,7 @@ fn core_state_from_app(app: &App) -> CoreState {
         query: app.search_input.clone(),
         selected_index: app.list_state.selected(),
         list_items: app.ui_summaries.clone(),
-        selected_detail: app.ui_selected_detail.clone(),
+        selected_content: app.ui_selected_content.clone(),
         selected_context: app.ui_dependency_node.clone(),
         total_count: app.ui_total_count,
         status_message: Some(app.status_message.clone()),
@@ -587,6 +601,7 @@ fn core_state_from_app(app: &App) -> CoreState {
         create_error: app.create_error.clone(),
         create_focus: app.create_focus,
         create_cost_state: CreateCostState::Hidden,
+        ..CoreState::default()
     }
 }
 

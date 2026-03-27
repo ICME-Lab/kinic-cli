@@ -52,6 +52,7 @@ impl UiItemKind {
 pub struct UiItemSummary {
     pub id: String,
     pub name: String,
+    pub leading_marker: Option<String>,
     pub kind: UiItemKind,
     pub visibility: UiVisibility,
     pub qualified_name: Option<String>,
@@ -59,14 +60,14 @@ pub struct UiItemSummary {
     pub tags: Vec<String>,
 }
 
-/// Arbitrary label/value row for detail sections.
+/// Arbitrary label/value row for content sections.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiRow {
     pub label: String,
     pub value: String,
 }
 
-/// Optional section block displayed in detail pane.
+/// Optional section block displayed in content pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiSection {
     pub heading: String,
@@ -74,9 +75,9 @@ pub struct UiSection {
     pub body_lines: Vec<String>,
 }
 
-/// Inspector/detail payload.
+/// Content payload shown in the right pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UiItemDetail {
+pub struct UiItemContent {
     pub id: String,
     pub title: String,
     pub kind: UiItemKind,

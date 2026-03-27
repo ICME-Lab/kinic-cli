@@ -1,4 +1,4 @@
-use tui_kit_model::{UiItemDetail, UiItemKind, UiItemSummary, UiSection, UiVisibility};
+use tui_kit_model::{UiItemContent, UiItemKind, UiItemSummary, UiSection, UiVisibility};
 use tui_kit_runtime::{
     CoreAction, CoreResult, CoreState, DataProvider, ProviderOutput, ProviderSnapshot,
     apply_snapshot,
@@ -60,6 +60,7 @@ impl DemoProvider {
             .map(|r| UiItemSummary {
                 id: r.id.clone(),
                 name: r.title.clone(),
+                leading_marker: None,
                 kind: UiItemKind::Custom("record".to_string()),
                 visibility: UiVisibility::Private,
                 qualified_name: Some(r.owner.clone()),
@@ -69,7 +70,7 @@ impl DemoProvider {
             .collect::<Vec<_>>();
 
         let sel = state.selected_index.unwrap_or(0);
-        let selected_detail = filtered.get(sel).map(|r| UiItemDetail {
+        let selected_content = filtered.get(sel).map(|r| UiItemContent {
             id: r.id.clone(),
             title: r.title.clone(),
             kind: UiItemKind::Custom("record".to_string()),
@@ -78,7 +79,7 @@ impl DemoProvider {
             docs: Some(r.summary.clone()),
             badges: vec!["demo".to_string()],
             sections: vec![UiSection {
-                heading: "Details".to_string(),
+                heading: "Content".to_string(),
                 rows: vec![],
                 body_lines: vec![r.summary.clone()],
             }],
@@ -86,7 +87,7 @@ impl DemoProvider {
 
         ProviderSnapshot {
             items,
-            selected_detail,
+            selected_content,
             selected_context: None,
             total_count: self.all.len(),
             status_message: Some(format!("{} records", filtered.len())),

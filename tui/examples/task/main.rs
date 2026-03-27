@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "task-blocked",
                 "task-done",
             ],
-            initial_focus: PaneFocus::List,
+            initial_focus: PaneFocus::Items,
             ui_config: task_ui_config,
         },
     )
