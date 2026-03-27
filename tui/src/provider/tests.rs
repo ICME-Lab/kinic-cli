@@ -77,8 +77,10 @@ fn partial_session_overview() -> SessionAccountOverview {
 }
 
 fn principal_error_session_overview() -> SessionAccountOverview {
-    let mut overview =
-        SessionAccountOverview::new(session_snapshot("unavailable"), Some("bbbbb-bb".to_string()));
+    let mut overview = SessionAccountOverview::new(
+        session_snapshot("unavailable"),
+        Some("bbbbb-bb".to_string()),
+    );
     overview.principal_error = Some("identity lookup failed".to_string());
     overview.balance_error = Some("ledger unavailable".to_string());
     overview
@@ -329,10 +331,7 @@ fn poll_background_keeps_previous_principal_when_refresh_reports_principal_error
         .poll_background(&CoreState::default())
         .expect("settings refresh output");
 
-    assert_eq!(
-        provider.session_overview.session.principal_id,
-        "aaaaa-aa"
-    );
+    assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
 }
 
 #[test]

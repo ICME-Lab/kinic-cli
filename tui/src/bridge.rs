@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use anyhow::{Context, Result};
 use candid::Nat;
 use ic_agent::export::Principal;
+use thiserror::Error;
 use tui_kit_runtime::CreateCostDetails;
 
 use crate::{
@@ -12,11 +13,10 @@ use crate::{
     },
     commands::create::{BalanceDelta, balance_delta, required_balance},
     embedding::{embedding_base_url, fetch_embedding},
+    ledger::fetch_balance,
     tui::TuiAuth,
     tui::settings::SessionSettingsSnapshot,
 };
-
-pub(crate) use crate::clients::launcher::CreateCostFetchError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySummary {
@@ -63,6 +63,18 @@ pub enum CreateMemoryError {
     Deploy(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub(crate) enum CreateCostFetchError {
+    #[error("Could not derive principal. Cause: {0}")]
+    Principal(String),
+    #[error("Could not fetch KINIC balance. Cause: {0}")]
+    Balance(String),
+    #[error("Could not fetch create price. Cause: {0}")]
+    Price(String),
+    #[error("Account overview is unavailable.")]
+    Unavailable(String),
+}
+
 fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<crate::agent::AgentFactory> {
     auth.agent_factory(use_mainnet)
 }
@@ -88,16 +100,11 @@ pub async fn create_memory(
         .build()
         .await
         .map_err(|error| CreateMemoryError::Principal(short_error(&error.to_string())))?;
-    let client = LauncherClient::new(agent);
-    let (balance, price) = client
-        .fetch_balance_and_price()
-        .await
-        .map_err(|error| match error {
-            CreateCostFetchError::Principal(reason) => CreateMemoryError::Principal(reason),
-            CreateCostFetchError::Balance(reason) => CreateMemoryError::Balance(reason),
-            CreateCostFetchError::Price(reason) => CreateMemoryError::Price(reason),
-            CreateCostFetchError::Unavailable(reason) => CreateMemoryError::Principal(reason),
-        })?;
+    let client = LauncherClient::new(agent.clone());
+    let (balance, price) = tokio::join!(fetch_balance(&agent), client.fetch_deployment_price());
+    let balance =
+        balance.map_err(|error| CreateMemoryError::Balance(short_error(&error.to_string())))?;
+    let price = price.map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
     match balance_delta(&price, balance) {
         BalanceDelta::Surplus(_) => {}
         BalanceDelta::Shortfall(shortfall) => {
@@ -175,14 +182,14 @@ pub async fn load_session_account_overview(
             return overview;
         }
     }
-    let client = LauncherClient::new(agent);
-    let (balance, price) = tokio::join!(client.fetch_balance(), client.fetch_deployment_price());
+    let client = LauncherClient::new(agent.clone());
+    let (balance, price) = tokio::join!(fetch_balance(&agent), client.fetch_deployment_price());
 
     if let Err(error) = &balance {
-        overview.balance_error = Some(error.to_string());
+        overview.balance_error = Some(short_error(&error.to_string()));
     }
     if let Err(error) = &price {
-        overview.price_error = Some(error.to_string());
+        overview.price_error = Some(short_error(&error.to_string()));
     }
     if overview.principal_error.is_none()
         && let (Ok(balance), Ok(price)) = (balance, price)

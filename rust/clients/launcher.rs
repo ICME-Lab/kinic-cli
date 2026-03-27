@@ -33,35 +33,16 @@ impl LauncherClient {
         }
     }
 
-    pub(crate) async fn fetch_balance(&self) -> std::result::Result<u128, CreateCostFetchError> {
-        crate::ledger::fetch_balance(&self.agent)
-            .await
-            .map_err(|error| CreateCostFetchError::Balance(short_error(&error.to_string())))
-    }
-
-    pub(crate) async fn fetch_deployment_price(
-        &self,
-    ) -> std::result::Result<Nat, CreateCostFetchError> {
+    pub(crate) async fn fetch_deployment_price(&self) -> Result<Nat> {
         let response = self
             .agent
             .query(&self.launcher_id, "get_price")
             .call()
             .await
-            .context("Failed to query deployment price")
-            .map_err(|error| CreateCostFetchError::Price(short_error(&error.to_string())))?;
+            .context("Failed to query deployment price")?;
 
-        let price = Decode!(&response, Nat)
-            .context("Failed to decode deployment price")
-            .map_err(|error| CreateCostFetchError::Price(short_error(&error.to_string())))?;
+        let price = Decode!(&response, Nat).context("Failed to decode deployment price")?;
         Ok(price)
-    }
-
-    pub(crate) async fn fetch_balance_and_price(
-        &self,
-    ) -> std::result::Result<(u128, Nat), CreateCostFetchError> {
-        let balance = self.fetch_balance().await?;
-        let price = self.fetch_deployment_price().await?;
-        Ok((balance, price))
     }
 
     pub fn launcher_id(&self) -> &Principal {
@@ -202,20 +183,4 @@ pub enum State {
     Installation(Principal, String),
     SettingUp(Principal),
     Running(Principal),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub(crate) enum CreateCostFetchError {
-    #[error("Could not derive principal. Cause: {0}")]
-    Principal(String),
-    #[error("Could not fetch KINIC balance. Cause: {0}")]
-    Balance(String),
-    #[error("Could not fetch create price. Cause: {0}")]
-    Price(String),
-    #[error("Account overview is unavailable.")]
-    Unavailable(String),
-}
-
-fn short_error(message: &str) -> String {
-    message.lines().next().unwrap_or(message).trim().to_string()
 }
