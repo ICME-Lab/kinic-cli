@@ -34,6 +34,8 @@ impl<'a> TuiKitUi<'a> {
             let mut spans = vec![
                 Span::styled(tab_label, self.theme.style_accent_bold()),
                 Span::styled(" │ ", self.theme.style_dim()),
+                Span::styled("←/→", self.theme.style_accent()),
+                Span::styled(" mode ", self.theme.style_muted()),
                 Span::styled("Tab/Shift+Tab", self.theme.style_accent()),
                 Span::styled(" fields ", self.theme.style_muted()),
                 Span::styled("Enter", self.theme.style_accent()),
@@ -68,7 +70,10 @@ impl<'a> TuiKitUi<'a> {
                     Span::styled(" tabs ", self.theme.style_muted()),
                     Span::styled("│ ", self.theme.style_dim()),
                     Span::styled("Shift+D", self.theme.style_accent()),
-                    Span::styled(" saves current memory from Memories", self.theme.style_muted()),
+                    Span::styled(
+                        " saves current memory from Memories",
+                        self.theme.style_muted(),
+                    ),
                 ])
             } else {
                 let mut spans = vec![
@@ -203,8 +208,18 @@ impl<'a> TuiKitUi<'a> {
 
 fn form_enter_hint(tab_id: &str) -> &'static str {
     if tab_id == KINIC_INSERT_TAB_ID {
-        " mode/submit "
+        " cycle/submit "
     } else {
         " submit "
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_tab_enter_hint_mentions_cycle_and_submit() {
+        assert_eq!(form_enter_hint(KINIC_INSERT_TAB_ID), " cycle/submit ");
     }
 }

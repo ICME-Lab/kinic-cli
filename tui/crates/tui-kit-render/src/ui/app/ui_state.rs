@@ -6,7 +6,7 @@ use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
 use tui_kit_runtime::{
     CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode,
-    SettingsSnapshot,
+    MemorySelectorContext, SettingsSnapshot,
 };
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
@@ -50,8 +50,10 @@ pub struct TuiKitUi<'a> {
     pub(super) default_memory_selector_items: &'a [String],
     pub(super) default_memory_selector_labels: &'a [String],
     pub(super) default_memory_selector_selected_id: Option<&'a str>,
+    pub(super) default_memory_selector_context: MemorySelectorContext,
     pub(super) insert_mode: InsertMode,
     pub(super) insert_memory_id: &'a str,
+    pub(super) insert_memory_placeholder: Option<&'a str>,
     pub(super) insert_tag: &'a str,
     pub(super) insert_text: &'a str,
     pub(super) insert_file_path: &'a str,
@@ -111,8 +113,10 @@ impl<'a> TuiKitUi<'a> {
             default_memory_selector_items: &[],
             default_memory_selector_labels: &[],
             default_memory_selector_selected_id: None,
+            default_memory_selector_context: MemorySelectorContext::DefaultPreference,
             insert_mode: InsertMode::Normal,
             insert_memory_id: "",
+            insert_memory_placeholder: None,
             insert_tag: "",
             insert_text: "",
             insert_file_path: "",

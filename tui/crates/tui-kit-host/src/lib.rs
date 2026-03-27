@@ -339,6 +339,12 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.insert_spinner_frame = 0;
                 state.insert_error = None;
             }
+            CoreEffect::SetInsertMemoryId(memory_id) => {
+                state.insert_memory_id = memory_id.clone();
+                state.insert_memory_placeholder = None;
+                state.default_memory_selector_selected_id = Some(memory_id);
+                state.insert_error = None;
+            }
             CoreEffect::Custom { id, payload } => {
                 state.status_message = Some(match payload {
                     Some(p) => format!("Custom effect: {id} ({p})"),
@@ -445,6 +451,28 @@ mod tests {
             execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::Items)]);
 
             assert_eq!(state.focus, PaneFocus::Form);
+        }
+
+        #[test]
+        fn set_insert_memory_id_effect_updates_insert_target() {
+            let mut state = CoreState {
+                insert_memory_id: "aaaaa-aa".to_string(),
+                insert_error: Some("boom".to_string()),
+                ..CoreState::default()
+            };
+
+            execute_effects_to_status(
+                &mut state,
+                vec![CoreEffect::SetInsertMemoryId("bbbbb-bb".to_string())],
+            );
+
+            assert_eq!(state.insert_memory_id, "bbbbb-bb");
+            assert_eq!(
+                state.default_memory_selector_selected_id.as_deref(),
+                Some("bbbbb-bb")
+            );
+            assert_eq!(state.insert_memory_placeholder, None);
+            assert_eq!(state.insert_error, None);
         }
     }
 

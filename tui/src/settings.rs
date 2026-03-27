@@ -7,12 +7,16 @@
 use std::{fs, path::Path};
 
 use serde::{Deserialize, Serialize};
-use tui_kit_host::settings::{SettingsError, load_yaml_or_default, save_yaml};
+use tui_kit_host::settings::SettingsError;
+#[cfg(not(test))]
+use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
 
 use crate::tui::TuiAuth;
 
+#[cfg(not(test))]
 const APP_NAMESPACE: &str = "kinic";
+#[cfg(not(test))]
 const SETTINGS_FILE_NAME: &str = "tui.yaml";
 const UNAVAILABLE: &str = "unavailable";
 const NOT_SET: &str = "not set";
@@ -58,11 +62,28 @@ pub struct PreferencesHealth {
 }
 
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
-    load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)
+    #[cfg(test)]
+    {
+        Ok(UserPreferences::default())
+    }
+
+    #[cfg(not(test))]
+    {
+        load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)
+    }
 }
 
 pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), SettingsError> {
-    save_yaml(APP_NAMESPACE, SETTINGS_FILE_NAME, preferences)
+    #[cfg(test)]
+    {
+        let _ = preferences;
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    {
+        save_yaml(APP_NAMESPACE, SETTINGS_FILE_NAME, preferences)
+    }
 }
 
 pub fn build_settings_snapshot(

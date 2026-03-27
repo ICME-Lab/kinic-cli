@@ -198,6 +198,8 @@ impl Default for UiConfig {
                 lines: vec![
                     "Tab: enter selected tab or move focus, Shift+Tab: previous focus"
                         .to_string(),
+                    "Insert form: \u{2190}/\u{2192} switch mode, Enter cycles mode or submits"
+                        .to_string(),
                     "/: focus search".to_string(),
                     "Esc: back / clear / close".to_string(),
                     "F5: refresh current view".to_string(),

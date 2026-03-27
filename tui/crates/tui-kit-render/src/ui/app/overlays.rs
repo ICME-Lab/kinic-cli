@@ -10,7 +10,9 @@ use ratatui::{
 use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::TuiKitUi;
-use super::screens::settings::{DefaultMemorySelectorLineKind, default_memory_selector_lines};
+use super::screens::settings::{
+    DefaultMemorySelectorLineKind, default_memory_selector_copy, default_memory_selector_lines,
+};
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_create_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -210,7 +212,9 @@ impl<'a> TuiKitUi<'a> {
             self.default_memory_selector_labels,
             self.default_memory_selector_index,
             self.default_memory_selector_selected_id,
+            default_memory_selector_copy(self.default_memory_selector_context),
         );
+        let copy = default_memory_selector_copy(self.default_memory_selector_context);
         let Some((w, h)) = fit_overlay_rect(area, 56, lines.len().saturating_add(2) as u16, 8)
         else {
             return;
@@ -249,7 +253,7 @@ impl<'a> TuiKitUi<'a> {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(self.theme.style_border_focused())
-                    .title(" Select Default Memory ")
+                    .title(format!(" {} ", copy.title))
                     .style(Style::default().bg(self.theme.bg_panel)),
             )
             .wrap(Wrap { trim: false })
@@ -344,7 +348,9 @@ fn settings_overlay_lines(
 mod tests {
     use super::*;
     use crate::ui::app::UiConfig;
-    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
+    use tui_kit_runtime::{
+        MemorySelectorContext, SettingsEntry, SettingsSection, SettingsSnapshot,
+    };
 
     #[test]
     fn settings_overlay_lines_include_priority_entries() {
@@ -444,6 +450,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             10,
             Some("id-2"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
 
         let visible = visible_default_memory_selector_lines(lines, 8);
@@ -469,6 +476,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             1,
             Some("id-9"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
 
         let visible = visible_default_memory_selector_lines(lines, 8);
@@ -480,6 +488,28 @@ mod tests {
 
         assert!(joined.contains("Memory 1"));
         assert!(!joined.contains("Memory 10"));
-        assert!(joined.contains("Select default memory"));
+        assert!(joined.contains("Select Default Memory"));
+    }
+
+    #[test]
+    fn insert_target_selector_window_uses_insert_specific_copy() {
+        let lines = default_memory_selector_lines(
+            &["id-0".to_string()],
+            &["Memory 0".to_string()],
+            0,
+            Some("id-0"),
+            default_memory_selector_copy(MemorySelectorContext::InsertTarget),
+        );
+
+        let visible = visible_default_memory_selector_lines(lines, 8);
+        let joined = visible
+            .iter()
+            .map(|(line, _)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("Select Target Memory"));
+        assert!(joined.contains("Enter: use target"));
+        assert!(!joined.contains('★'));
     }
 }

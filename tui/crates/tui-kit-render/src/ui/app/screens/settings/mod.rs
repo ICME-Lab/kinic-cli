@@ -9,7 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::SettingsSnapshot;
+use tui_kit_runtime::{MemorySelectorContext, SettingsSnapshot};
 
 use crate::ui::app::{Focus, TuiKitUi};
 
@@ -20,6 +20,13 @@ pub(crate) enum DefaultMemorySelectorLineKind {
     CurrentDefault,
     Normal,
     Hint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DefaultMemorySelectorCopy<'a> {
+    pub title: &'a str,
+    pub hint: &'a str,
+    pub show_current_default_marker: bool,
 }
 
 impl<'a> TuiKitUi<'a> {
@@ -75,10 +82,11 @@ pub(crate) fn default_memory_selector_lines(
     labels: &[String],
     selected_index: usize,
     current_default_id: Option<&str>,
+    copy: DefaultMemorySelectorCopy<'_>,
 ) -> Vec<(String, DefaultMemorySelectorLineKind)> {
     let mut lines = vec![
         (
-            " Select default memory ".to_string(),
+            format!(" {} ", copy.title),
             DefaultMemorySelectorLineKind::Title,
         ),
         (String::new(), DefaultMemorySelectorLineKind::Normal),
@@ -92,7 +100,8 @@ pub(crate) fn default_memory_selector_lines(
     } else {
         for (index, item) in items.iter().enumerate() {
             let is_selected = index == selected_index;
-            let is_default = current_default_id == Some(item.as_str());
+            let is_default =
+                copy.show_current_default_marker && current_default_id == Some(item.as_str());
             let prefix = if is_selected { "›" } else { " " };
             let suffix = if is_default { "  ★" } else { "" };
             let label = labels.get(index).map_or(item.as_str(), String::as_str);
@@ -108,11 +117,25 @@ pub(crate) fn default_memory_selector_lines(
     }
 
     lines.push((String::new(), DefaultMemorySelectorLineKind::Normal));
-    lines.push((
-        " Enter: save  ↑/↓: move  Esc: close".to_string(),
-        DefaultMemorySelectorLineKind::Hint,
-    ));
+    lines.push((copy.hint.to_string(), DefaultMemorySelectorLineKind::Hint));
     lines
+}
+
+pub(crate) fn default_memory_selector_copy(
+    context: MemorySelectorContext,
+) -> DefaultMemorySelectorCopy<'static> {
+    match context {
+        MemorySelectorContext::DefaultPreference => DefaultMemorySelectorCopy {
+            title: "Select Default Memory",
+            hint: " Enter: save  ↑/↓: move  Esc: close",
+            show_current_default_marker: true,
+        },
+        MemorySelectorContext::InsertTarget => DefaultMemorySelectorCopy {
+            title: "Select Target Memory",
+            hint: " Enter: use target  ↑/↓: move  Esc: close",
+            show_current_default_marker: false,
+        },
+    }
 }
 
 fn settings_screen_lines_with_selection(
@@ -278,6 +301,7 @@ mod tests {
             &["Alpha Memory".to_string(), "Beta Memory".to_string()],
             1,
             Some("aaaaa-aa"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
         let joined = lines
             .into_iter()
@@ -291,5 +315,25 @@ mod tests {
         assert!(joined.contains("↑/↓: move"));
         assert!(!joined.contains("ID aaaaa-aa"));
         assert!(!joined.contains("j/k: move"));
+    }
+
+    #[test]
+    fn insert_target_selector_lines_use_insert_specific_copy() {
+        let lines = default_memory_selector_lines(
+            &["aaaaa-aa".to_string()],
+            &["Alpha Memory".to_string()],
+            0,
+            Some("aaaaa-aa"),
+            default_memory_selector_copy(MemorySelectorContext::InsertTarget),
+        );
+        let joined = lines
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("Select Target Memory"));
+        assert!(joined.contains("Enter: use target"));
+        assert!(!joined.contains('★'));
     }
 }

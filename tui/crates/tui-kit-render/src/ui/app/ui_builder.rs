@@ -235,6 +235,15 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn default_memory_selector_context(
+        mut self,
+        value: tui_kit_runtime::MemorySelectorContext,
+    ) -> Self {
+        self.default_memory_selector_context = value;
+        self
+    }
+
+    #[must_use]
     pub fn insert_mode(mut self, value: InsertMode) -> Self {
         self.insert_mode = value;
         self
@@ -243,6 +252,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn insert_memory_id(mut self, value: &'a str) -> Self {
         self.insert_memory_id = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_memory_placeholder(mut self, value: Option<&'a str>) -> Self {
+        self.insert_memory_placeholder = value;
         self
     }
 

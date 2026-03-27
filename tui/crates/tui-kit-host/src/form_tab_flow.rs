@@ -31,20 +31,26 @@ pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<
         KeyCode::Tab => Some(CoreAction::InsertNextField),
         KeyCode::BackTab => Some(CoreAction::InsertPrevField),
         KeyCode::Backspace => Some(CoreAction::InsertBackspace),
+        KeyCode::Left => match state.insert_focus {
+            InsertFormFocus::Mode => Some(CoreAction::InsertCycleModePrev),
+            _ => None,
+        },
+        KeyCode::Right => match state.insert_focus {
+            InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
+            _ => None,
+        },
         KeyCode::Enter => match state.insert_focus {
             InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
+            InsertFormFocus::MemoryId => Some(CoreAction::OpenDefaultMemoryPicker),
             InsertFormFocus::Submit => Some(CoreAction::InsertSubmit),
             _ => None,
         },
         KeyCode::Char(c) if !c.is_control() => match state.insert_focus {
-            InsertFormFocus::MemoryId
-            | InsertFormFocus::Tag
+            InsertFormFocus::Tag
             | InsertFormFocus::Text
             | InsertFormFocus::FilePath
-            | InsertFormFocus::Embedding => {
-                Some(CoreAction::InsertInput(c))
-            }
-            InsertFormFocus::Mode | InsertFormFocus::Submit => None,
+            | InsertFormFocus::Embedding => Some(CoreAction::InsertInput(c)),
+            InsertFormFocus::Mode | InsertFormFocus::MemoryId | InsertFormFocus::Submit => None,
         },
         _ => None,
     }
@@ -156,6 +162,62 @@ mod tests {
         let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
 
         assert_eq!(action, Some(CoreAction::InsertCycleMode));
+    }
+
+    #[test]
+    fn insert_memory_id_focus_uses_enter_to_open_picker() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            insert_focus: InsertFormFocus::MemoryId,
+            ..CoreState::default()
+        };
+
+        let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+        assert_eq!(action, Some(CoreAction::OpenDefaultMemoryPicker));
+    }
+
+    #[test]
+    fn insert_mode_focus_uses_left_to_cycle_modes_backwards() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            insert_focus: InsertFormFocus::Mode,
+            ..CoreState::default()
+        };
+
+        let action = form_tab_action_from_key(KeyCode::Left, &mut state);
+
+        assert_eq!(action, Some(CoreAction::InsertCycleModePrev));
+    }
+
+    #[test]
+    fn insert_mode_focus_uses_right_to_cycle_modes_forwards() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            insert_focus: InsertFormFocus::Mode,
+            ..CoreState::default()
+        };
+
+        let action = form_tab_action_from_key(KeyCode::Right, &mut state);
+
+        assert_eq!(action, Some(CoreAction::InsertCycleMode));
+    }
+
+    #[test]
+    fn insert_submit_focus_uses_enter_to_submit() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            insert_focus: InsertFormFocus::Submit,
+            ..CoreState::default()
+        };
+
+        let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+        assert_eq!(action, Some(CoreAction::InsertSubmit));
     }
 
     #[test]

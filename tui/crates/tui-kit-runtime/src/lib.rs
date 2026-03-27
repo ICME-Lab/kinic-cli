@@ -127,6 +127,13 @@ pub enum InsertFormFocus {
     Submit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MemorySelectorContext {
+    #[default]
+    DefaultPreference,
+    InsertTarget,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CreateSubmitState {
     #[default]
@@ -210,8 +217,10 @@ pub struct CoreState {
     pub default_memory_selector_items: Vec<String>,
     pub default_memory_selector_labels: Vec<String>,
     pub default_memory_selector_selected_id: Option<String>,
+    pub default_memory_selector_context: MemorySelectorContext,
     pub insert_mode: InsertMode,
     pub insert_memory_id: String,
+    pub insert_memory_placeholder: Option<String>,
     pub insert_tag: String,
     pub insert_text: String,
     pub insert_file_path: String,
@@ -252,8 +261,10 @@ impl Default for CoreState {
             default_memory_selector_items: Vec::new(),
             default_memory_selector_labels: Vec::new(),
             default_memory_selector_selected_id: None,
+            default_memory_selector_context: MemorySelectorContext::default(),
             insert_mode: InsertMode::default(),
             insert_memory_id: String::new(),
+            insert_memory_placeholder: None,
             insert_tag: String::new(),
             insert_text: String::new(),
             insert_file_path: String::new(),
@@ -321,6 +332,7 @@ pub enum CoreAction {
     InsertBackspace,
     InsertNextField,
     InsertPrevField,
+    InsertCycleModePrev,
     InsertCycleMode,
     InsertSubmit,
     Submit,
@@ -396,6 +408,8 @@ pub enum CoreEffect {
     },
     /// Clear insert content fields while keeping target selection for repeated inserts.
     ResetInsertFormForRepeat,
+    /// Apply a selector-picked insert target without routing it through text input.
+    SetInsertMemoryId(String),
     /// Escape hatch for domain-specific integrations (examples, experiments).
     Custom {
         id: String,
@@ -417,6 +431,8 @@ pub struct ProviderSnapshot {
     pub default_memory_selector_items: Vec<String>,
     pub default_memory_selector_labels: Vec<String>,
     pub default_memory_selector_selected_id: Option<String>,
+    pub default_memory_selector_context: MemorySelectorContext,
+    pub insert_memory_placeholder: Option<String>,
 }
 
 /// Provider response to one action.
@@ -523,6 +539,17 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 return;
             }
             state.insert_focus = prev_insert_focus(state.insert_mode, state.insert_focus);
+        }
+        CoreAction::InsertCycleModePrev => {
+            if insert_form_locked(state) {
+                return;
+            }
+            state.insert_mode = prev_insert_mode(state.insert_mode);
+            state.insert_focus = InsertFormFocus::Mode;
+            state.insert_error = None;
+            if state.insert_submit_state == CreateSubmitState::Error {
+                state.insert_submit_state = CreateSubmitState::Idle;
+            }
         }
         CoreAction::InsertCycleMode => {
             if insert_form_locked(state) {
@@ -684,6 +711,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::OpenDefaultMemoryPicker => {
+            state.default_memory_selector_context = default_memory_selector_context(state);
+            if state.default_memory_selector_context == MemorySelectorContext::InsertTarget {
+                let insert_memory_id = state.insert_memory_id.trim();
+                if !insert_memory_id.is_empty() {
+                    state.default_memory_selector_selected_id = Some(insert_memory_id.to_string());
+                }
+            }
             state.default_memory_selector_open = true;
             state.default_memory_selector_index = state
                 .default_memory_selector_selected_id
@@ -855,13 +889,19 @@ fn insert_focus_order(mode: InsertMode) -> &'static [InsertFormFocus] {
 
 fn next_insert_focus(mode: InsertMode, focus: InsertFormFocus) -> InsertFormFocus {
     let order = insert_focus_order(mode);
-    let current = order.iter().position(|candidate| *candidate == focus).unwrap_or(0);
+    let current = order
+        .iter()
+        .position(|candidate| *candidate == focus)
+        .unwrap_or(0);
     order[(current + 1) % order.len()]
 }
 
 fn prev_insert_focus(mode: InsertMode, focus: InsertFormFocus) -> InsertFormFocus {
     let order = insert_focus_order(mode);
-    let current = order.iter().position(|candidate| *candidate == focus).unwrap_or(0);
+    let current = order
+        .iter()
+        .position(|candidate| *candidate == focus)
+        .unwrap_or(0);
     order[(current + order.len() - 1) % order.len()]
 }
 
@@ -870,6 +910,14 @@ fn next_insert_mode(mode: InsertMode) -> InsertMode {
         InsertMode::Normal => InsertMode::Raw,
         InsertMode::Raw => InsertMode::Pdf,
         InsertMode::Pdf => InsertMode::Normal,
+    }
+}
+
+fn prev_insert_mode(mode: InsertMode) -> InsertMode {
+    match mode {
+        InsertMode::Normal => InsertMode::Pdf,
+        InsertMode::Raw => InsertMode::Normal,
+        InsertMode::Pdf => InsertMode::Raw,
     }
 }
 
@@ -1046,6 +1094,8 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.default_memory_selector_items = snapshot.default_memory_selector_items;
     state.default_memory_selector_labels = snapshot.default_memory_selector_labels;
     state.default_memory_selector_selected_id = snapshot.default_memory_selector_selected_id;
+    state.default_memory_selector_context = snapshot.default_memory_selector_context;
+    state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
     if state.default_memory_selector_items.is_empty() {
         state.default_memory_selector_index = 0;
     } else if state.default_memory_selector_index >= state.default_memory_selector_items.len() {
@@ -1107,6 +1157,17 @@ pub fn should_open_default_memory_picker(state: &CoreState) -> bool {
             .and_then(|index| settings_entry(&state.settings, index))
             .map(|entry| entry.id.as_str())
             == Some("default_memory")
+}
+
+fn default_memory_selector_context(state: &CoreState) -> MemorySelectorContext {
+    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID
+        && state.focus == PaneFocus::Form
+        && state.insert_focus == InsertFormFocus::MemoryId
+    {
+        return MemorySelectorContext::InsertTarget;
+    }
+
+    MemorySelectorContext::DefaultPreference
 }
 
 #[cfg(test)]
@@ -1541,6 +1602,48 @@ mod tests {
     }
 
     #[test]
+    fn open_default_memory_picker_uses_insert_context_from_insert_memory_field() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            insert_focus: InsertFormFocus::MemoryId,
+            default_memory_selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            default_memory_selector_selected_id: Some("bbbbb-bb".to_string()),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::OpenDefaultMemoryPicker);
+
+        assert!(state.default_memory_selector_open);
+        assert_eq!(
+            state.default_memory_selector_context,
+            MemorySelectorContext::InsertTarget
+        );
+        assert_eq!(state.default_memory_selector_index, 1);
+    }
+
+    #[test]
+    fn open_default_memory_picker_prefers_explicit_insert_target_selection() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
+            focus: PaneFocus::Form,
+            insert_focus: InsertFormFocus::MemoryId,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            default_memory_selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            default_memory_selector_selected_id: Some("bbbbb-bb".to_string()),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::OpenDefaultMemoryPicker);
+
+        assert_eq!(
+            state.default_memory_selector_selected_id.as_deref(),
+            Some("aaaaa-aa")
+        );
+        assert_eq!(state.default_memory_selector_index, 0);
+    }
+
+    #[test]
     fn apply_snapshot_preserves_settings_row_selection() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
@@ -1576,6 +1679,27 @@ mod tests {
         apply_snapshot(&mut state, snapshot);
 
         assert_eq!(state.selected_index, Some(1));
+    }
+
+    #[test]
+    fn apply_snapshot_updates_selector_context_and_insert_placeholder() {
+        let mut state = CoreState::default();
+        let snapshot = ProviderSnapshot {
+            default_memory_selector_context: MemorySelectorContext::InsertTarget,
+            insert_memory_placeholder: Some("Alpha Memory".to_string()),
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(
+            state.default_memory_selector_context,
+            MemorySelectorContext::InsertTarget
+        );
+        assert_eq!(
+            state.insert_memory_placeholder.as_deref(),
+            Some("Alpha Memory")
+        );
     }
 
     #[test]
@@ -1683,5 +1807,39 @@ mod tests {
 
         assert_eq!(state.insert_focus, InsertFormFocus::Text);
         assert_eq!(state.insert_mode, InsertMode::Normal);
+    }
+
+    #[test]
+    fn insert_cycle_mode_prev_moves_backwards_and_resets_focus() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::Raw,
+            insert_focus: InsertFormFocus::Embedding,
+            insert_error: Some("boom".to_string()),
+            insert_submit_state: CreateSubmitState::Error,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
+
+        assert_eq!(state.insert_mode, InsertMode::Normal);
+        assert_eq!(state.insert_focus, InsertFormFocus::Mode);
+        assert_eq!(state.insert_error, None);
+        assert_eq!(state.insert_submit_state, CreateSubmitState::Idle);
+    }
+
+    #[test]
+    fn insert_cycle_mode_wraps_between_first_and_last_modes() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::Normal,
+            insert_focus: InsertFormFocus::Mode,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
+        assert_eq!(state.insert_mode, InsertMode::Pdf);
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::Normal);
+        assert_eq!(state.insert_focus, InsertFormFocus::Mode);
     }
 }
