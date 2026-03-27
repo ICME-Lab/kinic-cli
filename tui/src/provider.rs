@@ -238,15 +238,12 @@ impl KinicProvider {
                 },
             ),
         };
-        let session_overview = SessionAccountOverview::new(
-            settings::SessionSettingsSnapshot::new(
-                &config.auth,
-                config.use_mainnet,
-                None,
-                crate::embedding::embedding_base_url(),
-            ),
-            user_preferences.default_memory_id.clone(),
-        );
+        let session_overview = SessionAccountOverview::new(settings::SessionSettingsSnapshot::new(
+            &config.auth,
+            config.use_mainnet,
+            None,
+            crate::embedding::embedding_base_url(),
+        ));
 
         Self {
             all: sample_records(),
@@ -591,18 +588,14 @@ impl KinicProvider {
         self.session_settings_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
-        let default_memory_id = self.user_preferences.default_memory_id.clone();
         let (tx, rx) = mpsc::channel();
         self.pending_session_settings = Some(rx);
 
         thread::spawn(move || {
             let runtime =
                 Runtime::new().expect("failed to create tokio runtime for settings refresh");
-            let overview = runtime.block_on(bridge::load_session_account_overview(
-                use_mainnet,
-                auth,
-                default_memory_id,
-            ));
+            let overview =
+                runtime.block_on(bridge::load_session_account_overview(use_mainnet, auth));
             let _ = tx.send(SessionSettingsTaskOutput {
                 request_id,
                 overview,
@@ -634,18 +627,14 @@ impl KinicProvider {
         self.create_cost_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
-        let default_memory_id = self.user_preferences.default_memory_id.clone();
         let (tx, rx) = mpsc::channel();
         self.pending_create_cost = Some(rx);
 
         thread::spawn(move || {
             let runtime =
                 Runtime::new().expect("failed to create tokio runtime for create cost refresh");
-            let overview = runtime.block_on(bridge::load_session_account_overview(
-                use_mainnet,
-                auth,
-                default_memory_id,
-            ));
+            let overview =
+                runtime.block_on(bridge::load_session_account_overview(use_mainnet, auth));
             let _ = tx.send(CreateCostTaskOutput {
                 request_id,
                 overview,
@@ -735,16 +724,21 @@ impl KinicProvider {
     }
 
     fn apply_session_overview(&mut self, overview: bridge::SessionAccountOverview) {
-        let create_cost_details = overview
-            .create_cost_details
-            .or_else(|| self.session_overview.create_cost_details.clone());
+        // Preserve stale account values only when the response still belongs to the
+        // same session context. This avoids mixing identities or networks.
+        let same_session_context =
+            has_same_session_context(&self.session_overview.session, &overview.session);
+        let create_cost_details = overview.create_cost_details.or_else(|| {
+            same_session_context
+                .then(|| self.session_overview.create_cost_details.clone())
+                .flatten()
+        });
         let mut session = overview.session;
-        if overview.principal_error.is_some() {
+        if same_session_context && overview.principal_error.is_some() {
             session.principal_id = self.session_overview.session.principal_id.clone();
         }
         self.session_overview = SessionAccountOverview {
             session,
-            default_memory_id: overview.default_memory_id,
             create_cost_details,
             principal_error: overview.principal_error,
             balance_error: overview.balance_error,
@@ -949,8 +943,9 @@ impl KinicProvider {
                 self.pending_create_cost = None;
                 self.invalidate_pending_create_cost();
                 self.create_cost_in_flight = false;
-                self.create_cost_state =
-                    CreateCostState::Error("Account info refresh worker disconnected.".to_string());
+                self.create_cost_state = CreateCostState::Error(vec![
+                    "Account info refresh worker disconnected.".to_string(),
+                ]);
                 return Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
                     effects: vec![CoreEffect::Notify(
@@ -971,9 +966,17 @@ impl KinicProvider {
             });
         }
 
-        let next_state = match output.overview.create_cost_details_result() {
-            Ok(details) => CreateCostState::Ready(details),
-            Err(error) => CreateCostState::Error(format_create_cost_error(&error)),
+        let issues = create_cost_issues(&output.overview);
+        let same_session_context =
+            has_same_session_context(&self.session_overview.session, &output.overview.session);
+        let details = output.overview.create_cost_details.clone().or_else(|| {
+            same_session_context
+                .then(|| self.session_overview.create_cost_details.clone())
+                .flatten()
+        });
+        let next_state = match details {
+            Some(details) => CreateCostState::Ready { details, issues },
+            None => CreateCostState::Error(issues),
         };
         self.apply_session_overview(output.overview);
         self.create_cost_state = next_state;
@@ -1089,7 +1092,10 @@ impl KinicProvider {
             });
         }
 
-        let notify_message = output.overview.session_settings_refresh_notify_message();
+        let notify_message = output
+            .overview
+            .session_settings_refresh_failure_message()
+            .unwrap_or_else(|| output.overview.session_settings_refresh_notify_message());
         self.apply_session_overview(output.overview);
         let effects = vec![CoreEffect::Notify(notify_message)];
 
@@ -1423,20 +1429,21 @@ fn decode_payload_text(text: &str) -> String {
         .join("\n")
 }
 
-fn format_create_cost_error(error: &bridge::CreateCostFetchError) -> String {
-    match error {
-        bridge::CreateCostFetchError::Principal(reason) => {
-            format!("Could not derive principal. Cause: {reason}")
-        }
-        bridge::CreateCostFetchError::Balance(reason) => {
-            format!("Could not fetch KINIC balance. Cause: {reason}")
-        }
-        bridge::CreateCostFetchError::Price(reason) => {
-            format!("Could not fetch create price. Cause: {reason}")
-        }
-        bridge::CreateCostFetchError::Unavailable(reason) => {
-            format!("Could not load account overview. Cause: {reason}")
-        }
+fn has_same_session_context(
+    current: &settings::SessionSettingsSnapshot,
+    next: &settings::SessionSettingsSnapshot,
+) -> bool {
+    current.auth_mode == next.auth_mode
+        && current.identity_name == next.identity_name
+        && current.network == next.network
+}
+
+fn create_cost_issues(overview: &bridge::SessionAccountOverview) -> Vec<String> {
+    let issues = overview.account_issue_messages();
+    if issues.is_empty() {
+        vec!["Could not load account overview. Cause: Account overview is unavailable.".to_string()]
+    } else {
+        issues
     }
 }
 

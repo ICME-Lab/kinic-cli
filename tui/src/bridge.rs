@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 use anyhow::{Context, Result};
 use candid::Nat;
 use ic_agent::export::Principal;
-use thiserror::Error;
 use tui_kit_runtime::CreateCostDetails;
 
 use crate::{
@@ -41,7 +40,6 @@ pub struct CreateMemorySuccess {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionAccountOverview {
     pub session: SessionSettingsSnapshot,
-    pub default_memory_id: Option<String>,
     pub create_cost_details: Option<CreateCostDetails>,
     pub principal_error: Option<String>,
     pub balance_error: Option<String>,
@@ -61,18 +59,6 @@ pub enum CreateMemoryError {
     },
     Approve(String),
     Deploy(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub(crate) enum CreateCostFetchError {
-    #[error("Could not derive principal. Cause: {0}")]
-    Principal(String),
-    #[error("Could not fetch KINIC balance. Cause: {0}")]
-    Balance(String),
-    #[error("Could not fetch create price. Cause: {0}")]
-    Price(String),
-    #[error("Account overview is unavailable.")]
-    Unavailable(String),
 }
 
 fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<crate::agent::AgentFactory> {
@@ -149,12 +135,13 @@ pub async fn create_memory(
 pub async fn load_session_account_overview(
     use_mainnet: bool,
     auth: TuiAuth,
-    default_memory_id: Option<String>,
 ) -> SessionAccountOverview {
-    let mut overview = SessionAccountOverview::new(
-        SessionSettingsSnapshot::new(&auth, use_mainnet, None, embedding_base_url()),
-        default_memory_id,
-    );
+    let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+        &auth,
+        use_mainnet,
+        None,
+        embedding_base_url(),
+    ));
     let factory =
         resolve_agent_factory(use_mainnet, &auth).map_err(|error| short_error(&error.to_string()));
     let factory = match factory {
@@ -296,10 +283,9 @@ fn create_cost_details_from_parts(
 }
 
 impl SessionAccountOverview {
-    pub fn new(session: SessionSettingsSnapshot, default_memory_id: Option<String>) -> Self {
+    pub fn new(session: SessionSettingsSnapshot) -> Self {
         Self {
             session,
-            default_memory_id,
             create_cost_details: None,
             principal_error: None,
             balance_error: None,
@@ -307,22 +293,29 @@ impl SessionAccountOverview {
         }
     }
 
-    pub fn create_cost_details_result(&self) -> Result<CreateCostDetails, CreateCostFetchError> {
-        if let Some(details) = &self.create_cost_details {
-            return Ok(details.clone());
-        }
+    pub fn account_issue_messages(&self) -> Vec<String> {
+        let mut messages = Vec::new();
         if let Some(error) = &self.principal_error {
-            return Err(CreateCostFetchError::Principal(error.clone()));
+            messages.push(format!("Could not derive principal. Cause: {error}"));
         }
         if let Some(error) = &self.balance_error {
-            return Err(CreateCostFetchError::Balance(error.clone()));
+            messages.push(format!("Could not fetch KINIC balance. Cause: {error}"));
         }
         if let Some(error) = &self.price_error {
-            return Err(CreateCostFetchError::Price(error.clone()));
+            messages.push(format!("Could not fetch create price. Cause: {error}"));
         }
-        Err(CreateCostFetchError::Unavailable(
-            "Account overview is unavailable.".to_string(),
-        ))
+        messages
+    }
+
+    pub fn account_issue_note(&self) -> Option<String> {
+        let issues = self.account_issue_messages();
+        (!issues.is_empty()).then(|| issues.join(" | "))
+    }
+
+    pub fn session_settings_refresh_failure_message(&self) -> Option<String> {
+        self.principal_error
+            .as_ref()
+            .map(|error| format!("Session settings refresh failed: {error}"))
     }
 
     /// User-visible toast after a session settings / account overview refresh completes.
@@ -332,8 +325,7 @@ impl SessionAccountOverview {
             || self.price_error.is_some()
             || self.create_cost_details.is_none();
         if account_incomplete {
-            "Session settings updated (partial account info). See Settings → Account."
-                .to_string()
+            "Session settings updated (partial account info). See Settings → Account.".to_string()
         } else {
             "Session settings refreshed.".to_string()
         }
@@ -432,15 +424,12 @@ mod tests {
 
     #[test]
     fn session_account_overview_returns_ready_create_cost_details() {
-        let mut overview = SessionAccountOverview::new(
-            SessionSettingsSnapshot::new(
-                &TuiAuth::resolved_for_tests(),
-                false,
-                Some("aaaaa-aa".to_string()),
-                "https://api.kinic.io".to_string(),
-            ),
-            Some("bbbbb-bb".to_string()),
-        );
+        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
         overview.create_cost_details = Some(create_cost_details_from_parts(
             "aaaaa-aa".to_string(),
             2_000_000u128,
@@ -448,7 +437,8 @@ mod tests {
         ));
 
         let details = overview
-            .create_cost_details_result()
+            .create_cost_details
+            .clone()
             .expect("create cost details");
 
         assert_eq!(details.principal, "aaaaa-aa");
@@ -457,84 +447,91 @@ mod tests {
     }
 
     #[test]
-    fn session_account_overview_prioritizes_balance_error_when_details_missing() {
-        let mut overview = SessionAccountOverview::new(
-            SessionSettingsSnapshot::new(
-                &TuiAuth::resolved_for_tests(),
-                false,
-                Some("aaaaa-aa".to_string()),
-                "https://api.kinic.io".to_string(),
-            ),
-            None,
-        );
+    fn session_account_overview_lists_account_issues_in_priority_order() {
+        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.principal_error = Some("identity unavailable".to_string());
         overview.balance_error = Some("ledger unavailable".to_string());
-
-        let error = overview
-            .create_cost_details_result()
-            .expect_err("balance failure");
-
-        assert_eq!(
-            error,
-            CreateCostFetchError::Balance("ledger unavailable".to_string())
-        );
-    }
-
-    #[test]
-    fn session_account_overview_returns_price_error_when_price_fetch_fails() {
-        let mut overview = SessionAccountOverview::new(
-            SessionSettingsSnapshot::new(
-                &TuiAuth::resolved_for_tests(),
-                false,
-                Some("aaaaa-aa".to_string()),
-                "https://api.kinic.io".to_string(),
-            ),
-            None,
-        );
         overview.price_error = Some("price unavailable".to_string());
 
-        let error = overview
-            .create_cost_details_result()
-            .expect_err("price failure");
-
         assert_eq!(
-            error,
-            CreateCostFetchError::Price("price unavailable".to_string())
+            overview.account_issue_messages(),
+            vec![
+                "Could not derive principal. Cause: identity unavailable".to_string(),
+                "Could not fetch KINIC balance. Cause: ledger unavailable".to_string(),
+                "Could not fetch create price. Cause: price unavailable".to_string(),
+            ]
         );
     }
 
     #[test]
-    fn session_account_overview_returns_unavailable_when_no_details_and_no_errors() {
-        let overview = SessionAccountOverview::new(
-            SessionSettingsSnapshot::new(
-                &TuiAuth::resolved_for_tests(),
-                false,
-                Some("aaaaa-aa".to_string()),
-                "https://api.kinic.io".to_string(),
-            ),
-            None,
-        );
-
-        let error = overview
-            .create_cost_details_result()
-            .expect_err("unavailable");
-
+    fn session_account_overview_formats_joined_account_issue_note() {
+        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.balance_error = Some("ledger unavailable".to_string());
+        overview.price_error = Some("price unavailable".to_string());
         assert_eq!(
-            error,
-            CreateCostFetchError::Unavailable("Account overview is unavailable.".to_string())
+            overview.account_issue_note(),
+            Some(
+                "Could not fetch KINIC balance. Cause: ledger unavailable | Could not fetch create price. Cause: price unavailable".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn session_account_overview_returns_none_when_no_account_issues_exist() {
+        let overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        assert_eq!(overview.account_issue_note(), None);
+    }
+
+    #[test]
+    fn session_account_overview_lists_no_issues_when_unavailable_without_errors() {
+        let overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        assert_eq!(overview.account_issue_messages(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn session_account_overview_formats_joined_create_cost_errors_example() {
+        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.balance_error = Some("ledger unavailable".to_string());
+        overview.price_error = Some("price unavailable".to_string());
+        assert_eq!(
+            overview.account_issue_messages().join(" | "),
+            "Could not fetch KINIC balance. Cause: ledger unavailable | Could not fetch create price. Cause: price unavailable"
         );
     }
 
     #[test]
     fn session_settings_refresh_notify_message_reflects_account_completeness() {
-        let mut complete = SessionAccountOverview::new(
-            SessionSettingsSnapshot::new(
-                &TuiAuth::resolved_for_tests(),
-                false,
-                Some("aaaaa-aa".to_string()),
-                "https://api.kinic.io".to_string(),
-            ),
-            None,
-        );
+        let mut complete = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
         complete.create_cost_details = Some(create_cost_details_from_parts(
             "aaaaa-aa".to_string(),
             2_000_000u128,
@@ -552,6 +549,22 @@ mod tests {
             partial
                 .session_settings_refresh_notify_message()
                 .contains("Settings → Account."),
+        );
+    }
+
+    #[test]
+    fn session_settings_refresh_failure_message_reports_principal_failures() {
+        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            None,
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.principal_error = Some("identity lookup failed".to_string());
+
+        assert_eq!(
+            overview.session_settings_refresh_failure_message(),
+            Some("Session settings refresh failed: identity lookup failed".to_string())
         );
     }
 }

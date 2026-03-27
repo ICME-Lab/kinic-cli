@@ -433,7 +433,7 @@ fn open_form_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
     let should_reset_form_state = reset_form_state
         && state.current_tab_id != tab_id
         && matches!(tab_kind(tab_id), TabKind::Form);
-    match dispatch_with_effects(provider, state, hooks, &CoreAction::SetTab(tab_id.into())) {
+    match dispatch_tab_with_rollback(provider, state, hooks, tab_id) {
         Ok(()) => {
             if should_reset_form_state {
                 reset_create_form_state(state);
@@ -466,9 +466,25 @@ fn switch_to_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
     hooks: &mut H,
     tab_id: &str,
 ) -> Result<(), String> {
-    dispatch_with_effects(provider, state, hooks, &CoreAction::SetTab(tab_id.into()))?;
+    dispatch_tab_with_rollback(provider, state, hooks, tab_id)?;
     normalize_focus_after_set_tab(state);
     Ok(())
+}
+
+fn dispatch_tab_with_rollback<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    tab_id: &str,
+) -> Result<(), String> {
+    let previous_state = state.clone();
+    match dispatch_with_effects(provider, state, hooks, &CoreAction::SetTab(tab_id.into())) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            *state = previous_state;
+            Err(error)
+        }
+    }
 }
 
 fn dispatch_error_message(error: &dyn std::fmt::Display) -> String {

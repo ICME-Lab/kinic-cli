@@ -14,7 +14,7 @@ fn deferred_session() -> SessionSettingsSnapshot {
 }
 
 fn deferred_overview() -> SessionAccountOverview {
-    SessionAccountOverview::new(deferred_session(), None)
+    SessionAccountOverview::new(deferred_session())
 }
 
 fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {
@@ -165,8 +165,7 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
     ];
 
     for (name, preferences, memory_ids, health, default_memory, status) in cases {
-        let mut overview = deferred_overview();
-        overview.default_memory_id = preferences.default_memory_id.clone();
+        let overview = deferred_overview();
         let snapshot = build_settings_snapshot(&overview, &preferences, &memory_ids, &health);
         let section_titles = snapshot
             .sections
@@ -241,8 +240,14 @@ fn settings_snapshot_projects_account_cost_section_from_overview() {
         quick_entry_value(&snapshot, "kinic_balance"),
         "12.34000000 KINIC"
     );
-    assert_eq!(section_entry_note(&snapshot, "Account", "kinic_balance"), None);
-    assert_eq!(section_entry_value(&snapshot, "Account", "kinic_balance"), "12.34000000 KINIC");
+    assert_eq!(
+        section_entry_note(&snapshot, "Account", "kinic_balance"),
+        None
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account", "kinic_balance"),
+        "12.34000000 KINIC"
+    );
 }
 
 #[test]
@@ -282,5 +287,10 @@ fn settings_snapshot_marks_partial_account_cost_with_error_notes() {
         section_entry_value(&snapshot, "Account", "kinic_balance"),
         "12.34000000 KINIC"
     );
-    assert_eq!(section_entry_note(&snapshot, "Account", "kinic_balance"), None);
+    assert_eq!(
+        section_entry_note(&snapshot, "Account", "kinic_balance"),
+        Some(
+            "Could not fetch KINIC balance. Cause: ledger unavailable | Could not fetch create price. Cause: price unavailable"
+        )
+    );
 }

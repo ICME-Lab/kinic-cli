@@ -441,15 +441,12 @@ mod tests {
 
     #[test]
     fn default_memory_selector_window_keeps_selected_row_visible() {
-        let ids = (0..12)
-            .map(|index| format!("id-{index}"))
-            .collect::<Vec<_>>();
-        let labels = (0..12)
+        let items = (0..12)
             .map(|index| format!("Memory {index}"))
             .collect::<Vec<_>>();
 
         let near_end = visible_default_memory_selector_lines(
-            default_memory_selector_lines(&ids, &labels, 10, Some("id-2")),
+            default_memory_selector_lines(&items, 10, Some("Memory 2")),
             8,
         );
         let near_end_joined = near_end
@@ -461,7 +458,7 @@ mod tests {
         assert!(!near_end_joined.contains("› Memory 1\n"));
 
         let near_start = visible_default_memory_selector_lines(
-            default_memory_selector_lines(&ids, &labels, 1, Some("id-9")),
+            default_memory_selector_lines(&items, 1, Some("Memory 9")),
             8,
         );
         let near_start_joined = near_start

@@ -123,8 +123,11 @@ pub enum CreateCostState {
     Hidden,
     Loading,
     Unavailable,
-    Error(String),
-    Ready(CreateCostDetails),
+    Error(Vec<String>),
+    Ready {
+        details: CreateCostDetails,
+        issues: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -272,13 +272,15 @@ fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<
                 ui.theme.style_muted(),
             )));
         }
-        CreateCostState::Error(error) => {
-            lines.push(Line::from(Span::styled(
-                format!("{}: {error}", create_cfg.error_prefix),
-                ui.theme.style_error(),
-            )));
+        CreateCostState::Error(errors) => {
+            for error in errors {
+                lines.push(Line::from(Span::styled(
+                    format!("{}: {error}", create_cfg.error_prefix),
+                    ui.theme.style_error(),
+                )));
+            }
         }
-        CreateCostState::Ready(details) => {
+        CreateCostState::Ready { details, issues } => {
             lines.push(create_cost_detail_line(
                 ui,
                 layout,
@@ -307,6 +309,12 @@ fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<
                 create_cfg.status_label.as_str(),
                 create_status_text(create_cfg, details),
             ));
+            for issue in issues {
+                lines.push(Line::from(Span::styled(
+                    format!("{}: {issue}", create_cfg.error_prefix),
+                    ui.theme.style_error(),
+                )));
+            }
         }
     }
 

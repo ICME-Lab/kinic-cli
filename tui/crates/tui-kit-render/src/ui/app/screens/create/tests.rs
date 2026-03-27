@@ -258,18 +258,21 @@ fn create_screen_strings_come_from_ui_config() {
 fn create_screen_renders_account_cost_block_for_ready_state() {
     let area = Rect::new(0, 0, 100, 28);
     let theme = Theme::default();
-    let create_cost_state = CreateCostState::Ready(CreateCostDetails {
-        principal: "aaaaa-aa".to_string(),
-        balance_kinic: "12.34000000".to_string(),
-        balance_base_units: "1234000000".to_string(),
-        price_kinic: "1.50000000".to_string(),
-        price_base_units: "150000000".to_string(),
-        required_total_kinic: "1.50200000".to_string(),
-        required_total_base_units: "150200000".to_string(),
-        difference_kinic: "+10.83800000".to_string(),
-        difference_base_units: "+1083800000".to_string(),
-        sufficient_balance: true,
-    });
+    let create_cost_state = CreateCostState::Ready {
+        details: CreateCostDetails {
+            principal: "aaaaa-aa".to_string(),
+            balance_kinic: "12.34000000".to_string(),
+            balance_base_units: "1234000000".to_string(),
+            price_kinic: "1.50000000".to_string(),
+            price_base_units: "150000000".to_string(),
+            required_total_kinic: "1.50200000".to_string(),
+            required_total_base_units: "150200000".to_string(),
+            difference_kinic: "+10.83800000".to_string(),
+            difference_base_units: "+1083800000".to_string(),
+            sufficient_balance: true,
+        },
+        issues: Vec::new(),
+    };
     let ui = TuiKitUi::new(&theme)
         .focus(Focus::Form)
         .create_cost_state(&create_cost_state);
@@ -338,18 +341,21 @@ fn create_screen_truncates_long_principal_in_account_block() {
     let area = Rect::new(0, 0, 36, 24);
     let theme = Theme::default();
     let long_principal = "rdmx6-jaaaa-aaaaa-aaadq-cai-very-long-principal";
-    let create_cost_state = CreateCostState::Ready(CreateCostDetails {
-        principal: long_principal.to_string(),
-        balance_kinic: "1.00000000".to_string(),
-        balance_base_units: "100000000".to_string(),
-        price_kinic: "0.50000000".to_string(),
-        price_base_units: "50000000".to_string(),
-        required_total_kinic: "0.50200000".to_string(),
-        required_total_base_units: "50200000".to_string(),
-        difference_kinic: "+0.49800000".to_string(),
-        difference_base_units: "+49800000".to_string(),
-        sufficient_balance: true,
-    });
+    let create_cost_state = CreateCostState::Ready {
+        details: CreateCostDetails {
+            principal: long_principal.to_string(),
+            balance_kinic: "1.00000000".to_string(),
+            balance_base_units: "100000000".to_string(),
+            price_kinic: "0.50000000".to_string(),
+            price_base_units: "50000000".to_string(),
+            required_total_kinic: "0.50200000".to_string(),
+            required_total_base_units: "50200000".to_string(),
+            difference_kinic: "+0.49800000".to_string(),
+            difference_base_units: "+49800000".to_string(),
+            sufficient_balance: true,
+        },
+        issues: Vec::new(),
+    };
     let ui = TuiKitUi::new(&theme).create_cost_state(&create_cost_state);
     let layout = CreateScreenLayout::from_root_area(area, true);
     let lines = create_form_lines(&ui, layout);
@@ -377,18 +383,21 @@ fn create_screen_truncates_long_principal_in_account_block() {
 fn create_screen_aligns_account_cost_value_columns() {
     let area = Rect::new(0, 0, 100, 28);
     let theme = Theme::default();
-    let create_cost_state = CreateCostState::Ready(CreateCostDetails {
-        principal: "aaaaa-aa".to_string(),
-        balance_kinic: "12.34000000".to_string(),
-        balance_base_units: "1234000000".to_string(),
-        price_kinic: "1.50000000".to_string(),
-        price_base_units: "150000000".to_string(),
-        required_total_kinic: "1.50200000".to_string(),
-        required_total_base_units: "150200000".to_string(),
-        difference_kinic: "+10.83800000".to_string(),
-        difference_base_units: "+1083800000".to_string(),
-        sufficient_balance: true,
-    });
+    let create_cost_state = CreateCostState::Ready {
+        details: CreateCostDetails {
+            principal: "aaaaa-aa".to_string(),
+            balance_kinic: "12.34000000".to_string(),
+            balance_base_units: "1234000000".to_string(),
+            price_kinic: "1.50000000".to_string(),
+            price_base_units: "150000000".to_string(),
+            required_total_kinic: "1.50200000".to_string(),
+            required_total_base_units: "150200000".to_string(),
+            difference_kinic: "+10.83800000".to_string(),
+            difference_base_units: "+1083800000".to_string(),
+            sufficient_balance: true,
+        },
+        issues: Vec::new(),
+    };
     let ui = TuiKitUi::new(&theme)
         .focus(Focus::Form)
         .create_cost_state(&create_cost_state);
@@ -419,4 +428,78 @@ fn create_screen_aligns_account_cost_value_columns() {
             .windows(2)
             .all(|pair| pair[0] == pair[1])
     );
+}
+
+#[test]
+fn create_screen_renders_issue_lines_for_ready_state_with_partial_failures() {
+    let area = Rect::new(0, 0, 100, 28);
+    let theme = Theme::default();
+    let create_cost_state = CreateCostState::Ready {
+        details: CreateCostDetails {
+            principal: "aaaaa-aa".to_string(),
+            balance_kinic: "12.34000000".to_string(),
+            balance_base_units: "1234000000".to_string(),
+            price_kinic: "1.50000000".to_string(),
+            price_base_units: "150000000".to_string(),
+            required_total_kinic: "1.50200000".to_string(),
+            required_total_base_units: "150200000".to_string(),
+            difference_kinic: "+10.83800000".to_string(),
+            difference_base_units: "+1083800000".to_string(),
+            sufficient_balance: true,
+        },
+        issues: vec![
+            "Could not fetch KINIC balance. Cause: ledger unavailable".to_string(),
+            "Could not fetch create price. Cause: price unavailable".to_string(),
+        ],
+    };
+    let ui = TuiKitUi::new(&theme)
+        .focus(Focus::Form)
+        .create_cost_state(&create_cost_state);
+    let layout = CreateScreenLayout::from_root_area(area, true);
+    let lines = create_form_lines(&ui, layout);
+
+    assert!(lines.lines.iter().any(|line| {
+        line.spans.iter().any(|span| {
+            span.content.as_ref().contains(
+                "Account info error: Could not fetch KINIC balance. Cause: ledger unavailable",
+            )
+        })
+    }));
+    assert!(lines.lines.iter().any(|line| {
+        line.spans.iter().any(|span| {
+            span.content.as_ref().contains(
+                "Account info error: Could not fetch create price. Cause: price unavailable",
+            )
+        })
+    }));
+}
+
+#[test]
+fn create_screen_renders_multiple_error_lines_when_details_are_unavailable() {
+    let area = Rect::new(0, 0, 100, 28);
+    let theme = Theme::default();
+    let create_cost_state = CreateCostState::Error(vec![
+        "Could not derive principal. Cause: identity lookup failed".to_string(),
+        "Could not fetch KINIC balance. Cause: ledger unavailable".to_string(),
+    ]);
+    let ui = TuiKitUi::new(&theme)
+        .focus(Focus::Form)
+        .create_cost_state(&create_cost_state);
+    let layout = CreateScreenLayout::from_root_area(area, true);
+    let lines = create_form_lines(&ui, layout);
+
+    assert!(lines.lines.iter().any(|line| {
+        line.spans.iter().any(|span| {
+            span.content.as_ref().contains(
+                "Account info error: Could not derive principal. Cause: identity lookup failed",
+            )
+        })
+    }));
+    assert!(lines.lines.iter().any(|line| {
+        line.spans.iter().any(|span| {
+            span.content.as_ref().contains(
+                "Account info error: Could not fetch KINIC balance. Cause: ledger unavailable",
+            )
+        })
+    }));
 }

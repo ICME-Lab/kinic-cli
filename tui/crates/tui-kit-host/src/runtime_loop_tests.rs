@@ -137,7 +137,7 @@ fn handle_overlay_input_closes_settings_without_provider_dispatch() {
 }
 
 #[test]
-fn open_form_tab_keeps_form_state_when_dispatch_fails() {
+fn open_form_tab_failure_keeps_form_state_and_existing_focus() {
     let mut provider = TestProvider::err("tab failed");
     let mut hooks = NoopRuntimeHooks;
     let mut state = CoreState {
@@ -158,7 +158,7 @@ fn open_form_tab_keeps_form_state_when_dispatch_fails() {
         true,
     );
 
-    assert_eq!(state.focus, PaneFocus::Tabs);
+    assert_eq!(state.focus, PaneFocus::Content);
     assert_eq!(state.create_name, "draft");
     assert_eq!(state.create_description, "notes");
     assert_eq!(
@@ -172,7 +172,7 @@ fn open_form_tab_keeps_form_state_when_dispatch_fails() {
 }
 
 #[test]
-fn switch_to_tab_normalizes_focus_only_on_success() {
+fn switch_to_tab_failure_keeps_existing_focus_when_target_tab_allows_it() {
     let mut provider = TestProvider::err("tab failed");
     let mut hooks = NoopRuntimeHooks;
     let mut state = CoreState {
@@ -201,6 +201,24 @@ fn dispatch_with_effects_returns_error_message_on_failure() {
     );
 
     assert_eq!(result, Err("Dispatch error: settings failed".into()));
+}
+
+#[test]
+fn dispatch_with_effects_keeps_non_tab_reducer_state_on_failure() {
+    let mut provider = TestProvider::err("chat failed");
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState::default();
+
+    let result = dispatch_with_effects(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &CoreAction::ToggleChat,
+    );
+
+    assert_eq!(result, Err("Dispatch error: chat failed".into()));
+    assert!(state.chat_open);
+    assert_eq!(state.focus, PaneFocus::Extra);
 }
 
 #[test]

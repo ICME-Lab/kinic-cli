@@ -230,10 +230,7 @@ mod tests {
             auth_line.find("mock"),
             endpoint_line.find("https://api.kinic.io")
         );
-        assert_eq!(
-            auth_line.find(':'),
-            principal_line.find(':')
-        );
+        assert_eq!(auth_line.find(':'), principal_line.find(':'));
     }
 
     #[test]

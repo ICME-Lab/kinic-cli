@@ -75,73 +75,82 @@ pub fn build_settings_snapshot(
     health: &PreferencesHealth,
 ) -> SettingsSnapshot {
     let session = SessionSettingsSnapshot::from_overview(overview);
-    let default_memory_display =
-        default_memory_display(overview, preferences, available_memory_ids);
+    let default_memory_display = default_memory_display(preferences, available_memory_ids);
     let account_entries = account_entries(overview);
 
     SettingsSnapshot {
         quick_entries: vec![
-            entry(
-                "principal_id",
-                "Principal ID",
-                abbreviate_principal_id(session.principal_id.as_str()),
-                None,
-            ),
-            entry(
-                "kinic_balance",
-                "KINIC balance",
-                account_balance_value(overview),
-                account_balance_note(overview),
-            ),
-            entry(
-                SETTINGS_ENTRY_DEFAULT_MEMORY_ID,
-                "Default memory",
-                default_memory_display.clone(),
-                None,
-            ),
-            entry(
-                "embedding_api_endpoint",
-                "Embedding",
-                session.embedding_api_endpoint.clone(),
-                None,
-            ),
+            SettingsEntry {
+                id: "principal_id".to_string(),
+                label: "Principal ID".to_string(),
+                value: abbreviate_principal_id(session.principal_id.as_str()),
+                note: None,
+            },
+            SettingsEntry {
+                id: "kinic_balance".to_string(),
+                label: "KINIC balance".to_string(),
+                value: account_balance_value(overview),
+                note: account_balance_note(overview),
+            },
+            SettingsEntry {
+                id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
+                label: "Default memory".to_string(),
+                value: default_memory_display.clone(),
+                note: None,
+            },
+            SettingsEntry {
+                id: "embedding_api_endpoint".to_string(),
+                label: "Embedding".to_string(),
+                value: session.embedding_api_endpoint.clone(),
+                note: None,
+            },
         ],
         sections: vec![
             SettingsSection {
                 title: "Saved preferences".to_string(),
                 entries: vec![
-                    entry(
-                        SETTINGS_ENTRY_DEFAULT_MEMORY_ID,
-                        "Default memory",
-                        default_memory_display,
-                        None,
-                    ),
-                    entry(
-                        "preferences_status",
-                        "Preferences status",
-                        preferences_status_label(health),
-                        None,
-                    ),
+                    SettingsEntry {
+                        id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
+                        label: "Default memory".to_string(),
+                        value: default_memory_display,
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: "preferences_status".to_string(),
+                        label: "Preferences status".to_string(),
+                        value: preferences_status_label(health),
+                        note: None,
+                    },
                 ],
                 footer: None,
             },
             SettingsSection {
                 title: "Current session".to_string(),
                 entries: vec![
-                    entry(
-                        "identity_name",
-                        "Identity name",
-                        session.identity_name.clone(),
-                        None,
-                    ),
-                    entry("auth_mode", "Auth mode", session.auth_mode.clone(), None),
-                    entry("network", "Network", session.network.clone(), None),
-                    entry(
-                        "embedding_api_endpoint",
-                        "Embedding",
-                        session.embedding_api_endpoint.clone(),
-                        None,
-                    ),
+                    SettingsEntry {
+                        id: "identity_name".to_string(),
+                        label: "Identity name".to_string(),
+                        value: session.identity_name.clone(),
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: "auth_mode".to_string(),
+                        label: "Auth mode".to_string(),
+                        value: session.auth_mode.clone(),
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: "network".to_string(),
+                        label: "Network".to_string(),
+                        value: session.network.clone(),
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: "embedding_api_endpoint".to_string(),
+                        label: "Embedding".to_string(),
+                        value: session.embedding_api_endpoint.clone(),
+                        note: None,
+                    },
                 ],
                 footer: None,
             },
@@ -179,15 +188,10 @@ fn network_label(use_mainnet: bool) -> String {
 }
 
 fn default_memory_display(
-    overview: &SessionAccountOverview,
     preferences: &UserPreferences,
     available_memory_ids: &[String],
 ) -> String {
-    let default_memory_id = preferences
-        .default_memory_id
-        .as_ref()
-        .or(overview.default_memory_id.as_ref());
-    match default_memory_id {
+    match preferences.default_memory_id.as_ref() {
         Some(memory_id) if available_memory_ids.is_empty() => memory_id.clone(),
         Some(memory_id) if available_memory_ids.iter().any(|id| id == memory_id) => {
             memory_id.clone()
@@ -199,18 +203,18 @@ fn default_memory_display(
 
 fn account_entries(overview: &SessionAccountOverview) -> Vec<SettingsEntry> {
     vec![
-        entry(
-            "principal_id",
-            "Principal ID",
-            overview.session.principal_id.clone(),
-            None,
-        ),
-        entry(
-            "kinic_balance",
-            "KINIC balance",
-            account_balance_value(overview),
-            account_balance_note(overview),
-        ),
+        SettingsEntry {
+            id: "principal_id".to_string(),
+            label: "Principal ID".to_string(),
+            value: overview.session.principal_id.clone(),
+            note: None,
+        },
+        SettingsEntry {
+            id: "kinic_balance".to_string(),
+            label: "KINIC balance".to_string(),
+            value: account_balance_value(overview),
+            note: account_balance_note(overview),
+        },
     ]
 }
 
@@ -223,7 +227,7 @@ fn account_balance_value(overview: &SessionAccountOverview) -> String {
 }
 
 fn account_balance_note(overview: &SessionAccountOverview) -> Option<String> {
-    overview.balance_error.clone()
+    overview.account_issue_note()
 }
 
 fn abbreviate_principal_id(value: &str) -> String {
@@ -257,20 +261,6 @@ fn preferences_status_label(health: &PreferencesHealth) -> String {
         (Some(_), _) => "preferences unavailable".to_string(),
         (None, Some(_)) => "last save failed".to_string(),
         (None, None) => "ok".to_string(),
-    }
-}
-
-fn entry(
-    id: impl Into<String>,
-    label: impl Into<String>,
-    value: impl Into<String>,
-    note: Option<String>,
-) -> SettingsEntry {
-    SettingsEntry {
-        id: id.into(),
-        label: label.into(),
-        value: value.into(),
-        note,
     }
 }
 
