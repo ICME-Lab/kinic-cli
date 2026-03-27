@@ -1107,27 +1107,11 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
         state.selector_index = 0;
     } else if state.selector_open
         && state.selector_mode == SelectorMode::List
-        && matches!(
+        && !selector_is_add_row(state)
+        && !matches!(
             state.selector_context,
             SelectorContext::DefaultMemory | SelectorContext::InsertTarget
         )
-    {
-        if let Some(selected_id) = state.selector_selected_id.as_deref() {
-            if let Some(index) = state
-                .selector_items
-                .iter()
-                .position(|item| item == selected_id)
-            {
-                state.selector_index = index;
-            } else if state.selector_index >= selector_len {
-                state.selector_index = selector_len - 1;
-            }
-        } else if state.selector_index >= selector_len {
-            state.selector_index = selector_len - 1;
-        }
-    } else if state.selector_open
-        && state.selector_mode == SelectorMode::List
-        && !selector_is_add_row(state)
     {
         if let Some(selected_id) = state.selector_selected_id.as_deref() {
             if let Some(index) = state
@@ -1220,8 +1204,16 @@ fn open_selector(state: &mut CoreState, context: SelectorContext) {
     state.selector_add_tag_input.clear();
     match context {
         SelectorContext::DefaultMemory | SelectorContext::InsertTarget => {
-            state.selector_index = 0;
-            state.selector_selected_id = None;
+            state.selector_index = state
+                .selector_selected_id
+                .as_ref()
+                .and_then(|selected| {
+                    state
+                        .selector_items
+                        .iter()
+                        .position(|item| item == selected)
+                })
+                .unwrap_or(0);
         }
         SelectorContext::InsertTag => {
             let current_tag = state.insert_tag.trim();
@@ -1966,9 +1958,8 @@ mod tests {
     }
 
     #[test]
-    fn selector_snapshot_uses_snapshot_default_memory_selection() {
+    fn open_selector_uses_snapshot_default_memory_selection() {
         let mut state = CoreState {
-            selector_open: true,
             selector_context: SelectorContext::DefaultMemory,
             selector_mode: SelectorMode::List,
             selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
@@ -1984,7 +1975,31 @@ mod tests {
         };
 
         apply_snapshot(&mut state, snapshot);
+        open_selector(&mut state, SelectorContext::DefaultMemory);
 
         assert_eq!(state.selector_index, 1);
+    }
+
+    #[test]
+    fn selector_snapshot_keeps_default_memory_cursor_after_open() {
+        let mut state = CoreState {
+            selector_open: true,
+            selector_context: SelectorContext::DefaultMemory,
+            selector_mode: SelectorMode::List,
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_selected_id: Some("bbbbb-bb".to_string()),
+            selector_index: 0,
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
+            selector_selected_id: Some("bbbbb-bb".to_string()),
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.selector_index, 0);
     }
 }
