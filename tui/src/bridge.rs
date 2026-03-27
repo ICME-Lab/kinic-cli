@@ -12,10 +12,11 @@ use crate::{
     },
     commands::create::{BalanceDelta, balance_delta, required_balance},
     embedding::{embedding_base_url, fetch_embedding},
-    ledger::fetch_balance,
     tui::TuiAuth,
     tui::settings::SessionSettingsSnapshot,
 };
+
+pub(crate) use crate::clients::launcher::CreateCostFetchError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySummary {
@@ -38,10 +39,13 @@ pub struct CreateMemorySuccess {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CreateCostFetchError {
-    Principal(String),
-    Balance(String),
-    Price(String),
+pub struct SessionAccountOverview {
+    pub session: SessionSettingsSnapshot,
+    pub default_memory_id: Option<String>,
+    pub create_cost_details: Option<CreateCostDetails>,
+    pub principal_error: Option<String>,
+    pub balance_error: Option<String>,
+    pub price_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,20 +76,6 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
-pub async fn load_session_settings(
-    use_mainnet: bool,
-    auth: TuiAuth,
-) -> Result<SessionSettingsSnapshot, String> {
-    let principal_id = auth.principal_text().map_err(|error| error.to_string())?;
-
-    Ok(SessionSettingsSnapshot::new(
-        &auth,
-        use_mainnet,
-        Some(principal_id),
-        embedding_base_url(),
-    ))
-}
-
 pub async fn create_memory(
     use_mainnet: bool,
     auth: TuiAuth,
@@ -98,14 +88,16 @@ pub async fn create_memory(
         .build()
         .await
         .map_err(|error| CreateMemoryError::Principal(short_error(&error.to_string())))?;
-    let balance = fetch_balance(&agent)
-        .await
-        .map_err(|error| CreateMemoryError::Balance(short_error(&error.to_string())))?;
     let client = LauncherClient::new(agent);
-    let price = client
-        .fetch_deployment_price()
+    let (balance, price) = client
+        .fetch_balance_and_price()
         .await
-        .map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
+        .map_err(|error| match error {
+            CreateCostFetchError::Principal(reason) => CreateMemoryError::Principal(reason),
+            CreateCostFetchError::Balance(reason) => CreateMemoryError::Balance(reason),
+            CreateCostFetchError::Price(reason) => CreateMemoryError::Price(reason),
+            CreateCostFetchError::Unavailable(reason) => CreateMemoryError::Principal(reason),
+        })?;
     match balance_delta(&price, balance) {
         BalanceDelta::Surplus(_) => {}
         BalanceDelta::Shortfall(shortfall) => {
@@ -147,42 +139,62 @@ pub async fn create_memory(
     })
 }
 
-pub async fn fetch_create_cost_details(
+pub async fn load_session_account_overview(
     use_mainnet: bool,
     auth: TuiAuth,
-) -> Result<CreateCostDetails, CreateCostFetchError> {
-    let factory = resolve_agent_factory(use_mainnet, &auth)
-        .map_err(|error| CreateCostFetchError::Principal(short_error(&error.to_string())))?;
+    default_memory_id: Option<String>,
+) -> SessionAccountOverview {
+    let mut overview = SessionAccountOverview::new(
+        SessionSettingsSnapshot::new(&auth, use_mainnet, None, embedding_base_url()),
+        default_memory_id,
+    );
+    let factory =
+        resolve_agent_factory(use_mainnet, &auth).map_err(|error| short_error(&error.to_string()));
+    let factory = match factory {
+        Ok(factory) => factory,
+        Err(error) => {
+            overview.principal_error = Some(error);
+            return overview;
+        }
+    };
     let agent = factory
         .build()
         .await
-        .map_err(|error| CreateCostFetchError::Principal(short_error(&error.to_string())))?;
-    let principal = agent
-        .get_principal()
-        .map_err(|error| CreateCostFetchError::Principal(short_error(&error.to_string())))?;
-    let balance = fetch_balance(&agent)
-        .await
-        .map_err(|error| CreateCostFetchError::Balance(short_error(&error.to_string())))?;
+        .map_err(|error| short_error(&error.to_string()));
+    let agent = match agent {
+        Ok(agent) => agent,
+        Err(error) => {
+            overview.principal_error = Some(error);
+            return overview;
+        }
+    };
+    match auth.principal_text() {
+        Ok(principal_id) => overview.session.principal_id = principal_id,
+        Err(error) => {
+            overview.principal_error = Some(short_error(&error.to_string()));
+            return overview;
+        }
+    }
     let client = LauncherClient::new(agent);
-    let price = client
-        .fetch_deployment_price()
-        .await
-        .map_err(|error| CreateCostFetchError::Price(short_error(&error.to_string())))?;
-    let required_total = required_balance(&price);
-    let delta = balance_delta(&price, balance);
+    let (balance, price) = tokio::join!(client.fetch_balance(), client.fetch_deployment_price());
 
-    Ok(CreateCostDetails {
-        principal: principal.to_text(),
-        balance_kinic: format_e8s_to_kinic_string(&Nat::from(balance)),
-        balance_base_units: balance.to_string(),
-        price_kinic: format_e8s_to_kinic_string(&price),
-        price_base_units: price.to_string(),
-        required_total_kinic: format_e8s_to_kinic_string(&required_total),
-        required_total_base_units: required_total.to_string(),
-        difference_kinic: signed_delta_kinic(&delta),
-        difference_base_units: signed_delta_base_units(&delta),
-        sufficient_balance: matches!(delta, BalanceDelta::Surplus(_)),
-    })
+    if let Err(error) = &balance {
+        overview.balance_error = Some(error.to_string());
+    }
+    if let Err(error) = &price {
+        overview.price_error = Some(error.to_string());
+    }
+    if overview.principal_error.is_none()
+        && let (Ok(balance), Ok(price)) = (balance, price)
+    {
+        overview.create_cost_details = Some(create_cost_details_from_parts(
+            overview.session.principal_id.clone(),
+            balance,
+            price,
+        ));
+    }
+
+    overview
 }
 
 pub async fn search_memory(
@@ -251,6 +263,73 @@ fn signed_delta_base_units(delta: &BalanceDelta) -> String {
     match delta {
         BalanceDelta::Surplus(value) => format!("+{value}"),
         BalanceDelta::Shortfall(value) => format!("-{value}"),
+    }
+}
+
+fn create_cost_details_from_parts(
+    principal: String,
+    balance: u128,
+    price: Nat,
+) -> CreateCostDetails {
+    let required_total = required_balance(&price);
+    let delta = balance_delta(&price, balance);
+
+    CreateCostDetails {
+        principal,
+        balance_kinic: format_e8s_to_kinic_string(&Nat::from(balance)),
+        balance_base_units: balance.to_string(),
+        price_kinic: format_e8s_to_kinic_string(&price),
+        price_base_units: price.to_string(),
+        required_total_kinic: format_e8s_to_kinic_string(&required_total),
+        required_total_base_units: required_total.to_string(),
+        difference_kinic: signed_delta_kinic(&delta),
+        difference_base_units: signed_delta_base_units(&delta),
+        sufficient_balance: matches!(delta, BalanceDelta::Surplus(_)),
+    }
+}
+
+impl SessionAccountOverview {
+    pub fn new(session: SessionSettingsSnapshot, default_memory_id: Option<String>) -> Self {
+        Self {
+            session,
+            default_memory_id,
+            create_cost_details: None,
+            principal_error: None,
+            balance_error: None,
+            price_error: None,
+        }
+    }
+
+    pub fn create_cost_details_result(&self) -> Result<CreateCostDetails, CreateCostFetchError> {
+        if let Some(details) = &self.create_cost_details {
+            return Ok(details.clone());
+        }
+        if let Some(error) = &self.principal_error {
+            return Err(CreateCostFetchError::Principal(error.clone()));
+        }
+        if let Some(error) = &self.balance_error {
+            return Err(CreateCostFetchError::Balance(error.clone()));
+        }
+        if let Some(error) = &self.price_error {
+            return Err(CreateCostFetchError::Price(error.clone()));
+        }
+        Err(CreateCostFetchError::Unavailable(
+            "Account overview is unavailable.".to_string(),
+        ))
+    }
+
+    /// User-visible toast after a session settings / account overview refresh completes.
+    pub fn session_settings_refresh_notify_message(&self) -> String {
+        let account_incomplete = self.principal_error.is_some()
+            || self.balance_error.is_some()
+            || self.price_error.is_some()
+            || self.create_cost_details.is_none();
+        if account_incomplete {
+            "Session settings updated (partial account info). See Settings → Account & cost."
+                .to_string()
+        } else {
+            "Session settings refreshed.".to_string()
+        }
     }
 }
 
@@ -341,6 +420,131 @@ mod tests {
                 .refresh_warning
                 .as_deref()
                 .is_some_and(|message| message.contains("Press F5 to refresh"))
+        );
+    }
+
+    #[test]
+    fn session_account_overview_returns_ready_create_cost_details() {
+        let mut overview = SessionAccountOverview::new(
+            SessionSettingsSnapshot::new(
+                &TuiAuth::resolved_for_tests(),
+                false,
+                Some("aaaaa-aa".to_string()),
+                "https://api.kinic.io".to_string(),
+            ),
+            Some("bbbbb-bb".to_string()),
+        );
+        overview.create_cost_details = Some(create_cost_details_from_parts(
+            "aaaaa-aa".to_string(),
+            2_000_000u128,
+            Nat::from(1_500_000u128),
+        ));
+
+        let details = overview
+            .create_cost_details_result()
+            .expect("create cost details");
+
+        assert_eq!(details.principal, "aaaaa-aa");
+        assert_eq!(details.required_total_base_units, "1_700_000");
+        assert_eq!(details.difference_base_units, "+300_000");
+    }
+
+    #[test]
+    fn session_account_overview_prioritizes_balance_error_when_details_missing() {
+        let mut overview = SessionAccountOverview::new(
+            SessionSettingsSnapshot::new(
+                &TuiAuth::resolved_for_tests(),
+                false,
+                Some("aaaaa-aa".to_string()),
+                "https://api.kinic.io".to_string(),
+            ),
+            None,
+        );
+        overview.balance_error = Some("ledger unavailable".to_string());
+
+        let error = overview
+            .create_cost_details_result()
+            .expect_err("balance failure");
+
+        assert_eq!(
+            error,
+            CreateCostFetchError::Balance("ledger unavailable".to_string())
+        );
+    }
+
+    #[test]
+    fn session_account_overview_returns_price_error_when_price_fetch_fails() {
+        let mut overview = SessionAccountOverview::new(
+            SessionSettingsSnapshot::new(
+                &TuiAuth::resolved_for_tests(),
+                false,
+                Some("aaaaa-aa".to_string()),
+                "https://api.kinic.io".to_string(),
+            ),
+            None,
+        );
+        overview.price_error = Some("price unavailable".to_string());
+
+        let error = overview
+            .create_cost_details_result()
+            .expect_err("price failure");
+
+        assert_eq!(
+            error,
+            CreateCostFetchError::Price("price unavailable".to_string())
+        );
+    }
+
+    #[test]
+    fn session_account_overview_returns_unavailable_when_no_details_and_no_errors() {
+        let overview = SessionAccountOverview::new(
+            SessionSettingsSnapshot::new(
+                &TuiAuth::resolved_for_tests(),
+                false,
+                Some("aaaaa-aa".to_string()),
+                "https://api.kinic.io".to_string(),
+            ),
+            None,
+        );
+
+        let error = overview
+            .create_cost_details_result()
+            .expect_err("unavailable");
+
+        assert_eq!(
+            error,
+            CreateCostFetchError::Unavailable("Account overview is unavailable.".to_string())
+        );
+    }
+
+    #[test]
+    fn session_settings_refresh_notify_message_reflects_account_completeness() {
+        let mut complete = SessionAccountOverview::new(
+            SessionSettingsSnapshot::new(
+                &TuiAuth::resolved_for_tests(),
+                false,
+                Some("aaaaa-aa".to_string()),
+                "https://api.kinic.io".to_string(),
+            ),
+            None,
+        );
+        complete.create_cost_details = Some(create_cost_details_from_parts(
+            "aaaaa-aa".to_string(),
+            2_000_000u128,
+            Nat::from(1_500_000u128),
+        ));
+        assert_eq!(
+            complete.session_settings_refresh_notify_message(),
+            "Session settings refreshed."
+        );
+
+        let mut partial = complete.clone();
+        partial.create_cost_details = None;
+        partial.balance_error = Some("ledger down".to_string());
+        assert!(
+            partial
+                .session_settings_refresh_notify_message()
+                .contains("partial"),
         );
     }
 }

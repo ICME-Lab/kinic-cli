@@ -2,9 +2,7 @@ use anyhow::{Result, bail};
 use candid::Nat;
 use tracing::info;
 
-use crate::{
-    agent::AgentFactory, cli::CreateArgs, clients::launcher::LauncherClient, ledger::fetch_balance,
-};
+use crate::{agent::AgentFactory, cli::CreateArgs, clients::launcher::LauncherClient};
 
 use super::CommandContext;
 
@@ -28,9 +26,11 @@ pub(crate) async fn create_memory(
     description: &str,
 ) -> Result<String> {
     let agent = factory.build().await?;
-    let balance = fetch_balance(&agent).await?;
     let client = LauncherClient::new(agent);
-    let price = client.fetch_deployment_price().await?;
+    let (balance, price) = client
+        .fetch_balance_and_price()
+        .await
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     info!(%price, "fetched deployment price");
 
     ensure_sufficient_balance(&price, balance)?;

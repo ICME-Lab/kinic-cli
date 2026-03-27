@@ -9,6 +9,7 @@ use tui_kit_runtime::{
     SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot,
 };
 
+use super::bridge::SessionAccountOverview;
 use crate::tui::TuiAuth;
 
 const APP_NAMESPACE: &str = "kinic";
@@ -40,6 +41,10 @@ impl SessionSettingsSnapshot {
             embedding_api_endpoint,
         }
     }
+
+    pub fn from_overview(overview: &SessionAccountOverview) -> Self {
+        overview.session.clone()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -64,13 +69,16 @@ pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), Settin
 }
 
 pub fn build_settings_snapshot(
-    session: &SessionSettingsSnapshot,
+    overview: &SessionAccountOverview,
     preferences: &UserPreferences,
     available_memory_ids: &[String],
     health: &PreferencesHealth,
 ) -> SettingsSnapshot {
-    let default_memory_display = default_memory_display(preferences, available_memory_ids);
+    let session = SessionSettingsSnapshot::from_overview(overview);
+    let default_memory_display =
+        default_memory_display(overview, preferences, available_memory_ids);
     let preferences_status = preferences_status_label(health);
+    let account_entries = account_cost_entries(overview);
 
     SettingsSnapshot {
         quick_entries: vec![
@@ -88,6 +96,18 @@ pub fn build_settings_snapshot(
             ),
             entry("auth_mode", "Auth mode", session.auth_mode.clone(), None),
             entry("network", "Network", session.network.clone(), None),
+            entry(
+                "kinic_balance",
+                "KINIC balance",
+                account_balance_value(overview),
+                account_balance_note(overview),
+            ),
+            entry(
+                "create_cost",
+                "Create cost",
+                account_price_value(overview),
+                account_price_note(overview),
+            ),
             entry(
                 SETTINGS_ENTRY_DEFAULT_MEMORY_ID,
                 "Default memory",
@@ -127,6 +147,11 @@ pub fn build_settings_snapshot(
                         None,
                     ),
                 ],
+                footer: None,
+            },
+            SettingsSection {
+                title: "Account & cost".to_string(),
+                entries: account_entries,
                 footer: None,
             },
             SettingsSection {
@@ -176,10 +201,15 @@ fn network_label(use_mainnet: bool) -> String {
 }
 
 fn default_memory_display(
+    overview: &SessionAccountOverview,
     preferences: &UserPreferences,
     available_memory_ids: &[String],
 ) -> String {
-    match &preferences.default_memory_id {
+    let default_memory_id = preferences
+        .default_memory_id
+        .as_ref()
+        .or(overview.default_memory_id.as_ref());
+    match default_memory_id {
         Some(memory_id) if available_memory_ids.is_empty() => memory_id.clone(),
         Some(memory_id) if available_memory_ids.iter().any(|id| id == memory_id) => {
             memory_id.clone()
@@ -187,6 +217,125 @@ fn default_memory_display(
         Some(memory_id) => format!("{memory_id} (missing)"),
         None => NOT_SET.to_string(),
     }
+}
+
+fn account_cost_entries(overview: &SessionAccountOverview) -> Vec<SettingsEntry> {
+    vec![
+        entry(
+            "kinic_balance",
+            "KINIC balance",
+            account_balance_value(overview),
+            account_balance_note(overview),
+        ),
+        entry(
+            "create_cost",
+            "Create cost",
+            account_price_value(overview),
+            account_price_note(overview),
+        ),
+        entry(
+            "account_status",
+            "Status",
+            account_status_value(overview),
+            account_status_note(overview),
+        ),
+    ]
+}
+
+fn account_balance_value(overview: &SessionAccountOverview) -> String {
+    overview
+        .create_cost_details
+        .as_ref()
+        .map(|details| format_kinic_value(&details.balance_kinic))
+        .unwrap_or_else(|| UNAVAILABLE.to_string())
+}
+
+fn account_balance_note(overview: &SessionAccountOverview) -> Option<String> {
+    if let Some(details) = &overview.create_cost_details {
+        return Some(format!("{} e8s", details.balance_base_units));
+    }
+    overview.balance_error.clone()
+}
+
+fn account_price_value(overview: &SessionAccountOverview) -> String {
+    overview
+        .create_cost_details
+        .as_ref()
+        .map(|details| format_kinic_value(&details.required_total_kinic))
+        .unwrap_or_else(|| UNAVAILABLE.to_string())
+}
+
+fn account_price_note(overview: &SessionAccountOverview) -> Option<String> {
+    if let Some(details) = &overview.create_cost_details {
+        return Some(format!("{} e8s", details.required_total_base_units));
+    }
+    overview.price_error.clone()
+}
+
+fn account_status_value(overview: &SessionAccountOverview) -> String {
+    if overview.principal_error.is_some()
+        || overview.balance_error.is_some()
+        || overview.price_error.is_some()
+    {
+        return "partial".to_string();
+    }
+    if let Some(details) = &overview.create_cost_details {
+        if details.sufficient_balance {
+            return "ready".to_string();
+        }
+        return "insufficient balance".to_string();
+    }
+    if overview.balance_error.is_some() || overview.price_error.is_some() {
+        return "partial".to_string();
+    }
+    UNAVAILABLE.to_string()
+}
+
+fn account_status_note(overview: &SessionAccountOverview) -> Option<String> {
+    let has_partial_account_state = overview.principal_error.is_some()
+        || overview.balance_error.is_some()
+        || overview.price_error.is_some();
+    if has_partial_account_state {
+        let mut causes = Vec::new();
+        if overview.create_cost_details.is_some() {
+            causes.push("stale values shown".to_string());
+        }
+        if let Some(error) = &overview.principal_error {
+            causes.push(format!("principal: {error}"));
+        }
+        if let Some(error) = &overview.balance_error {
+            causes.push(format!("balance: {error}"));
+        }
+        if let Some(error) = &overview.price_error {
+            causes.push(format!("price: {error}"));
+        }
+        return Some(causes.join(" | "));
+    }
+    if let Some(details) = &overview.create_cost_details {
+        return Some(format!(
+            "difference: {} KINIC ({} e8s)",
+            details.difference_kinic, details.difference_base_units
+        ));
+    }
+    let mut causes = Vec::new();
+    if let Some(error) = &overview.principal_error {
+        causes.push(format!("principal: {error}"));
+    }
+    if let Some(error) = &overview.balance_error {
+        causes.push(format!("balance: {error}"));
+    }
+    if let Some(error) = &overview.price_error {
+        causes.push(format!("price: {error}"));
+    }
+    if causes.is_empty() {
+        None
+    } else {
+        Some(causes.join(" | "))
+    }
+}
+
+fn format_kinic_value(value: &str) -> String {
+    format!("{value} KINIC")
 }
 
 fn preferences_status_label(health: &PreferencesHealth) -> String {

@@ -1,14 +1,14 @@
 use std::{sync::mpsc, thread};
 
 use super::adapter;
-use super::bridge::{self, MemorySummary, SearchResultItem};
-use super::settings::{self, PreferencesHealth, SessionSettingsSnapshot, UserPreferences};
+use super::bridge::{self, MemorySummary, SearchResultItem, SessionAccountOverview};
+use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::tui::TuiAuth;
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreResult, CoreState, CreateCostDetails, CreateCostState,
-    DataProvider, PaneFocus, ProviderOutput, ProviderSnapshot,
+    CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, PaneFocus,
+    ProviderOutput, ProviderSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
     },
@@ -64,7 +64,7 @@ pub struct KinicProvider {
     query: String,
     tab_id: String,
     config: TuiConfig,
-    session_settings: SessionSettingsSnapshot,
+    session_overview: SessionAccountOverview,
     user_preferences: UserPreferences,
     preferences_health: PreferencesHealth,
     active_memory_id: Option<String>,
@@ -111,7 +111,7 @@ struct InitialMemoriesTaskOutput {
 
 struct CreateCostTaskOutput {
     request_id: u64,
-    result: Result<CreateCostDetails, bridge::CreateCostFetchError>,
+    overview: bridge::SessionAccountOverview,
 }
 
 struct CreateSubmitTaskOutput {
@@ -121,7 +121,7 @@ struct CreateSubmitTaskOutput {
 
 struct SessionSettingsTaskOutput {
     request_id: u64,
-    result: Result<SessionSettingsSnapshot, String>,
+    overview: bridge::SessionAccountOverview,
 }
 
 #[derive(Clone, Copy)]
@@ -238,11 +238,14 @@ impl KinicProvider {
                 },
             ),
         };
-        let session_settings = SessionSettingsSnapshot::new(
-            &config.auth,
-            config.use_mainnet,
-            None,
-            crate::embedding::embedding_base_url(),
+        let session_overview = SessionAccountOverview::new(
+            settings::SessionSettingsSnapshot::new(
+                &config.auth,
+                config.use_mainnet,
+                None,
+                crate::embedding::embedding_base_url(),
+            ),
+            user_preferences.default_memory_id.clone(),
         );
 
         Self {
@@ -250,7 +253,7 @@ impl KinicProvider {
             query: String::new(),
             tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
             config,
-            session_settings,
+            session_overview,
             user_preferences,
             preferences_health,
             active_memory_id: None,
@@ -549,7 +552,7 @@ impl KinicProvider {
             create_cost_state: self.create_cost_state.clone(),
             create_submit_state: state.create_submit_state.clone(),
             settings: settings::build_settings_snapshot(
-                &self.session_settings,
+                &self.session_overview,
                 &self.user_preferences,
                 &default_memory_selector_items,
                 &self.preferences_health,
@@ -588,14 +591,22 @@ impl KinicProvider {
         self.session_settings_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
+        let default_memory_id = self.user_preferences.default_memory_id.clone();
         let (tx, rx) = mpsc::channel();
         self.pending_session_settings = Some(rx);
 
         thread::spawn(move || {
             let runtime =
                 Runtime::new().expect("failed to create tokio runtime for settings refresh");
-            let result = runtime.block_on(bridge::load_session_settings(use_mainnet, auth));
-            let _ = tx.send(SessionSettingsTaskOutput { request_id, result });
+            let overview = runtime.block_on(bridge::load_session_account_overview(
+                use_mainnet,
+                auth,
+                default_memory_id,
+            ));
+            let _ = tx.send(SessionSettingsTaskOutput {
+                request_id,
+                overview,
+            });
         });
 
         Some(CoreEffect::Notify(
@@ -623,14 +634,22 @@ impl KinicProvider {
         self.create_cost_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
+        let default_memory_id = self.user_preferences.default_memory_id.clone();
         let (tx, rx) = mpsc::channel();
         self.pending_create_cost = Some(rx);
 
         thread::spawn(move || {
             let runtime =
                 Runtime::new().expect("failed to create tokio runtime for create cost refresh");
-            let result = runtime.block_on(bridge::fetch_create_cost_details(use_mainnet, auth));
-            let _ = tx.send(CreateCostTaskOutput { request_id, result });
+            let overview = runtime.block_on(bridge::load_session_account_overview(
+                use_mainnet,
+                auth,
+                default_memory_id,
+            ));
+            let _ = tx.send(CreateCostTaskOutput {
+                request_id,
+                overview,
+            });
         });
 
         Some(CoreEffect::Notify("Refreshing account info...".to_string()))
@@ -713,6 +732,24 @@ impl KinicProvider {
 
     fn invalidate_pending_session_settings(&mut self) {
         self.pending_session_settings_request_id = None;
+    }
+
+    fn apply_session_overview(&mut self, overview: bridge::SessionAccountOverview) {
+        let create_cost_details = overview
+            .create_cost_details
+            .or_else(|| self.session_overview.create_cost_details.clone());
+        let mut session = overview.session;
+        if overview.principal_error.is_some() {
+            session.principal_id = self.session_overview.session.principal_id.clone();
+        }
+        self.session_overview = SessionAccountOverview {
+            session,
+            default_memory_id: overview.default_memory_id,
+            create_cost_details,
+            principal_error: overview.principal_error,
+            balance_error: overview.balance_error,
+            price_error: overview.price_error,
+        };
     }
 
     fn search_context(request_id: u64, memory_id: String, query: String) -> SearchRequestContext {
@@ -934,10 +971,12 @@ impl KinicProvider {
             });
         }
 
-        self.create_cost_state = match output.result {
+        let next_state = match output.overview.create_cost_details_result() {
             Ok(details) => CreateCostState::Ready(details),
             Err(error) => CreateCostState::Error(format_create_cost_error(&error)),
         };
+        self.apply_session_overview(output.overview);
+        self.create_cost_state = next_state;
 
         Some(ProviderOutput {
             snapshot: Some(self.build_snapshot(state)),
@@ -1050,17 +1089,9 @@ impl KinicProvider {
             });
         }
 
-        let effects = match output.result {
-            Ok(snapshot) => {
-                self.session_settings = snapshot;
-                vec![CoreEffect::Notify(
-                    "Session settings refreshed.".to_string(),
-                )]
-            }
-            Err(error) => vec![CoreEffect::Notify(format!(
-                "Session settings refresh failed: {error}"
-            ))],
-        };
+        let notify_message = output.overview.session_settings_refresh_notify_message();
+        self.apply_session_overview(output.overview);
+        let effects = vec![CoreEffect::Notify(notify_message)];
 
         Some(ProviderOutput {
             snapshot: Some(self.build_snapshot(state)),
@@ -1402,6 +1433,9 @@ fn format_create_cost_error(error: &bridge::CreateCostFetchError) -> String {
         }
         bridge::CreateCostFetchError::Price(reason) => {
             format!("Could not fetch create price. Cause: {reason}")
+        }
+        bridge::CreateCostFetchError::Unavailable(reason) => {
+            format!("Could not load account overview. Cause: {reason}")
         }
     }
 }

@@ -1,4 +1,14 @@
 use super::*;
+use tui_kit_runtime::CreateCostDetails;
+
+fn session_snapshot(principal_id: &str) -> settings::SessionSettingsSnapshot {
+    settings::SessionSettingsSnapshot::new(
+        &TuiAuth::resolved_for_tests(),
+        false,
+        Some(principal_id.to_string()),
+        "https://api.kinic.io".to_string(),
+    )
+}
 
 fn live_config() -> TuiConfig {
     TuiConfig {
@@ -40,14 +50,59 @@ fn pending_search_context(request_id: u64, memory_id: &str, query: &str) -> Sear
     }
 }
 
-fn refreshed_session_settings() -> SessionSettingsSnapshot {
-    SessionSettingsSnapshot {
-        auth_mode: "live identity".to_string(),
-        identity_name: "provided".to_string(),
-        principal_id: "aaaaa-aa".to_string(),
-        network: "local".to_string(),
-        embedding_api_endpoint: "https://api.kinic.io".to_string(),
-    }
+fn refreshed_session_overview() -> SessionAccountOverview {
+    let mut overview =
+        SessionAccountOverview::new(session_snapshot("aaaaa-aa"), Some("bbbbb-bb".to_string()));
+    overview.create_cost_details = Some(CreateCostDetails {
+        principal: "aaaaa-aa".to_string(),
+        balance_kinic: "12.34000000".to_string(),
+        balance_base_units: "1234000000".to_string(),
+        price_kinic: "1.50000000".to_string(),
+        price_base_units: "150000000".to_string(),
+        required_total_kinic: "1.50200000".to_string(),
+        required_total_base_units: "150200000".to_string(),
+        difference_kinic: "+10.83800000".to_string(),
+        difference_base_units: "+1083800000".to_string(),
+        sufficient_balance: true,
+    });
+    overview
+}
+
+fn partial_session_overview() -> SessionAccountOverview {
+    let mut overview =
+        SessionAccountOverview::new(session_snapshot("aaaaa-aa"), Some("bbbbb-bb".to_string()));
+    overview.balance_error = Some("ledger unavailable".to_string());
+    overview.price_error = Some("price unavailable".to_string());
+    overview
+}
+
+fn principal_error_session_overview() -> SessionAccountOverview {
+    let mut overview =
+        SessionAccountOverview::new(session_snapshot("unavailable"), Some("bbbbb-bb".to_string()));
+    overview.principal_error = Some("identity lookup failed".to_string());
+    overview.balance_error = Some("ledger unavailable".to_string());
+    overview
+}
+
+fn quick_entry_value<'a>(snapshot: &'a ProviderSnapshot, id: &str) -> &'a str {
+    snapshot
+        .settings
+        .quick_entries
+        .iter()
+        .find(|entry| entry.id == id)
+        .map(|entry| entry.value.as_str())
+        .expect("quick entry should exist")
+}
+
+fn section_entry_value<'a>(snapshot: &'a ProviderSnapshot, section: &str, id: &str) -> &'a str {
+    snapshot
+        .settings
+        .sections
+        .iter()
+        .find(|current| current.title == section)
+        .and_then(|current| current.entries.iter().find(|entry| entry.id == id))
+        .map(|entry| entry.value.as_str())
+        .expect("section entry should exist")
 }
 
 #[test]
@@ -164,7 +219,7 @@ fn poll_background_applies_refreshed_session_settings() {
     provider.session_settings_in_flight = true;
     tx.send(SessionSettingsTaskOutput {
         request_id: 4,
-        result: Ok(refreshed_session_settings()),
+        overview: refreshed_session_overview(),
     })
     .unwrap();
 
@@ -173,26 +228,35 @@ fn poll_background_applies_refreshed_session_settings() {
         .expect("settings refresh output");
 
     assert!(!provider.session_settings_in_flight);
-    assert_eq!(provider.session_settings.principal_id, "aaaaa-aa");
-    assert!(
-        output
-            .effects
-            .iter()
-            .any(|effect| matches!(effect, CoreEffect::Notify(_)))
+    assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
+    assert_eq!(
+        provider.session_overview.default_memory_id.as_deref(),
+        Some("bbbbb-bb")
     );
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Session settings refreshed."
+    )));
 }
 
 #[test]
-fn poll_background_keeps_existing_session_settings_when_refresh_fails() {
+fn poll_background_projects_partial_session_overview_into_settings() {
     let mut provider = KinicProvider::new(live_config());
-    let original = provider.session_settings.clone();
+    provider.session_overview = refreshed_session_overview();
+    provider.create_cost_state = CreateCostState::Ready(
+        provider
+            .session_overview
+            .create_cost_details
+            .clone()
+            .expect("ready create cost details"),
+    );
     let (tx, rx) = mpsc::channel();
     provider.pending_session_settings = Some(rx);
     provider.pending_session_settings_request_id = Some(6);
     provider.session_settings_in_flight = true;
     tx.send(SessionSettingsTaskOutput {
         request_id: 6,
-        result: Err("boom".to_string()),
+        overview: partial_session_overview(),
     })
     .unwrap();
 
@@ -201,12 +265,73 @@ fn poll_background_keeps_existing_session_settings_when_refresh_fails() {
         .expect("settings refresh output");
 
     assert!(!provider.session_settings_in_flight);
-    assert_eq!(provider.session_settings, original);
+    assert_eq!(
+        provider.session_overview.balance_error.as_deref(),
+        Some("ledger unavailable")
+    );
+    assert_eq!(
+        provider
+            .session_overview
+            .create_cost_details
+            .as_ref()
+            .map(|details| details.balance_kinic.as_str()),
+        Some("12.34000000")
+    );
+    let snapshot = output.snapshot.expect("settings snapshot");
+    assert_eq!(
+        quick_entry_value(&snapshot, "kinic_balance"),
+        "12.34000000 KINIC"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account & cost", "create_cost"),
+        "1.50200000 KINIC"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account & cost", "account_status"),
+        "partial"
+    );
     assert!(
-        output
-            .effects
+        snapshot
+            .settings
+            .sections
             .iter()
-            .any(|effect| matches!(effect, CoreEffect::Notify(_)))
+            .find(|section| section.title == "Account & cost")
+            .and_then(|section| {
+                section
+                    .entries
+                    .iter()
+                    .find(|entry| entry.id == "account_status")
+            })
+            .and_then(|entry| entry.note.as_deref())
+            .is_some_and(|note| note.contains("stale values shown"))
+    );
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message.contains("partial")
+    )));
+}
+
+#[test]
+fn poll_background_keeps_previous_principal_when_refresh_reports_principal_error() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.session_overview = refreshed_session_overview();
+    let (tx, rx) = mpsc::channel();
+    provider.pending_session_settings = Some(rx);
+    provider.pending_session_settings_request_id = Some(7);
+    provider.session_settings_in_flight = true;
+    tx.send(SessionSettingsTaskOutput {
+        request_id: 7,
+        overview: principal_error_session_overview(),
+    })
+    .unwrap();
+
+    let _output = provider
+        .poll_background(&CoreState::default())
+        .expect("settings refresh output");
+
+    assert_eq!(
+        provider.session_overview.session.principal_id,
+        "aaaaa-aa"
     );
 }
 
@@ -319,6 +444,35 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
     assert_eq!(
         snapshot.default_memory_selector_items,
         vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()]
+    );
+}
+
+#[test]
+fn poll_create_cost_background_updates_overview_and_error_state_from_partial_loader() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel();
+    provider.pending_create_cost = Some(rx);
+    provider.pending_create_cost_request_id = Some(8);
+    provider.create_cost_in_flight = true;
+    tx.send(CreateCostTaskOutput {
+        request_id: 8,
+        overview: partial_session_overview(),
+    })
+    .unwrap();
+
+    let _output = provider
+        .poll_create_cost_background(&CoreState::default())
+        .expect("create cost output");
+
+    assert_eq!(
+        provider.create_cost_state,
+        CreateCostState::Error(
+            "Could not fetch KINIC balance. Cause: ledger unavailable".to_string()
+        )
+    );
+    assert_eq!(
+        provider.session_overview.price_error.as_deref(),
+        Some("price unavailable")
     );
 }
 

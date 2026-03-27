@@ -13,6 +13,10 @@ fn deferred_session() -> SessionSettingsSnapshot {
     )
 }
 
+fn deferred_overview() -> SessionAccountOverview {
+    SessionAccountOverview::new(deferred_session(), None)
+}
+
 fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {
     snapshot
         .quick_entries
@@ -20,6 +24,19 @@ fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {
         .find(|entry| entry.id == id)
         .map(|entry| entry.value.as_str())
         .expect("quick entry should exist")
+}
+
+fn section_entry_note<'a>(
+    snapshot: &'a SettingsSnapshot,
+    section: &str,
+    id: &str,
+) -> Option<&'a str> {
+    snapshot
+        .sections
+        .iter()
+        .find(|current| current.title == section)
+        .and_then(|current| current.entries.iter().find(|entry| entry.id == id))
+        .and_then(|entry| entry.note.as_deref())
 }
 
 fn section_entry_value<'a>(snapshot: &'a SettingsSnapshot, section: &str, id: &str) -> &'a str {
@@ -148,8 +165,9 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
     ];
 
     for (name, preferences, memory_ids, health, default_memory, status) in cases {
-        let snapshot =
-            build_settings_snapshot(&deferred_session(), &preferences, &memory_ids, &health);
+        let mut overview = deferred_overview();
+        overview.default_memory_id = preferences.default_memory_id.clone();
+        let snapshot = build_settings_snapshot(&overview, &preferences, &memory_ids, &health);
 
         assert_eq!(
             quick_entry_value(&snapshot, SETTINGS_ENTRY_DEFAULT_MEMORY_ID),
@@ -176,4 +194,96 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn settings_snapshot_projects_account_cost_section_from_overview() {
+    let mut overview = deferred_overview();
+    overview.create_cost_details = Some(tui_kit_runtime::CreateCostDetails {
+        principal: "principal-1".to_string(),
+        balance_kinic: "12.34000000".to_string(),
+        balance_base_units: "1234000000".to_string(),
+        price_kinic: "1.50000000".to_string(),
+        price_base_units: "150000000".to_string(),
+        required_total_kinic: "1.50200000".to_string(),
+        required_total_base_units: "150200000".to_string(),
+        difference_kinic: "+10.83800000".to_string(),
+        difference_base_units: "+1083800000".to_string(),
+        sufficient_balance: true,
+    });
+
+    let snapshot = build_settings_snapshot(
+        &overview,
+        &UserPreferences::default(),
+        &Vec::new(),
+        &PreferencesHealth::default(),
+    );
+
+    assert_eq!(
+        quick_entry_value(&snapshot, "kinic_balance"),
+        "12.34000000 KINIC"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account & cost", "create_cost"),
+        "1.50200000 KINIC"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account & cost", "account_status"),
+        "ready"
+    );
+    assert_eq!(
+        section_entry_note(&snapshot, "Account & cost", "account_status"),
+        Some("difference: +10.83800000 KINIC (+1083800000 e8s)")
+    );
+}
+
+#[test]
+fn settings_snapshot_marks_partial_account_cost_with_error_notes() {
+    let mut overview = deferred_overview();
+    overview.create_cost_details = Some(tui_kit_runtime::CreateCostDetails {
+        principal: "principal-1".to_string(),
+        balance_kinic: "12.34000000".to_string(),
+        balance_base_units: "1234000000".to_string(),
+        price_kinic: "1.50000000".to_string(),
+        price_base_units: "150000000".to_string(),
+        required_total_kinic: "1.50200000".to_string(),
+        required_total_base_units: "150200000".to_string(),
+        difference_kinic: "+10.83800000".to_string(),
+        difference_base_units: "+1083800000".to_string(),
+        sufficient_balance: true,
+    });
+    overview.balance_error = Some("ledger unavailable".to_string());
+    overview.price_error = Some("price unavailable".to_string());
+
+    let snapshot = build_settings_snapshot(
+        &overview,
+        &UserPreferences::default(),
+        &Vec::new(),
+        &PreferencesHealth::default(),
+    );
+
+    assert_eq!(
+        section_entry_value(&snapshot, "Account & cost", "kinic_balance"),
+        "12.34000000 KINIC"
+    );
+    assert_eq!(
+        section_entry_note(&snapshot, "Account & cost", "kinic_balance"),
+        Some("1234000000 e8s")
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account & cost", "create_cost"),
+        "1.50200000 KINIC"
+    );
+    assert_eq!(
+        section_entry_note(&snapshot, "Account & cost", "create_cost"),
+        Some("150200000 e8s")
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account & cost", "account_status"),
+        "partial"
+    );
+    assert_eq!(
+        section_entry_note(&snapshot, "Account & cost", "account_status"),
+        Some("stale values shown | balance: ledger unavailable | price: price unavailable")
+    );
 }
