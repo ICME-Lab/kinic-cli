@@ -168,15 +168,20 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
         let mut overview = deferred_overview();
         overview.default_memory_id = preferences.default_memory_id.clone();
         let snapshot = build_settings_snapshot(&overview, &preferences, &memory_ids, &health);
+        let section_titles = snapshot
+            .sections
+            .iter()
+            .map(|section| section.title.as_str())
+            .collect::<Vec<_>>();
 
         assert_eq!(
-            quick_entry_value(&snapshot, SETTINGS_ENTRY_DEFAULT_MEMORY_ID),
-            default_memory,
+            quick_entry_value(&snapshot, "principal_id"),
+            "princ...pal-1",
             "{name}"
         );
         assert_eq!(
-            quick_entry_value(&snapshot, "preferences"),
-            status,
+            quick_entry_value(&snapshot, SETTINGS_ENTRY_DEFAULT_MEMORY_ID),
+            default_memory,
             "{name}"
         );
         assert_eq!(
@@ -191,6 +196,11 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
         assert_eq!(
             section_entry_value(&snapshot, "Saved preferences", "preferences_status"),
             status,
+            "{name}"
+        );
+        assert_eq!(
+            section_titles,
+            vec!["Saved preferences", "Current session", "Account"],
             "{name}"
         );
     }
@@ -220,21 +230,19 @@ fn settings_snapshot_projects_account_cost_section_from_overview() {
     );
 
     assert_eq!(
+        section_entry_value(&snapshot, "Account", "principal_id"),
+        "principal-1"
+    );
+    assert_eq!(
+        quick_entry_value(&snapshot, "principal_id"),
+        "princ...pal-1"
+    );
+    assert_eq!(
         quick_entry_value(&snapshot, "kinic_balance"),
         "12.34000000 KINIC"
     );
-    assert_eq!(
-        section_entry_value(&snapshot, "Account & cost", "create_cost"),
-        "1.50200000 KINIC"
-    );
-    assert_eq!(
-        section_entry_value(&snapshot, "Account & cost", "account_status"),
-        "ready"
-    );
-    assert_eq!(
-        section_entry_note(&snapshot, "Account & cost", "account_status"),
-        Some("difference: +10.83800000 KINIC (+1083800000 e8s)")
-    );
+    assert_eq!(section_entry_note(&snapshot, "Account", "kinic_balance"), None);
+    assert_eq!(section_entry_value(&snapshot, "Account", "kinic_balance"), "12.34000000 KINIC");
 }
 
 #[test]
@@ -263,27 +271,16 @@ fn settings_snapshot_marks_partial_account_cost_with_error_notes() {
     );
 
     assert_eq!(
-        section_entry_value(&snapshot, "Account & cost", "kinic_balance"),
+        section_entry_value(&snapshot, "Account", "principal_id"),
+        "principal-1"
+    );
+    assert_eq!(
+        quick_entry_value(&snapshot, "principal_id"),
+        "princ...pal-1"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account", "kinic_balance"),
         "12.34000000 KINIC"
     );
-    assert_eq!(
-        section_entry_note(&snapshot, "Account & cost", "kinic_balance"),
-        Some("1234000000 e8s")
-    );
-    assert_eq!(
-        section_entry_value(&snapshot, "Account & cost", "create_cost"),
-        "1.50200000 KINIC"
-    );
-    assert_eq!(
-        section_entry_note(&snapshot, "Account & cost", "create_cost"),
-        Some("150200000 e8s")
-    );
-    assert_eq!(
-        section_entry_value(&snapshot, "Account & cost", "account_status"),
-        "partial"
-    );
-    assert_eq!(
-        section_entry_note(&snapshot, "Account & cost", "account_status"),
-        Some("stale values shown | balance: ledger unavailable | price: price unavailable")
-    );
+    assert_eq!(section_entry_note(&snapshot, "Account", "kinic_balance"), None);
 }

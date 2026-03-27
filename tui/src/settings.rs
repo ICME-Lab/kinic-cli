@@ -77,25 +77,16 @@ pub fn build_settings_snapshot(
     let session = SessionSettingsSnapshot::from_overview(overview);
     let default_memory_display =
         default_memory_display(overview, preferences, available_memory_ids);
-    let preferences_status = preferences_status_label(health);
-    let account_entries = account_cost_entries(overview);
+    let account_entries = account_entries(overview);
 
     SettingsSnapshot {
         quick_entries: vec![
             entry(
-                "identity_name",
-                "Identity name",
-                session.identity_name.clone(),
-                None,
-            ),
-            entry(
                 "principal_id",
                 "Principal ID",
-                session.principal_id.clone(),
+                abbreviate_principal_id(session.principal_id.as_str()),
                 None,
             ),
-            entry("auth_mode", "Auth mode", session.auth_mode.clone(), None),
-            entry("network", "Network", session.network.clone(), None),
             entry(
                 "kinic_balance",
                 "KINIC balance",
@@ -103,57 +94,19 @@ pub fn build_settings_snapshot(
                 account_balance_note(overview),
             ),
             entry(
-                "create_cost",
-                "Create cost",
-                account_price_value(overview),
-                account_price_note(overview),
-            ),
-            entry(
                 SETTINGS_ENTRY_DEFAULT_MEMORY_ID,
                 "Default memory",
                 default_memory_display.clone(),
                 None,
             ),
-            entry("preferences", "Preferences", preferences_status, None),
             entry(
                 "embedding_api_endpoint",
-                "Embedding API endpoint",
+                "Embedding",
                 session.embedding_api_endpoint.clone(),
                 None,
             ),
         ],
         sections: vec![
-            SettingsSection {
-                title: "Current session".to_string(),
-                entries: vec![
-                    entry(
-                        "identity_name",
-                        "Identity name",
-                        session.identity_name.clone(),
-                        None,
-                    ),
-                    entry(
-                        "principal_id",
-                        "Principal ID",
-                        session.principal_id.clone(),
-                        None,
-                    ),
-                    entry("auth_mode", "Auth mode", session.auth_mode.clone(), None),
-                    entry("network", "Network", session.network.clone(), None),
-                    entry(
-                        "embedding_api_endpoint",
-                        "Embedding API endpoint",
-                        session.embedding_api_endpoint.clone(),
-                        None,
-                    ),
-                ],
-                footer: None,
-            },
-            SettingsSection {
-                title: "Account & cost".to_string(),
-                entries: account_entries,
-                footer: None,
-            },
             SettingsSection {
                 title: "Saved preferences".to_string(),
                 entries: vec![
@@ -170,6 +123,31 @@ pub fn build_settings_snapshot(
                         None,
                     ),
                 ],
+                footer: None,
+            },
+            SettingsSection {
+                title: "Current session".to_string(),
+                entries: vec![
+                    entry(
+                        "identity_name",
+                        "Identity name",
+                        session.identity_name.clone(),
+                        None,
+                    ),
+                    entry("auth_mode", "Auth mode", session.auth_mode.clone(), None),
+                    entry("network", "Network", session.network.clone(), None),
+                    entry(
+                        "embedding_api_endpoint",
+                        "Embedding",
+                        session.embedding_api_endpoint.clone(),
+                        None,
+                    ),
+                ],
+                footer: None,
+            },
+            SettingsSection {
+                title: "Account".to_string(),
+                entries: account_entries,
                 footer: None,
             },
         ],
@@ -219,25 +197,19 @@ fn default_memory_display(
     }
 }
 
-fn account_cost_entries(overview: &SessionAccountOverview) -> Vec<SettingsEntry> {
+fn account_entries(overview: &SessionAccountOverview) -> Vec<SettingsEntry> {
     vec![
+        entry(
+            "principal_id",
+            "Principal ID",
+            overview.session.principal_id.clone(),
+            None,
+        ),
         entry(
             "kinic_balance",
             "KINIC balance",
             account_balance_value(overview),
             account_balance_note(overview),
-        ),
-        entry(
-            "create_cost",
-            "Create cost",
-            account_price_value(overview),
-            account_price_note(overview),
-        ),
-        entry(
-            "account_status",
-            "Status",
-            account_status_value(overview),
-            account_status_note(overview),
         ),
     ]
 }
@@ -251,87 +223,29 @@ fn account_balance_value(overview: &SessionAccountOverview) -> String {
 }
 
 fn account_balance_note(overview: &SessionAccountOverview) -> Option<String> {
-    if let Some(details) = &overview.create_cost_details {
-        return Some(format!("{} e8s", details.balance_base_units));
-    }
     overview.balance_error.clone()
 }
 
-fn account_price_value(overview: &SessionAccountOverview) -> String {
-    overview
-        .create_cost_details
-        .as_ref()
-        .map(|details| format_kinic_value(&details.required_total_kinic))
-        .unwrap_or_else(|| UNAVAILABLE.to_string())
-}
+fn abbreviate_principal_id(value: &str) -> String {
+    if value == UNAVAILABLE {
+        return value.to_string();
+    }
 
-fn account_price_note(overview: &SessionAccountOverview) -> Option<String> {
-    if let Some(details) = &overview.create_cost_details {
-        return Some(format!("{} e8s", details.required_total_base_units));
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= 10 {
+        return value.to_string();
     }
-    overview.price_error.clone()
-}
 
-fn account_status_value(overview: &SessionAccountOverview) -> String {
-    if overview.principal_error.is_some()
-        || overview.balance_error.is_some()
-        || overview.price_error.is_some()
-    {
-        return "partial".to_string();
-    }
-    if let Some(details) = &overview.create_cost_details {
-        if details.sufficient_balance {
-            return "ready".to_string();
-        }
-        return "insufficient balance".to_string();
-    }
-    if overview.balance_error.is_some() || overview.price_error.is_some() {
-        return "partial".to_string();
-    }
-    UNAVAILABLE.to_string()
-}
-
-fn account_status_note(overview: &SessionAccountOverview) -> Option<String> {
-    let has_partial_account_state = overview.principal_error.is_some()
-        || overview.balance_error.is_some()
-        || overview.price_error.is_some();
-    if has_partial_account_state {
-        let mut causes = Vec::new();
-        if overview.create_cost_details.is_some() {
-            causes.push("stale values shown".to_string());
-        }
-        if let Some(error) = &overview.principal_error {
-            causes.push(format!("principal: {error}"));
-        }
-        if let Some(error) = &overview.balance_error {
-            causes.push(format!("balance: {error}"));
-        }
-        if let Some(error) = &overview.price_error {
-            causes.push(format!("price: {error}"));
-        }
-        return Some(causes.join(" | "));
-    }
-    if let Some(details) = &overview.create_cost_details {
-        return Some(format!(
-            "difference: {} KINIC ({} e8s)",
-            details.difference_kinic, details.difference_base_units
-        ));
-    }
-    let mut causes = Vec::new();
-    if let Some(error) = &overview.principal_error {
-        causes.push(format!("principal: {error}"));
-    }
-    if let Some(error) = &overview.balance_error {
-        causes.push(format!("balance: {error}"));
-    }
-    if let Some(error) = &overview.price_error {
-        causes.push(format!("price: {error}"));
-    }
-    if causes.is_empty() {
-        None
-    } else {
-        Some(causes.join(" | "))
-    }
+    let prefix = chars.iter().take(5).collect::<String>();
+    let suffix = chars
+        .iter()
+        .rev()
+        .take(5)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
 }
 
 fn format_kinic_value(value: &str) -> String {

@@ -332,7 +332,7 @@ impl SessionAccountOverview {
             || self.price_error.is_some()
             || self.create_cost_details.is_none();
         if account_incomplete {
-            "Session settings updated (partial account info). See Settings → Account & cost."
+            "Session settings updated (partial account info). See Settings → Account."
                 .to_string()
         } else {
             "Session settings refreshed.".to_string()
@@ -551,7 +551,7 @@ mod tests {
         assert!(
             partial
                 .session_settings_refresh_notify_message()
-                .contains("partial"),
+                .contains("Settings → Account."),
         );
     }
 }

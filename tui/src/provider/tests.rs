@@ -281,31 +281,20 @@ fn poll_background_projects_partial_session_overview_into_settings() {
     );
     let snapshot = output.snapshot.expect("settings snapshot");
     assert_eq!(
+        quick_entry_value(&snapshot, "principal_id"),
+        "aaaaa-aa"
+    );
+    assert_eq!(
         quick_entry_value(&snapshot, "kinic_balance"),
         "12.34000000 KINIC"
     );
     assert_eq!(
-        section_entry_value(&snapshot, "Account & cost", "create_cost"),
-        "1.50200000 KINIC"
+        section_entry_value(&snapshot, "Account", "principal_id"),
+        "aaaaa-aa"
     );
     assert_eq!(
-        section_entry_value(&snapshot, "Account & cost", "account_status"),
-        "partial"
-    );
-    assert!(
-        snapshot
-            .settings
-            .sections
-            .iter()
-            .find(|section| section.title == "Account & cost")
-            .and_then(|section| {
-                section
-                    .entries
-                    .iter()
-                    .find(|entry| entry.id == "account_status")
-            })
-            .and_then(|entry| entry.note.as_deref())
-            .is_some_and(|note| note.contains("stale values shown"))
+        section_entry_value(&snapshot, "Account", "kinic_balance"),
+        "12.34000000 KINIC"
     );
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
