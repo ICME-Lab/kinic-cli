@@ -11,6 +11,7 @@ name = "tui_kit_host"
 path = "src/lib.rs"
 
 [dependencies]
+arboard = "3"
 crossterm = "0.28"
 webbrowser = "0.8"
 dirs = "6"

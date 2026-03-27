@@ -10,9 +10,11 @@ use tui_kit_runtime::{
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
+    settings_entry,
     should_open_default_memory_picker,
 };
 
+use crate::clipboard::copy_text;
 use crate::{
     HostGlobalCommand, HostInputEvent, action_from_keycode, execute_effects_to_status,
     global_command_for_key, poll_host_input, resolve_tab_action_with_current,
@@ -185,6 +187,24 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 }
                 continue;
             };
+
+            if let Some(principal_id) = copy_principal_id_from_settings(&state, code) {
+                match copy_text(&principal_id) {
+                    Ok(()) => execute_effects_to_status(
+                        &mut state,
+                        vec![CoreEffect::Notify(
+                            "Principal ID copied to clipboard.".to_string(),
+                        )],
+                    ),
+                    Err(error) => execute_effects_to_status(
+                        &mut state,
+                        vec![CoreEffect::Notify(format!(
+                            "Failed to copy Principal ID: {error}"
+                        ))],
+                    ),
+                }
+                continue;
+            }
 
             match handle_overlay_input(provider, &mut state, show_settings, code, modifiers) {
                 OverlayInputResult::NotHandled => {}
@@ -502,13 +522,34 @@ fn apply_content_scroll_action(action: &CoreAction, inspector_scroll: &mut usize
     }
 }
 
+fn copy_principal_id_from_settings(
+    state: &CoreState,
+    code: crossterm::event::KeyCode,
+) -> Option<String> {
+    if code != crossterm::event::KeyCode::Enter {
+        return None;
+    }
+    if state.current_tab_id != KINIC_SETTINGS_TAB_ID || state.focus != PaneFocus::Content {
+        return None;
+    }
+    let index = state.selected_index?;
+    let entry = settings_entry(&state.settings, index)?;
+    if entry.id == "principal_id" && entry.value != "unavailable" {
+        return Some(entry.value.clone());
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tui_kit_runtime::kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
     };
-    use tui_kit_runtime::{CoreResult, ProviderOutput, ProviderSnapshot};
+    use tui_kit_runtime::{
+        CoreResult, ProviderOutput, ProviderSnapshot, SettingsEntry, SettingsSection,
+        SettingsSnapshot,
+    };
 
     struct TestProvider;
 
@@ -657,5 +698,47 @@ mod tests {
             &mut inspector_scroll
         ));
         assert_eq!(inspector_scroll, 10002);
+    }
+
+    #[test]
+    fn copy_principal_id_from_settings_only_targets_principal_id() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(1),
+            settings: SettingsSnapshot {
+                quick_entries: vec![],
+                sections: vec![SettingsSection {
+                    title: "Current session".to_string(),
+                    entries: vec![
+                        SettingsEntry {
+                            id: "identity_name".to_string(),
+                            label: "Identity name".to_string(),
+                            value: "alice".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "principal_id".to_string(),
+                            label: "Principal ID".to_string(),
+                            value: "aaaaa-aa".to_string(),
+                            note: None,
+                        },
+                    ],
+                    footer: None,
+                }],
+            },
+            ..CoreState::default()
+        };
+
+        let copied =
+            copy_principal_id_from_settings(&state, crossterm::event::KeyCode::Enter);
+
+        assert_eq!(copied.as_deref(), Some("aaaaa-aa"));
+
+        state.selected_index = Some(0);
+        let not_copyable =
+            copy_principal_id_from_settings(&state, crossterm::event::KeyCode::Enter);
+
+        assert_eq!(not_copyable, None);
     }
 }
