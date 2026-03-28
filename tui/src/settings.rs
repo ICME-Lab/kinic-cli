@@ -6,46 +6,16 @@
 use serde::{Deserialize, Serialize};
 use tui_kit_host::settings::{SettingsError, load_yaml_or_default, save_yaml};
 use tui_kit_runtime::{
-    SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot,
+    SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview, SessionSettingsSnapshot,
+    SettingsEntry, SettingsSection, SettingsSnapshot, format_e8s_to_kinic_string_u128,
 };
 
-use super::bridge::SessionAccountOverview;
 use crate::tui::TuiAuth;
 
 const APP_NAMESPACE: &str = "kinic";
 const SETTINGS_FILE_NAME: &str = "tui.yaml";
 const UNAVAILABLE: &str = "unavailable";
 const NOT_SET: &str = "not set";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionSettingsSnapshot {
-    pub auth_mode: String,
-    pub identity_name: String,
-    pub principal_id: String,
-    pub network: String,
-    pub embedding_api_endpoint: String,
-}
-
-impl SessionSettingsSnapshot {
-    pub fn new(
-        auth: &TuiAuth,
-        use_mainnet: bool,
-        principal_id: Option<String>,
-        embedding_api_endpoint: String,
-    ) -> Self {
-        Self {
-            auth_mode: auth_mode_label(auth),
-            identity_name: identity_name_label(auth),
-            principal_id: principal_id.unwrap_or_else(|| UNAVAILABLE.to_string()),
-            network: network_label(use_mainnet),
-            embedding_api_endpoint,
-        }
-    }
-
-    pub fn from_overview(overview: &SessionAccountOverview) -> Self {
-        overview.session.clone()
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -74,7 +44,7 @@ pub fn build_settings_snapshot(
     available_memory_ids: &[String],
     health: &PreferencesHealth,
 ) -> SettingsSnapshot {
-    let session = SessionSettingsSnapshot::from_overview(overview);
+    let session = overview.session.clone();
     let default_memory_display = default_memory_display(preferences, available_memory_ids);
     let account_entries = account_entries(overview);
 
@@ -163,6 +133,21 @@ pub fn build_settings_snapshot(
     }
 }
 
+pub fn session_settings_snapshot(
+    auth: &TuiAuth,
+    use_mainnet: bool,
+    principal_id: Option<String>,
+    embedding_api_endpoint: String,
+) -> SessionSettingsSnapshot {
+    SessionSettingsSnapshot {
+        auth_mode: auth_mode_label(auth),
+        identity_name: identity_name_label(auth),
+        principal_id: principal_id.unwrap_or_else(|| UNAVAILABLE.to_string()),
+        network: network_label(use_mainnet),
+        embedding_api_endpoint,
+    }
+}
+
 fn auth_mode_label(auth: &TuiAuth) -> String {
     match auth {
         TuiAuth::Mock => "mock".to_string(),
@@ -220,9 +205,10 @@ fn account_entries(overview: &SessionAccountOverview) -> Vec<SettingsEntry> {
 
 fn account_balance_value(overview: &SessionAccountOverview) -> String {
     overview
-        .create_cost_details
-        .as_ref()
-        .map(|details| format_kinic_value(&details.balance_kinic))
+        .balance_base_units
+        .map(format_e8s_to_kinic_string_u128)
+        .as_deref()
+        .map(format_kinic_value)
         .unwrap_or_else(|| UNAVAILABLE.to_string())
 }
 

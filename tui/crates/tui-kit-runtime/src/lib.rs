@@ -1,13 +1,21 @@
-//! Domain-agnostic core contracts for driving tui-kit style UIs.
+//! Shared runtime contracts for the Kinic tui-kit stack.
 //!
-//! This crate defines generic actions/effects, shared runtime state, and the
-//! `DataProvider` trait so multiple domains can plug into the same UI shell.
+//! This crate defines common actions/effects, shared runtime state, and the
+//! `DataProvider` trait used by the Kinic TUI crates.
 
 pub mod kinic_tabs;
 
+use candid::Nat;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
 
 pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
+const TRANSFER_FEE_E8S: u128 = 100_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BalanceDelta {
+    Surplus(Nat),
+    Shortfall(Nat),
+}
 
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -123,25 +131,154 @@ pub enum CreateCostState {
     Hidden,
     Loading,
     Unavailable,
+    Loaded(SessionAccountOverview),
     Error(Vec<String>),
-    Ready {
-        details: CreateCostDetails,
-        issues: Vec<String>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateCostDetails {
+pub struct SessionSettingsSnapshot {
+    pub auth_mode: String,
+    pub identity_name: String,
+    pub principal_id: String,
+    pub network: String,
+    pub embedding_api_endpoint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionAccountOverview {
+    pub session: SessionSettingsSnapshot,
+    pub balance_base_units: Option<u128>,
+    pub price_base_units: Option<Nat>,
+    pub principal_error: Option<String>,
+    pub balance_error: Option<String>,
+    pub price_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedCreateCost {
     pub principal: String,
     pub balance_kinic: String,
-    pub balance_base_units: String,
     pub price_kinic: String,
-    pub price_base_units: String,
     pub required_total_kinic: String,
     pub required_total_base_units: String,
     pub difference_kinic: String,
     pub difference_base_units: String,
     pub sufficient_balance: bool,
+}
+
+impl SessionAccountOverview {
+    pub fn new(session: SessionSettingsSnapshot) -> Self {
+        Self {
+            session,
+            balance_base_units: None,
+            price_base_units: None,
+            principal_error: None,
+            balance_error: None,
+            price_error: None,
+        }
+    }
+
+    pub fn has_complete_create_cost(&self) -> bool {
+        self.balance_base_units.is_some() && self.price_base_units.is_some()
+    }
+
+    pub fn derived_create_cost(&self) -> Option<DerivedCreateCost> {
+        let balance_base_units = self.balance_base_units?;
+        let price = self.price_base_units.clone()?;
+        let required_total = required_balance(&price);
+        let delta = balance_delta(&price, balance_base_units);
+        let (difference_sign, difference_base_units, sufficient_balance) = match &delta {
+            BalanceDelta::Surplus(value) => ('+', value.to_string(), true),
+            BalanceDelta::Shortfall(value) => ('-', value.to_string(), false),
+        };
+
+        Some(DerivedCreateCost {
+            principal: self.session.principal_id.clone(),
+            balance_kinic: format_e8s_to_kinic_string_u128(balance_base_units),
+            price_kinic: format_e8s_to_kinic_string_nat(&price),
+            required_total_kinic: format_e8s_to_kinic_string_nat(&required_total),
+            required_total_base_units: required_total.to_string(),
+            difference_kinic: format!(
+                "{difference_sign}{}",
+                format_e8s_to_kinic_string_str(difference_base_units.as_str())
+            ),
+            difference_base_units: format!("{difference_sign}{difference_base_units}"),
+            sufficient_balance,
+        })
+    }
+
+    pub fn account_issue_messages(&self) -> Vec<String> {
+        let mut messages = Vec::new();
+        if let Some(error) = &self.principal_error {
+            messages.push(format!("Could not derive principal. Cause: {error}"));
+        }
+        if let Some(error) = &self.balance_error {
+            messages.push(format!("Could not fetch KINIC balance. Cause: {error}"));
+        }
+        if let Some(error) = &self.price_error {
+            messages.push(format!("Could not fetch create price. Cause: {error}"));
+        }
+        messages
+    }
+
+    pub fn account_issue_note(&self) -> Option<String> {
+        let issues = self.account_issue_messages();
+        (!issues.is_empty()).then(|| issues.join(" | "))
+    }
+
+    pub fn session_settings_refresh_failure_message(&self) -> Option<String> {
+        self.principal_error
+            .as_ref()
+            .map(|error| format!("Session settings refresh failed: {error}"))
+    }
+
+    pub fn session_settings_refresh_notify_message(&self) -> String {
+        let account_incomplete = self.principal_error.is_some()
+            || self.balance_error.is_some()
+            || self.price_error.is_some()
+            || !self.has_complete_create_cost();
+        if account_incomplete {
+            "Session settings updated (partial account info). See Settings → Account.".to_string()
+        } else {
+            "Session settings refreshed.".to_string()
+        }
+    }
+}
+
+pub fn required_balance(price: &Nat) -> Nat {
+    let fee = Nat::from(TRANSFER_FEE_E8S);
+    price.clone() + fee.clone() + fee
+}
+
+pub fn balance_delta(price: &Nat, balance: u128) -> BalanceDelta {
+    let required = required_balance(price);
+    let balance_nat = Nat::from(balance);
+    if balance_nat >= required {
+        BalanceDelta::Surplus(balance_nat - required)
+    } else {
+        BalanceDelta::Shortfall(required - balance_nat)
+    }
+}
+
+pub fn format_e8s_to_kinic_string_u128(value: u128) -> String {
+    format_e8s_to_kinic_string_nat(&Nat::from(value))
+}
+
+pub fn format_e8s_to_kinic_string_nat(value: &Nat) -> String {
+    format_e8s_to_kinic_string_str(value.to_string().as_str())
+}
+
+fn format_e8s_to_kinic_string_str(value: &str) -> String {
+    const SCALE: usize = 8;
+
+    let digits = value.replace('_', "");
+    if digits.len() <= SCALE {
+        return format!("0.{:0>width$}", digits, width = SCALE);
+    }
+
+    let split_at = digits.len() - SCALE;
+    let (whole, fraction) = digits.split_at(split_at);
+    format!("{whole}.{fraction}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -370,6 +507,34 @@ pub struct ProviderSnapshot {
 pub struct ProviderOutput {
     pub snapshot: Option<ProviderSnapshot>,
     pub effects: Vec<CoreEffect>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128};
+    use candid::Nat;
+
+    #[test]
+    fn format_e8s_to_kinic_string_nat_keeps_eight_fraction_digits() {
+        assert_eq!(
+            format_e8s_to_kinic_string_nat(&Nat::from(123_456_789u128)),
+            "1.23456789"
+        );
+        assert_eq!(
+            format_e8s_to_kinic_string_nat(&Nat::from(42u128)),
+            "0.00000042"
+        );
+    }
+
+    #[test]
+    fn format_e8s_to_kinic_string_u128_matches_nat_formatting() {
+        let value = 1_700_000u128;
+
+        assert_eq!(
+            format_e8s_to_kinic_string_u128(value),
+            format_e8s_to_kinic_string_nat(&Nat::from(value))
+        );
+    }
 }
 
 /// Input key abstraction for shared key->action mapping.

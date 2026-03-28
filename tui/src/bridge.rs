@@ -1,20 +1,21 @@
 use std::cmp::Ordering;
 
 use anyhow::{Context, Result};
-use candid::Nat;
 use ic_agent::export::Principal;
-use tui_kit_runtime::CreateCostDetails;
+use tui_kit_runtime::{
+    BalanceDelta, SessionAccountOverview, balance_delta, format_e8s_to_kinic_string_nat,
+    required_balance,
+};
 
 use crate::{
     clients::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
     },
-    commands::create::{BalanceDelta, balance_delta, required_balance},
     embedding::{embedding_base_url, fetch_embedding},
     ledger::fetch_balance,
     tui::TuiAuth,
-    tui::settings::SessionSettingsSnapshot,
+    tui::settings::session_settings_snapshot,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,15 +36,6 @@ pub struct CreateMemorySuccess {
     pub id: String,
     pub memories: Option<Vec<MemorySummary>>,
     pub refresh_warning: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionAccountOverview {
-    pub session: SessionSettingsSnapshot,
-    pub create_cost_details: Option<CreateCostDetails>,
-    pub principal_error: Option<String>,
-    pub balance_error: Option<String>,
-    pub price_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,9 +88,9 @@ pub async fn create_memory(
         BalanceDelta::Shortfall(shortfall) => {
             let required_total = required_balance(&price);
             return Err(CreateMemoryError::InsufficientBalance {
-                required_total_kinic: format_e8s_to_kinic_string(&required_total),
+                required_total_kinic: format_e8s_to_kinic_string_nat(&required_total),
                 required_total_base_units: required_total.to_string(),
-                shortfall_kinic: format_e8s_to_kinic_string(&shortfall),
+                shortfall_kinic: format_e8s_to_kinic_string_nat(&shortfall),
                 shortfall_base_units: shortfall.to_string(),
             });
         }
@@ -136,7 +128,7 @@ pub async fn load_session_account_overview(
     use_mainnet: bool,
     auth: TuiAuth,
 ) -> SessionAccountOverview {
-    let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+    let mut overview = SessionAccountOverview::new(session_settings_snapshot(
         &auth,
         use_mainnet,
         None,
@@ -174,18 +166,13 @@ pub async fn load_session_account_overview(
 
     if let Err(error) = &balance {
         overview.balance_error = Some(short_error(&error.to_string()));
+    } else if let Ok(balance) = &balance {
+        overview.balance_base_units = Some(*balance);
     }
     if let Err(error) = &price {
         overview.price_error = Some(short_error(&error.to_string()));
-    }
-    if overview.principal_error.is_none()
-        && let (Ok(balance), Ok(price)) = (balance, price)
-    {
-        overview.create_cost_details = Some(create_cost_details_from_parts(
-            overview.session.principal_id.clone(),
-            balance,
-            price,
-        ));
+    } else if let Ok(price) = &price {
+        overview.price_base_units = Some(price.clone());
     }
 
     overview
@@ -246,105 +233,6 @@ fn memory_summary_from_state(state: State) -> MemorySummary {
     }
 }
 
-fn signed_delta_kinic(delta: &BalanceDelta) -> String {
-    match delta {
-        BalanceDelta::Surplus(value) => format!("+{}", format_e8s_to_kinic_string(value)),
-        BalanceDelta::Shortfall(value) => format!("-{}", format_e8s_to_kinic_string(value)),
-    }
-}
-
-fn signed_delta_base_units(delta: &BalanceDelta) -> String {
-    match delta {
-        BalanceDelta::Surplus(value) => format!("+{value}"),
-        BalanceDelta::Shortfall(value) => format!("-{value}"),
-    }
-}
-
-fn create_cost_details_from_parts(
-    principal: String,
-    balance: u128,
-    price: Nat,
-) -> CreateCostDetails {
-    let required_total = required_balance(&price);
-    let delta = balance_delta(&price, balance);
-
-    CreateCostDetails {
-        principal,
-        balance_kinic: format_e8s_to_kinic_string(&Nat::from(balance)),
-        balance_base_units: balance.to_string(),
-        price_kinic: format_e8s_to_kinic_string(&price),
-        price_base_units: price.to_string(),
-        required_total_kinic: format_e8s_to_kinic_string(&required_total),
-        required_total_base_units: required_total.to_string(),
-        difference_kinic: signed_delta_kinic(&delta),
-        difference_base_units: signed_delta_base_units(&delta),
-        sufficient_balance: matches!(delta, BalanceDelta::Surplus(_)),
-    }
-}
-
-impl SessionAccountOverview {
-    pub fn new(session: SessionSettingsSnapshot) -> Self {
-        Self {
-            session,
-            create_cost_details: None,
-            principal_error: None,
-            balance_error: None,
-            price_error: None,
-        }
-    }
-
-    pub fn account_issue_messages(&self) -> Vec<String> {
-        let mut messages = Vec::new();
-        if let Some(error) = &self.principal_error {
-            messages.push(format!("Could not derive principal. Cause: {error}"));
-        }
-        if let Some(error) = &self.balance_error {
-            messages.push(format!("Could not fetch KINIC balance. Cause: {error}"));
-        }
-        if let Some(error) = &self.price_error {
-            messages.push(format!("Could not fetch create price. Cause: {error}"));
-        }
-        messages
-    }
-
-    pub fn account_issue_note(&self) -> Option<String> {
-        let issues = self.account_issue_messages();
-        (!issues.is_empty()).then(|| issues.join(" | "))
-    }
-
-    pub fn session_settings_refresh_failure_message(&self) -> Option<String> {
-        self.principal_error
-            .as_ref()
-            .map(|error| format!("Session settings refresh failed: {error}"))
-    }
-
-    /// User-visible toast after a session settings / account overview refresh completes.
-    pub fn session_settings_refresh_notify_message(&self) -> String {
-        let account_incomplete = self.principal_error.is_some()
-            || self.balance_error.is_some()
-            || self.price_error.is_some()
-            || self.create_cost_details.is_none();
-        if account_incomplete {
-            "Session settings updated (partial account info). See Settings → Account.".to_string()
-        } else {
-            "Session settings refreshed.".to_string()
-        }
-    }
-}
-
-fn format_e8s_to_kinic_string(value: &Nat) -> String {
-    const SCALE: usize = 8;
-
-    let digits = value.to_string().replace('_', "");
-    if digits.len() <= SCALE {
-        return format!("0.{:0>width$}", digits, width = SCALE);
-    }
-
-    let split_at = digits.len() - SCALE;
-    let (whole, fraction) = digits.split_at(split_at);
-    format!("{whole}.{fraction}")
-}
-
 fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
@@ -352,29 +240,9 @@ fn short_error(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use candid::Nat;
     use ic_agent::identity::AnonymousIdentity;
     use std::sync::Arc;
-
-    #[test]
-    fn format_e8s_to_kinic_string_keeps_eight_fraction_digits() {
-        assert_eq!(
-            format_e8s_to_kinic_string(&Nat::from(123_456_789u128)),
-            "1.23456789"
-        );
-        assert_eq!(format_e8s_to_kinic_string(&Nat::from(42u128)), "0.00000042");
-    }
-
-    #[test]
-    fn signed_delta_strings_keep_signs() {
-        assert_eq!(
-            signed_delta_kinic(&BalanceDelta::Surplus(Nat::from(10u128))),
-            "+0.00000010"
-        );
-        assert_eq!(
-            signed_delta_base_units(&BalanceDelta::Shortfall(Nat::from(10u128))),
-            "-10"
-        );
-    }
 
     #[test]
     fn resolve_agent_factory_accepts_resolved_identity() {
@@ -423,23 +291,17 @@ mod tests {
     }
 
     #[test]
-    fn session_account_overview_returns_ready_create_cost_details() {
-        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+    fn session_account_overview_derives_create_cost_when_balance_and_price_exist() {
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
             Some("aaaaa-aa".to_string()),
             "https://api.kinic.io".to_string(),
         ));
-        overview.create_cost_details = Some(create_cost_details_from_parts(
-            "aaaaa-aa".to_string(),
-            2_000_000u128,
-            Nat::from(1_500_000u128),
-        ));
+        overview.balance_base_units = Some(2_000_000u128);
+        overview.price_base_units = Some(Nat::from(1_500_000u128));
 
-        let details = overview
-            .create_cost_details
-            .clone()
-            .expect("create cost details");
+        let details = overview.derived_create_cost().expect("create cost details");
 
         assert_eq!(details.principal, "aaaaa-aa");
         assert_eq!(details.required_total_base_units, "1_700_000");
@@ -447,8 +309,23 @@ mod tests {
     }
 
     #[test]
+    fn session_account_overview_reports_incomplete_create_cost_when_only_balance_exists() {
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.balance_base_units = Some(1_234_000_000u128);
+        overview.price_error = Some("price unavailable".to_string());
+
+        assert!(!overview.has_complete_create_cost());
+        assert_eq!(overview.derived_create_cost(), None);
+    }
+
+    #[test]
     fn session_account_overview_lists_account_issues_in_priority_order() {
-        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
             Some("aaaaa-aa".to_string()),
@@ -470,7 +347,7 @@ mod tests {
 
     #[test]
     fn session_account_overview_formats_joined_account_issue_note() {
-        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
             Some("aaaaa-aa".to_string()),
@@ -488,7 +365,7 @@ mod tests {
 
     #[test]
     fn session_account_overview_returns_none_when_no_account_issues_exist() {
-        let overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+        let overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
             Some("aaaaa-aa".to_string()),
@@ -499,7 +376,7 @@ mod tests {
 
     #[test]
     fn session_account_overview_lists_no_issues_when_unavailable_without_errors() {
-        let overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+        let overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
             Some("aaaaa-aa".to_string()),
@@ -510,7 +387,7 @@ mod tests {
 
     #[test]
     fn session_account_overview_formats_joined_create_cost_errors_example() {
-        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
             Some("aaaaa-aa".to_string()),
@@ -526,24 +403,21 @@ mod tests {
 
     #[test]
     fn session_settings_refresh_notify_message_reflects_account_completeness() {
-        let mut complete = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+        let mut complete = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
             Some("aaaaa-aa".to_string()),
             "https://api.kinic.io".to_string(),
         ));
-        complete.create_cost_details = Some(create_cost_details_from_parts(
-            "aaaaa-aa".to_string(),
-            2_000_000u128,
-            Nat::from(1_500_000u128),
-        ));
+        complete.balance_base_units = Some(2_000_000u128);
+        complete.price_base_units = Some(Nat::from(1_500_000u128));
         assert_eq!(
             complete.session_settings_refresh_notify_message(),
             "Session settings refreshed."
         );
 
         let mut partial = complete.clone();
-        partial.create_cost_details = None;
+        partial.price_base_units = None;
         partial.balance_error = Some("ledger down".to_string());
         assert!(
             partial
@@ -554,7 +428,7 @@ mod tests {
 
     #[test]
     fn session_settings_refresh_failure_message_reports_principal_failures() {
-        let mut overview = SessionAccountOverview::new(SessionSettingsSnapshot::new(
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
             None,

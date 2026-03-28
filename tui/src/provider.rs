@@ -1,14 +1,14 @@
 use std::{sync::mpsc, thread};
 
 use super::adapter;
-use super::bridge::{self, MemorySummary, SearchResultItem, SessionAccountOverview};
+use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::tui::TuiAuth;
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, PaneFocus,
-    ProviderOutput, ProviderSnapshot,
+    ProviderOutput, ProviderSnapshot, SessionAccountOverview, SessionSettingsSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
     },
@@ -111,7 +111,7 @@ struct InitialMemoriesTaskOutput {
 
 struct CreateCostTaskOutput {
     request_id: u64,
-    overview: bridge::SessionAccountOverview,
+    overview: SessionAccountOverview,
 }
 
 struct CreateSubmitTaskOutput {
@@ -121,7 +121,7 @@ struct CreateSubmitTaskOutput {
 
 struct SessionSettingsTaskOutput {
     request_id: u64,
-    overview: bridge::SessionAccountOverview,
+    overview: SessionAccountOverview,
 }
 
 #[derive(Clone, Copy)]
@@ -238,7 +238,7 @@ impl KinicProvider {
                 },
             ),
         };
-        let session_overview = SessionAccountOverview::new(settings::SessionSettingsSnapshot::new(
+        let session_overview = SessionAccountOverview::new(settings::session_settings_snapshot(
             &config.auth,
             config.use_mainnet,
             None,
@@ -723,23 +723,17 @@ impl KinicProvider {
         self.pending_session_settings_request_id = None;
     }
 
-    fn apply_session_overview(&mut self, overview: bridge::SessionAccountOverview) {
-        // Preserve stale account values only when the response still belongs to the
-        // same session context. This avoids mixing identities or networks.
+    fn apply_session_overview(&mut self, overview: SessionAccountOverview) {
         let same_session_context =
             has_same_session_context(&self.session_overview.session, &overview.session);
-        let create_cost_details = overview.create_cost_details.or_else(|| {
-            same_session_context
-                .then(|| self.session_overview.create_cost_details.clone())
-                .flatten()
-        });
         let mut session = overview.session;
         if same_session_context && overview.principal_error.is_some() {
             session.principal_id = self.session_overview.session.principal_id.clone();
         }
         self.session_overview = SessionAccountOverview {
             session,
-            create_cost_details,
+            balance_base_units: overview.balance_base_units,
+            price_base_units: overview.price_base_units,
             principal_error: overview.principal_error,
             balance_error: overview.balance_error,
             price_error: overview.price_error,
@@ -966,17 +960,16 @@ impl KinicProvider {
             });
         }
 
-        let issues = create_cost_issues(&output.overview);
-        let same_session_context =
-            has_same_session_context(&self.session_overview.session, &output.overview.session);
-        let details = output.overview.create_cost_details.clone().or_else(|| {
-            same_session_context
-                .then(|| self.session_overview.create_cost_details.clone())
-                .flatten()
-        });
-        let next_state = match details {
-            Some(details) => CreateCostState::Ready { details, issues },
-            None => CreateCostState::Error(issues),
+        let issues = output.overview.account_issue_messages();
+        let next_state = if output.overview.principal_error.is_none() {
+            CreateCostState::Loaded(output.overview.clone())
+        } else if issues.is_empty() {
+            CreateCostState::Error(vec![
+                "Could not load account overview. Cause: Account overview is unavailable."
+                    .to_string(),
+            ])
+        } else {
+            CreateCostState::Error(issues)
         };
         self.apply_session_overview(output.overview);
         self.create_cost_state = next_state;
@@ -1430,21 +1423,12 @@ fn decode_payload_text(text: &str) -> String {
 }
 
 fn has_same_session_context(
-    current: &settings::SessionSettingsSnapshot,
-    next: &settings::SessionSettingsSnapshot,
+    current: &SessionSettingsSnapshot,
+    next: &SessionSettingsSnapshot,
 ) -> bool {
     current.auth_mode == next.auth_mode
         && current.identity_name == next.identity_name
         && current.network == next.network
-}
-
-fn create_cost_issues(overview: &bridge::SessionAccountOverview) -> Vec<String> {
-    let issues = overview.account_issue_messages();
-    if issues.is_empty() {
-        vec!["Could not load account overview. Cause: Account overview is unavailable.".to_string()]
-    } else {
-        issues
-    }
 }
 
 fn format_create_submit_error(error: &bridge::CreateMemoryError) -> String {

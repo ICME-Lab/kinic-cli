@@ -1,8 +1,9 @@
 use super::*;
-use tui_kit_runtime::SETTINGS_ENTRY_DEFAULT_MEMORY_ID;
+use candid::Nat;
+use tui_kit_runtime::{SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview};
 
 fn deferred_session() -> SessionSettingsSnapshot {
-    SessionSettingsSnapshot::new(
+    session_settings_snapshot(
         &TuiAuth::DeferredIdentity {
             identity_name: "alice".to_string(),
             cached_identity: Default::default(),
@@ -103,7 +104,7 @@ fn session_snapshot_labels_match_auth_state() {
     for (auth, use_mainnet, principal_id, auth_mode, identity_name, principal_label, network) in
         cases
     {
-        let snapshot = SessionSettingsSnapshot::new(
+        let snapshot = session_settings_snapshot(
             &auth,
             use_mainnet,
             principal_id.map(str::to_string),
@@ -208,18 +209,8 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
 #[test]
 fn settings_snapshot_projects_account_cost_section_from_overview() {
     let mut overview = deferred_overview();
-    overview.create_cost_details = Some(tui_kit_runtime::CreateCostDetails {
-        principal: "principal-1".to_string(),
-        balance_kinic: "12.34000000".to_string(),
-        balance_base_units: "1234000000".to_string(),
-        price_kinic: "1.50000000".to_string(),
-        price_base_units: "150000000".to_string(),
-        required_total_kinic: "1.50200000".to_string(),
-        required_total_base_units: "150200000".to_string(),
-        difference_kinic: "+10.83800000".to_string(),
-        difference_base_units: "+1083800000".to_string(),
-        sufficient_balance: true,
-    });
+    overview.balance_base_units = Some(1_234_000_000u128);
+    overview.price_base_units = Some(Nat::from(150_000_000u128));
 
     let snapshot = build_settings_snapshot(
         &overview,
@@ -253,19 +244,7 @@ fn settings_snapshot_projects_account_cost_section_from_overview() {
 #[test]
 fn settings_snapshot_marks_partial_account_cost_with_error_notes() {
     let mut overview = deferred_overview();
-    overview.create_cost_details = Some(tui_kit_runtime::CreateCostDetails {
-        principal: "principal-1".to_string(),
-        balance_kinic: "12.34000000".to_string(),
-        balance_base_units: "1234000000".to_string(),
-        price_kinic: "1.50000000".to_string(),
-        price_base_units: "150000000".to_string(),
-        required_total_kinic: "1.50200000".to_string(),
-        required_total_base_units: "150200000".to_string(),
-        difference_kinic: "+10.83800000".to_string(),
-        difference_base_units: "+1083800000".to_string(),
-        sufficient_balance: true,
-    });
-    overview.balance_error = Some("ledger unavailable".to_string());
+    overview.balance_base_units = Some(1_234_000_000u128);
     overview.price_error = Some("price unavailable".to_string());
 
     let snapshot = build_settings_snapshot(
@@ -289,8 +268,6 @@ fn settings_snapshot_marks_partial_account_cost_with_error_notes() {
     );
     assert_eq!(
         section_entry_note(&snapshot, "Account", "kinic_balance"),
-        Some(
-            "Could not fetch KINIC balance. Cause: ledger unavailable | Could not fetch create price. Cause: price unavailable"
-        )
+        Some("Could not fetch create price. Cause: price unavailable")
     );
 }

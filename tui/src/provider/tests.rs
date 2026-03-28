@@ -1,8 +1,9 @@
 use super::*;
-use tui_kit_runtime::CreateCostDetails;
+use candid::Nat;
+use tui_kit_runtime::{CreateCostState, SessionAccountOverview};
 
-fn session_snapshot(principal_id: &str) -> settings::SessionSettingsSnapshot {
-    settings::SessionSettingsSnapshot::new(
+fn session_snapshot(principal_id: &str) -> tui_kit_runtime::SessionSettingsSnapshot {
+    settings::session_settings_snapshot(
         &TuiAuth::resolved_for_tests(),
         false,
         Some(principal_id.to_string()),
@@ -52,26 +53,27 @@ fn pending_search_context(request_id: u64, memory_id: &str, query: &str) -> Sear
 
 fn refreshed_session_overview() -> SessionAccountOverview {
     let mut overview = SessionAccountOverview::new(session_snapshot("aaaaa-aa"));
-    overview.create_cost_details = Some(CreateCostDetails {
-        principal: "aaaaa-aa".to_string(),
-        balance_kinic: "12.34000000".to_string(),
-        balance_base_units: "1234000000".to_string(),
-        price_kinic: "1.50000000".to_string(),
-        price_base_units: "150000000".to_string(),
-        required_total_kinic: "1.50200000".to_string(),
-        required_total_base_units: "150200000".to_string(),
-        difference_kinic: "+10.83800000".to_string(),
-        difference_base_units: "+1083800000".to_string(),
-        sufficient_balance: true,
-    });
+    overview.balance_base_units = Some(1_234_000_000u128);
+    overview.price_base_units = Some(Nat::from(150_000_000u128));
     overview
 }
 
-fn partial_session_overview() -> SessionAccountOverview {
+fn balance_only_session_overview() -> SessionAccountOverview {
     let mut overview = SessionAccountOverview::new(session_snapshot("aaaaa-aa"));
-    overview.balance_error = Some("ledger unavailable".to_string());
+    overview.balance_base_units = Some(1_234_000_000u128);
     overview.price_error = Some("price unavailable".to_string());
     overview
+}
+
+fn price_only_session_overview() -> SessionAccountOverview {
+    let mut overview = SessionAccountOverview::new(session_snapshot("aaaaa-aa"));
+    overview.balance_error = Some("ledger unavailable".to_string());
+    overview.price_base_units = Some(Nat::from(150_000_000u128));
+    overview
+}
+
+fn unavailable_session_overview() -> SessionAccountOverview {
+    SessionAccountOverview::new(session_snapshot("aaaaa-aa"))
 }
 
 fn principal_error_session_overview() -> SessionAccountOverview {
@@ -82,7 +84,7 @@ fn principal_error_session_overview() -> SessionAccountOverview {
 }
 
 fn mainnet_principal_error_session_overview() -> SessionAccountOverview {
-    let mut overview = SessionAccountOverview::new(settings::SessionSettingsSnapshot::new(
+    let mut overview = SessionAccountOverview::new(settings::session_settings_snapshot(
         &TuiAuth::resolved_for_tests(),
         true,
         None,
@@ -262,21 +264,14 @@ fn poll_background_applies_refreshed_session_settings() {
 fn poll_background_projects_partial_session_overview_into_settings() {
     let mut provider = KinicProvider::new(live_config());
     provider.session_overview = refreshed_session_overview();
-    provider.create_cost_state = CreateCostState::Ready {
-        details: provider
-            .session_overview
-            .create_cost_details
-            .clone()
-            .expect("ready create cost details"),
-        issues: Vec::new(),
-    };
+    provider.create_cost_state = CreateCostState::Loaded(provider.session_overview.clone());
     let (tx, rx) = mpsc::channel();
     provider.pending_session_settings = Some(rx);
     provider.pending_session_settings_request_id = Some(6);
     provider.session_settings_in_flight = true;
     tx.send(SessionSettingsTaskOutput {
         request_id: 6,
-        overview: partial_session_overview(),
+        overview: balance_only_session_overview(),
     })
     .unwrap();
 
@@ -286,16 +281,12 @@ fn poll_background_projects_partial_session_overview_into_settings() {
 
     assert!(!provider.session_settings_in_flight);
     assert_eq!(
-        provider.session_overview.balance_error.as_deref(),
-        Some("ledger unavailable")
+        provider.session_overview.price_error.as_deref(),
+        Some("price unavailable")
     );
     assert_eq!(
-        provider
-            .session_overview
-            .create_cost_details
-            .as_ref()
-            .map(|details| details.balance_kinic.as_str()),
-        Some("12.34000000")
+        provider.session_overview.balance_base_units,
+        Some(1_234_000_000u128)
     );
     let snapshot = output.snapshot.expect("settings snapshot");
     assert_eq!(quick_entry_value(&snapshot, "principal_id"), "aaaaa-aa");
@@ -313,9 +304,7 @@ fn poll_background_projects_partial_session_overview_into_settings() {
     );
     assert_eq!(
         section_entry_note(&snapshot, "Account", "kinic_balance"),
-        Some(
-            "Could not fetch KINIC balance. Cause: ledger unavailable | Could not fetch create price. Cause: price unavailable"
-        )
+        Some("Could not fetch create price. Cause: price unavailable")
     );
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
@@ -372,7 +361,6 @@ fn poll_background_drops_stale_account_values_when_session_context_changes() {
         provider.session_overview.session.principal_id,
         "unavailable"
     );
-    assert_eq!(provider.session_overview.create_cost_details, None);
 }
 
 #[test]
@@ -497,7 +485,7 @@ fn poll_create_cost_background_updates_overview_and_error_state_from_partial_loa
     provider.create_cost_in_flight = true;
     tx.send(CreateCostTaskOutput {
         request_id: 8,
-        overview: partial_session_overview(),
+        overview: balance_only_session_overview(),
     })
     .unwrap();
 
@@ -507,15 +495,7 @@ fn poll_create_cost_background_updates_overview_and_error_state_from_partial_loa
 
     assert_eq!(
         provider.create_cost_state,
-        CreateCostState::Ready {
-            details: refreshed_session_overview()
-                .create_cost_details
-                .expect("stale details"),
-            issues: vec![
-                "Could not fetch KINIC balance. Cause: ledger unavailable".to_string(),
-                "Could not fetch create price. Cause: price unavailable".to_string(),
-            ],
-        }
+        CreateCostState::Loaded(balance_only_session_overview())
     );
     assert_eq!(
         provider.session_overview.price_error.as_deref(),
@@ -546,6 +526,76 @@ fn poll_create_cost_background_surfaces_error_list_when_no_details_exist() {
             "Could not derive principal. Cause: identity lookup failed".to_string(),
             "Could not fetch KINIC balance. Cause: ledger unavailable".to_string(),
         ])
+    );
+}
+
+#[test]
+fn poll_create_cost_background_keeps_loaded_state_clean_when_values_exist_without_issues() {
+    let mut provider = KinicProvider::new(live_config());
+    let ready_overview = refreshed_session_overview();
+    let (tx, rx) = mpsc::channel();
+    provider.pending_create_cost = Some(rx);
+    provider.pending_create_cost_request_id = Some(12);
+    provider.create_cost_in_flight = true;
+    tx.send(CreateCostTaskOutput {
+        request_id: 12,
+        overview: ready_overview.clone(),
+    })
+    .unwrap();
+
+    let _output = provider
+        .poll_create_cost_background(&CoreState::default())
+        .expect("create cost output");
+
+    assert_eq!(
+        provider.create_cost_state,
+        CreateCostState::Loaded(ready_overview)
+    );
+}
+
+#[test]
+fn poll_create_cost_background_surfaces_partial_state_from_price_only_loader() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel();
+    provider.pending_create_cost = Some(rx);
+    provider.pending_create_cost_request_id = Some(14);
+    provider.create_cost_in_flight = true;
+    tx.send(CreateCostTaskOutput {
+        request_id: 14,
+        overview: price_only_session_overview(),
+    })
+    .unwrap();
+
+    let _output = provider
+        .poll_create_cost_background(&CoreState::default())
+        .expect("create cost output");
+
+    assert_eq!(
+        provider.create_cost_state,
+        CreateCostState::Loaded(price_only_session_overview())
+    );
+}
+
+#[test]
+fn poll_create_cost_background_keeps_loaded_state_when_overview_is_empty_but_principal_exists() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel();
+    provider.pending_create_cost = Some(rx);
+    provider.pending_create_cost_request_id = Some(13);
+    provider.create_cost_in_flight = true;
+    tx.send(CreateCostTaskOutput {
+        request_id: 13,
+        overview: unavailable_session_overview(),
+    })
+    .unwrap();
+
+    let _output = provider
+        .poll_create_cost_background(&CoreState::default())
+        .expect("create cost output");
+
+    assert_eq!(
+        provider.create_cost_state,
+        CreateCostState::Loaded(unavailable_session_overview())
     );
 }
 

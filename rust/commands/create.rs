@@ -1,20 +1,13 @@
 use anyhow::{Result, bail};
 use candid::Nat;
 use tracing::info;
+use tui_kit_runtime::{BalanceDelta, balance_delta, required_balance};
 
 use crate::{
     agent::AgentFactory, cli::CreateArgs, clients::launcher::LauncherClient, ledger::fetch_balance,
 };
 
 use super::CommandContext;
-
-pub(crate) const TRANSFER_FEE_E8S: u128 = 100_000;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BalanceDelta {
-    Surplus(Nat),
-    Shortfall(Nat),
-}
 
 pub async fn handle(args: CreateArgs, ctx: &CommandContext) -> Result<()> {
     let id = create_memory(&ctx.agent_factory, &args.name, &args.description).await?;
@@ -55,22 +48,6 @@ fn ensure_sufficient_balance(price: &Nat, balance: u128) -> Result<()> {
     }
     Ok(())
 }
-
-pub(crate) fn required_balance(price: &Nat) -> Nat {
-    let fee = Nat::from(TRANSFER_FEE_E8S);
-    price.clone() + fee.clone() + fee
-}
-
-pub(crate) fn balance_delta(price: &Nat, balance: u128) -> BalanceDelta {
-    let required = required_balance(price);
-    let balance_nat = Nat::from(balance);
-    if balance_nat >= required {
-        BalanceDelta::Surplus(balance_nat - required)
-    } else {
-        BalanceDelta::Shortfall(required - balance_nat)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

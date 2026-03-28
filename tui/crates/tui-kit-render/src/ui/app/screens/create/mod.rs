@@ -7,7 +7,9 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{CreateCostDetails, CreateCostState, CreateModalFocus, CreateSubmitState};
+use tui_kit_runtime::{
+    CreateCostState, CreateModalFocus, CreateSubmitState, format_e8s_to_kinic_string_u128,
+};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
@@ -280,36 +282,58 @@ fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<
                 )));
             }
         }
-        CreateCostState::Ready { details, issues } => {
+        CreateCostState::Loaded(overview) => {
             lines.push(create_cost_detail_line(
                 ui,
                 layout,
                 detail_label_width,
                 create_cfg.principal_label.as_str(),
-                details.principal.clone(),
+                overview.session.principal_id.clone(),
             ));
             lines.push(create_cost_detail_line(
                 ui,
                 layout,
                 detail_label_width,
                 create_cfg.balance_label.as_str(),
-                format_kinic_value(details.balance_kinic.as_str()),
+                overview
+                    .balance_base_units
+                    .map(format_e8s_to_kinic_string_u128)
+                    .as_deref()
+                    .map(format_kinic_value)
+                    .unwrap_or_else(|| create_cfg.unavailable_message.clone()),
             ));
-            lines.push(create_cost_detail_line(
-                ui,
-                layout,
-                detail_label_width,
-                create_cfg.price_label.as_str(),
-                format_kinic_value(details.required_total_kinic.as_str()),
-            ));
-            lines.push(create_cost_detail_line(
-                ui,
-                layout,
-                detail_label_width,
-                create_cfg.status_label.as_str(),
-                create_status_text(create_cfg, details),
-            ));
-            for issue in issues {
+            if let Some(details) = overview.derived_create_cost() {
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.price_label.as_str(),
+                    format_kinic_value(details.required_total_kinic.as_str()),
+                ));
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.status_label.as_str(),
+                    create_status_text(create_cfg, details.sufficient_balance),
+                ));
+            } else {
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.price_label.as_str(),
+                    create_cfg.unavailable_message.clone(),
+                ));
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.status_label.as_str(),
+                    create_cfg.unavailable_message.clone(),
+                ));
+            }
+            for issue in overview.account_issue_messages() {
                 lines.push(Line::from(Span::styled(
                     format!("{}: {issue}", create_cfg.error_prefix),
                     ui.theme.style_error(),
@@ -320,6 +344,7 @@ fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<
 
     lines
 }
+
 fn create_cost_detail_line(
     ui: &TuiKitUi<'_>,
     layout: CreateScreenLayout,
@@ -378,8 +403,9 @@ fn pad_terminal_width(value: &str, width: usize) -> String {
     }
     format!("{value}{}", " ".repeat(width - current_width))
 }
-fn create_status_text(create_cfg: &CreateOverlayText, details: &CreateCostDetails) -> String {
-    if details.sufficient_balance {
+
+fn create_status_text(create_cfg: &CreateOverlayText, sufficient_balance: bool) -> String {
+    if sufficient_balance {
         create_cfg.status_ready_label.clone()
     } else {
         create_cfg.status_insufficient_label.clone()
