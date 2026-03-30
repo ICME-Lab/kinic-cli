@@ -2,12 +2,14 @@
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
-use tui_kit_runtime::{CreateCostDetails, CreateCostState, CreateModalFocus, CreateSubmitState};
+use tui_kit_runtime::{
+    CreateCostState, CreateModalFocus, CreateSubmitState, format_e8s_to_kinic_string_u128,
+};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
@@ -15,39 +17,6 @@ use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_create_screen(&self, area: Rect, buf: &mut Buffer) {
         let screen = CreateScreenState::from_root_area(self, area);
-        let intro = vec![
-            Line::from(vec![
-                Span::styled(" Create ", self.theme.style_accent_bold()),
-                Span::styled(
-                    self.ui_config.create.intro_description.as_str(),
-                    self.theme.style_normal(),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(" Enter ", self.theme.style_accent()),
-                Span::styled(
-                    self.ui_config.create.intro_enter_hint.as_str(),
-                    self.theme.style_muted(),
-                ),
-                Span::styled("  │  ", self.theme.style_dim()),
-                Span::styled(" Tab / Shift+Tab ", self.theme.style_accent()),
-                Span::styled(
-                    self.ui_config.create.intro_cycle_hint.as_str(),
-                    self.theme.style_muted(),
-                ),
-                Span::styled("  │  ", self.theme.style_dim()),
-                Span::styled(" Esc ", self.theme.style_accent()),
-                Span::styled(
-                    self.ui_config.create.intro_escape_hint.as_str(),
-                    self.theme.style_muted(),
-                ),
-            ]),
-        ];
-        Paragraph::new(intro)
-            .wrap(Wrap { trim: false })
-            .render(screen.layout.intro_area, buf);
-
         Paragraph::new(screen.form_lines.lines)
             .block(
                 Block::default()
@@ -90,24 +59,17 @@ impl<'a> CreateScreenState<'a> {
 }
 #[derive(Clone, Copy)]
 struct CreateScreenLayout {
-    intro_area: Rect,
     form_area: Rect,
     form_inner_area: Option<Rect>,
 }
 impl CreateScreenLayout {
-    const INTRO_HEIGHT: u16 = 6;
     const INPUT_INDENT_WIDTH: u16 = 2;
 
     fn from_root_area(area: Rect, has_tabs: bool) -> Self {
         let body = shared::layout::body_rect_for_area_with_tabs(area, has_tabs);
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(Self::INTRO_HEIGHT), Constraint::Min(12)])
-            .split(body);
-        let form_inner_area = inner_bordered_area(chunks[1]);
+        let form_inner_area = inner_bordered_area(body);
         Self {
-            intro_area: chunks[0],
-            form_area: chunks[1],
+            form_area: body,
             form_inner_area,
         }
     }
@@ -272,46 +234,85 @@ fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<
                 ui.theme.style_muted(),
             )));
         }
-        CreateCostState::Error(error) => {
-            lines.push(Line::from(Span::styled(
-                format!("{}: {error}", create_cfg.error_prefix),
-                ui.theme.style_error(),
-            )));
+        CreateCostState::Error(errors) => {
+            for error in errors {
+                lines.push(Line::from(Span::styled(
+                    format!("{}: {error}", create_cfg.error_prefix),
+                    ui.theme.style_error(),
+                )));
+            }
         }
-        CreateCostState::Ready(details) => {
+        CreateCostState::Loaded(loaded) => {
+            let overview = &loaded.overview;
             lines.push(create_cost_detail_line(
                 ui,
                 layout,
                 detail_label_width,
                 create_cfg.principal_label.as_str(),
-                details.principal.clone(),
+                overview.session.principal_id.clone(),
             ));
-            lines.push(create_cost_detail_line(
-                ui,
-                layout,
-                detail_label_width,
-                create_cfg.balance_label.as_str(),
-                format_kinic_value(details.balance_kinic.as_str()),
-            ));
-            lines.push(create_cost_detail_line(
-                ui,
-                layout,
-                detail_label_width,
-                create_cfg.price_label.as_str(),
-                format_kinic_value(details.required_total_kinic.as_str()),
-            ));
-            lines.push(create_cost_detail_line(
-                ui,
-                layout,
-                detail_label_width,
-                create_cfg.status_label.as_str(),
-                create_status_text(create_cfg, details),
-            ));
+            if let Some(details) = &loaded.details {
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.balance_label.as_str(),
+                    format_kinic_value(details.balance_kinic.as_str()),
+                ));
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.price_label.as_str(),
+                    format_kinic_value(details.required_total_kinic.as_str()),
+                ));
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.status_label.as_str(),
+                    create_status_text(create_cfg, details.sufficient_balance),
+                ));
+            } else {
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.balance_label.as_str(),
+                    overview
+                        .balance_base_units
+                        .map(format_e8s_to_kinic_string_u128)
+                        .as_deref()
+                        .map(format_kinic_value)
+                        .unwrap_or_else(|| create_cfg.unavailable_message.clone()),
+                ));
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.price_label.as_str(),
+                    create_cfg.unavailable_message.clone(),
+                ));
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.status_label.as_str(),
+                    create_cfg.unavailable_message.clone(),
+                ));
+            }
+            for issue in overview.account_issue_messages() {
+                lines.push(Line::from(Span::styled(
+                    format!("{}: {issue}", create_cfg.error_prefix),
+                    ui.theme.style_error(),
+                )));
+            }
         }
     }
 
     lines
 }
+
 fn create_cost_detail_line(
     ui: &TuiKitUi<'_>,
     layout: CreateScreenLayout,
@@ -370,8 +371,9 @@ fn pad_terminal_width(value: &str, width: usize) -> String {
     }
     format!("{value}{}", " ".repeat(width - current_width))
 }
-fn create_status_text(create_cfg: &CreateOverlayText, details: &CreateCostDetails) -> String {
-    if details.sufficient_balance {
+
+fn create_status_text(create_cfg: &CreateOverlayText, sufficient_balance: bool) -> String {
+    if sufficient_balance {
         create_cfg.status_ready_label.clone()
     } else {
         create_cfg.status_insufficient_label.clone()

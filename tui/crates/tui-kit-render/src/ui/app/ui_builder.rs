@@ -5,7 +5,7 @@ use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
     CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode,
-    SettingsSnapshot,
+    MemorySelectorItem, SettingsSnapshot,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -217,20 +217,23 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn default_memory_selector_items(mut self, value: &'a [String]) -> Self {
+    pub fn default_memory_selector_items(mut self, value: &'a [MemorySelectorItem]) -> Self {
         self.default_memory_selector_items = value;
-        self
-    }
-
-    #[must_use]
-    pub fn default_memory_selector_labels(mut self, value: &'a [String]) -> Self {
-        self.default_memory_selector_labels = value;
         self
     }
 
     #[must_use]
     pub fn default_memory_selector_selected_id(mut self, value: Option<&'a str>) -> Self {
         self.default_memory_selector_selected_id = value;
+        self
+    }
+
+    #[must_use]
+    pub fn default_memory_selector_context(
+        mut self,
+        value: tui_kit_runtime::MemorySelectorContext,
+    ) -> Self {
+        self.default_memory_selector_context = value;
         self
     }
 
@@ -243,6 +246,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn insert_memory_id(mut self, value: &'a str) -> Self {
         self.insert_memory_id = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_memory_placeholder(mut self, value: Option<&'a str>) -> Self {
+        self.insert_memory_placeholder = value;
         self
     }
 

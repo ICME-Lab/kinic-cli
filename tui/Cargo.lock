@@ -3990,6 +3990,7 @@ dependencies = [
 name = "tui-kit-runtime"
 version = "0.1.0"
 dependencies = [
+ "candid",
  "tui-kit-model",
 ]
 
