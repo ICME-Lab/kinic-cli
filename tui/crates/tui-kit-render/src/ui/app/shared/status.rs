@@ -9,7 +9,10 @@ use ratatui::{
 };
 use tui_kit_runtime::kinic_tabs::{KINIC_INSERT_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind};
 
-use crate::ui::app::{Focus, TuiKitUi};
+use crate::ui::app::{
+    Focus, TuiKitUi,
+    types::insert_form_copy,
+};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_status(&self, area: Rect, buf: &mut Buffer) {
@@ -219,7 +222,7 @@ fn show_form_mode_shortcut(tab_id: &str) -> bool {
 
 fn form_enter_hint(tab_id: &str) -> &'static str {
     if tab_id == KINIC_INSERT_TAB_ID {
-        " cycle/picker/submit "
+        insert_form_copy().status_enter_hint
     } else {
         " submit "
     }

@@ -420,6 +420,15 @@ mod tests {
     }
 
     #[test]
+    fn help_overlay_insert_line_mentions_target_picker() {
+        let cfg = UiConfig::default().help;
+
+        assert!(cfg.lines.iter().any(|line| {
+            line == "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits"
+        }));
+    }
+
+    #[test]
     fn fit_overlay_rect_uses_available_height_when_terminal_is_short() {
         let area = Rect {
             x: 0,
