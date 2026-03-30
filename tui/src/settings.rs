@@ -172,7 +172,6 @@ pub fn session_settings_snapshot(
 
 fn auth_mode_label(auth: &TuiAuth) -> String {
     match auth {
-        TuiAuth::Mock => "mock".to_string(),
         TuiAuth::DeferredIdentity { .. } => "keyring identity".to_string(),
         TuiAuth::ResolvedIdentity(_) => "live identity".to_string(),
     }
@@ -180,7 +179,6 @@ fn auth_mode_label(auth: &TuiAuth) -> String {
 
 fn identity_name_label(auth: &TuiAuth) -> String {
     match auth {
-        TuiAuth::Mock => "mock".to_string(),
         TuiAuth::DeferredIdentity { identity_name, .. } => identity_name.clone(),
         TuiAuth::ResolvedIdentity(_) => "provided".to_string(),
     }

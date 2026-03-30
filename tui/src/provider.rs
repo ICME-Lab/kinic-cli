@@ -7,7 +7,9 @@ use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::{
     create_domain::derive_create_cost,
-    insert_service::{InsertRequest, validate_insert_request_fields, validate_insert_request_for_submit},
+    insert_service::{
+        InsertRequest, validate_insert_request_fields, validate_insert_request_for_submit,
+    },
     tui::TuiAuth,
 };
 use serde::Deserialize;
@@ -185,7 +187,6 @@ impl<'a> DefaultMemorySelection<'a> {
 }
 
 struct DefaultMemoryController<'a> {
-    is_live: bool,
     user_preferences: &'a mut UserPreferences,
     preferences_health: &'a mut PreferencesHealth,
 }
@@ -212,11 +213,6 @@ impl<'a> DefaultMemoryController<'a> {
     }
 
     fn set_default_memory_preference(&mut self, memory_id: String) -> CoreEffect {
-        if !self.is_live {
-            return CoreEffect::Notify(
-                "Default memory is only available in live mode.".to_string(),
-            );
-        }
         if self.user_preferences.default_memory_id.as_deref() == Some(memory_id.as_str()) {
             return CoreEffect::Notify(format!("Default memory already set to {memory_id}"));
         }
@@ -316,10 +312,6 @@ impl KinicProvider {
     }
 
     fn initialize_live_memories(&mut self) {
-        if !self.is_live() {
-            return;
-        }
-
         let _ = self.start_live_memories_load(None, false);
     }
 
@@ -328,12 +320,6 @@ impl KinicProvider {
         notify_message: Option<&str>,
         preserve_query: bool,
     ) -> Option<CoreEffect> {
-        if !self.is_live() {
-            return Some(CoreEffect::Notify(
-                "Live memories unavailable in mock mode.".to_string(),
-            ));
-        }
-
         if self.initial_memories_in_flight {
             return Some(CoreEffect::Notify(
                 "Memories are already loading.".to_string(),
@@ -390,24 +376,14 @@ impl KinicProvider {
         }
     }
 
-    fn is_live(&self) -> bool {
-        self.config.auth.is_live()
-    }
-
     fn current_records(&self) -> Vec<&KinicRecord> {
-        if self.is_live()
-            && self.memories_mode == MemoriesMode::Browser
-            && self.memory_records.is_empty()
-        {
+        if self.memories_mode == MemoriesMode::Browser && self.memory_records.is_empty() {
             return self.all.iter().collect();
         }
-        let base = if self.is_live() {
-            match self.memories_mode {
-                MemoriesMode::Browser => &self.memory_records,
-                MemoriesMode::Results => &self.result_records,
-            }
-        } else {
-            &self.all
+
+        let base = match self.memories_mode {
+            MemoriesMode::Browser => &self.memory_records,
+            MemoriesMode::Results => &self.result_records,
         };
 
         if self.memories_mode == MemoriesMode::Results || self.query.is_empty() {
@@ -426,7 +402,7 @@ impl KinicProvider {
     }
 
     fn visible_memory_records(&self) -> Vec<&KinicRecord> {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+        if self.memories_mode != MemoriesMode::Browser {
             return Vec::new();
         }
         if self.memory_records.is_empty() {
@@ -436,7 +412,7 @@ impl KinicProvider {
     }
 
     fn sync_active_memory_to_visible_records(&mut self) {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+        if self.memories_mode != MemoriesMode::Browser {
             return;
         }
 
@@ -478,7 +454,7 @@ impl KinicProvider {
     }
 
     fn live_search_target_id(&self) -> Option<String> {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+        if self.memories_mode != MemoriesMode::Browser {
             return self.active_memory_id.clone();
         }
 
@@ -519,10 +495,7 @@ impl KinicProvider {
     }
 
     fn move_active_memory(&mut self, delta: isize) {
-        if !self.is_live()
-            || self.memories_mode != MemoriesMode::Browser
-            || self.visible_memory_count() == 0
-        {
+        if self.memories_mode != MemoriesMode::Browser || self.visible_memory_count() == 0 {
             return;
         }
 
@@ -535,7 +508,7 @@ impl KinicProvider {
     }
 
     fn set_active_memory(&mut self, index: usize) {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+        if self.memories_mode != MemoriesMode::Browser {
             return;
         }
         let visible_records = self.visible_memory_records();
@@ -572,7 +545,7 @@ impl KinicProvider {
             .collect::<Vec<_>>();
         let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
-        } else if self.is_live() && self.memories_mode == MemoriesMode::Browser {
+        } else if self.memories_mode == MemoriesMode::Browser {
             if self.memory_records.is_empty() {
                 filtered.first().copied().map(adapter::to_content)
             } else {
@@ -645,16 +618,12 @@ impl KinicProvider {
 
     fn default_memory_controller(&mut self) -> DefaultMemoryController<'_> {
         DefaultMemoryController {
-            is_live: self.is_live(),
             user_preferences: &mut self.user_preferences,
             preferences_health: &mut self.preferences_health,
         }
     }
 
     fn start_session_settings_refresh(&mut self) -> Option<CoreEffect> {
-        if !self.is_live() {
-            return None;
-        }
         if self.session_settings_in_flight {
             return None;
         }
@@ -685,12 +654,6 @@ impl KinicProvider {
     }
 
     fn start_create_cost_refresh(&mut self) -> Option<CoreEffect> {
-        if !self.is_live() {
-            self.create_cost_state = CreateCostState::Unavailable;
-            return Some(CoreEffect::Notify(
-                "Live account info unavailable in mock mode.".to_string(),
-            ));
-        }
         if self.create_cost_in_flight {
             return Some(CoreEffect::Notify(
                 "Account info refresh already running.".to_string(),
@@ -790,31 +753,20 @@ impl KinicProvider {
         if self.tab_id == KINIC_INSERT_TAB_ID {
             return "kinic(insert): choose mode, target memory, and payload, then press Enter on submit.".to_string();
         }
-        let base = if !self.is_live() {
-            format!(
-                "kinic(mock): {visible_count} filtered / {} total",
-                self.all.len()
-            )
-        } else {
-            match self.memories_mode {
-                MemoriesMode::Browser => match self.active_memory_id.as_deref() {
-                    Some(memory_id) => format!(
-                        "kinic(live): target {memory_id} | Enter in search runs remote search | Shift+D saves default"
-                    ),
-                    None => "kinic(live): no memory selected".to_string(),
-                },
-                MemoriesMode::Results => match self.active_memory_id.as_deref() {
-                    Some(memory_id) => format!(
-                        "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
-                    ),
-                    None => format!("kinic(live): {visible_count} search results"),
-                },
-            }
+        let base = match self.memories_mode {
+            MemoriesMode::Browser => match self.active_memory_id.as_deref() {
+                Some(memory_id) => format!(
+                    "kinic(live): target {memory_id} | Enter in search runs remote search | Shift+D saves default"
+                ),
+                None => "kinic(live): no memory selected".to_string(),
+            },
+            MemoriesMode::Results => match self.active_memory_id.as_deref() {
+                Some(memory_id) => format!(
+                    "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
+                ),
+                None => format!("kinic(live): {visible_count} search results"),
+            },
         };
-
-        if !self.is_live() {
-            return base;
-        }
 
         if self.initial_memories_in_flight {
             return "kinic(live): loading memories...".to_string();
@@ -887,9 +839,6 @@ impl KinicProvider {
 
     fn run_live_search(&mut self) -> Option<CoreEffect> {
         let auth = self.config.auth.clone();
-        if !auth.is_live() {
-            return None;
-        }
         if self.search_in_flight {
             return Some(CoreEffect::Notify(
                 "Search already running. Wait for the current request to finish.".to_string(),
@@ -1285,11 +1234,9 @@ impl KinicProvider {
     }
 
     fn reset_memories_browser(&mut self) {
-        if self.is_live() {
-            self.memories_mode = MemoriesMode::Browser;
-            self.result_records.clear();
-            self.invalidate_pending_search();
-        }
+        self.memories_mode = MemoriesMode::Browser;
+        self.result_records.clear();
+        self.invalidate_pending_search();
     }
 
     fn set_tab(&mut self, tab_id: &str) -> Vec<CoreEffect> {
@@ -1358,9 +1305,7 @@ impl DataProvider for KinicProvider {
                 self.sync_active_memory_to_visible_records();
             }
             CoreAction::SearchSubmit => {
-                if self.is_live()
-                    && let Some(effect) = self.run_live_search()
-                {
+                if let Some(effect) = self.run_live_search() {
                     effects.push(effect);
                 }
             }
@@ -1390,7 +1335,7 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::ChatSubmit => {
                 effects.push(CoreEffect::Notify(
-                    "Chat is still mock-only; search is live first.".to_string(),
+                    "Chat is not implemented yet; search is available first.".to_string(),
                 ));
             }
             CoreAction::CreateSubmit => {
@@ -1404,29 +1349,8 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::Notify(
                         "Create request already running.".to_string(),
                     ));
-                } else if self.is_live() {
-                    effects.push(self.start_create_submit(name, description));
                 } else {
-                    let new_id = format!("mock-memory-{}", self.all.len() + 1);
-                    let record = KinicRecord::new(
-                        new_id.clone(),
-                        name.clone(),
-                        "memories",
-                        "Status: mock".to_string(),
-                        format!(
-                            "## Memory\n\n- Id: `{new_id}`\n- Status: `mock`\n\n### Content\n{}\n",
-                            state.create_description.trim()
-                        ),
-                    );
-                    self.all.insert(0, record);
-                    self.active_memory_id = Some(new_id.clone());
-                    effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
-                    effects.push(CoreEffect::SelectFirstListItem);
-                    effects.push(CoreEffect::ResetCreateFormAndSetTab {
-                        tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
-                    });
-                    effects.push(CoreEffect::FocusPane(PaneFocus::Items));
-                    effects.push(CoreEffect::Notify(format!("Created mock memory {name}")));
+                    effects.push(self.start_create_submit(name, description));
                 }
             }
             CoreAction::InsertSubmit => {
@@ -1439,12 +1363,8 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::Notify(
                         "Insert request already running.".to_string(),
                     ));
-                } else if self.is_live() {
-                    effects.push(self.start_insert_submit(request));
                 } else {
-                    effects.push(CoreEffect::Notify(
-                        "Insert submit is only available in live mode.".to_string(),
-                    ));
+                    effects.push(self.start_insert_submit(request));
                 }
             }
             CoreAction::CreateRefresh => {

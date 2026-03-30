@@ -21,13 +21,6 @@ fn live_config() -> TuiConfig {
     }
 }
 
-fn mock_config() -> TuiConfig {
-    TuiConfig {
-        auth: TuiAuth::Mock,
-        use_mainnet: false,
-    }
-}
-
 fn live_memory(id: &str, title: &str) -> KinicRecord {
     KinicRecord::new(
         id,
@@ -230,8 +223,8 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
 }
 
 #[test]
-fn mock_insert_rejects_invalid_embedding_json_before_background_submit() {
-    let mut provider = KinicProvider::new(mock_config());
+fn insert_submit_rejects_invalid_embedding_json_before_background_submit() {
+    let mut provider = KinicProvider::new(live_config());
     let state = CoreState {
         insert_mode: InsertMode::Raw,
         insert_memory_id: "aaaaa-aa".to_string(),
@@ -243,7 +236,7 @@ fn mock_insert_rejects_invalid_embedding_json_before_background_submit() {
 
     let output = provider
         .handle_action(&CoreAction::InsertSubmit, &state)
-        .expect("insert submit should succeed");
+        .expect("insert submit should return output");
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
@@ -254,7 +247,7 @@ fn mock_insert_rejects_invalid_embedding_json_before_background_submit() {
 
 #[test]
 fn build_insert_request_prefers_explicit_memory_over_saved_default() {
-    let mut provider = KinicProvider::new(mock_config());
+    let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
     let state = CoreState {
         insert_mode: InsertMode::Raw,
@@ -280,7 +273,10 @@ fn build_snapshot_exposes_saved_default_memory_id() {
 
     let snapshot = provider.build_snapshot(&CoreState::default());
 
-    assert_eq!(snapshot.saved_default_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(
+        snapshot.saved_default_memory_id.as_deref(),
+        Some("aaaaa-aa")
+    );
 }
 
 #[test]
@@ -325,8 +321,8 @@ fn format_insert_submit_error_reports_error_stage() {
 }
 
 #[test]
-fn mock_insert_rejects_blank_raw_text() {
-    let mut provider = KinicProvider::new(mock_config());
+fn insert_submit_rejects_blank_raw_text() {
+    let mut provider = KinicProvider::new(live_config());
     let state = CoreState {
         insert_mode: InsertMode::Raw,
         insert_memory_id: "aaaaa-aa".to_string(),
@@ -348,8 +344,8 @@ fn mock_insert_rejects_blank_raw_text() {
 }
 
 #[test]
-fn mock_insert_rejects_missing_pdf_path() {
-    let mut provider = KinicProvider::new(mock_config());
+fn insert_submit_rejects_missing_pdf_path() {
+    let mut provider = KinicProvider::new(live_config());
     let state = CoreState {
         insert_mode: InsertMode::Pdf,
         insert_memory_id: "aaaaa-aa".to_string(),
@@ -370,8 +366,8 @@ fn mock_insert_rejects_missing_pdf_path() {
 }
 
 #[test]
-fn mock_insert_rejects_pdf_submit_after_validation() {
-    let mut provider = KinicProvider::new(mock_config());
+fn insert_submit_rejects_pdf_submit_after_validation() {
+    let mut provider = KinicProvider::new(live_config());
     let state = CoreState {
         insert_mode: InsertMode::Pdf,
         insert_memory_id: "aaaaa-aa".to_string(),
@@ -392,8 +388,8 @@ fn mock_insert_rejects_pdf_submit_after_validation() {
 }
 
 #[test]
-fn mock_insert_rejects_nonexistent_normal_file_path_before_background_submit() {
-    let mut provider = KinicProvider::new(mock_config());
+fn insert_submit_rejects_nonexistent_normal_file_path_before_background_submit() {
+    let mut provider = KinicProvider::new(live_config());
     let state = CoreState {
         insert_mode: InsertMode::Normal,
         insert_memory_id: "aaaaa-aa".to_string(),
@@ -414,8 +410,8 @@ fn mock_insert_rejects_nonexistent_normal_file_path_before_background_submit() {
 }
 
 #[test]
-fn mock_insert_rejects_valid_request_after_validation() {
-    let mut provider = KinicProvider::new(mock_config());
+fn insert_submit_starts_background_submit_for_valid_request() {
+    let mut provider = KinicProvider::new(live_config());
     let state = CoreState {
         insert_mode: InsertMode::Normal,
         insert_memory_id: "aaaaa-aa".to_string(),
@@ -426,16 +422,21 @@ fn mock_insert_rejects_valid_request_after_validation() {
 
     let output = provider
         .handle_action(&CoreAction::InsertSubmit, &state)
-        .expect("insert submit should succeed");
+        .expect("insert submit should return output");
 
+    assert!(provider.insert_submit_in_flight);
+    assert!(provider.pending_insert_submit.is_some());
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::Notify(message)
-            if message == "Insert submit is only available in live mode."
+            if message == "Submitting insert request..."
     )));
-    assert!(!output.effects.iter().any(
-        |effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat)
-    ));
+    assert!(
+        !output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat))
+    );
 }
 
 #[test]
@@ -520,16 +521,7 @@ fn poll_initial_memories_background_surfaces_error_row_and_selected_detail() {
 }
 
 #[test]
-fn set_tab_create_handles_mock_and_live_modes() {
-    let mut mock_provider = KinicProvider::new(mock_config());
-    let mock_effects = mock_provider.set_tab(KINIC_CREATE_TAB_ID);
-    assert_eq!(
-        mock_provider.create_cost_state,
-        CreateCostState::Unavailable
-    );
-    assert!(!mock_provider.create_cost_in_flight);
-    assert!(!mock_effects.is_empty());
-
+fn set_tab_create_starts_account_refresh() {
     let mut provider = KinicProvider::new(live_config());
     let effects = provider.set_tab(KINIC_CREATE_TAB_ID);
     assert_eq!(provider.tab_id, KINIC_CREATE_TAB_ID);
@@ -1003,29 +995,21 @@ fn refresh_current_view_restarts_live_memories_load() {
 
 #[test]
 fn clearing_query_after_create_resets_memories_browser() {
-    let mut provider = KinicProvider::new(TuiConfig {
-        auth: TuiAuth::Mock,
-        use_mainnet: false,
-    });
-    provider.tab_id = KINIC_CREATE_TAB_ID.to_string();
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.all = provider.memory_records.clone();
+    provider.result_records = vec![live_memory("aaaaa-aa-result-1", "Search Hit")];
+    provider.memories_mode = MemoriesMode::Results;
     provider.query = "stale".to_string();
-    provider
-        .handle_action(
-            &CoreAction::CreateSubmit,
-            &CoreState {
-                create_name: "New Memory".to_string(),
-                create_description: "Created from test".to_string(),
-                ..CoreState::default()
-            },
-        )
-        .unwrap();
 
     let output = provider
         .handle_action(&CoreAction::SetQuery(String::new()), &CoreState::default())
         .unwrap();
 
-    assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
     assert_eq!(provider.query, "");
+    assert_eq!(provider.memories_mode, MemoriesMode::Browser);
+    assert!(provider.result_records.is_empty());
     assert_eq!(output.snapshot.unwrap().total_count, provider.all.len());
 }
 

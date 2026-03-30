@@ -53,7 +53,11 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(format!(" {}", focus_indicator.1), self.theme.style_dim()),
             ]);
             if self.focus == Focus::Form {
-                let insert_at = if show_form_mode_shortcut(tab_id) { 8 } else { 4 };
+                let insert_at = if show_form_mode_shortcut(tab_id) {
+                    8
+                } else {
+                    4
+                };
                 spans.splice(
                     insert_at..insert_at,
                     [
@@ -232,7 +236,10 @@ mod tests {
 
     #[test]
     fn insert_tab_enter_hint_mentions_picker_and_submit() {
-        assert_eq!(form_enter_hint(KINIC_INSERT_TAB_ID), " cycle/picker/submit ");
+        assert_eq!(
+            form_enter_hint(KINIC_INSERT_TAB_ID),
+            " cycle/picker/submit "
+        );
     }
 
     #[test]

@@ -97,13 +97,16 @@ pub(crate) fn build_keyring_agent_factory(use_mainnet: bool, identity: &str) -> 
     AgentFactory::new(use_mainnet, identity.to_string())
 }
 
-pub(crate) fn resolve_tui_identity(global: &cli::GlobalOpts) -> Result<Option<String>> {
+pub(crate) fn resolve_tui_identity(global: &cli::GlobalOpts) -> Result<String> {
     if global.ii {
         return Err(anyhow!(
             "Internet Identity is not supported for the Kinic TUI yet"
         ));
     }
-    Ok(global.identity.clone())
+    global
+        .identity
+        .clone()
+        .ok_or_else(|| anyhow!("--identity is required for the Kinic TUI"))
 }
 
 fn resolve_required_identity(global: &cli::GlobalOpts) -> Result<String> {
@@ -144,16 +147,19 @@ mod tests {
 
         let identity = resolve_tui_identity(&global).unwrap();
 
-        assert_eq!(identity.as_deref(), Some("alice"));
+        assert_eq!(identity, "alice");
     }
 
     #[test]
-    fn resolve_tui_identity_returns_none_without_identity() {
+    fn resolve_tui_identity_requires_identity() {
         let global = global_opts(None, false, None);
 
-        let identity = resolve_tui_identity(&global).unwrap();
+        let error = resolve_tui_identity(&global).unwrap_err();
 
-        assert!(identity.is_none());
+        assert_eq!(
+            error.to_string(),
+            "--identity is required for the Kinic TUI"
+        );
     }
 
     #[test]

@@ -14,9 +14,10 @@ pub use tui_kit_runtime as runtime;
 pub struct TuiArgs {
     #[arg(
         long,
-        help = "Dfx identity name used to load credentials from the system keyring"
+        required = true,
+        help = "Required dfx identity name used to load credentials from the system keyring"
     )]
-    pub identity: Option<String>,
+    pub identity: String,
 
     #[arg(
         long,
@@ -35,25 +36,19 @@ mod tests {
 
     #[test]
     fn build_launch_config_from_args_maps_ic_flag_without_identity() {
-        let args = TuiArgs {
-            identity: None,
-            ic: true,
-        };
+        let args = TuiArgs::try_parse_from(["kinic-tui"]).unwrap_err();
 
-        let config = build_launch_config_from_args(&args).unwrap();
-
-        assert!(matches!(config.auth, tui::TuiAuth::Mock));
-        assert!(config.use_mainnet);
+        assert_eq!(args.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 
     #[test]
-    fn build_launch_config_from_args_uses_mock_without_identity() {
+    fn build_launch_config_from_args_uses_provided_identity() {
         let args = TuiArgs {
-            identity: None,
+            identity: "alice".to_string(),
             ic: false,
         };
 
         let config = build_launch_config_from_args(&args).unwrap();
-        assert!(matches!(config.auth, tui::TuiAuth::Mock));
+        assert!(matches!(config.auth, tui::TuiAuth::DeferredIdentity { .. }));
     }
 }

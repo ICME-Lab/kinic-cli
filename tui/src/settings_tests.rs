@@ -1,6 +1,8 @@
 use super::*;
 use candid::Nat;
-use tui_kit_runtime::{MemorySelectorItem, SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview};
+use tui_kit_runtime::{
+    MemorySelectorItem, SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview,
+};
 
 fn deferred_session() -> SessionSettingsSnapshot {
     session_settings_snapshot(
@@ -76,15 +78,6 @@ future_setting: true
 #[test]
 fn session_snapshot_labels_match_auth_state() {
     let cases = [
-        (
-            TuiAuth::Mock,
-            false,
-            None,
-            "mock",
-            "mock",
-            UNAVAILABLE,
-            "local",
-        ),
         (
             TuiAuth::DeferredIdentity {
                 identity_name: "alice".to_string(),
