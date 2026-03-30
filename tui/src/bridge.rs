@@ -62,7 +62,9 @@ pub enum CreateMemoryError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InsertMemoryError {
-    Principal(String),
+    ResolveAgentFactory(String),
+    BuildAgent(String),
+    ParseMemoryId(String),
     Execute(String),
 }
 
@@ -217,13 +219,13 @@ pub async fn run_insert(
     request: InsertRequest,
 ) -> Result<InsertMemorySuccess, InsertMemoryError> {
     let factory = resolve_agent_factory(use_mainnet, &auth)
-        .map_err(|error| InsertMemoryError::Principal(short_error(&error.to_string())))?;
+        .map_err(|error| InsertMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
     let agent = factory
         .build()
         .await
-        .map_err(|error| InsertMemoryError::Principal(short_error(&error.to_string())))?;
+        .map_err(|error| InsertMemoryError::BuildAgent(short_error(&error.to_string())))?;
     let memory = Principal::from_text(request.memory_id())
-        .map_err(|error| InsertMemoryError::Principal(short_error(&error.to_string())))?;
+        .map_err(|error| InsertMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let client = MemoryClient::new(agent, memory);
     let result = execute_insert_request(&client, &request)
         .await
@@ -335,6 +337,31 @@ mod tests {
                 .as_deref()
                 .is_some_and(|message| message.contains("Press F5 to refresh"))
         );
+    }
+
+    #[test]
+    fn insert_error_variants_keep_failure_stage() {
+        let resolve = InsertMemoryError::ResolveAgentFactory("auth missing".to_string());
+        let build = InsertMemoryError::BuildAgent("transport down".to_string());
+        let parse = InsertMemoryError::ParseMemoryId("invalid principal".to_string());
+        let execute = InsertMemoryError::Execute("insert failed".to_string());
+
+        assert!(matches!(
+            resolve,
+            InsertMemoryError::ResolveAgentFactory(message) if message == "auth missing"
+        ));
+        assert!(matches!(
+            build,
+            InsertMemoryError::BuildAgent(message) if message == "transport down"
+        ));
+        assert!(matches!(
+            parse,
+            InsertMemoryError::ParseMemoryId(message) if message == "invalid principal"
+        ));
+        assert!(matches!(
+            execute,
+            InsertMemoryError::Execute(message) if message == "insert failed"
+        ));
     }
 
     #[test]

@@ -138,6 +138,18 @@ pub enum MemorySelectorContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MemorySelectorItem {
+    pub id: String,
+    pub title: Option<String>,
+}
+
+impl MemorySelectorItem {
+    pub fn display_title(&self) -> &str {
+        self.title.as_deref().unwrap_or(self.id.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CreateSubmitState {
     #[default]
     Idle,
@@ -315,8 +327,9 @@ pub struct CoreState {
     pub settings: SettingsSnapshot,
     pub default_memory_selector_open: bool,
     pub default_memory_selector_index: usize,
-    pub default_memory_selector_items: Vec<String>,
+    pub default_memory_selector_items: Vec<MemorySelectorItem>,
     pub default_memory_selector_selected_id: Option<String>,
+    pub saved_default_memory_id: Option<String>,
     pub default_memory_selector_context: MemorySelectorContext,
     pub insert_mode: InsertMode,
     pub insert_memory_id: String,
@@ -360,6 +373,7 @@ impl Default for CoreState {
             default_memory_selector_index: 0,
             default_memory_selector_items: Vec::new(),
             default_memory_selector_selected_id: None,
+            saved_default_memory_id: None,
             default_memory_selector_context: MemorySelectorContext::default(),
             insert_mode: InsertMode::default(),
             insert_memory_id: String::new(),
@@ -521,8 +535,9 @@ pub struct ProviderSnapshot {
     pub create_cost_state: CreateCostState,
     pub create_submit_state: CreateSubmitState,
     pub settings: SettingsSnapshot,
-    pub default_memory_selector_items: Vec<String>,
+    pub default_memory_selector_items: Vec<MemorySelectorItem>,
     pub default_memory_selector_selected_id: Option<String>,
+    pub saved_default_memory_id: Option<String>,
     pub default_memory_selector_context: MemorySelectorContext,
     pub insert_memory_placeholder: Option<String>,
 }
@@ -610,8 +625,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 return;
             }
             match state.insert_focus {
-                InsertFormFocus::Mode | InsertFormFocus::Submit => {}
-                InsertFormFocus::MemoryId => state.insert_memory_id.push(*c),
+                InsertFormFocus::Mode | InsertFormFocus::MemoryId | InsertFormFocus::Submit => {}
                 InsertFormFocus::Tag => state.insert_tag.push(*c),
                 InsertFormFocus::Text => state.insert_text.push(*c),
                 InsertFormFocus::FilePath => state.insert_file_path.push(*c),
@@ -627,10 +641,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 return;
             }
             match state.insert_focus {
-                InsertFormFocus::Mode | InsertFormFocus::Submit => {}
-                InsertFormFocus::MemoryId => {
-                    state.insert_memory_id.pop();
-                }
+                InsertFormFocus::Mode | InsertFormFocus::MemoryId | InsertFormFocus::Submit => {}
                 InsertFormFocus::Tag => {
                     state.insert_tag.pop();
                 }
@@ -843,7 +854,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                     state
                         .default_memory_selector_items
                         .iter()
-                        .position(|item| item == selected)
+                        .position(|item| item.id == *selected)
                 })
                 .unwrap_or(0);
         }
@@ -1164,8 +1175,12 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.settings = snapshot.settings;
     state.default_memory_selector_items = snapshot.default_memory_selector_items;
     state.default_memory_selector_selected_id = snapshot.default_memory_selector_selected_id;
+    state.saved_default_memory_id = snapshot.saved_default_memory_id;
     state.default_memory_selector_context = snapshot.default_memory_selector_context;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
+    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty() {
+        state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
+    }
     if state.default_memory_selector_items.is_empty() {
         state.default_memory_selector_index = 0;
     } else if state.default_memory_selector_index >= state.default_memory_selector_items.len() {
@@ -1643,7 +1658,16 @@ mod tests {
             current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
             focus: PaneFocus::Form,
             insert_focus: InsertFormFocus::MemoryId,
-            default_memory_selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            default_memory_selector_items: vec![
+                MemorySelectorItem {
+                    id: "aaaaa-aa".to_string(),
+                    title: Some("Alpha Memory".to_string()),
+                },
+                MemorySelectorItem {
+                    id: "bbbbb-bb".to_string(),
+                    title: Some("Beta Memory".to_string()),
+                },
+            ],
             default_memory_selector_selected_id: Some("bbbbb-bb".to_string()),
             ..CoreState::default()
         };
@@ -1665,7 +1689,16 @@ mod tests {
             focus: PaneFocus::Form,
             insert_focus: InsertFormFocus::MemoryId,
             insert_memory_id: "aaaaa-aa".to_string(),
-            default_memory_selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            default_memory_selector_items: vec![
+                MemorySelectorItem {
+                    id: "aaaaa-aa".to_string(),
+                    title: Some("Alpha Memory".to_string()),
+                },
+                MemorySelectorItem {
+                    id: "bbbbb-bb".to_string(),
+                    title: Some("Beta Memory".to_string()),
+                },
+            ],
             default_memory_selector_selected_id: Some("bbbbb-bb".to_string()),
             ..CoreState::default()
         };
@@ -1721,6 +1754,7 @@ mod tests {
     fn apply_snapshot_updates_selector_context_and_insert_placeholder() {
         let mut state = CoreState::default();
         let snapshot = ProviderSnapshot {
+            saved_default_memory_id: Some("aaaaa-aa".to_string()),
             default_memory_selector_context: MemorySelectorContext::InsertTarget,
             insert_memory_placeholder: Some("Alpha Memory".to_string()),
             ..ProviderSnapshot::default()
@@ -1732,10 +1766,27 @@ mod tests {
             state.default_memory_selector_context,
             MemorySelectorContext::InsertTarget
         );
+        assert_eq!(state.saved_default_memory_id.as_deref(), Some("aaaaa-aa"));
         assert_eq!(
             state.insert_memory_placeholder.as_deref(),
             Some("Alpha Memory")
         );
+    }
+
+    #[test]
+    fn apply_snapshot_sets_insert_memory_id_from_saved_default_on_insert_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            saved_default_memory_id: Some("aaaaa-aa".to_string()),
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.insert_memory_id, "aaaaa-aa");
     }
 
     #[test]
@@ -1862,6 +1913,20 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertInput('x'));
 
         assert_eq!(state.insert_text, "draft");
+    }
+
+    #[test]
+    fn insert_memory_id_ignores_direct_text_editing() {
+        let mut state = CoreState {
+            insert_focus: InsertFormFocus::MemoryId,
+            insert_memory_id: "aaaaa-aa".to_string(),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertInput('x'));
+        apply_core_action(&mut state, &CoreAction::InsertBackspace);
+
+        assert_eq!(state.insert_memory_id, "aaaaa-aa");
     }
 
     #[test]

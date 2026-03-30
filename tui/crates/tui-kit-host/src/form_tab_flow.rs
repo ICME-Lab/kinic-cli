@@ -71,7 +71,7 @@ pub fn reset_form_focus(state: &mut CoreState) {
 pub fn reset_form_state_for_tab(state: &mut CoreState, tab_id: &str) {
     if is_kinic_insert_tab(tab_id) {
         state.insert_mode = tui_kit_runtime::InsertMode::Normal;
-        state.insert_memory_id.clear();
+        state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
         state.insert_tag.clear();
         state.insert_text.clear();
         state.insert_file_path.clear();

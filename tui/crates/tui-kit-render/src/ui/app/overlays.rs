@@ -7,6 +7,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
+#[cfg(test)]
+use tui_kit_runtime::MemorySelectorItem;
 use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::TuiKitUi;
@@ -449,10 +451,10 @@ mod tests {
     fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
         let lines = default_memory_selector_lines(
             &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
-                .map(|index| format!("Memory {index}"))
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
                 .collect::<Vec<_>>(),
             10,
             Some("id-2"),
@@ -467,7 +469,7 @@ mod tests {
         let joined = visible_lines.join("\n");
 
         assert!(joined.contains("Memory 10"));
-        assert!(!visible_lines.iter().any(|line| *line == "  Memory 1"));
+        assert!(!visible_lines.iter().any(|line| *line == "   Memory 1"));
         assert!(joined.contains("Enter: save"));
     }
 
@@ -475,15 +477,16 @@ mod tests {
     fn default_memory_selector_window_keeps_selected_row_visible_near_start() {
         let lines = default_memory_selector_lines(
             &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
-                .map(|index| format!("Memory {index}"))
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
                 .collect::<Vec<_>>(),
             1,
             Some("id-9"),
             default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
+        let near_start = visible_default_memory_selector_lines(lines, 8);
         let near_start_joined = near_start
             .iter()
             .map(|(line, _)| line.as_str())
@@ -498,8 +501,10 @@ mod tests {
     #[test]
     fn insert_target_selector_window_uses_insert_specific_copy() {
         let lines = default_memory_selector_lines(
-            &["id-0".to_string()],
-            &["Memory 0".to_string()],
+            &[MemorySelectorItem {
+                id: "id-0".to_string(),
+                title: Some("Memory 0".to_string()),
+            }],
             0,
             Some("id-0"),
             default_memory_selector_copy(MemorySelectorContext::InsertTarget),

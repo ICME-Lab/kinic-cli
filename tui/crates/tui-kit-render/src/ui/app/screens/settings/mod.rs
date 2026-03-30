@@ -9,7 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{MemorySelectorContext, SettingsSnapshot};
+use tui_kit_runtime::{MemorySelectorContext, MemorySelectorItem, SettingsSnapshot};
 
 use crate::ui::app::{Focus, TuiKitUi};
 
@@ -78,7 +78,7 @@ impl<'a> TuiKitUi<'a> {
 }
 
 pub(crate) fn default_memory_selector_lines(
-    items: &[String],
+    items: &[MemorySelectorItem],
     selected_index: usize,
     current_default_id: Option<&str>,
     copy: DefaultMemorySelectorCopy<'_>,
@@ -99,8 +99,7 @@ pub(crate) fn default_memory_selector_lines(
     } else {
         for (index, item) in items.iter().enumerate() {
             let is_selected = index == selected_index;
-            let is_default =
-                copy.show_current_default_marker && current_default_id == Some(item.as_str());
+            let is_default = copy.show_current_default_marker && current_default_id == Some(item.id.as_str());
             let prefix = if is_selected { "›" } else { " " };
             let suffix = if is_default { "  ★" } else { "" };
             let kind = if is_selected {
@@ -110,7 +109,7 @@ pub(crate) fn default_memory_selector_lines(
             } else {
                 DefaultMemorySelectorLineKind::Normal
             };
-            lines.push((format!(" {prefix} {item}{suffix}"), kind));
+            lines.push((format!(" {prefix} {}{suffix}", item.display_title()), kind));
         }
     }
 
@@ -288,8 +287,16 @@ mod tests {
     #[test]
     fn default_memory_selector_lines_mark_selected_and_current_entries() {
         let lines = default_memory_selector_lines(
-            &["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            &["Alpha Memory".to_string(), "Beta Memory".to_string()],
+            &[
+                MemorySelectorItem {
+                    id: "aaaaa-aa".to_string(),
+                    title: Some("Alpha Memory".to_string()),
+                },
+                MemorySelectorItem {
+                    id: "bbbbb-bb".to_string(),
+                    title: Some("Beta Memory".to_string()),
+                },
+            ],
             1,
             Some("aaaaa-aa"),
             default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
@@ -304,15 +311,16 @@ mod tests {
         assert!(joined.contains("› Beta Memory"));
         assert!(joined.contains("Enter: save"));
         assert!(joined.contains("↑/↓: move"));
-        assert!(!joined.contains("ID aaaaa-aa"));
         assert!(!joined.contains("j/k: move"));
     }
 
     #[test]
     fn insert_target_selector_lines_use_insert_specific_copy() {
         let lines = default_memory_selector_lines(
-            &["aaaaa-aa".to_string()],
-            &["Alpha Memory".to_string()],
+            &[MemorySelectorItem {
+                id: "aaaaa-aa".to_string(),
+                title: Some("Alpha Memory".to_string()),
+            }],
             0,
             Some("aaaaa-aa"),
             default_memory_selector_copy(MemorySelectorContext::InsertTarget),
@@ -326,5 +334,25 @@ mod tests {
         assert!(joined.contains("Select Target Memory"));
         assert!(joined.contains("Enter: use target"));
         assert!(!joined.contains('★'));
+    }
+
+    #[test]
+    fn selector_lines_fall_back_to_id_when_title_is_missing() {
+        let lines = default_memory_selector_lines(
+            &[MemorySelectorItem {
+                id: "aaaaa-aa".to_string(),
+                title: None,
+            }],
+            0,
+            Some("aaaaa-aa"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
+        );
+        let joined = lines
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("aaaaa-aa  ★"));
     }
 }

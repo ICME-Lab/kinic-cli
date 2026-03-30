@@ -155,7 +155,7 @@ impl Default for UiConfig {
                 submit_label: "Insert".to_string(),
                 submit_pending_label: "Inserting...".to_string(),
                 close_hint:
-                    "Tab: cycle fields, Enter: cycle mode or submit, Esc: back to tab focus"
+                    "Tab: cycle fields, Enter: cycle mode / open target picker / submit, Esc: back to tab focus"
                         .to_string(),
             },
             create: CreateOverlayText {

@@ -8,8 +8,9 @@ use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 use tui_kit_runtime::{
-    SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview, SessionSettingsSnapshot,
-    SettingsEntry, SettingsSection, SettingsSnapshot, format_e8s_to_kinic_string_u128,
+    MemorySelectorItem, SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview,
+    SessionSettingsSnapshot, SettingsEntry, SettingsSection, SettingsSnapshot,
+    format_e8s_to_kinic_string_u128,
 };
 
 use crate::tui::TuiAuth;
@@ -62,11 +63,11 @@ pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), Settin
 pub fn build_settings_snapshot(
     overview: &SessionAccountOverview,
     preferences: &UserPreferences,
-    available_memory_ids: &[String],
+    selector_items: &[MemorySelectorItem],
     health: &PreferencesHealth,
 ) -> SettingsSnapshot {
     let session = overview.session.clone();
-    let default_memory_display = default_memory_display(preferences, available_memory_ids);
+    let default_memory_display = default_memory_display(preferences, selector_items);
     let account_entries = account_entries(overview);
 
     SettingsSnapshot {
@@ -195,14 +196,15 @@ fn network_label(use_mainnet: bool) -> String {
 
 fn default_memory_display(
     preferences: &UserPreferences,
-    available_memory_ids: &[String],
+    selector_items: &[MemorySelectorItem],
 ) -> String {
     match preferences.default_memory_id.as_ref() {
-        Some(memory_id) if available_memory_ids.is_empty() => memory_id.clone(),
-        Some(memory_id) if available_memory_ids.iter().any(|id| id == memory_id) => {
-            memory_id.clone()
-        }
-        Some(memory_id) => format!("{memory_id} (missing)"),
+        Some(memory_id) if selector_items.is_empty() => memory_id.clone(),
+        Some(memory_id) => selector_items
+            .iter()
+            .find(|item| item.id == *memory_id)
+            .map(|item| item.display_title().to_string())
+            .unwrap_or_else(|| format!("{memory_id} (missing)")),
         None => NOT_SET.to_string(),
     }
 }
