@@ -2,9 +2,10 @@
 // What: centralizes insert/insert-raw/insert-pdf preparation and execution.
 // Why: keep the actual insert path in one place so UI additions do not duplicate logic.
 
-use std::{fs, path::PathBuf};
+use std::{fs, fs::File, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
+use ic_agent::export::Principal;
 use serde_json::json;
 
 use crate::{
@@ -53,12 +54,34 @@ struct PreparedInsertItem {
     payload: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum ValidatedInsertRequest {
+    Normal {
+        memory_id: String,
+        tag: String,
+        text: Option<String>,
+        file_path: Option<PathBuf>,
+    },
+    Raw {
+        memory_id: String,
+        tag: String,
+        text: String,
+        embedding: Vec<f32>,
+    },
+    Pdf {
+        memory_id: String,
+        tag: String,
+        file_path: PathBuf,
+    },
+}
+
 pub async fn execute_insert_request(
     client: &MemoryClient,
     request: &InsertRequest,
 ) -> Result<InsertExecutionResult> {
-    validate_insert_request(request)?;
-    let prepared = prepare_insert_request(request).await?;
+    validate_insert_request_fields(request)?;
+    let validated = validate_and_transform_insert_request(request)?;
+    let prepared = prepare_insert_request(&validated).await?;
     let inserted_count = prepared.len();
 
     for item in prepared {
@@ -66,9 +89,9 @@ pub async fn execute_insert_request(
     }
 
     Ok(InsertExecutionResult {
-        mode: request.mode(),
-        memory_id: request.memory_id().to_string(),
-        tag: request.tag().to_string(),
+        mode: validated.mode(),
+        memory_id: validated.memory_id().to_string(),
+        tag: validated.tag().to_string(),
         inserted_count,
     })
 }
@@ -82,14 +105,20 @@ pub fn parse_embedding_json(raw: &str) -> Result<Vec<f32>> {
     Ok(parsed)
 }
 
-pub fn validate_insert_request(request: &InsertRequest) -> Result<()> {
+pub fn validate_insert_request_fields(request: &InsertRequest) -> Result<()> {
     validate_shared_fields(request.memory_id(), request.tag())?;
 
     match request {
         InsertRequest::Normal {
             text, file_path, ..
         } => {
-            load_normal_content(text.as_ref(), file_path.as_ref())?;
+            let has_inline_text = text.as_ref().is_some_and(|value| !value.trim().is_empty());
+            let has_file_path = file_path
+                .as_ref()
+                .is_some_and(|path| !path.as_os_str().is_empty());
+            if !has_inline_text && !has_file_path {
+                bail!("Provide text or file path for normal insert.");
+            }
         }
         InsertRequest::Raw {
             text,
@@ -102,7 +131,6 @@ pub fn validate_insert_request(request: &InsertRequest) -> Result<()> {
             if embedding_json.trim().is_empty() {
                 bail!("Embedding JSON is required for raw insert.");
             }
-            let _ = parse_embedding_json(embedding_json)?;
         }
         InsertRequest::Pdf { file_path, .. } => {
             if file_path.as_os_str().is_empty() {
@@ -114,9 +142,82 @@ pub fn validate_insert_request(request: &InsertRequest) -> Result<()> {
     Ok(())
 }
 
-async fn prepare_insert_request(request: &InsertRequest) -> Result<Vec<PreparedInsertItem>> {
+pub fn validate_insert_request_for_submit(request: &InsertRequest) -> Result<()> {
+    let _ = validate_and_transform_insert_request(request)?;
+    Ok(())
+}
+
+fn validate_and_transform_insert_request(request: &InsertRequest) -> Result<ValidatedInsertRequest> {
+    validate_shared_fields(request.memory_id(), request.tag())?;
+    validate_memory_id(request.memory_id())?;
+
     match request {
         InsertRequest::Normal {
+            memory_id,
+            tag,
+            text,
+            file_path,
+        } => {
+            let text = normalized_optional_text(text.clone());
+            let file_path = normalized_optional_path(file_path.clone());
+            if text.is_none() && file_path.is_none() {
+                bail!("Provide text or file path for normal insert.");
+            }
+            if text.is_none() {
+                let path = file_path
+                    .as_ref()
+                    .expect("normal insert should have file path when text is absent");
+                validate_file_path(path)?;
+            }
+
+            Ok(ValidatedInsertRequest::Normal {
+                memory_id: memory_id.clone(),
+                tag: tag.clone(),
+                text,
+                file_path,
+            })
+        }
+        InsertRequest::Raw {
+            memory_id,
+            tag,
+            text,
+            embedding_json,
+        } => {
+            if text.trim().is_empty() {
+                bail!("Text is required for raw insert.");
+            }
+            if embedding_json.trim().is_empty() {
+                bail!("Embedding JSON is required for raw insert.");
+            }
+            Ok(ValidatedInsertRequest::Raw {
+                memory_id: memory_id.clone(),
+                tag: tag.clone(),
+                text: text.clone(),
+                embedding: parse_embedding_json(embedding_json)?,
+            })
+        }
+        InsertRequest::Pdf {
+            memory_id,
+            tag,
+            file_path,
+        } => {
+            if file_path.as_os_str().is_empty() {
+                bail!("File path is required for PDF insert.");
+            }
+            validate_file_path(file_path)?;
+
+            Ok(ValidatedInsertRequest::Pdf {
+                memory_id: memory_id.clone(),
+                tag: tag.clone(),
+                file_path: file_path.clone(),
+            })
+        }
+    }
+}
+
+async fn prepare_insert_request(request: &ValidatedInsertRequest) -> Result<Vec<PreparedInsertItem>> {
+    match request {
+        ValidatedInsertRequest::Normal {
             tag,
             text,
             file_path,
@@ -125,16 +226,16 @@ async fn prepare_insert_request(request: &InsertRequest) -> Result<Vec<PreparedI
             let content = load_normal_content(text.as_ref(), file_path.as_ref())?;
             prepare_chunked_insert(tag, &content).await
         }
-        InsertRequest::Raw {
+        ValidatedInsertRequest::Raw {
             tag,
             text,
-            embedding_json,
+            embedding,
             ..
         } => Ok(vec![PreparedInsertItem {
-            embedding: parse_embedding_json(embedding_json)?,
+            embedding: embedding.clone(),
             payload: payload_for(tag, text),
         }]),
-        InsertRequest::Pdf { tag, file_path, .. } => {
+        ValidatedInsertRequest::Pdf { tag, file_path, .. } => {
             let markdown = pdf_to_markdown(file_path).map_err(|error| {
                 anyhow::anyhow!(
                     "Failed to convert PDF {} to markdown: {error}",
@@ -177,19 +278,42 @@ fn validate_shared_fields(memory_id: &str, tag: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_memory_id(memory_id: &str) -> Result<()> {
+    Principal::from_text(memory_id)
+        .with_context(|| format!("Memory ID must be a valid principal: {memory_id}"))?;
+    Ok(())
+}
+
+fn validate_file_path(path: &PathBuf) -> Result<()> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            bail!("File path does not exist: {}", path.display())
+        }
+        Err(_) => bail!("Could not access file path: {}", path.display()),
+    };
+    if !metadata.is_file() {
+        bail!("File path is not a file: {}", path.display());
+    }
+    if File::open(path).is_err() {
+        bail!("File path is not readable: {}", path.display());
+    }
+    Ok(())
+}
+
+fn normalized_optional_text(text: Option<String>) -> Option<String> {
+    text.filter(|value| !value.trim().is_empty())
+}
+
+fn normalized_optional_path(path: Option<PathBuf>) -> Option<PathBuf> {
+    path.filter(|candidate| !candidate.as_os_str().is_empty())
+}
+
 fn payload_for(tag: &str, sentence: &str) -> String {
     json!({ "tag": tag, "sentence": sentence }).to_string()
 }
 
 impl InsertRequest {
-    pub fn mode(&self) -> InsertMode {
-        match self {
-            Self::Normal { .. } => InsertMode::Normal,
-            Self::Raw { .. } => InsertMode::Raw,
-            Self::Pdf { .. } => InsertMode::Pdf,
-        }
-    }
-
     pub fn memory_id(&self) -> &str {
         match self {
             Self::Normal { memory_id, .. }
@@ -199,6 +323,32 @@ impl InsertRequest {
     }
 
     pub fn tag(&self) -> &str {
+        match self {
+            Self::Normal { tag, .. } | Self::Raw { tag, .. } | Self::Pdf { tag, .. } => {
+                tag.as_str()
+            }
+        }
+    }
+}
+
+impl ValidatedInsertRequest {
+    fn mode(&self) -> InsertMode {
+        match self {
+            Self::Normal { .. } => InsertMode::Normal,
+            Self::Raw { .. } => InsertMode::Raw,
+            Self::Pdf { .. } => InsertMode::Pdf,
+        }
+    }
+
+    fn memory_id(&self) -> &str {
+        match self {
+            Self::Normal { memory_id, .. }
+            | Self::Raw { memory_id, .. }
+            | Self::Pdf { memory_id, .. } => memory_id.as_str(),
+        }
+    }
+
+    fn tag(&self) -> &str {
         match self {
             Self::Normal { tag, .. } | Self::Raw { tag, .. } | Self::Pdf { tag, .. } => {
                 tag.as_str()
@@ -259,8 +409,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_insert_request_rejects_empty_normal_payload() {
-        let err = validate_insert_request(&InsertRequest::Normal {
+    fn validate_insert_request_fields_rejects_empty_normal_payload() {
+        let err = validate_insert_request_fields(&InsertRequest::Normal {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             text: None,
@@ -275,8 +425,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_insert_request_rejects_blank_raw_embedding() {
-        let err = validate_insert_request(&InsertRequest::Raw {
+    fn validate_insert_request_fields_rejects_blank_raw_embedding() {
+        let err = validate_insert_request_fields(&InsertRequest::Raw {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             text: "payload".to_string(),
@@ -291,8 +441,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_insert_request_rejects_blank_raw_text() {
-        let err = validate_insert_request(&InsertRequest::Raw {
+    fn validate_insert_request_fields_rejects_blank_raw_text() {
+        let err = validate_insert_request_fields(&InsertRequest::Raw {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             text: "   ".to_string(),
@@ -304,8 +454,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_insert_request_rejects_missing_pdf_path() {
-        let err = validate_insert_request(&InsertRequest::Pdf {
+    fn validate_insert_request_fields_rejects_missing_pdf_path() {
+        let err = validate_insert_request_fields(&InsertRequest::Pdf {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             file_path: PathBuf::new(),
@@ -316,8 +466,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_insert_request_rejects_whitespace_only_inline_text_without_file() {
-        let err = validate_insert_request(&InsertRequest::Normal {
+    fn validate_insert_request_fields_rejects_whitespace_only_inline_text_without_file() {
+        let err = validate_insert_request_fields(&InsertRequest::Normal {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             text: Some("   ".to_string()),
@@ -332,23 +482,129 @@ mod tests {
     }
 
     #[test]
-    fn validate_insert_request_uses_file_when_inline_text_is_whitespace_only() {
-        let path = write_temp_markdown_file("# title");
-
-        validate_insert_request(&InsertRequest::Normal {
+    fn validate_insert_request_fields_accepts_non_empty_file_path_without_reading_file() {
+        validate_insert_request_fields(&InsertRequest::Normal {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             text: Some("   ".to_string()),
-            file_path: Some(path.clone()),
+            file_path: Some(PathBuf::from("/path/that/does/not/need/to/exist.md")),
         })
         .unwrap();
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_rejects_invalid_memory_id() {
+        let err = validate_insert_request_for_submit(&InsertRequest::Normal {
+            memory_id: "not-a-principal".to_string(),
+            tag: "docs".to_string(),
+            text: Some("payload".to_string()),
+            file_path: None,
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("Memory ID must be a valid principal"));
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_rejects_invalid_raw_embedding_json() {
+        let err = validate_insert_request_for_submit(&InsertRequest::Raw {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: "payload".to_string(),
+            embedding_json: "not-json".to_string(),
+        })
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("Embedding must be a JSON array of floats"));
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_rejects_missing_normal_file_path() {
+        let err = validate_insert_request_for_submit(&InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("   ".to_string()),
+            file_path: Some(PathBuf::from("/path/that/does/not/need/to/exist.md")),
+        })
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("File path does not exist: /path/that/does/not/need/to/exist.md"));
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_accepts_inline_text_with_missing_file_path() {
+        validate_insert_request_for_submit(&InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("payload".to_string()),
+            file_path: Some(PathBuf::from("/path/that/does/not/need/to/exist.md")),
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_rejects_missing_pdf_file_path() {
+        let err = validate_insert_request_for_submit(&InsertRequest::Pdf {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            file_path: PathBuf::from("/path/that/does/not/need/to/exist.pdf"),
+        })
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("File path does not exist: /path/that/does/not/need/to/exist.pdf"));
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_rejects_directory_paths() {
+        let dir = env::temp_dir();
+        let err = validate_insert_request_for_submit(&InsertRequest::Pdf {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            file_path: dir.clone(),
+        })
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains(&format!("File path is not a file: {}", dir.display())));
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_reuses_parsed_raw_embedding() {
+        let validated = validate_and_transform_insert_request(&InsertRequest::Raw {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: "payload".to_string(),
+            embedding_json: "[0.1, 0.2]".to_string(),
+        })
+        .unwrap();
+
+        assert!(matches!(
+            validated,
+            ValidatedInsertRequest::Raw { embedding, .. } if embedding == vec![0.1, 0.2]
+        ));
+    }
+
+    #[test]
+    fn load_normal_content_uses_file_when_inline_text_is_whitespace_only() {
+        let path = write_temp_markdown_file("# title");
+
+        let content = load_normal_content(Some(&"   ".to_string()), Some(&path)).unwrap();
+
+        assert_eq!(content, "# title");
 
         fs::remove_file(path).expect("temporary markdown file should be removable");
     }
 
     #[test]
-    fn validate_insert_request_accepts_non_empty_pdf_path_without_conversion() {
-        validate_insert_request(&InsertRequest::Pdf {
+    fn validate_insert_request_fields_accepts_non_empty_pdf_path_without_conversion() {
+        validate_insert_request_fields(&InsertRequest::Pdf {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             file_path: PathBuf::from("/path/that/does/not/need/to/exist.pdf"),

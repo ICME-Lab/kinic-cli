@@ -1,10 +1,6 @@
 use super::*;
 use crate::create_domain::derive_create_cost;
 use candid::Nat;
-use std::{
-    env, fs,
-    time::{SystemTime, UNIX_EPOCH},
-};
 use tui_kit_runtime::{
     CreateCostState, LoadedCreateCost, MemorySelectorItem, SessionAccountOverview,
 };
@@ -30,16 +26,6 @@ fn mock_config() -> TuiConfig {
         auth: TuiAuth::Mock,
         use_mainnet: false,
     }
-}
-
-fn write_temp_markdown_file(contents: &str) -> String {
-    let unique_suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after epoch")
-        .as_nanos();
-    let path = env::temp_dir().join(format!("kinic-provider-test-{unique_suffix}.md"));
-    fs::write(&path, contents).expect("temporary markdown file should be writable");
-    path.display().to_string()
 }
 
 fn live_memory(id: &str, title: &str) -> KinicRecord {
@@ -244,7 +230,7 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
 }
 
 #[test]
-fn mock_insert_rejects_invalid_embedding_json() {
+fn mock_insert_rejects_invalid_embedding_json_before_background_submit() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
         insert_mode: InsertMode::Raw,
@@ -263,30 +249,6 @@ fn mock_insert_rejects_invalid_embedding_json() {
         effect,
         CoreEffect::InsertFormError(Some(message))
             if message.contains("Embedding must be a JSON array")
-    )));
-}
-
-#[test]
-fn mock_insert_uses_saved_default_memory_when_target_is_blank() {
-    let mut provider = KinicProvider::new(mock_config());
-    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
-    let state = CoreState {
-        saved_default_memory_id: Some("aaaaa-aa".to_string()),
-        insert_memory_id: "aaaaa-aa".to_string(),
-        insert_mode: InsertMode::Normal,
-        insert_tag: "docs".to_string(),
-        insert_text: "payload".to_string(),
-        ..CoreState::default()
-    };
-
-    let output = provider
-        .handle_action(&CoreAction::InsertSubmit, &state)
-        .expect("insert submit should succeed");
-
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message)
-            if message == "Mock insert accepted for aaaaa-aa [docs]"
     )));
 }
 
@@ -408,7 +370,7 @@ fn mock_insert_rejects_missing_pdf_path() {
 }
 
 #[test]
-fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
+fn mock_insert_rejects_pdf_submit_after_validation() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
         insert_mode: InsertMode::Pdf,
@@ -424,21 +386,19 @@ fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::Notify(message)
-            if message == "Mock insert accepted for aaaaa-aa [docs]"
+        CoreEffect::InsertFormError(Some(message))
+            if message.contains("File path does not exist")
     )));
 }
 
 #[test]
-fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
+fn mock_insert_rejects_nonexistent_normal_file_path_before_background_submit() {
     let mut provider = KinicProvider::new(mock_config());
-    let file_path = write_temp_markdown_file("# title");
     let state = CoreState {
         insert_mode: InsertMode::Normal,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_text: "   ".to_string(),
-        insert_file_path: file_path.clone(),
+        insert_file_path: "/path/that/does/not/need/to/exist.md".to_string(),
         ..CoreState::default()
     };
 
@@ -448,14 +408,13 @@ fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::Notify(message)
-            if message == "Mock insert accepted for aaaaa-aa [docs]"
+        CoreEffect::InsertFormError(Some(message))
+            if message.contains("File path does not exist")
     )));
-    fs::remove_file(file_path).expect("temporary markdown file should be removable");
 }
 
 #[test]
-fn mock_insert_accepts_valid_request_only_after_validation() {
+fn mock_insert_rejects_valid_request_after_validation() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
         insert_mode: InsertMode::Normal,
@@ -472,14 +431,11 @@ fn mock_insert_accepts_valid_request_only_after_validation() {
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::Notify(message)
-            if message == "Mock insert accepted for aaaaa-aa [docs]"
+            if message == "Insert submit is only available in live mode."
     )));
-    assert!(
-        output
-            .effects
-            .iter()
-            .any(|effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat))
-    );
+    assert!(!output.effects.iter().any(
+        |effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat)
+    ));
 }
 
 #[test]
