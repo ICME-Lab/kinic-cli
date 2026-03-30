@@ -588,5 +588,6 @@ fn copy_principal_id_from_settings(
     None
 }
 
+#[cfg(test)]
 #[path = "runtime_loop_tests.rs"]
 mod tests;
