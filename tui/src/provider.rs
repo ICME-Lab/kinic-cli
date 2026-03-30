@@ -759,25 +759,40 @@ impl KinicProvider {
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
         let memory_id = state.insert_memory_id.trim().to_string();
         let tag = state.insert_tag.trim().to_string();
+        let file_path = (!state.insert_file_path.trim().is_empty())
+            .then(|| std::path::PathBuf::from(state.insert_file_path.trim()));
 
         match state.insert_mode {
-            InsertMode::Normal => InsertRequest::Normal {
+            InsertMode::Text => InsertRequest::Normal {
                 memory_id,
                 tag,
                 text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
-                file_path: (!state.insert_file_path.trim().is_empty())
-                    .then(|| std::path::PathBuf::from(state.insert_file_path.trim())),
+                file_path: None,
+            },
+            InsertMode::File => match file_path {
+                Some(path) if is_pdf_file_path(&path) => InsertRequest::Pdf {
+                    memory_id,
+                    tag,
+                    file_path: path,
+                },
+                Some(path) => InsertRequest::Normal {
+                    memory_id,
+                    tag,
+                    text: None,
+                    file_path: Some(path),
+                },
+                None => InsertRequest::Normal {
+                    memory_id,
+                    tag,
+                    text: None,
+                    file_path: None,
+                },
             },
             InsertMode::Raw => InsertRequest::Raw {
                 memory_id,
                 tag,
                 text: state.insert_text.clone(),
                 embedding_json: state.insert_embedding.clone(),
-            },
-            InsertMode::Pdf => InsertRequest::Pdf {
-                memory_id,
-                tag,
-                file_path: std::path::PathBuf::from(state.insert_file_path.trim()),
             },
         }
     }
@@ -830,6 +845,25 @@ impl KinicProvider {
 
     fn invalidate_pending_search(&mut self) {
         self.pending_search_context = None;
+    }
+
+    fn validate_insert_state(&self, state: &CoreState) -> Result<(), String> {
+        match state.insert_mode {
+            InsertMode::Text => {
+                if state.insert_text.trim().is_empty() {
+                    return Err("Text is required for text insert.".to_string());
+                }
+            }
+            InsertMode::File => {
+                if state.insert_file_path.trim().is_empty() {
+                    return Err("File path is required for file insert.".to_string());
+                }
+            }
+            InsertMode::Raw => {}
+        }
+
+        let request = self.build_insert_request(state);
+        validate_insert_request(&request).map_err(|error| error.to_string())
     }
 
     fn invalidate_pending_create_cost(&mut self) {
@@ -1426,14 +1460,14 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::InsertSubmit => {
-                let request = self.build_insert_request(state);
-                if let Err(error) = validate_insert_request(&request) {
-                    effects.push(CoreEffect::InsertFormError(Some(error.to_string())));
+                if let Err(error) = self.validate_insert_state(state) {
+                    effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if self.insert_submit_in_flight {
                     effects.push(CoreEffect::Notify(
                         "Insert request already running.".to_string(),
                     ));
                 } else if self.is_live() {
+                    let request = self.build_insert_request(state);
                     effects.push(self.start_insert_submit(request));
                 } else {
                     effects.push(CoreEffect::InsertFormError(None));
@@ -1962,6 +1996,12 @@ Maintain keyboard-first behavior as baseline.
 "#,
         ),
     ]
+}
+
+fn is_pdf_file_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
 #[cfg(test)]

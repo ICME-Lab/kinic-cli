@@ -281,7 +281,7 @@ fn mock_insert_rejects_blank_raw_text() {
 fn mock_insert_rejects_missing_pdf_path() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Pdf,
+        insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path: String::new(),
@@ -295,7 +295,7 @@ fn mock_insert_rejects_missing_pdf_path() {
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::InsertFormError(Some(message))
-            if message == "File path is required for PDF insert."
+            if message == "File path is required for file insert."
     )));
 }
 
@@ -303,7 +303,7 @@ fn mock_insert_rejects_missing_pdf_path() {
 fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Pdf,
+        insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path: "/path/that/does/not/need/to/exist.pdf".to_string(),
@@ -326,7 +326,7 @@ fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
     let mut provider = KinicProvider::new(mock_config());
     let file_path = write_temp_markdown_file("# title");
     let state = CoreState {
-        insert_mode: InsertMode::Normal,
+        insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "   ".to_string(),
@@ -350,7 +350,7 @@ fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
 fn mock_insert_accepts_valid_request_only_after_validation() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Normal,
+        insert_mode: InsertMode::Text,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "  keep spacing  ".to_string(),
@@ -371,6 +371,95 @@ fn mock_insert_accepts_valid_request_only_after_validation() {
             .effects
             .iter()
             .any(|effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat))
+    );
+}
+
+#[test]
+fn build_insert_request_uses_text_mode_without_file_path() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::Text,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "hello".to_string(),
+        insert_file_path: "/tmp/ignored.md".to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.build_insert_request(&state),
+        InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("hello".to_string()),
+            file_path: None,
+        }
+    );
+}
+
+#[test]
+fn mock_insert_rejects_missing_text_for_text_mode() {
+    let mut provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::Text,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "   ".to_string(),
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message == "Text is required for text insert."
+    )));
+}
+
+#[test]
+fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "ignored".to_string(),
+        insert_file_path: "/tmp/doc.md".to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.build_insert_request(&state),
+        InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: None,
+            file_path: Some(std::path::PathBuf::from("/tmp/doc.md")),
+        }
+    );
+}
+
+#[test]
+fn build_insert_request_uses_pdf_mode_for_pdf_paths() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: "/tmp/doc.PDF".to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.build_insert_request(&state),
+        InsertRequest::Pdf {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            file_path: std::path::PathBuf::from("/tmp/doc.PDF"),
+        }
     );
 }
 

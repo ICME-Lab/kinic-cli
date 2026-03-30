@@ -107,7 +107,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         display_value(ui.insert_tag, "<tag>"),
         max_width,
     );
-    if matches!(ui.insert_mode, InsertMode::Normal | InsertMode::Raw) {
+    if matches!(ui.insert_mode, InsertMode::Text | InsertMode::Raw) {
         push_field(
             &mut lines,
             &mut rows,
@@ -118,7 +118,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             max_width,
         );
     }
-    if matches!(ui.insert_mode, InsertMode::Normal | InsertMode::Pdf) {
+    if matches!(ui.insert_mode, InsertMode::File) {
         push_field(
             &mut lines,
             &mut rows,
@@ -217,12 +217,12 @@ fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
 }
 
 fn mode_value(mode: InsertMode) -> String {
-    let (normal, raw, pdf) = match mode {
-        InsertMode::Normal => ("[normal]", " raw ", " pdf "),
-        InsertMode::Raw => (" normal ", "[raw]", " pdf "),
-        InsertMode::Pdf => (" normal ", " raw ", "[pdf]"),
+    let (text, file, raw) = match mode {
+        InsertMode::Text => ("[text]", " file ", " raw "),
+        InsertMode::File => (" text ", "[file]", " raw "),
+        InsertMode::Raw => (" text ", " file ", "[raw]"),
     };
-    format!("{normal} / {raw} / {pdf}")
+    format!("{text} / {file} / {raw}")
 }
 
 fn submit_value(ui: &TuiKitUi<'_>) -> String {
@@ -270,5 +270,44 @@ mod tests {
             .insert_memory_id("bbbbb-bb");
 
         assert_eq!(memory_id_value(&ui), "bbbbb-bb");
+    }
+
+    #[test]
+    fn insert_form_hides_file_path_for_text_mode() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::Text);
+        let lines = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(lines.contains("Text"));
+        assert!(!lines.contains("File Path"));
+        assert!(!lines.contains("Embedding JSON"));
+    }
+
+    #[test]
+    fn insert_form_hides_text_for_file_mode() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::File);
+        let lines = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!lines.contains("Text"));
+        assert!(lines.contains("File Path"));
+        assert!(!lines.contains("Embedding JSON"));
+    }
+
+    #[test]
+    fn mode_value_uses_text_file_raw_labels() {
+        assert_eq!(mode_value(InsertMode::Text), "[text] /  file  /  raw ");
+        assert_eq!(mode_value(InsertMode::File), " text  / [file] /  raw ");
+        assert_eq!(mode_value(InsertMode::Raw), " text  /  file  / [raw]");
     }
 }

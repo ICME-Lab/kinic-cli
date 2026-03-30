@@ -144,12 +144,12 @@ impl Default for UiConfig {
             insert: InsertScreenText {
                 title: "Insert Memory Content".to_string(),
                 intro_description:
-                    "Insert text, raw embeddings, or PDFs without leaving the tab view."
+                    "Insert text, files, or raw embeddings without leaving the tab view."
                         .to_string(),
                 mode_label: "Mode".to_string(),
                 memory_id_label: "Memory ID".to_string(),
                 tag_label: "Tag".to_string(),
-                text_label: "Text".to_string(),
+                text_label: "Inline Text".to_string(),
                 file_path_label: "File Path".to_string(),
                 embedding_label: "Embedding JSON".to_string(),
                 submit_label: "Insert".to_string(),

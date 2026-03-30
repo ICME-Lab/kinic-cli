@@ -177,7 +177,7 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     let mut state = CoreState {
         current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Content,
-        insert_mode: tui_kit_runtime::InsertMode::Pdf,
+        insert_mode: tui_kit_runtime::InsertMode::File,
         insert_memory_id: "aaaaa-aa".into(),
         insert_tag: "docs".into(),
         insert_file_path: "/tmp/doc.pdf".into(),
@@ -195,7 +195,7 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     );
 
     assert_eq!(state.focus, PaneFocus::Content);
-    assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::Pdf);
+    assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::File);
     assert_eq!(state.insert_memory_id, "aaaaa-aa");
     assert_eq!(state.insert_tag, "docs");
     assert_eq!(state.insert_file_path, "/tmp/doc.pdf");
