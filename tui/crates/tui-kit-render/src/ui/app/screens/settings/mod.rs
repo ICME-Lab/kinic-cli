@@ -99,7 +99,8 @@ pub(crate) fn default_memory_selector_lines(
     } else {
         for (index, item) in items.iter().enumerate() {
             let is_selected = index == selected_index;
-            let is_default = copy.show_current_default_marker && current_default_id == Some(item.id.as_str());
+            let is_default =
+                copy.show_current_default_marker && current_default_id == Some(item.id.as_str());
             let prefix = if is_selected { "›" } else { " " };
             let suffix = if is_default { "  ★" } else { "" };
             let kind = if is_selected {

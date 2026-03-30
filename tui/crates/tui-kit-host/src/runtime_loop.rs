@@ -10,8 +10,7 @@ use tui_kit_runtime::{
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
-    settings_entry,
-    should_open_default_memory_picker,
+    settings_entry, should_open_default_memory_picker,
 };
 
 use crate::clipboard::copy_text;

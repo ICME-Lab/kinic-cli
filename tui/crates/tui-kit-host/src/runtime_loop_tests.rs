@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 use super::*;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
@@ -350,8 +347,7 @@ fn copy_principal_id_from_settings_only_targets_principal_id() {
     assert_eq!(copied.as_deref(), Some("aaaaa-aa"));
 
     state.selected_index = Some(0);
-    let not_copyable =
-        copy_principal_id_from_settings(&state, crossterm::event::KeyCode::Enter);
+    let not_copyable = copy_principal_id_from_settings(&state, crossterm::event::KeyCode::Enter);
 
     assert_eq!(not_copyable, None);
 }

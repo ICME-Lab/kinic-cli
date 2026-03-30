@@ -130,10 +130,8 @@ pub(crate) struct InsertFormCopy {
 
 pub(crate) fn insert_form_copy() -> InsertFormCopy {
     InsertFormCopy {
-        close_hint:
-            "Tab: cycle fields, Enter: cycle mode / open target picker / submit, Esc: back to tab focus",
-        help_line:
-            "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits",
+        close_hint: "Tab: cycle fields, Enter: cycle mode / open target picker / submit, Esc: back to tab focus",
+        help_line: "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits",
         status_enter_hint: " cycle/picker/submit ",
     }
 }

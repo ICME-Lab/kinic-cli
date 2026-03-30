@@ -1178,7 +1178,8 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.saved_default_memory_id = snapshot.saved_default_memory_id;
     state.default_memory_selector_context = snapshot.default_memory_selector_context;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
-    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty() {
+    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty()
+    {
         state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
     }
     if state.default_memory_selector_items.is_empty() {
