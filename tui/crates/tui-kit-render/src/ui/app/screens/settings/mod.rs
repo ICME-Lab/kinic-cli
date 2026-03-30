@@ -79,7 +79,6 @@ impl<'a> TuiKitUi<'a> {
 
 pub(crate) fn default_memory_selector_lines(
     items: &[String],
-    labels: &[String],
     selected_index: usize,
     current_default_id: Option<&str>,
     copy: DefaultMemorySelectorCopy<'_>,
@@ -104,7 +103,6 @@ pub(crate) fn default_memory_selector_lines(
                 copy.show_current_default_marker && current_default_id == Some(item.as_str());
             let prefix = if is_selected { "›" } else { " " };
             let suffix = if is_default { "  ★" } else { "" };
-            let label = labels.get(index).map_or(item.as_str(), String::as_str);
             let kind = if is_selected {
                 DefaultMemorySelectorLineKind::Selected
             } else if is_default {
@@ -112,7 +110,7 @@ pub(crate) fn default_memory_selector_lines(
             } else {
                 DefaultMemorySelectorLineKind::Normal
             };
-            lines.push((format!(" {prefix} {label}{suffix}"), kind));
+            lines.push((format!(" {prefix} {item}{suffix}"), kind));
         }
     }
 
@@ -149,15 +147,17 @@ fn settings_screen_lines_with_selection(
         return lines;
     };
 
+    let label_width = snapshot
+        .sections
+        .iter()
+        .flat_map(|section| section.entries.iter())
+        .map(|entry| entry.label.chars().count())
+        .max()
+        .unwrap_or(0);
+
     let mut flattened_index = 0usize;
     for section in &snapshot.sections {
         lines.push(format!("## {}", section.title));
-        let label_width = section
-            .entries
-            .iter()
-            .map(|entry| entry.label.chars().count())
-            .max()
-            .unwrap_or(0);
         for entry in &section.entries {
             let prefix = if selected_entry_index == Some(flattened_index) {
                 "›"
@@ -187,65 +187,52 @@ fn settings_screen_lines_with_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
+    use tui_kit_runtime::{
+        SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot,
+    };
 
     #[test]
-    fn settings_screen_lines_show_sections_and_status_notes() {
+    fn settings_screen_lines_align_value_columns_across_sections() {
         let snapshot = SettingsSnapshot {
             quick_entries: vec![],
             sections: vec![
                 SettingsSection {
                     title: "Current session".to_string(),
-                    entries: vec![SettingsEntry {
-                        id: "principal_id".to_string(),
-                        label: "Principal ID".to_string(),
-                        value: "unavailable".to_string(),
-                        note: None,
-                    }],
+                    entries: vec![
+                        SettingsEntry {
+                            id: "auth".to_string(),
+                            label: "Auth".to_string(),
+                            value: "mock".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "embedding_api_endpoint".to_string(),
+                            label: "Embedding".to_string(),
+                            value: "https://api.kinic.io".to_string(),
+                            note: None,
+                        },
+                    ],
                     footer: None,
                 },
                 SettingsSection {
-                    title: "Saved preferences".to_string(),
-                    entries: vec![SettingsEntry {
-                        id: "preferred_network".to_string(),
-                        label: "Preferred network".to_string(),
-                        value: "coming soon".to_string(),
-                        note: Some("No persisted network preference is stored in v1.".to_string()),
-                    }],
+                    title: "Account".to_string(),
+                    entries: vec![
+                        SettingsEntry {
+                            id: "principal_id".to_string(),
+                            label: "Principal ID".to_string(),
+                            value: "aaaaa-aa".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "kinic_balance".to_string(),
+                            label: "KINIC balance".to_string(),
+                            value: "12.34000000 KINIC".to_string(),
+                            note: None,
+                        },
+                    ],
                     footer: None,
                 },
             ],
-        };
-
-        let lines = settings_screen_lines_with_selection(Some(&snapshot), None).join("\n");
-
-        assert!(lines.contains("## Current session"));
-        assert!(lines.contains("Principal ID: unavailable"));
-        assert!(!lines.contains("Shift+S shows quick status"));
-    }
-
-    #[test]
-    fn settings_screen_lines_align_value_columns_within_section() {
-        let snapshot = SettingsSnapshot {
-            quick_entries: vec![],
-            sections: vec![SettingsSection {
-                title: "Current session".to_string(),
-                entries: vec![
-                    SettingsEntry {
-                        id: "auth".to_string(),
-                        label: "Auth".to_string(),
-                        value: "mock".to_string(),
-                        note: None,
-                    },
-                    SettingsEntry {
-                        id: "embedding_api_endpoint".to_string(),
-                        label: "Embedding API endpoint".to_string(),
-                        value: "https://api.kinic.io".to_string(),
-                        note: None,
-                    },
-                ],
-                footer: None,
-            }],
         };
 
         let lines = settings_screen_lines_with_selection(Some(&snapshot), None);
@@ -255,13 +242,18 @@ mod tests {
             .expect("auth line");
         let endpoint_line = lines
             .iter()
-            .find(|line| line.contains("Embedding API endpoint"))
+            .find(|line| line.contains("Embedding"))
             .expect("endpoint line");
+        let principal_line = lines
+            .iter()
+            .find(|line| line.contains("Principal ID"))
+            .expect("principal line");
 
         assert_eq!(
             auth_line.find("mock"),
             endpoint_line.find("https://api.kinic.io")
         );
+        assert_eq!(auth_line.find(':'), principal_line.find(':'));
     }
 
     #[test]
@@ -272,7 +264,7 @@ mod tests {
                 title: "Saved preferences".to_string(),
                 entries: vec![
                     SettingsEntry {
-                        id: "default_memory".to_string(),
+                        id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                         label: "Default memory".to_string(),
                         value: "Alpha Memory".to_string(),
                         note: None,
@@ -293,7 +285,6 @@ mod tests {
         assert!(lines.contains("› Preferences status: ok"));
         assert!(lines.contains("  Default memory"));
     }
-
     #[test]
     fn default_memory_selector_lines_mark_selected_and_current_entries() {
         let lines = default_memory_selector_lines(

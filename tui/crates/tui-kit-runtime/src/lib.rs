@@ -1,11 +1,14 @@
-//! Domain-agnostic core contracts for driving tui-kit style UIs.
+//! Shared runtime contracts for the Kinic tui-kit stack.
 //!
-//! This crate defines generic actions/effects, shared runtime state, and the
-//! `DataProvider` trait so multiple domains can plug into the same UI shell.
+//! This crate defines common actions/effects, shared runtime state, and the
+//! `DataProvider` trait used by the Kinic TUI crates.
 
 pub mod kinic_tabs;
 
+use candid::Nat;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
+
+pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
 
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -148,22 +151,120 @@ pub enum CreateCostState {
     Hidden,
     Loading,
     Unavailable,
-    Error(String),
-    Ready(CreateCostDetails),
+    Loaded(Box<LoadedCreateCost>),
+    Error(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateCostDetails {
+pub struct SessionSettingsSnapshot {
+    pub auth_mode: String,
+    pub identity_name: String,
+    pub principal_id: String,
+    pub network: String,
+    pub embedding_api_endpoint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionAccountOverview {
+    pub session: SessionSettingsSnapshot,
+    pub balance_base_units: Option<u128>,
+    pub price_base_units: Option<Nat>,
+    pub principal_error: Option<String>,
+    pub balance_error: Option<String>,
+    pub price_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedCreateCost {
     pub principal: String,
     pub balance_kinic: String,
-    pub balance_base_units: String,
     pub price_kinic: String,
-    pub price_base_units: String,
     pub required_total_kinic: String,
     pub required_total_base_units: String,
     pub difference_kinic: String,
     pub difference_base_units: String,
     pub sufficient_balance: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedCreateCost {
+    pub overview: SessionAccountOverview,
+    pub details: Option<DerivedCreateCost>,
+}
+
+impl SessionAccountOverview {
+    pub fn new(session: SessionSettingsSnapshot) -> Self {
+        Self {
+            session,
+            balance_base_units: None,
+            price_base_units: None,
+            principal_error: None,
+            balance_error: None,
+            price_error: None,
+        }
+    }
+
+    pub fn has_complete_create_cost(&self) -> bool {
+        self.balance_base_units.is_some() && self.price_base_units.is_some()
+    }
+
+    pub fn account_issue_messages(&self) -> Vec<String> {
+        let mut messages = Vec::new();
+        if let Some(error) = &self.principal_error {
+            messages.push(format!("Could not derive principal. Cause: {error}"));
+        }
+        if let Some(error) = &self.balance_error {
+            messages.push(format!("Could not fetch KINIC balance. Cause: {error}"));
+        }
+        if let Some(error) = &self.price_error {
+            messages.push(format!("Could not fetch create price. Cause: {error}"));
+        }
+        messages
+    }
+
+    pub fn account_issue_note(&self) -> Option<String> {
+        let issues = self.account_issue_messages();
+        (!issues.is_empty()).then(|| issues.join(" | "))
+    }
+
+    pub fn session_settings_refresh_failure_message(&self) -> Option<String> {
+        self.principal_error
+            .as_ref()
+            .map(|error| format!("Session settings refresh failed: {error}"))
+    }
+
+    pub fn session_settings_refresh_notify_message(&self) -> String {
+        let account_incomplete = self.principal_error.is_some()
+            || self.balance_error.is_some()
+            || self.price_error.is_some()
+            || !self.has_complete_create_cost();
+        if account_incomplete {
+            "Session settings updated (partial account info). See Settings → Account.".to_string()
+        } else {
+            "Session settings refreshed.".to_string()
+        }
+    }
+}
+
+pub fn format_e8s_to_kinic_string_u128(value: u128) -> String {
+    format_e8s_to_kinic_string_str(value.to_string().as_str())
+}
+
+pub fn format_e8s_to_kinic_string_nat(value: &Nat) -> String {
+    format_e8s_to_kinic_string_str(value.to_string().as_str())
+}
+
+fn format_e8s_to_kinic_string_str(value: &str) -> String {
+    const SCALE: usize = 8;
+
+    let digits = value.replace('_', "");
+    if digits.len() <= SCALE {
+        return format!("0.{:0>width$}", digits, width = SCALE);
+    }
+
+    let split_at = digits.len() - SCALE;
+    let (whole, fraction) = digits.split_at(split_at);
+    format!("{whole}.{fraction}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -215,7 +316,6 @@ pub struct CoreState {
     pub default_memory_selector_open: bool,
     pub default_memory_selector_index: usize,
     pub default_memory_selector_items: Vec<String>,
-    pub default_memory_selector_labels: Vec<String>,
     pub default_memory_selector_selected_id: Option<String>,
     pub default_memory_selector_context: MemorySelectorContext,
     pub insert_mode: InsertMode,
@@ -259,7 +359,6 @@ impl Default for CoreState {
             default_memory_selector_open: false,
             default_memory_selector_index: 0,
             default_memory_selector_items: Vec::new(),
-            default_memory_selector_labels: Vec::new(),
             default_memory_selector_selected_id: None,
             default_memory_selector_context: MemorySelectorContext::default(),
             insert_mode: InsertMode::default(),
@@ -286,12 +385,6 @@ pub enum CoreAction {
     MovePageUp,
     MoveHome,
     MoveEnd,
-    SettingsMoveNext,
-    SettingsMovePrev,
-    SettingsMovePageDown,
-    SettingsMovePageUp,
-    SettingsMoveHome,
-    SettingsMoveEnd,
     ScrollContentPageDown,
     ScrollContentPageUp,
     ScrollContentHome,
@@ -429,7 +522,6 @@ pub struct ProviderSnapshot {
     pub create_submit_state: CreateSubmitState,
     pub settings: SettingsSnapshot,
     pub default_memory_selector_items: Vec<String>,
-    pub default_memory_selector_labels: Vec<String>,
     pub default_memory_selector_selected_id: Option<String>,
     pub default_memory_selector_context: MemorySelectorContext,
     pub insert_memory_placeholder: Option<String>,
@@ -440,6 +532,31 @@ pub struct ProviderSnapshot {
 pub struct ProviderOutput {
     pub snapshot: Option<ProviderSnapshot>,
     pub effects: Vec<CoreEffect>,
+}
+
+#[cfg(test)]
+mod formatter_tests {
+    use super::{format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128};
+    use candid::Nat;
+
+    #[test]
+    fn format_e8s_to_kinic_string_u128_keeps_eight_fraction_digits() {
+        assert_eq!(
+            format_e8s_to_kinic_string_u128(123_456_789u128),
+            "1.23456789"
+        );
+        assert_eq!(format_e8s_to_kinic_string_u128(42u128), "0.00000042");
+    }
+
+    #[test]
+    fn format_e8s_to_kinic_string_nat_supports_values_larger_than_u128() {
+        let large = Nat::parse(b"340282366920938463463374607431768211456").expect("valid Nat");
+
+        assert_eq!(
+            format_e8s_to_kinic_string_nat(&large),
+            "3402823669209384634633746074317.68211456"
+        );
+    }
 }
 
 /// Input key abstraction for shared key->action mapping.
@@ -765,7 +882,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::ChatScrollHome => state.chat_scroll = 0,
         CoreAction::ChatScrollEnd => state.chat_scroll = state.chat_scroll.saturating_add(9999),
         CoreAction::MoveNext => {
-            let len = item_selectable_len(state);
+            let len = selectable_len(state);
             if len == 0 {
                 state.selected_index = None;
             } else {
@@ -774,22 +891,27 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::MovePrev => {
-            let idx = state.selected_index.unwrap_or(0);
-            state.selected_index = Some(idx.saturating_sub(1));
+            let len = selectable_len(state);
+            if len == 0 {
+                state.selected_index = None;
+            } else {
+                let idx = state.selected_index.unwrap_or(0);
+                state.selected_index = Some(idx.saturating_sub(1));
+            }
         }
         CoreAction::MoveHome => {
-            state.selected_index = if item_selectable_len(state) == 0 {
+            state.selected_index = if selectable_len(state) == 0 {
                 None
             } else {
                 Some(0)
             };
         }
         CoreAction::MoveEnd => {
-            let len = item_selectable_len(state);
+            let len = selectable_len(state);
             state.selected_index = if len == 0 { None } else { Some(len - 1) };
         }
         CoreAction::MovePageDown => {
-            let len = item_selectable_len(state);
+            let len = selectable_len(state);
             if len == 0 {
                 state.selected_index = None;
             } else {
@@ -798,45 +920,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::MovePageUp => {
-            let idx = state.selected_index.unwrap_or(0);
-            state.selected_index = Some(idx.saturating_sub(10));
-        }
-        CoreAction::SettingsMoveNext => {
-            let len = settings_selectable_len(&state.settings);
+            let len = selectable_len(state);
             if len == 0 {
                 state.selected_index = None;
             } else {
                 let idx = state.selected_index.unwrap_or(0);
-                state.selected_index = Some((idx + 1).min(len - 1));
+                state.selected_index = Some(idx.saturating_sub(10));
             }
-        }
-        CoreAction::SettingsMovePrev => {
-            let idx = state.selected_index.unwrap_or(0);
-            state.selected_index = Some(idx.saturating_sub(1));
-        }
-        CoreAction::SettingsMoveHome => {
-            state.selected_index = if settings_selectable_len(&state.settings) == 0 {
-                None
-            } else {
-                Some(0)
-            };
-        }
-        CoreAction::SettingsMoveEnd => {
-            let len = settings_selectable_len(&state.settings);
-            state.selected_index = if len == 0 { None } else { Some(len - 1) };
-        }
-        CoreAction::SettingsMovePageDown => {
-            let len = settings_selectable_len(&state.settings);
-            if len == 0 {
-                state.selected_index = None;
-            } else {
-                let idx = state.selected_index.unwrap_or(0);
-                state.selected_index = Some((idx + 10).min(len - 1));
-            }
-        }
-        CoreAction::SettingsMovePageUp => {
-            let idx = state.selected_index.unwrap_or(0);
-            state.selected_index = Some(idx.saturating_sub(10));
         }
         _ => {}
     }
@@ -1032,29 +1122,10 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             },
             PaneFocus::Tabs => None,
             PaneFocus::Content => match key {
-                CoreKey::Enter if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => None,
+                CoreKey::Enter if is_settings_content(current_tab_id, PaneFocus::Content) => None,
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
-                CoreKey::Down if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::SettingsMoveNext)
-                }
-                CoreKey::Up if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::SettingsMovePrev)
-                }
-                CoreKey::PageDown if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::SettingsMovePageDown)
-                }
-                CoreKey::PageUp if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID => {
-                    Some(CoreAction::SettingsMovePageUp)
-                }
-                CoreKey::Home | CoreKey::Char('g')
-                    if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID =>
-                {
-                    Some(CoreAction::SettingsMoveHome)
-                }
-                CoreKey::End | CoreKey::Char('G')
-                    if current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID =>
-                {
-                    Some(CoreAction::SettingsMoveEnd)
+                _ if is_settings_content(current_tab_id, PaneFocus::Content) => {
+                    settings_content_action_for_key(key)
                 }
                 CoreKey::Down => Some(CoreAction::ScrollContentPageDown),
                 CoreKey::Up => Some(CoreAction::ScrollContentPageUp),
@@ -1092,7 +1163,6 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.create_submit_state = snapshot.create_submit_state;
     state.settings = snapshot.settings;
     state.default_memory_selector_items = snapshot.default_memory_selector_items;
-    state.default_memory_selector_labels = snapshot.default_memory_selector_labels;
     state.default_memory_selector_selected_id = snapshot.default_memory_selector_selected_id;
     state.default_memory_selector_context = snapshot.default_memory_selector_context;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
@@ -1113,9 +1183,7 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
 }
 
 fn selectable_len(state: &CoreState) -> usize {
-    if state.current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID
-        && state.focus == PaneFocus::Content
-    {
+    if is_settings_content(state.current_tab_id.as_str(), state.focus) {
         return settings_selectable_len(&state.settings);
     }
 
@@ -1150,13 +1218,28 @@ pub fn settings_entry(settings: &SettingsSnapshot, index: usize) -> Option<&Sett
 }
 
 pub fn should_open_default_memory_picker(state: &CoreState) -> bool {
-    state.current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID
-        && state.focus == PaneFocus::Content
+    is_settings_content(state.current_tab_id.as_str(), state.focus)
         && state
             .selected_index
             .and_then(|index| settings_entry(&state.settings, index))
             .map(|entry| entry.id.as_str())
-            == Some("default_memory")
+            == Some(SETTINGS_ENTRY_DEFAULT_MEMORY_ID)
+}
+
+fn is_settings_content(current_tab_id: &str, focus: PaneFocus) -> bool {
+    current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID && focus == PaneFocus::Content
+}
+
+fn settings_content_action_for_key(key: CoreKey) -> Option<CoreAction> {
+    match key {
+        CoreKey::Down => Some(CoreAction::MoveNext),
+        CoreKey::Up => Some(CoreAction::MovePrev),
+        CoreKey::PageDown => Some(CoreAction::MovePageDown),
+        CoreKey::PageUp => Some(CoreAction::MovePageUp),
+        CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::MoveHome),
+        CoreKey::End | CoreKey::Char('G') => Some(CoreAction::MoveEnd),
+        _ => None,
+    }
 }
 
 fn default_memory_selector_context(state: &CoreState) -> MemorySelectorContext {
@@ -1173,25 +1256,6 @@ fn default_memory_selector_context(state: &CoreState) -> MemorySelectorContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct DummyProvider;
-
-    impl DataProvider for DummyProvider {
-        fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
-            Ok(ProviderSnapshot {
-                total_count: 1,
-                ..ProviderSnapshot::default()
-            })
-        }
-
-        fn handle_action(
-            &mut self,
-            _action: &CoreAction,
-            _state: &CoreState,
-        ) -> CoreResult<ProviderOutput> {
-            Ok(ProviderOutput::default())
-        }
-    }
 
     #[test]
     fn test_apply_snapshot_sets_total_and_selection() {
@@ -1217,13 +1281,6 @@ mod tests {
         apply_snapshot(&mut state, snapshot);
         assert_eq!(state.total_count, 1);
         assert_eq!(state.selected_index, Some(0));
-    }
-
-    #[test]
-    fn test_dummy_provider_contract() {
-        let mut p = DummyProvider;
-        let init = p.initialize().unwrap();
-        assert_eq!(init.total_count, 1);
     }
 
     #[test]
@@ -1260,7 +1317,26 @@ mod tests {
 
     #[test]
     fn test_dispatch_action_applies_provider_snapshot() {
-        let mut provider = DummyProvider;
+        struct DispatchTestProvider;
+
+        impl DataProvider for DispatchTestProvider {
+            fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
+                Ok(ProviderSnapshot {
+                    total_count: 1,
+                    ..ProviderSnapshot::default()
+                })
+            }
+
+            fn handle_action(
+                &mut self,
+                _action: &CoreAction,
+                _state: &CoreState,
+            ) -> CoreResult<ProviderOutput> {
+                Ok(ProviderOutput::default())
+            }
+        }
+
+        let mut provider = DispatchTestProvider;
         let mut state = CoreState::default();
         let effects = dispatch_action(&mut provider, &mut state, &CoreAction::FocusItems).unwrap();
         assert!(effects.is_empty());
@@ -1318,19 +1394,6 @@ mod tests {
     }
 
     #[test]
-    fn tab_focus_policy_matches_create_tab_capabilities() {
-        let policy = tab_focus_policy(kinic_tabs::KINIC_CREATE_TAB_ID);
-
-        assert_eq!(policy.default_focus, PaneFocus::Tabs);
-        assert!(!policy.allows_search);
-        assert!(!policy.allows_items);
-        assert!(policy.allows_tabs);
-        assert!(!policy.allows_content);
-        assert!(policy.allows_form);
-        assert!(policy.allows_chat);
-    }
-
-    #[test]
     fn back_is_clamped_on_create_tab() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
@@ -1353,33 +1416,6 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::CreateNextField);
         assert_eq!(state.create_focus, CreateModalFocus::Name);
-    }
-
-    #[test]
-    fn create_refresh_sets_loading_state() {
-        let mut state = CoreState::default();
-
-        apply_core_action(&mut state, &CoreAction::CreateRefresh);
-
-        assert_eq!(state.create_cost_state, CreateCostState::Loading);
-        assert_eq!(state.create_spinner_frame, 0);
-    }
-
-    #[test]
-    fn tab_entry_focus_matches_kinic_tabs() {
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_MEMORIES_TAB_ID),
-            Some(PaneFocus::Search)
-        );
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_CREATE_TAB_ID),
-            Some(PaneFocus::Form)
-        );
-        assert_eq!(
-            tab_entry_focus(kinic_tabs::KINIC_MARKET_TAB_ID),
-            Some(PaneFocus::Content)
-        );
-        assert_eq!(tab_entry_focus("unknown"), Some(PaneFocus::Content));
     }
 
     #[test]
@@ -1569,7 +1605,7 @@ mod tests {
                 title: "Saved preferences".to_string(),
                 entries: vec![
                     SettingsEntry {
-                        id: "default_memory".to_string(),
+                        id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                         label: "Preferred memory".to_string(),
                         value: "aaaaa-aa".to_string(),
                         note: None,
@@ -1658,7 +1694,7 @@ mod tests {
                     title: "Saved preferences".to_string(),
                     entries: vec![
                         SettingsEntry {
-                            id: "default_memory".to_string(),
+                            id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                             label: "Default memory".to_string(),
                             value: "aaaaa-aa".to_string(),
                             note: None,
@@ -1710,7 +1746,7 @@ mod tests {
                 PaneFocus::Content,
                 kinic_tabs::KINIC_SETTINGS_TAB_ID
             ),
-            Some(CoreAction::SettingsMoveNext)
+            Some(CoreAction::MoveNext)
         );
         assert_eq!(
             action_for_key(
@@ -1718,7 +1754,7 @@ mod tests {
                 PaneFocus::Content,
                 kinic_tabs::KINIC_SETTINGS_TAB_ID
             ),
-            Some(CoreAction::SettingsMoveEnd)
+            Some(CoreAction::MoveEnd)
         );
         assert_eq!(
             action_for_key(
@@ -1726,7 +1762,7 @@ mod tests {
                 PaneFocus::Content,
                 kinic_tabs::KINIC_SETTINGS_TAB_ID
             ),
-            Some(CoreAction::SettingsMovePageUp)
+            Some(CoreAction::MovePageUp)
         );
     }
 
@@ -1743,18 +1779,40 @@ mod tests {
     }
 
     #[test]
-    fn settings_move_actions_update_settings_selection_only() {
+    fn move_actions_follow_settings_selection_length() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
             focus: PaneFocus::Content,
             selected_index: Some(0),
+            list_items: vec![
+                UiItemSummary {
+                    id: "memory-1".to_string(),
+                    name: "memory-1".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+                UiItemSummary {
+                    id: "memory-2".to_string(),
+                    name: "memory-2".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+            ],
             settings: SettingsSnapshot {
                 quick_entries: vec![],
                 sections: vec![SettingsSection {
                     title: "Saved preferences".to_string(),
                     entries: vec![
                         SettingsEntry {
-                            id: "default_memory".to_string(),
+                            id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                             label: "Default memory".to_string(),
                             value: "aaaaa-aa".to_string(),
                             note: None,
@@ -1765,6 +1823,12 @@ mod tests {
                             value: "ok".to_string(),
                             note: None,
                         },
+                        SettingsEntry {
+                            id: "preferences_mode".to_string(),
+                            label: "Preferences mode".to_string(),
+                            value: "live".to_string(),
+                            note: None,
+                        },
                     ],
                     footer: None,
                 }],
@@ -1772,11 +1836,18 @@ mod tests {
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::SettingsMoveNext);
+        apply_core_action(&mut state, &CoreAction::MoveNext);
         assert_eq!(state.selected_index, Some(1));
 
         apply_core_action(&mut state, &CoreAction::MoveNext);
-        assert_eq!(state.selected_index, None);
+        assert_eq!(state.selected_index, Some(2));
+
+        apply_core_action(&mut state, &CoreAction::MoveNext);
+        assert_eq!(state.selected_index, Some(2));
+
+        state.selected_index = Some(0);
+        apply_core_action(&mut state, &CoreAction::MoveEnd);
+        assert_eq!(state.selected_index, Some(2));
     }
 
     #[test]

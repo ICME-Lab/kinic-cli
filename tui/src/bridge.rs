@@ -1,21 +1,20 @@
 use std::cmp::Ordering;
 
 use anyhow::{Context, Result};
-use candid::Nat;
 use ic_agent::export::Principal;
-use tui_kit_runtime::CreateCostDetails;
+use tui_kit_runtime::{SessionAccountOverview, format_e8s_to_kinic_string_nat};
 
 use crate::{
     clients::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
     },
-    commands::create::{BalanceDelta, balance_delta, required_balance},
+    create_domain::{BalanceDelta, balance_delta, required_balance},
     embedding::{embedding_base_url, fetch_embedding},
     insert_service::{InsertExecutionResult, InsertRequest, execute_insert_request},
     ledger::fetch_balance,
     tui::TuiAuth,
-    tui::settings::SessionSettingsSnapshot,
+    tui::settings::session_settings_snapshot,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,13 +43,6 @@ pub struct InsertMemorySuccess {
     pub memory_id: String,
     pub tag: String,
     pub inserted_count: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CreateCostFetchError {
-    Principal(String),
-    Balance(String),
-    Price(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,22 +79,6 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
-pub async fn load_session_settings(
-    use_mainnet: bool,
-    auth: TuiAuth,
-    default_memory_id: Option<String>,
-) -> Result<SessionSettingsSnapshot, String> {
-    let principal_id = auth.principal_text().map_err(|error| error.to_string())?;
-
-    Ok(SessionSettingsSnapshot::new(
-        &auth,
-        use_mainnet,
-        Some(principal_id),
-        embedding_base_url(),
-        default_memory_id,
-    ))
-}
-
 pub async fn create_memory(
     use_mainnet: bool,
     auth: TuiAuth,
@@ -115,22 +91,19 @@ pub async fn create_memory(
         .build()
         .await
         .map_err(|error| CreateMemoryError::Principal(short_error(&error.to_string())))?;
-    let balance = fetch_balance(&agent)
-        .await
-        .map_err(|error| CreateMemoryError::Balance(short_error(&error.to_string())))?;
-    let client = LauncherClient::new(agent);
-    let price = client
-        .fetch_deployment_price()
-        .await
-        .map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
+    let client = LauncherClient::new(agent.clone());
+    let (balance, price) = tokio::join!(fetch_balance(&agent), client.fetch_deployment_price());
+    let balance =
+        balance.map_err(|error| CreateMemoryError::Balance(short_error(&error.to_string())))?;
+    let price = price.map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
     match balance_delta(&price, balance) {
         BalanceDelta::Surplus(_) => {}
         BalanceDelta::Shortfall(shortfall) => {
             let required_total = required_balance(&price);
             return Err(CreateMemoryError::InsufficientBalance {
-                required_total_kinic: format_e8s_to_kinic_string(&required_total),
+                required_total_kinic: format_e8s_to_kinic_string_nat(&required_total),
                 required_total_base_units: required_total.to_string(),
-                shortfall_kinic: format_e8s_to_kinic_string(&shortfall),
+                shortfall_kinic: format_e8s_to_kinic_string_nat(&shortfall),
                 shortfall_base_units: shortfall.to_string(),
             });
         }
@@ -164,42 +137,58 @@ pub async fn create_memory(
     })
 }
 
-pub async fn fetch_create_cost_details(
+pub async fn load_session_account_overview(
     use_mainnet: bool,
     auth: TuiAuth,
-) -> Result<CreateCostDetails, CreateCostFetchError> {
-    let factory = resolve_agent_factory(use_mainnet, &auth)
-        .map_err(|error| CreateCostFetchError::Principal(short_error(&error.to_string())))?;
+) -> SessionAccountOverview {
+    let mut overview = SessionAccountOverview::new(session_settings_snapshot(
+        &auth,
+        use_mainnet,
+        None,
+        embedding_base_url(),
+    ));
+    let factory =
+        resolve_agent_factory(use_mainnet, &auth).map_err(|error| short_error(&error.to_string()));
+    let factory = match factory {
+        Ok(factory) => factory,
+        Err(error) => {
+            overview.principal_error = Some(error);
+            return overview;
+        }
+    };
     let agent = factory
         .build()
         .await
-        .map_err(|error| CreateCostFetchError::Principal(short_error(&error.to_string())))?;
-    let principal = agent
-        .get_principal()
-        .map_err(|error| CreateCostFetchError::Principal(short_error(&error.to_string())))?;
-    let balance = fetch_balance(&agent)
-        .await
-        .map_err(|error| CreateCostFetchError::Balance(short_error(&error.to_string())))?;
-    let client = LauncherClient::new(agent);
-    let price = client
-        .fetch_deployment_price()
-        .await
-        .map_err(|error| CreateCostFetchError::Price(short_error(&error.to_string())))?;
-    let required_total = required_balance(&price);
-    let delta = balance_delta(&price, balance);
+        .map_err(|error| short_error(&error.to_string()));
+    let agent = match agent {
+        Ok(agent) => agent,
+        Err(error) => {
+            overview.principal_error = Some(error);
+            return overview;
+        }
+    };
+    match auth.principal_text() {
+        Ok(principal_id) => overview.session.principal_id = principal_id,
+        Err(error) => {
+            overview.principal_error = Some(short_error(&error.to_string()));
+            return overview;
+        }
+    }
+    let client = LauncherClient::new(agent.clone());
+    let (balance, price) = tokio::join!(fetch_balance(&agent), client.fetch_deployment_price());
 
-    Ok(CreateCostDetails {
-        principal: principal.to_text(),
-        balance_kinic: format_e8s_to_kinic_string(&Nat::from(balance)),
-        balance_base_units: balance.to_string(),
-        price_kinic: format_e8s_to_kinic_string(&price),
-        price_base_units: price.to_string(),
-        required_total_kinic: format_e8s_to_kinic_string(&required_total),
-        required_total_base_units: required_total.to_string(),
-        difference_kinic: signed_delta_kinic(&delta),
-        difference_base_units: signed_delta_base_units(&delta),
-        sufficient_balance: matches!(delta, BalanceDelta::Surplus(_)),
-    })
+    if let Err(error) = &balance {
+        overview.balance_error = Some(short_error(&error.to_string()));
+    } else if let Ok(balance) = &balance {
+        overview.balance_base_units = Some(*balance);
+    }
+    if let Err(error) = &price {
+        overview.price_error = Some(short_error(&error.to_string()));
+    } else if let Ok(price) = &price {
+        overview.price_base_units = Some(price.clone());
+    }
+
+    overview
 }
 
 pub async fn search_memory(
@@ -278,33 +267,6 @@ fn memory_summary_from_state(state: State) -> MemorySummary {
     }
 }
 
-fn signed_delta_kinic(delta: &BalanceDelta) -> String {
-    match delta {
-        BalanceDelta::Surplus(value) => format!("+{}", format_e8s_to_kinic_string(value)),
-        BalanceDelta::Shortfall(value) => format!("-{}", format_e8s_to_kinic_string(value)),
-    }
-}
-
-fn signed_delta_base_units(delta: &BalanceDelta) -> String {
-    match delta {
-        BalanceDelta::Surplus(value) => format!("+{value}"),
-        BalanceDelta::Shortfall(value) => format!("-{value}"),
-    }
-}
-
-fn format_e8s_to_kinic_string(value: &Nat) -> String {
-    const SCALE: usize = 8;
-
-    let digits = value.to_string().replace('_', "");
-    if digits.len() <= SCALE {
-        return format!("0.{:0>width$}", digits, width = SCALE);
-    }
-
-    let split_at = digits.len() - SCALE;
-    let (whole, fraction) = digits.split_at(split_at);
-    format!("{whole}.{fraction}")
-}
-
 fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
@@ -325,29 +287,9 @@ fn insert_success_from_result(result: InsertExecutionResult) -> InsertMemorySucc
 #[cfg(test)]
 mod tests {
     use super::*;
+    use candid::Nat;
     use ic_agent::identity::AnonymousIdentity;
     use std::sync::Arc;
-
-    #[test]
-    fn format_e8s_to_kinic_string_keeps_eight_fraction_digits() {
-        assert_eq!(
-            format_e8s_to_kinic_string(&Nat::from(123_456_789u128)),
-            "1.23456789"
-        );
-        assert_eq!(format_e8s_to_kinic_string(&Nat::from(42u128)), "0.00000042");
-    }
-
-    #[test]
-    fn signed_delta_strings_keep_signs() {
-        assert_eq!(
-            signed_delta_kinic(&BalanceDelta::Surplus(Nat::from(10u128))),
-            "+0.00000010"
-        );
-        assert_eq!(
-            signed_delta_base_units(&BalanceDelta::Shortfall(Nat::from(10u128))),
-            "-10"
-        );
-    }
 
     #[test]
     fn resolve_agent_factory_accepts_resolved_identity() {
@@ -392,6 +334,153 @@ mod tests {
                 .refresh_warning
                 .as_deref()
                 .is_some_and(|message| message.contains("Press F5 to refresh"))
+        );
+    }
+
+    #[test]
+    fn session_account_overview_reports_complete_cost_inputs_when_balance_and_price_exist() {
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.balance_base_units = Some(2_000_000u128);
+        overview.price_base_units = Some(Nat::from(1_500_000u128));
+
+        assert!(overview.has_complete_create_cost());
+    }
+
+    #[test]
+    fn session_account_overview_reports_incomplete_create_cost_when_only_balance_exists() {
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.balance_base_units = Some(1_234_000_000u128);
+        overview.price_error = Some("price unavailable".to_string());
+
+        assert!(!overview.has_complete_create_cost());
+    }
+
+    #[test]
+    fn session_account_overview_lists_account_issues_in_priority_order() {
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.principal_error = Some("identity unavailable".to_string());
+        overview.balance_error = Some("ledger unavailable".to_string());
+        overview.price_error = Some("price unavailable".to_string());
+
+        assert_eq!(
+            overview.account_issue_messages(),
+            vec![
+                "Could not derive principal. Cause: identity unavailable".to_string(),
+                "Could not fetch KINIC balance. Cause: ledger unavailable".to_string(),
+                "Could not fetch create price. Cause: price unavailable".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn session_account_overview_formats_joined_account_issue_note() {
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.balance_error = Some("ledger unavailable".to_string());
+        overview.price_error = Some("price unavailable".to_string());
+        assert_eq!(
+            overview.account_issue_note(),
+            Some(
+                "Could not fetch KINIC balance. Cause: ledger unavailable | Could not fetch create price. Cause: price unavailable".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn session_account_overview_returns_none_when_no_account_issues_exist() {
+        let overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        assert_eq!(overview.account_issue_note(), None);
+    }
+
+    #[test]
+    fn session_account_overview_lists_no_issues_when_unavailable_without_errors() {
+        let overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        assert_eq!(overview.account_issue_messages(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn session_account_overview_formats_joined_create_cost_errors_example() {
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.balance_error = Some("ledger unavailable".to_string());
+        overview.price_error = Some("price unavailable".to_string());
+        assert_eq!(
+            overview.account_issue_messages().join(" | "),
+            "Could not fetch KINIC balance. Cause: ledger unavailable | Could not fetch create price. Cause: price unavailable"
+        );
+    }
+
+    #[test]
+    fn session_settings_refresh_notify_message_reflects_account_completeness() {
+        let mut complete = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            Some("aaaaa-aa".to_string()),
+            "https://api.kinic.io".to_string(),
+        ));
+        complete.balance_base_units = Some(2_000_000u128);
+        complete.price_base_units = Some(Nat::from(1_500_000u128));
+        assert_eq!(
+            complete.session_settings_refresh_notify_message(),
+            "Session settings refreshed."
+        );
+
+        let mut partial = complete.clone();
+        partial.price_base_units = None;
+        partial.balance_error = Some("ledger down".to_string());
+        assert!(
+            partial
+                .session_settings_refresh_notify_message()
+                .contains("Settings → Account."),
+        );
+    }
+
+    #[test]
+    fn session_settings_refresh_failure_message_reports_principal_failures() {
+        let mut overview = SessionAccountOverview::new(session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            false,
+            None,
+            "https://api.kinic.io".to_string(),
+        ));
+        overview.principal_error = Some("identity lookup failed".to_string());
+
+        assert_eq!(
+            overview.session_settings_refresh_failure_message(),
+            Some("Session settings refresh failed: identity lookup failed".to_string())
         );
     }
 }
