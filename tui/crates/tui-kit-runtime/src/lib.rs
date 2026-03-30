@@ -2002,4 +2002,50 @@ mod tests {
 
         assert_eq!(state.selector_index, 0);
     }
+
+    #[test]
+    fn open_selector_uses_snapshot_insert_target_selection() {
+        let mut state = CoreState {
+            selector_context: SelectorContext::InsertTarget,
+            selector_mode: SelectorMode::List,
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_selected_id: Some("aaaaa-aa".to_string()),
+            selector_index: 0,
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
+            selector_selected_id: Some("bbbbb-bb".to_string()),
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+        open_selector(&mut state, SelectorContext::InsertTarget);
+
+        assert_eq!(state.selector_index, 1);
+    }
+
+    #[test]
+    fn selector_snapshot_keeps_insert_target_cursor_after_open() {
+        let mut state = CoreState {
+            selector_open: true,
+            selector_context: SelectorContext::InsertTarget,
+            selector_mode: SelectorMode::List,
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_selected_id: Some("bbbbb-bb".to_string()),
+            selector_index: 0,
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
+            selector_selected_id: Some("bbbbb-bb".to_string()),
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.selector_index, 0);
+    }
 }

@@ -200,6 +200,9 @@ fn selector_snapshot_for_context(
         SelectorContext::DefaultMemory | SelectorContext::InsertTarget => {
             let items = memory_selection.available_memory_ids();
             let labels = memory_selection.selector_labels();
+            // Default-memory selectors only use the persisted preference as the
+            // initial anchor when the overlay opens. Once open, runtime keeps the
+            // current cursor and does not follow snapshot.selected_id updates.
             let selected_id = memory_selection.selected_default_memory_id();
             (items, labels, selected_id)
         }
