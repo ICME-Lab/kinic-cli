@@ -2,26 +2,20 @@
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
 use tui_kit_runtime::{CreateSubmitState, InsertFormFocus, InsertMode};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::{Focus, TuiKitUi, shared};
 
-const MODE_OPTIONS: &str = "normal / raw / pdf";
-
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_insert_screen(&self, area: Rect, buf: &mut Buffer) {
         let layout = insert_layout(area, !self.tab_specs.is_empty());
         let form = insert_form_lines(self, layout.form_area.width.saturating_sub(6));
-        let intro = insert_intro_lines(self, layout.intro_area.height);
-        Paragraph::new(intro)
-            .wrap(Wrap { trim: false })
-            .render(layout.intro_area, buf);
         Paragraph::new(form.lines)
             .block(
                 Block::default()
@@ -52,92 +46,13 @@ impl<'a> TuiKitUi<'a> {
     }
 }
 
-fn insert_intro_lines<'a>(ui: &'a TuiKitUi<'a>, intro_height: u16) -> Vec<Line<'a>> {
-    let mut intro = vec![
-        Line::from(vec![
-            Span::styled(" Insert ", ui.theme.style_accent_bold()),
-            Span::styled(
-                ui.ui_config.insert.intro_description.as_str(),
-                ui.theme.style_normal(),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(" Enter ", ui.theme.style_accent()),
-            Span::styled("mode or submit", ui.theme.style_muted()),
-            Span::styled("  │  ", ui.theme.style_dim()),
-            Span::styled(" Tab / Shift+Tab ", ui.theme.style_accent()),
-            Span::styled("cycle fields", ui.theme.style_muted()),
-        ]),
-    ];
-
-    if intro_height >= 5 {
-        intro[2] = Line::from(vec![
-            Span::styled(" Enter ", ui.theme.style_accent()),
-            Span::styled("mode or submit", ui.theme.style_muted()),
-            Span::styled("  │  ", ui.theme.style_dim()),
-            Span::styled(" Tab / Shift+Tab ", ui.theme.style_accent()),
-            Span::styled("cycle fields", ui.theme.style_muted()),
-            Span::styled("  │  ", ui.theme.style_dim()),
-            Span::styled(" Esc ", ui.theme.style_accent()),
-            Span::styled("step back one level", ui.theme.style_muted()),
-        ]);
-        intro.push(Line::from(vec![
-            Span::styled(" While submitting ", ui.theme.style_accent()),
-            Span::styled("wait for completion before editing", ui.theme.style_muted()),
-        ]));
-    }
-
-    intro
-}
-
-#[cfg(test)]
-fn insert_intro_is_compact(intro_height: u16) -> bool {
-    intro_height < 5
-}
-
 struct InsertLayout {
-    intro_area: Rect,
     form_area: Rect,
-}
-
-fn insert_intro_height(body_height: u16) -> u16 {
-    if body_height < 16 { 4 } else { 6 }
 }
 
 fn insert_layout(area: Rect, has_tabs: bool) -> InsertLayout {
     let body = shared::layout::body_rect_for_area_with_tabs(area, has_tabs);
-    let intro_height = insert_intro_height(body.height);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(intro_height), Constraint::Min(10)])
-        .split(body);
-    InsertLayout {
-        intro_area: chunks[0],
-        form_area: chunks[1],
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compact_intro_is_used_for_short_bodies() {
-        assert!(insert_intro_is_compact(insert_intro_height(12)));
-        assert!(!insert_intro_is_compact(insert_intro_height(20)));
-    }
-
-    #[test]
-    fn compact_layout_preserves_room_for_form() {
-        let area = Rect::new(0, 0, 80, 29);
-        let body = shared::layout::body_rect_for_area_with_tabs(area, true);
-        let layout = insert_layout(area, true);
-
-        assert_eq!(body.height, 14);
-        assert_eq!(layout.intro_area.height, 4);
-        assert!(layout.form_area.height >= 10);
-    }
+    InsertLayout { form_area: body }
 }
 
 struct InsertForm<'a> {
@@ -147,7 +62,10 @@ struct InsertForm<'a> {
 
 impl InsertForm<'_> {
     fn focus_row(&self, focus: InsertFormFocus) -> Option<u16> {
-        self.rows.iter().find(|(field, _, _)| *field == focus).map(|(_, row, _)| *row)
+        self.rows
+            .iter()
+            .find(|(field, _, _)| *field == focus)
+            .map(|(_, row, _)| *row)
     }
 
     fn focus_width(&self, focus: InsertFormFocus) -> u16 {
@@ -177,7 +95,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         ui,
         InsertFormFocus::MemoryId,
         ui.ui_config.insert.memory_id_label.as_str(),
-        display_value(ui.insert_memory_id, "<target memory canister>"),
+        memory_id_value(ui),
         max_width,
     );
     push_field(
@@ -238,7 +156,10 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
     )));
     if let Some(error) = ui.insert_error {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(error.to_string(), ui.theme.style_error())));
+        lines.push(Line::from(Span::styled(
+            error.to_string(),
+            ui.theme.style_error(),
+        )));
     }
     InsertForm { lines, rows }
 }
@@ -253,7 +174,10 @@ fn push_field(
     max_width: u16,
 ) {
     if !label.is_empty() {
-        lines.push(Line::from(Span::styled(label.to_string(), ui.theme.style_dim())));
+        lines.push(Line::from(Span::styled(
+            label.to_string(),
+            ui.theme.style_dim(),
+        )));
     }
     let display = trim_to_width(&value, max_width);
     let row = u16::try_from(lines.len()).unwrap_or(0);
@@ -284,18 +208,29 @@ fn display_value(value: &str, placeholder: &str) -> String {
     }
 }
 
+fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
+    let placeholder = ui
+        .insert_memory_placeholder
+        .map(|label| format!("<default memory: {label}>"))
+        .unwrap_or_else(|| "<target memory canister>".to_string());
+    display_value(ui.insert_memory_id, &placeholder)
+}
+
 fn mode_value(mode: InsertMode) -> String {
-    match mode {
-        InsertMode::Normal => format!("[normal]   {MODE_OPTIONS}"),
-        InsertMode::Raw => format!("normal / [raw] / pdf"),
-        InsertMode::Pdf => format!("normal / raw / [pdf]"),
-    }
+    let (normal, raw, pdf) = match mode {
+        InsertMode::Normal => ("[normal]", " raw ", " pdf "),
+        InsertMode::Raw => (" normal ", "[raw]", " pdf "),
+        InsertMode::Pdf => (" normal ", " raw ", "[pdf]"),
+    };
+    format!("{normal} / {raw} / {pdf}")
 }
 
 fn submit_value(ui: &TuiKitUi<'_>) -> String {
     match ui.insert_submit_state {
         CreateSubmitState::Submitting => ui.ui_config.insert.submit_pending_label.clone(),
-        CreateSubmitState::Idle | CreateSubmitState::Error => ui.ui_config.insert.submit_label.clone(),
+        CreateSubmitState::Idle | CreateSubmitState::Error => {
+            ui.ui_config.insert.submit_label.clone()
+        }
     }
 }
 
@@ -312,4 +247,28 @@ fn trim_to_width(value: &str, max_width: u16) -> String {
         trimmed.push(ch);
     }
     format!("{trimmed}…")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::theme::Theme;
+
+    #[test]
+    fn memory_id_value_prefers_default_memory_placeholder_when_empty() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_memory_placeholder(Some("Alpha Memory"));
+
+        assert_eq!(memory_id_value(&ui), "<default memory: Alpha Memory>");
+    }
+
+    #[test]
+    fn memory_id_value_prefers_explicit_insert_memory_id() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_memory_placeholder(Some("Alpha Memory"))
+            .insert_memory_id("bbbbb-bb");
+
+        assert_eq!(memory_id_value(&ui), "bbbbb-bb");
+    }
 }

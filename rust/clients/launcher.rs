@@ -33,11 +33,7 @@ impl LauncherClient {
         }
     }
 
-    pub fn launcher_id(&self) -> &Principal {
-        &self.launcher_id
-    }
-
-    pub async fn fetch_deployment_price(&self) -> Result<Nat> {
+    pub(crate) async fn fetch_deployment_price(&self) -> Result<Nat> {
         let response = self
             .agent
             .query(&self.launcher_id, "get_price")
@@ -47,6 +43,10 @@ impl LauncherClient {
 
         let price = Decode!(&response, Nat).context("Failed to decode deployment price")?;
         Ok(price)
+    }
+
+    pub fn launcher_id(&self) -> &Principal {
+        &self.launcher_id
     }
 
     pub async fn approve_launcher(&self, amount: &Nat) -> Result<()> {

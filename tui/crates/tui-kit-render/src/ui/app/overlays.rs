@@ -7,10 +7,14 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
+#[cfg(test)]
+use tui_kit_runtime::MemorySelectorItem;
 use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::TuiKitUi;
-use super::screens::settings::{DefaultMemorySelectorLineKind, default_memory_selector_lines};
+use super::screens::settings::{
+    DefaultMemorySelectorLineKind, default_memory_selector_copy, default_memory_selector_lines,
+};
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_create_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -134,7 +138,7 @@ impl<'a> TuiKitUi<'a> {
         let text = lines
             .into_iter()
             .map(|line| {
-                if line == cfg.content_hint || line == cfg.close_hint {
+                if line == cfg.close_hint {
                     Line::from(Span::styled(line, self.theme.style_muted()))
                 } else if line.starts_with(' ') {
                     Line::from(vec![
@@ -207,10 +211,11 @@ impl<'a> TuiKitUi<'a> {
 
         let lines = default_memory_selector_lines(
             self.default_memory_selector_items,
-            self.default_memory_selector_labels,
             self.default_memory_selector_index,
             self.default_memory_selector_selected_id,
+            default_memory_selector_copy(self.default_memory_selector_context),
         );
+        let copy = default_memory_selector_copy(self.default_memory_selector_context);
         let Some((w, h)) = fit_overlay_rect(area, 56, lines.len().saturating_add(2) as u16, 8)
         else {
             return;
@@ -249,7 +254,7 @@ impl<'a> TuiKitUi<'a> {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(self.theme.style_border_focused())
-                    .title(" Select Default Memory ")
+                    .title(format!(" {} ", copy.title))
                     .style(Style::default().bg(self.theme.bg_panel)),
             )
             .wrap(Wrap { trim: false })
@@ -327,15 +332,25 @@ fn settings_overlay_lines(
         if snapshot.quick_entries.is_empty() {
             lines.push(" No settings available yet.".to_string());
         } else {
-            for entry in snapshot.quick_entries.iter().take(7) {
-                lines.push(format!(" {}: {}", entry.label, entry.value));
+            let visible_entries = snapshot.quick_entries.iter().take(7).collect::<Vec<_>>();
+            let label_width = visible_entries
+                .iter()
+                .map(|entry| entry.label.chars().count())
+                .max()
+                .unwrap_or(0);
+            for entry in visible_entries {
+                lines.push(format!(
+                    " {label:<width$}: {value}",
+                    label = entry.label,
+                    width = label_width,
+                    value = entry.value,
+                ));
             }
         }
     } else {
         lines.push(" No settings available yet.".to_string());
     }
     lines.push(String::new());
-    lines.push(cfg.content_hint.clone());
     lines.push(cfg.close_hint.clone());
     lines
 }
@@ -344,45 +359,9 @@ fn settings_overlay_lines(
 mod tests {
     use super::*;
     use crate::ui::app::UiConfig;
-    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
-
-    #[test]
-    fn settings_overlay_lines_include_priority_entries() {
-        let cfg = UiConfig::default().settings;
-        let snapshot = SettingsSnapshot {
-            quick_entries: vec![
-                SettingsEntry {
-                    id: "identity_name".to_string(),
-                    label: "Identity name".to_string(),
-                    value: "alice".to_string(),
-                    note: None,
-                },
-                SettingsEntry {
-                    id: "principal_id".to_string(),
-                    label: "Principal ID".to_string(),
-                    value: "aaaaa-aa".to_string(),
-                    note: None,
-                },
-                SettingsEntry {
-                    id: "network".to_string(),
-                    label: "Network".to_string(),
-                    value: "local".to_string(),
-                    note: None,
-                },
-            ],
-            sections: vec![SettingsSection::default()],
-        };
-
-        let lines = settings_overlay_lines(Some(&snapshot), &cfg);
-        let joined = lines.join("\n");
-
-        assert!(joined.contains("Identity name: alice"));
-        assert!(joined.contains("Principal ID: aaaaa-aa"));
-        assert!(joined.contains("Network: local"));
-        assert!(joined.contains("Open the Settings tab for detailed view."));
-        assert!(!joined.contains("Quick status while the main UI stays interactive."));
-        assert!(!joined.contains("More details are available in the Settings tab."));
-    }
+    use tui_kit_runtime::{
+        MemorySelectorContext, SettingsEntry, SettingsSection, SettingsSnapshot,
+    };
 
     #[test]
     fn settings_overlay_lines_show_up_to_seven_entries() {
@@ -401,8 +380,52 @@ mod tests {
 
         let joined = settings_overlay_lines(Some(&snapshot), &cfg).join("\n");
 
+        assert!(!joined.contains("Open the Settings tab for detailed view."));
         assert!(joined.contains("Item 7: Value 7"));
         assert!(!joined.contains("Item 8: Value 8"));
+    }
+
+    #[test]
+    fn settings_overlay_lines_align_quick_entry_columns() {
+        let cfg = UiConfig::default().settings;
+        let snapshot = SettingsSnapshot {
+            quick_entries: vec![
+                SettingsEntry {
+                    id: "auth".to_string(),
+                    label: "Auth".to_string(),
+                    value: "mock".to_string(),
+                    note: None,
+                },
+                SettingsEntry {
+                    id: "embedding_api_endpoint".to_string(),
+                    label: "Embedding".to_string(),
+                    value: "https://api.kinic.io".to_string(),
+                    note: None,
+                },
+            ],
+            sections: vec![SettingsSection::default()],
+        };
+
+        let lines = settings_overlay_lines(Some(&snapshot), &cfg);
+        let auth_line = lines
+            .iter()
+            .find(|line| line.contains("Auth"))
+            .expect("auth line");
+        let embedding_line = lines
+            .iter()
+            .find(|line| line.contains("Embedding"))
+            .expect("embedding line");
+
+        assert_eq!(auth_line.find(':'), embedding_line.find(':'));
+    }
+
+    #[test]
+    fn help_overlay_insert_line_mentions_target_picker() {
+        let cfg = UiConfig::default().help;
+
+        assert!(cfg.lines.iter().any(|line| {
+            line == "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits"
+        }));
     }
 
     #[test]
@@ -437,13 +460,14 @@ mod tests {
     fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
         let lines = default_memory_selector_lines(
             &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
-                .map(|index| format!("Memory {index}"))
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
                 .collect::<Vec<_>>(),
             10,
             Some("id-2"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
 
         let visible = visible_default_memory_selector_lines(lines, 8);
@@ -454,7 +478,7 @@ mod tests {
         let joined = visible_lines.join("\n");
 
         assert!(joined.contains("Memory 10"));
-        assert!(!visible_lines.iter().any(|line| *line == "  Memory 1"));
+        assert!(!visible_lines.iter().any(|line| *line == "   Memory 1"));
         assert!(joined.contains("Enter: save"));
     }
 
@@ -462,13 +486,37 @@ mod tests {
     fn default_memory_selector_window_keeps_selected_row_visible_near_start() {
         let lines = default_memory_selector_lines(
             &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
-                .map(|index| format!("Memory {index}"))
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
                 .collect::<Vec<_>>(),
             1,
             Some("id-9"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
+        );
+        let near_start = visible_default_memory_selector_lines(lines, 8);
+        let near_start_joined = near_start
+            .iter()
+            .map(|(line, _)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(near_start_joined.contains("Memory 1"));
+        assert!(!near_start_joined.contains("Memory 10"));
+        assert!(near_start_joined.contains("Select Default Memory"));
+    }
+
+    #[test]
+    fn insert_target_selector_window_uses_insert_specific_copy() {
+        let lines = default_memory_selector_lines(
+            &[MemorySelectorItem {
+                id: "id-0".to_string(),
+                title: Some("Memory 0".to_string()),
+            }],
+            0,
+            Some("id-0"),
+            default_memory_selector_copy(MemorySelectorContext::InsertTarget),
         );
 
         let visible = visible_default_memory_selector_lines(lines, 8);
@@ -478,8 +526,8 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(joined.contains("Memory 1"));
-        assert!(!joined.contains("Memory 10"));
-        assert!(joined.contains("Select default memory"));
+        assert!(joined.contains("Select Target Memory"));
+        assert!(joined.contains("Enter: use target"));
+        assert!(!joined.contains('★'));
     }
 }

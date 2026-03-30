@@ -9,7 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::SettingsSnapshot;
+use tui_kit_runtime::{MemorySelectorContext, MemorySelectorItem, SettingsSnapshot};
 
 use crate::ui::app::{Focus, TuiKitUi};
 
@@ -20,6 +20,13 @@ pub(crate) enum DefaultMemorySelectorLineKind {
     CurrentDefault,
     Normal,
     Hint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DefaultMemorySelectorCopy<'a> {
+    pub title: &'a str,
+    pub hint: &'a str,
+    pub show_current_default_marker: bool,
 }
 
 impl<'a> TuiKitUi<'a> {
@@ -71,14 +78,14 @@ impl<'a> TuiKitUi<'a> {
 }
 
 pub(crate) fn default_memory_selector_lines(
-    items: &[String],
-    labels: &[String],
+    items: &[MemorySelectorItem],
     selected_index: usize,
     current_default_id: Option<&str>,
+    copy: DefaultMemorySelectorCopy<'_>,
 ) -> Vec<(String, DefaultMemorySelectorLineKind)> {
     let mut lines = vec![
         (
-            " Select default memory ".to_string(),
+            format!(" {} ", copy.title),
             DefaultMemorySelectorLineKind::Title,
         ),
         (String::new(), DefaultMemorySelectorLineKind::Normal),
@@ -92,10 +99,9 @@ pub(crate) fn default_memory_selector_lines(
     } else {
         for (index, item) in items.iter().enumerate() {
             let is_selected = index == selected_index;
-            let is_default = current_default_id == Some(item.as_str());
+            let is_default = copy.show_current_default_marker && current_default_id == Some(item.id.as_str());
             let prefix = if is_selected { "›" } else { " " };
             let suffix = if is_default { "  ★" } else { "" };
-            let label = labels.get(index).map_or(item.as_str(), String::as_str);
             let kind = if is_selected {
                 DefaultMemorySelectorLineKind::Selected
             } else if is_default {
@@ -103,16 +109,30 @@ pub(crate) fn default_memory_selector_lines(
             } else {
                 DefaultMemorySelectorLineKind::Normal
             };
-            lines.push((format!(" {prefix} {label}{suffix}"), kind));
+            lines.push((format!(" {prefix} {}{suffix}", item.display_title()), kind));
         }
     }
 
     lines.push((String::new(), DefaultMemorySelectorLineKind::Normal));
-    lines.push((
-        " Enter: save  ↑/↓: move  Esc: close".to_string(),
-        DefaultMemorySelectorLineKind::Hint,
-    ));
+    lines.push((copy.hint.to_string(), DefaultMemorySelectorLineKind::Hint));
     lines
+}
+
+pub(crate) fn default_memory_selector_copy(
+    context: MemorySelectorContext,
+) -> DefaultMemorySelectorCopy<'static> {
+    match context {
+        MemorySelectorContext::DefaultPreference => DefaultMemorySelectorCopy {
+            title: "Select Default Memory",
+            hint: " Enter: save  ↑/↓: move  Esc: close",
+            show_current_default_marker: true,
+        },
+        MemorySelectorContext::InsertTarget => DefaultMemorySelectorCopy {
+            title: "Select Target Memory",
+            hint: " Enter: use target  ↑/↓: move  Esc: close",
+            show_current_default_marker: false,
+        },
+    }
 }
 
 fn settings_screen_lines_with_selection(
@@ -126,15 +146,17 @@ fn settings_screen_lines_with_selection(
         return lines;
     };
 
+    let label_width = snapshot
+        .sections
+        .iter()
+        .flat_map(|section| section.entries.iter())
+        .map(|entry| entry.label.chars().count())
+        .max()
+        .unwrap_or(0);
+
     let mut flattened_index = 0usize;
     for section in &snapshot.sections {
         lines.push(format!("## {}", section.title));
-        let label_width = section
-            .entries
-            .iter()
-            .map(|entry| entry.label.chars().count())
-            .max()
-            .unwrap_or(0);
         for entry in &section.entries {
             let prefix = if selected_entry_index == Some(flattened_index) {
                 "›"
@@ -164,65 +186,52 @@ fn settings_screen_lines_with_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
+    use tui_kit_runtime::{
+        SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot,
+    };
 
     #[test]
-    fn settings_screen_lines_show_sections_and_status_notes() {
+    fn settings_screen_lines_align_value_columns_across_sections() {
         let snapshot = SettingsSnapshot {
             quick_entries: vec![],
             sections: vec![
                 SettingsSection {
                     title: "Current session".to_string(),
-                    entries: vec![SettingsEntry {
-                        id: "principal_id".to_string(),
-                        label: "Principal ID".to_string(),
-                        value: "unavailable".to_string(),
-                        note: None,
-                    }],
+                    entries: vec![
+                        SettingsEntry {
+                            id: "auth".to_string(),
+                            label: "Auth".to_string(),
+                            value: "mock".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "embedding_api_endpoint".to_string(),
+                            label: "Embedding".to_string(),
+                            value: "https://api.kinic.io".to_string(),
+                            note: None,
+                        },
+                    ],
                     footer: None,
                 },
                 SettingsSection {
-                    title: "Saved preferences".to_string(),
-                    entries: vec![SettingsEntry {
-                        id: "preferred_network".to_string(),
-                        label: "Preferred network".to_string(),
-                        value: "coming soon".to_string(),
-                        note: Some("No persisted network preference is stored in v1.".to_string()),
-                    }],
+                    title: "Account".to_string(),
+                    entries: vec![
+                        SettingsEntry {
+                            id: "principal_id".to_string(),
+                            label: "Principal ID".to_string(),
+                            value: "aaaaa-aa".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "kinic_balance".to_string(),
+                            label: "KINIC balance".to_string(),
+                            value: "12.34000000 KINIC".to_string(),
+                            note: None,
+                        },
+                    ],
                     footer: None,
                 },
             ],
-        };
-
-        let lines = settings_screen_lines_with_selection(Some(&snapshot), None).join("\n");
-
-        assert!(lines.contains("## Current session"));
-        assert!(lines.contains("Principal ID: unavailable"));
-        assert!(!lines.contains("Shift+S shows quick status"));
-    }
-
-    #[test]
-    fn settings_screen_lines_align_value_columns_within_section() {
-        let snapshot = SettingsSnapshot {
-            quick_entries: vec![],
-            sections: vec![SettingsSection {
-                title: "Current session".to_string(),
-                entries: vec![
-                    SettingsEntry {
-                        id: "auth".to_string(),
-                        label: "Auth".to_string(),
-                        value: "mock".to_string(),
-                        note: None,
-                    },
-                    SettingsEntry {
-                        id: "embedding_api_endpoint".to_string(),
-                        label: "Embedding API endpoint".to_string(),
-                        value: "https://api.kinic.io".to_string(),
-                        note: None,
-                    },
-                ],
-                footer: None,
-            }],
         };
 
         let lines = settings_screen_lines_with_selection(Some(&snapshot), None);
@@ -232,13 +241,18 @@ mod tests {
             .expect("auth line");
         let endpoint_line = lines
             .iter()
-            .find(|line| line.contains("Embedding API endpoint"))
+            .find(|line| line.contains("Embedding"))
             .expect("endpoint line");
+        let principal_line = lines
+            .iter()
+            .find(|line| line.contains("Principal ID"))
+            .expect("principal line");
 
         assert_eq!(
             auth_line.find("mock"),
             endpoint_line.find("https://api.kinic.io")
         );
+        assert_eq!(auth_line.find(':'), principal_line.find(':'));
     }
 
     #[test]
@@ -249,7 +263,7 @@ mod tests {
                 title: "Saved preferences".to_string(),
                 entries: vec![
                     SettingsEntry {
-                        id: "default_memory".to_string(),
+                        id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                         label: "Default memory".to_string(),
                         value: "Alpha Memory".to_string(),
                         note: None,
@@ -270,14 +284,22 @@ mod tests {
         assert!(lines.contains("› Preferences status: ok"));
         assert!(lines.contains("  Default memory"));
     }
-
     #[test]
     fn default_memory_selector_lines_mark_selected_and_current_entries() {
         let lines = default_memory_selector_lines(
-            &["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            &["Alpha Memory".to_string(), "Beta Memory".to_string()],
+            &[
+                MemorySelectorItem {
+                    id: "aaaaa-aa".to_string(),
+                    title: Some("Alpha Memory".to_string()),
+                },
+                MemorySelectorItem {
+                    id: "bbbbb-bb".to_string(),
+                    title: Some("Beta Memory".to_string()),
+                },
+            ],
             1,
             Some("aaaaa-aa"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
         let joined = lines
             .into_iter()
@@ -289,7 +311,48 @@ mod tests {
         assert!(joined.contains("› Beta Memory"));
         assert!(joined.contains("Enter: save"));
         assert!(joined.contains("↑/↓: move"));
-        assert!(!joined.contains("ID aaaaa-aa"));
         assert!(!joined.contains("j/k: move"));
+    }
+
+    #[test]
+    fn insert_target_selector_lines_use_insert_specific_copy() {
+        let lines = default_memory_selector_lines(
+            &[MemorySelectorItem {
+                id: "aaaaa-aa".to_string(),
+                title: Some("Alpha Memory".to_string()),
+            }],
+            0,
+            Some("aaaaa-aa"),
+            default_memory_selector_copy(MemorySelectorContext::InsertTarget),
+        );
+        let joined = lines
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("Select Target Memory"));
+        assert!(joined.contains("Enter: use target"));
+        assert!(!joined.contains('★'));
+    }
+
+    #[test]
+    fn selector_lines_fall_back_to_id_when_title_is_missing() {
+        let lines = default_memory_selector_lines(
+            &[MemorySelectorItem {
+                id: "aaaaa-aa".to_string(),
+                title: None,
+            }],
+            0,
+            Some("aaaaa-aa"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
+        );
+        let joined = lines
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("aaaaa-aa  ★"));
     }
 }
