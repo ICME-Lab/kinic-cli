@@ -1,8 +1,8 @@
 use candid::Nat;
 use ratatui::layout::Rect;
 use tui_kit_runtime::{
-    CreateCostState, CreateModalFocus, CreateSubmitState, SessionAccountOverview,
-    SessionSettingsSnapshot,
+    CreateCostState, CreateModalFocus, CreateSubmitState, DerivedCreateCost, LoadedCreateCost,
+    SessionAccountOverview, SessionSettingsSnapshot,
 };
 
 use crate::{
@@ -29,6 +29,31 @@ fn overview() -> SessionAccountOverview {
         network: "local".to_string(),
         embedding_api_endpoint: "https://api.kinic.io".to_string(),
     })
+}
+
+fn details(
+    principal: &str,
+    balance_kinic: &str,
+    price_kinic: &str,
+    sufficient_balance: bool,
+) -> DerivedCreateCost {
+    DerivedCreateCost {
+        principal: principal.to_string(),
+        balance_kinic: balance_kinic.to_string(),
+        price_kinic: price_kinic.to_string(),
+        required_total_kinic: price_kinic.to_string(),
+        required_total_base_units: "150200000".to_string(),
+        difference_kinic: "+10.83800000".to_string(),
+        difference_base_units: "+1083800000".to_string(),
+        sufficient_balance,
+    }
+}
+
+fn loaded_create_cost(
+    overview: SessionAccountOverview,
+    details: Option<DerivedCreateCost>,
+) -> CreateCostState {
+    CreateCostState::Loaded(LoadedCreateCost { overview, details })
 }
 
 #[test]
@@ -275,7 +300,10 @@ fn create_screen_renders_account_cost_block_for_ready_state() {
     let mut current_overview = overview();
     current_overview.balance_base_units = Some(1_234_000_000u128);
     current_overview.price_base_units = Some(Nat::from(150_000_000u128));
-    let create_cost_state = CreateCostState::Loaded(current_overview);
+    let create_cost_state = loaded_create_cost(
+        current_overview,
+        Some(details("aaaaa-aa", "12.34000000", "1.50200000", true)),
+    );
     let ui = TuiKitUi::new(&theme)
         .focus(Focus::Form)
         .create_cost_state(&create_cost_state);
@@ -348,7 +376,10 @@ fn create_screen_truncates_long_principal_in_account_block() {
     current_overview.session.principal_id = long_principal.to_string();
     current_overview.balance_base_units = Some(100_000_000u128);
     current_overview.price_base_units = Some(Nat::from(50_000_000u128));
-    let create_cost_state = CreateCostState::Loaded(current_overview);
+    let create_cost_state = loaded_create_cost(
+        current_overview,
+        Some(details(long_principal, "1.00000000", "0.50200000", true)),
+    );
     let ui = TuiKitUi::new(&theme).create_cost_state(&create_cost_state);
     let layout = CreateScreenLayout::from_root_area(area, true);
     let lines = create_form_lines(&ui, layout);
@@ -379,7 +410,10 @@ fn create_screen_aligns_account_cost_value_columns() {
     let mut current_overview = overview();
     current_overview.balance_base_units = Some(1_234_000_000u128);
     current_overview.price_base_units = Some(Nat::from(150_000_000u128));
-    let create_cost_state = CreateCostState::Loaded(current_overview);
+    let create_cost_state = loaded_create_cost(
+        current_overview,
+        Some(details("aaaaa-aa", "12.34000000", "1.50200000", true)),
+    );
     let ui = TuiKitUi::new(&theme)
         .focus(Focus::Form)
         .create_cost_state(&create_cost_state);
@@ -419,7 +453,7 @@ fn create_screen_renders_loaded_partial_state_with_unavailable_fields() {
     let mut current_overview = overview();
     current_overview.balance_base_units = Some(1_234_000_000u128);
     current_overview.price_error = Some("price unavailable".to_string());
-    let create_cost_state = CreateCostState::Loaded(current_overview);
+    let create_cost_state = loaded_create_cost(current_overview, None);
     let ui = TuiKitUi::new(&theme)
         .focus(Focus::Form)
         .create_cost_state(&create_cost_state);

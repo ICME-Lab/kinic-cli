@@ -9,13 +9,6 @@ use candid::Nat;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
 
 pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
-const TRANSFER_FEE_E8S: u128 = 100_000;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BalanceDelta {
-    Surplus(Nat),
-    Shortfall(Nat),
-}
 
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -131,7 +124,7 @@ pub enum CreateCostState {
     Hidden,
     Loading,
     Unavailable,
-    Loaded(SessionAccountOverview),
+    Loaded(LoadedCreateCost),
     Error(Vec<String>),
 }
 
@@ -166,6 +159,12 @@ pub struct DerivedCreateCost {
     pub sufficient_balance: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedCreateCost {
+    pub overview: SessionAccountOverview,
+    pub details: Option<DerivedCreateCost>,
+}
+
 impl SessionAccountOverview {
     pub fn new(session: SessionSettingsSnapshot) -> Self {
         Self {
@@ -180,31 +179,6 @@ impl SessionAccountOverview {
 
     pub fn has_complete_create_cost(&self) -> bool {
         self.balance_base_units.is_some() && self.price_base_units.is_some()
-    }
-
-    pub fn derived_create_cost(&self) -> Option<DerivedCreateCost> {
-        let balance_base_units = self.balance_base_units?;
-        let price = self.price_base_units.clone()?;
-        let required_total = required_balance(&price);
-        let delta = balance_delta(&price, balance_base_units);
-        let (difference_sign, difference_base_units, sufficient_balance) = match &delta {
-            BalanceDelta::Surplus(value) => ('+', value.to_string(), true),
-            BalanceDelta::Shortfall(value) => ('-', value.to_string(), false),
-        };
-
-        Some(DerivedCreateCost {
-            principal: self.session.principal_id.clone(),
-            balance_kinic: format_e8s_to_kinic_string_u128(balance_base_units),
-            price_kinic: format_e8s_to_kinic_string_nat(&price),
-            required_total_kinic: format_e8s_to_kinic_string_nat(&required_total),
-            required_total_base_units: required_total.to_string(),
-            difference_kinic: format!(
-                "{difference_sign}{}",
-                format_e8s_to_kinic_string_str(difference_base_units.as_str())
-            ),
-            difference_base_units: format!("{difference_sign}{difference_base_units}"),
-            sufficient_balance,
-        })
     }
 
     pub fn account_issue_messages(&self) -> Vec<String> {
@@ -245,23 +219,8 @@ impl SessionAccountOverview {
     }
 }
 
-pub fn required_balance(price: &Nat) -> Nat {
-    let fee = Nat::from(TRANSFER_FEE_E8S);
-    price.clone() + fee.clone() + fee
-}
-
-pub fn balance_delta(price: &Nat, balance: u128) -> BalanceDelta {
-    let required = required_balance(price);
-    let balance_nat = Nat::from(balance);
-    if balance_nat >= required {
-        BalanceDelta::Surplus(balance_nat - required)
-    } else {
-        BalanceDelta::Shortfall(required - balance_nat)
-    }
-}
-
 pub fn format_e8s_to_kinic_string_u128(value: u128) -> String {
-    format_e8s_to_kinic_string_nat(&Nat::from(value))
+    format_e8s_to_kinic_string_str(value.to_string().as_str())
 }
 
 pub fn format_e8s_to_kinic_string_nat(value: &Nat) -> String {
@@ -510,29 +469,26 @@ pub struct ProviderOutput {
 }
 
 #[cfg(test)]
-mod tests {
+mod formatter_tests {
     use super::{format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128};
     use candid::Nat;
 
     #[test]
-    fn format_e8s_to_kinic_string_nat_keeps_eight_fraction_digits() {
+    fn format_e8s_to_kinic_string_u128_keeps_eight_fraction_digits() {
         assert_eq!(
-            format_e8s_to_kinic_string_nat(&Nat::from(123_456_789u128)),
+            format_e8s_to_kinic_string_u128(123_456_789u128),
             "1.23456789"
         );
-        assert_eq!(
-            format_e8s_to_kinic_string_nat(&Nat::from(42u128)),
-            "0.00000042"
-        );
+        assert_eq!(format_e8s_to_kinic_string_u128(42u128), "0.00000042");
     }
 
     #[test]
-    fn format_e8s_to_kinic_string_u128_matches_nat_formatting() {
-        let value = 1_700_000u128;
+    fn format_e8s_to_kinic_string_nat_supports_values_larger_than_u128() {
+        let large = Nat::parse(b"340282366920938463463374607431768211456").expect("valid Nat");
 
         assert_eq!(
-            format_e8s_to_kinic_string_u128(value),
-            format_e8s_to_kinic_string_nat(&Nat::from(value))
+            format_e8s_to_kinic_string_nat(&large),
+            "3402823669209384634633746074317.68211456"
         );
     }
 }

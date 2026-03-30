@@ -1,6 +1,7 @@
 use super::*;
+use crate::create_domain::derive_create_cost;
 use candid::Nat;
-use tui_kit_runtime::{CreateCostState, SessionAccountOverview};
+use tui_kit_runtime::{CreateCostState, LoadedCreateCost, SessionAccountOverview};
 
 fn session_snapshot(principal_id: &str) -> tui_kit_runtime::SessionSettingsSnapshot {
     settings::session_settings_snapshot(
@@ -81,6 +82,15 @@ fn principal_error_session_overview() -> SessionAccountOverview {
     overview.principal_error = Some("identity lookup failed".to_string());
     overview.balance_error = Some("ledger unavailable".to_string());
     overview
+}
+
+fn loaded_create_cost(overview: SessionAccountOverview) -> CreateCostState {
+    let details = derive_create_cost(
+        overview.session.principal_id.as_str(),
+        overview.balance_base_units,
+        overview.price_base_units.as_ref(),
+    );
+    CreateCostState::Loaded(LoadedCreateCost { overview, details })
 }
 
 fn mainnet_principal_error_session_overview() -> SessionAccountOverview {
@@ -264,7 +274,7 @@ fn poll_background_applies_refreshed_session_settings() {
 fn poll_background_projects_partial_session_overview_into_settings() {
     let mut provider = KinicProvider::new(live_config());
     provider.session_overview = refreshed_session_overview();
-    provider.create_cost_state = CreateCostState::Loaded(provider.session_overview.clone());
+    provider.create_cost_state = loaded_create_cost(provider.session_overview.clone());
     let (tx, rx) = mpsc::channel();
     provider.pending_session_settings = Some(rx);
     provider.pending_session_settings_request_id = Some(6);
@@ -495,7 +505,7 @@ fn poll_create_cost_background_updates_overview_and_error_state_from_partial_loa
 
     assert_eq!(
         provider.create_cost_state,
-        CreateCostState::Loaded(balance_only_session_overview())
+        loaded_create_cost(balance_only_session_overview())
     );
     assert_eq!(
         provider.session_overview.price_error.as_deref(),
@@ -549,7 +559,7 @@ fn poll_create_cost_background_keeps_loaded_state_clean_when_values_exist_withou
 
     assert_eq!(
         provider.create_cost_state,
-        CreateCostState::Loaded(ready_overview)
+        loaded_create_cost(ready_overview)
     );
 }
 
@@ -572,7 +582,7 @@ fn poll_create_cost_background_surfaces_partial_state_from_price_only_loader() {
 
     assert_eq!(
         provider.create_cost_state,
-        CreateCostState::Loaded(price_only_session_overview())
+        loaded_create_cost(price_only_session_overview())
     );
 }
 
@@ -595,7 +605,7 @@ fn poll_create_cost_background_keeps_loaded_state_when_overview_is_empty_but_pri
 
     assert_eq!(
         provider.create_cost_state,
-        CreateCostState::Loaded(unavailable_session_overview())
+        loaded_create_cost(unavailable_session_overview())
     );
 }
 

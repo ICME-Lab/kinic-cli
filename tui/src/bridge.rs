@@ -2,16 +2,14 @@ use std::cmp::Ordering;
 
 use anyhow::{Context, Result};
 use ic_agent::export::Principal;
-use tui_kit_runtime::{
-    BalanceDelta, SessionAccountOverview, balance_delta, format_e8s_to_kinic_string_nat,
-    required_balance,
-};
+use tui_kit_runtime::{SessionAccountOverview, format_e8s_to_kinic_string_nat};
 
 use crate::{
     clients::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
     },
+    create_domain::{BalanceDelta, balance_delta, required_balance},
     embedding::{embedding_base_url, fetch_embedding},
     ledger::fetch_balance,
     tui::TuiAuth,
@@ -291,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn session_account_overview_derives_create_cost_when_balance_and_price_exist() {
+    fn session_account_overview_reports_complete_cost_inputs_when_balance_and_price_exist() {
         let mut overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
             false,
@@ -301,11 +299,7 @@ mod tests {
         overview.balance_base_units = Some(2_000_000u128);
         overview.price_base_units = Some(Nat::from(1_500_000u128));
 
-        let details = overview.derived_create_cost().expect("create cost details");
-
-        assert_eq!(details.principal, "aaaaa-aa");
-        assert_eq!(details.required_total_base_units, "1_700_000");
-        assert_eq!(details.difference_base_units, "+300_000");
+        assert!(overview.has_complete_create_cost());
     }
 
     #[test]
@@ -320,7 +314,6 @@ mod tests {
         overview.price_error = Some("price unavailable".to_string());
 
         assert!(!overview.has_complete_create_cost());
-        assert_eq!(overview.derived_create_cost(), None);
     }
 
     #[test]

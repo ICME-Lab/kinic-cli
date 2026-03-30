@@ -1,10 +1,13 @@
 use anyhow::{Result, bail};
 use candid::Nat;
 use tracing::info;
-use tui_kit_runtime::{BalanceDelta, balance_delta, required_balance};
 
 use crate::{
-    agent::AgentFactory, cli::CreateArgs, clients::launcher::LauncherClient, ledger::fetch_balance,
+    agent::AgentFactory,
+    cli::CreateArgs,
+    clients::launcher::LauncherClient,
+    create_domain::{BalanceDelta, balance_delta, required_balance},
+    ledger::fetch_balance,
 };
 
 use super::CommandContext;
@@ -53,34 +56,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn required_balance_adds_two_transfer_fees() {
-        let price = Nat::from(1_500_000u128);
-        let required = required_balance(&price);
-        assert_eq!(required, Nat::from(1_700_000u128));
-    }
-
-    #[test]
     fn ensure_sufficient_balance_rejects_insufficient_balance() {
         let price = Nat::from(1_500_000u128);
         let error = ensure_sufficient_balance(&price, 1_699_999).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("Insufficient balance: need"));
         assert!(message.contains("have 1699999 e8s"));
-    }
-
-    #[test]
-    fn balance_delta_returns_shortfall_below_required_balance() {
-        let price = Nat::from(1_500_000u128);
-        let delta = balance_delta(&price, 1_699_999);
-
-        assert_eq!(delta, BalanceDelta::Shortfall(Nat::from(1u128)));
-    }
-
-    #[test]
-    fn balance_delta_returns_surplus_at_required_balance_boundary() {
-        let price = Nat::from(1_500_000u128);
-        let delta = balance_delta(&price, 1_700_000);
-
-        assert_eq!(delta, BalanceDelta::Surplus(Nat::from(0u128)));
     }
 }

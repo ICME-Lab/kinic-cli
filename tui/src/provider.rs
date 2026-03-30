@@ -3,12 +3,13 @@ use std::{sync::mpsc, thread};
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::settings::{self, PreferencesHealth, UserPreferences};
+use crate::create_domain::derive_create_cost;
 use crate::tui::TuiAuth;
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, PaneFocus,
-    ProviderOutput, ProviderSnapshot, SessionAccountOverview, SessionSettingsSnapshot,
+    CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, LoadedCreateCost,
+    PaneFocus, ProviderOutput, ProviderSnapshot, SessionAccountOverview, SessionSettingsSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
     },
@@ -961,8 +962,16 @@ impl KinicProvider {
         }
 
         let issues = output.overview.account_issue_messages();
+        let details = derive_create_cost(
+            output.overview.session.principal_id.as_str(),
+            output.overview.balance_base_units,
+            output.overview.price_base_units.as_ref(),
+        );
         let next_state = if output.overview.principal_error.is_none() {
-            CreateCostState::Loaded(output.overview.clone())
+            CreateCostState::Loaded(LoadedCreateCost {
+                overview: output.overview.clone(),
+                details,
+            })
         } else if issues.is_empty() {
             CreateCostState::Error(vec![
                 "Could not load account overview. Cause: Account overview is unavailable."

@@ -282,7 +282,8 @@ fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<
                 )));
             }
         }
-        CreateCostState::Loaded(overview) => {
+        CreateCostState::Loaded(loaded) => {
+            let overview = &loaded.overview;
             lines.push(create_cost_detail_line(
                 ui,
                 layout,
@@ -290,19 +291,14 @@ fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<
                 create_cfg.principal_label.as_str(),
                 overview.session.principal_id.clone(),
             ));
-            lines.push(create_cost_detail_line(
-                ui,
-                layout,
-                detail_label_width,
-                create_cfg.balance_label.as_str(),
-                overview
-                    .balance_base_units
-                    .map(format_e8s_to_kinic_string_u128)
-                    .as_deref()
-                    .map(format_kinic_value)
-                    .unwrap_or_else(|| create_cfg.unavailable_message.clone()),
-            ));
-            if let Some(details) = overview.derived_create_cost() {
+            if let Some(details) = &loaded.details {
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.balance_label.as_str(),
+                    format_kinic_value(details.balance_kinic.as_str()),
+                ));
                 lines.push(create_cost_detail_line(
                     ui,
                     layout,
@@ -318,6 +314,18 @@ fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<
                     create_status_text(create_cfg, details.sufficient_balance),
                 ));
             } else {
+                lines.push(create_cost_detail_line(
+                    ui,
+                    layout,
+                    detail_label_width,
+                    create_cfg.balance_label.as_str(),
+                    overview
+                        .balance_base_units
+                        .map(format_e8s_to_kinic_string_u128)
+                        .as_deref()
+                        .map(format_kinic_value)
+                        .unwrap_or_else(|| create_cfg.unavailable_message.clone()),
+                ));
                 lines.push(create_cost_detail_line(
                     ui,
                     layout,
