@@ -4,9 +4,7 @@ pub mod runtime_loop;
 pub mod settings;
 pub mod terminal;
 
-use crossterm::event::{
-    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
-};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::time::Duration;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateCostState, CreateModalFocus,
@@ -18,15 +16,9 @@ pub const DEFAULT_TAB_IDS: [&str; 4] = ["tab-1", "tab-2", "tab-3", "tab-4"];
 
 /// Host-level normalized input event used by app loops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HostInputEvent {
-    KeyPress {
-        code: KeyCode,
-        modifiers: KeyModifiers,
-    },
-    MouseLeftDown {
-        column: u16,
-        row: u16,
-    },
+pub struct HostInputEvent {
+    pub code: KeyCode,
+    pub modifiers: KeyModifiers,
 }
 
 /// Poll and normalize crossterm events for host loops.
@@ -34,20 +26,17 @@ pub fn poll_host_input(timeout: Duration) -> std::io::Result<Option<HostInputEve
     if !event::poll(timeout)? {
         return Ok(None);
     }
-    let ev = match event::read()? {
-        Event::Key(key) if key.kind == KeyEventKind::Press => Some(HostInputEvent::KeyPress {
+    Ok(normalize_host_input_event(event::read()?))
+}
+
+fn normalize_host_input_event(event: Event) -> Option<HostInputEvent> {
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => Some(HostInputEvent {
             code: key.code,
             modifiers: key.modifiers,
         }),
-        Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) => {
-            Some(HostInputEvent::MouseLeftDown {
-                column: mouse.column,
-                row: mouse.row,
-            })
-        }
         _ => None,
-    };
-    Ok(ev)
+    }
 }
 
 /// Convert crossterm key codes into runtime-agnostic core keys.

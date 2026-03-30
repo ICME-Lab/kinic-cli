@@ -181,12 +181,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             let Some(input) = poll_host_input(poll_duration)? else {
                 continue;
             };
-            let HostInputEvent::KeyPress { code, modifiers } = input else {
-                if hooks.on_unhandled_input(provider, &mut state, input) {
-                    continue;
-                }
-                continue;
-            };
+            let HostInputEvent { code, modifiers } = input;
 
             match handle_overlay_input(provider, &mut state, show_settings, code, modifiers) {
                 OverlayInputResult::NotHandled => {}
@@ -371,7 +366,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 && hooks.on_unhandled_input(
                     provider,
                     &mut state,
-                    HostInputEvent::KeyPress { code, modifiers },
+                    HostInputEvent { code, modifiers },
                 )
             {
                 continue;

@@ -6,6 +6,9 @@ use tui_kit_runtime::kinic_tabs::{
 
 mod key_mapping {
     use super::*;
+    use crossterm::event::{
+        KeyEvent, KeyEventKind, KeyEventState, MouseButton, MouseEvent, MouseEventKind,
+    };
 
     #[test]
     fn action_from_keycode_maps_search_input() {
@@ -13,6 +16,36 @@ mod key_mapping {
             action_from_keycode(KeyCode::Char('x'), PaneFocus::Search, KINIC_MEMORIES_TAB_ID),
             Some(CoreAction::SearchInput('x'))
         );
+    }
+
+    #[test]
+    fn normalize_host_input_event_maps_key_press_only() {
+        let key_event = Event::Key(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::SHIFT,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        });
+
+        assert_eq!(
+            normalize_host_input_event(key_event),
+            Some(HostInputEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::SHIFT,
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_host_input_event_ignores_mouse_input() {
+        let mouse_event = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        });
+
+        assert_eq!(normalize_host_input_event(mouse_event), None);
     }
 }
 

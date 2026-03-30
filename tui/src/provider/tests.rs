@@ -318,7 +318,10 @@ fn build_snapshot_exposes_saved_default_memory_id() {
 
     let snapshot = provider.build_snapshot(&CoreState::default());
 
-    assert_eq!(snapshot.saved_default_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(
+        snapshot.saved_default_memory_id.as_deref(),
+        Some("aaaaa-aa")
+    );
 }
 
 #[test]

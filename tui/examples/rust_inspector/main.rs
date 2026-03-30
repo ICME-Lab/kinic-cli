@@ -14,8 +14,7 @@ pub use tui_kit_render::ui;
 
 use anyhow::Result;
 use app::{
-    App, UiEffect, apply_intent, apply_runtime_set_tab, build_render_context, intents_for_key,
-    try_apply_runtime_action,
+    App, UiEffect, apply_intent, build_render_context, intents_for_key, try_apply_runtime_action,
 };
 use crossterm::execute;
 use ratatui::layout::Rect;
@@ -168,59 +167,22 @@ fn run_app(terminal: &mut HostTerminal, app: &mut App) -> Result<()> {
             Duration::from_millis(50)
         };
 
-        if let Some(input) = poll_host_input(poll_duration)? {
-            match input {
-                HostInputEvent::KeyPress { code, modifiers } => {
-                    // Runtime-first path:
-                    // 1) apply shared/core interaction when possible
-                    // 2) fallback only for app-specific behaviors (completion/chat/crates extras)
-                    let runtime_result =
-                        try_apply_runtime_action(app, code, modifiers, &mut inspector_scroll);
-                    if runtime_result.consumed {
-                        if runtime_result.tab_changed {
-                            animation.on_tab_change();
-                        }
-                        continue;
-                    }
-                    let intents = intents_for_key(app, code, modifiers);
-                    for intent in intents {
-                        let effects =
-                            apply_intent(app, intent, &mut inspector_scroll, &mut animation);
-                        execute_effects(app, effects);
-                    }
+        if let Some(HostInputEvent { code, modifiers }) = poll_host_input(poll_duration)? {
+            // Runtime-first path:
+            // 1) apply shared/core interaction when possible
+            // 2) fallback only for app-specific behaviors (completion/chat/crates extras)
+            let runtime_result =
+                try_apply_runtime_action(app, code, modifiers, &mut inspector_scroll);
+            if runtime_result.consumed {
+                if runtime_result.tab_changed {
+                    animation.on_tab_change();
                 }
-                HostInputEvent::MouseLeftDown { column: col, row } => {
-                    if let Ok(size) = terminal.size() {
-                        let area = Rect::new(0, 0, size.width, size.height);
-                        if let Some(tabs_rect) = tabs_rect_for_area(area) {
-                            if col >= tabs_rect.x
-                                && col < tabs_rect.x + tabs_rect.width
-                                && row >= tabs_rect.y
-                                && row < tabs_rect.y + tabs_rect.height
-                            {
-                                let tab_specs = &app.ui_config.tabs;
-                                let tab_count = tab_specs.len() as u16;
-                                if tab_count == 0 {
-                                    continue;
-                                }
-                                let inner_w = tabs_rect.width.saturating_sub(2);
-                                if inner_w >= tab_count {
-                                    let tab_width = inner_w / tab_count;
-                                    let inner_x = tabs_rect.x + 1;
-                                    let rel = col.saturating_sub(inner_x);
-                                    let idx = (rel / tab_width).min(tab_count - 1) as usize;
-                                    if let Some(spec) = tab_specs.get(idx) {
-                                        let runtime_result =
-                                            apply_runtime_set_tab(app, spec.id.clone());
-                                        if runtime_result.tab_changed {
-                                            animation.on_tab_change();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                continue;
+            }
+            let intents = intents_for_key(app, code, modifiers);
+            for intent in intents {
+                let effects = apply_intent(app, intent, &mut inspector_scroll, &mut animation);
+                execute_effects(app, effects);
             }
         }
     }
