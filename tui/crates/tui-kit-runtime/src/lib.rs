@@ -124,7 +124,7 @@ pub enum CreateCostState {
     Hidden,
     Loading,
     Unavailable,
-    Loaded(LoadedCreateCost),
+    Loaded(Box<LoadedCreateCost>),
     Error(Vec<String>),
 }
 

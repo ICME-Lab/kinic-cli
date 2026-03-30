@@ -1,4 +1,3 @@
-use candid::Nat;
 use ratatui::layout::Rect;
 use tui_kit_runtime::{
     CreateCostState, CreateModalFocus, CreateSubmitState, DerivedCreateCost, LoadedCreateCost,
@@ -53,7 +52,7 @@ fn loaded_create_cost(
     overview: SessionAccountOverview,
     details: Option<DerivedCreateCost>,
 ) -> CreateCostState {
-    CreateCostState::Loaded(LoadedCreateCost { overview, details })
+    CreateCostState::Loaded(Box::new(LoadedCreateCost { overview, details }))
 }
 
 #[test]
@@ -299,7 +298,6 @@ fn create_screen_renders_account_cost_block_for_ready_state() {
     let theme = Theme::default();
     let mut current_overview = overview();
     current_overview.balance_base_units = Some(1_234_000_000u128);
-    current_overview.price_base_units = Some(Nat::from(150_000_000u128));
     let create_cost_state = loaded_create_cost(
         current_overview,
         Some(details("aaaaa-aa", "12.34000000", "1.50200000", true)),
@@ -375,7 +373,6 @@ fn create_screen_truncates_long_principal_in_account_block() {
     let mut current_overview = overview();
     current_overview.session.principal_id = long_principal.to_string();
     current_overview.balance_base_units = Some(100_000_000u128);
-    current_overview.price_base_units = Some(Nat::from(50_000_000u128));
     let create_cost_state = loaded_create_cost(
         current_overview,
         Some(details(long_principal, "1.00000000", "0.50200000", true)),
@@ -409,7 +406,6 @@ fn create_screen_aligns_account_cost_value_columns() {
     let theme = Theme::default();
     let mut current_overview = overview();
     current_overview.balance_base_units = Some(1_234_000_000u128);
-    current_overview.price_base_units = Some(Nat::from(150_000_000u128));
     let create_cost_state = loaded_create_cost(
         current_overview,
         Some(details("aaaaa-aa", "12.34000000", "1.50200000", true)),

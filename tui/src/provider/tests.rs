@@ -90,7 +90,7 @@ fn loaded_create_cost(overview: SessionAccountOverview) -> CreateCostState {
         overview.balance_base_units,
         overview.price_base_units.as_ref(),
     );
-    CreateCostState::Loaded(LoadedCreateCost { overview, details })
+    CreateCostState::Loaded(Box::new(LoadedCreateCost { overview, details }))
 }
 
 fn mainnet_principal_error_session_overview() -> SessionAccountOverview {

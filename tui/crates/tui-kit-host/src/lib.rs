@@ -191,11 +191,10 @@ pub fn global_command_for_key(
             && focus == PaneFocus::Content
         {
             HostGlobalCommand::BackFromContent
-        } else if focus == PaneFocus::Content {
-            HostGlobalCommand::BackToTabs
-        } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
-            && matches!(focus, PaneFocus::Search | PaneFocus::Items)
-            && query_is_empty
+        } else if focus == PaneFocus::Content
+            || (current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
+                && matches!(focus, PaneFocus::Search | PaneFocus::Items)
+                && query_is_empty)
         {
             HostGlobalCommand::BackToTabs
         } else if focus == PaneFocus::Tabs && !focus_policy.allows_search {

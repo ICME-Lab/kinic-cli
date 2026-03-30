@@ -968,10 +968,10 @@ impl KinicProvider {
             output.overview.price_base_units.as_ref(),
         );
         let next_state = if output.overview.principal_error.is_none() {
-            CreateCostState::Loaded(LoadedCreateCost {
+            CreateCostState::Loaded(Box::new(LoadedCreateCost {
                 overview: output.overview.clone(),
                 details,
-            })
+            }))
         } else if issues.is_empty() {
             CreateCostState::Error(vec![
                 "Could not load account overview. Cause: Account overview is unavailable."
