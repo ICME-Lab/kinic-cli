@@ -86,7 +86,6 @@ pub struct CreateOverlayText {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsOverlayText {
     pub title: String,
-    pub content_hint: String,
     pub close_hint: String,
 }
 
@@ -157,7 +156,6 @@ impl Default for UiConfig {
             },
             settings: SettingsOverlayText {
                 title: "Settings".to_string(),
-                content_hint: "Open the Settings tab for detailed view.".to_string(),
                 close_hint: "Esc: close".to_string(),
             },
             help: HelpOverlayText {

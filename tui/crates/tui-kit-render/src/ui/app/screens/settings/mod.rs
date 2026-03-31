@@ -124,15 +124,17 @@ fn settings_screen_lines_with_selection(
         return lines;
     };
 
+    let label_width = snapshot
+        .sections
+        .iter()
+        .flat_map(|section| section.entries.iter())
+        .map(|entry| entry.label.chars().count())
+        .max()
+        .unwrap_or(0);
+
     let mut flattened_index = 0usize;
     for section in &snapshot.sections {
         lines.push(format!("## {}", section.title));
-        let label_width = section
-            .entries
-            .iter()
-            .map(|entry| entry.label.chars().count())
-            .max()
-            .unwrap_or(0);
         for entry in &section.entries {
             let prefix = if selected_entry_index == Some(flattened_index) {
                 "›"
@@ -167,27 +169,47 @@ mod tests {
     };
 
     #[test]
-    fn settings_screen_lines_align_value_columns_within_section() {
+    fn settings_screen_lines_align_value_columns_across_sections() {
         let snapshot = SettingsSnapshot {
             quick_entries: vec![],
-            sections: vec![SettingsSection {
-                title: "Current session".to_string(),
-                entries: vec![
-                    SettingsEntry {
-                        id: "auth".to_string(),
-                        label: "Auth".to_string(),
-                        value: "mock".to_string(),
-                        note: None,
-                    },
-                    SettingsEntry {
-                        id: "embedding_api_endpoint".to_string(),
-                        label: "Embedding API endpoint".to_string(),
-                        value: "https://api.kinic.io".to_string(),
-                        note: None,
-                    },
-                ],
-                footer: None,
-            }],
+            sections: vec![
+                SettingsSection {
+                    title: "Current session".to_string(),
+                    entries: vec![
+                        SettingsEntry {
+                            id: "auth".to_string(),
+                            label: "Auth".to_string(),
+                            value: "mock".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "embedding_api_endpoint".to_string(),
+                            label: "Embedding".to_string(),
+                            value: "https://api.kinic.io".to_string(),
+                            note: None,
+                        },
+                    ],
+                    footer: None,
+                },
+                SettingsSection {
+                    title: "Account".to_string(),
+                    entries: vec![
+                        SettingsEntry {
+                            id: "principal_id".to_string(),
+                            label: "Principal ID".to_string(),
+                            value: "aaaaa-aa".to_string(),
+                            note: None,
+                        },
+                        SettingsEntry {
+                            id: "kinic_balance".to_string(),
+                            label: "KINIC balance".to_string(),
+                            value: "12.34000000 KINIC".to_string(),
+                            note: None,
+                        },
+                    ],
+                    footer: None,
+                },
+            ],
         };
 
         let lines = settings_screen_lines_with_selection(Some(&snapshot), None);
@@ -197,13 +219,18 @@ mod tests {
             .expect("auth line");
         let endpoint_line = lines
             .iter()
-            .find(|line| line.contains("Embedding API endpoint"))
+            .find(|line| line.contains("Embedding"))
             .expect("endpoint line");
+        let principal_line = lines
+            .iter()
+            .find(|line| line.contains("Principal ID"))
+            .expect("principal line");
 
         assert_eq!(
             auth_line.find("mock"),
             endpoint_line.find("https://api.kinic.io")
         );
+        assert_eq!(auth_line.find(':'), principal_line.find(':'));
     }
 
     #[test]

@@ -1,8 +1,9 @@
 use super::*;
-use tui_kit_runtime::SETTINGS_ENTRY_DEFAULT_MEMORY_ID;
+use candid::Nat;
+use tui_kit_runtime::{SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview};
 
 fn deferred_session() -> SessionSettingsSnapshot {
-    SessionSettingsSnapshot::new(
+    session_settings_snapshot(
         &TuiAuth::DeferredIdentity {
             identity_name: "alice".to_string(),
             cached_identity: Default::default(),
@@ -13,6 +14,10 @@ fn deferred_session() -> SessionSettingsSnapshot {
     )
 }
 
+fn deferred_overview() -> SessionAccountOverview {
+    SessionAccountOverview::new(deferred_session())
+}
+
 fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {
     snapshot
         .quick_entries
@@ -20,6 +25,19 @@ fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {
         .find(|entry| entry.id == id)
         .map(|entry| entry.value.as_str())
         .expect("quick entry should exist")
+}
+
+fn section_entry_note<'a>(
+    snapshot: &'a SettingsSnapshot,
+    section: &str,
+    id: &str,
+) -> Option<&'a str> {
+    snapshot
+        .sections
+        .iter()
+        .find(|current| current.title == section)
+        .and_then(|current| current.entries.iter().find(|entry| entry.id == id))
+        .and_then(|entry| entry.note.as_deref())
 }
 
 fn section_entry_value<'a>(snapshot: &'a SettingsSnapshot, section: &str, id: &str) -> &'a str {
@@ -86,7 +104,7 @@ fn session_snapshot_labels_match_auth_state() {
     for (auth, use_mainnet, principal_id, auth_mode, identity_name, principal_label, network) in
         cases
     {
-        let snapshot = SessionSettingsSnapshot::new(
+        let snapshot = session_settings_snapshot(
             &auth,
             use_mainnet,
             principal_id.map(str::to_string),
@@ -148,17 +166,22 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
     ];
 
     for (name, preferences, memory_ids, health, default_memory, status) in cases {
-        let snapshot =
-            build_settings_snapshot(&deferred_session(), &preferences, &memory_ids, &health);
+        let overview = deferred_overview();
+        let snapshot = build_settings_snapshot(&overview, &preferences, &memory_ids, &health);
+        let section_titles = snapshot
+            .sections
+            .iter()
+            .map(|section| section.title.as_str())
+            .collect::<Vec<_>>();
 
         assert_eq!(
-            quick_entry_value(&snapshot, SETTINGS_ENTRY_DEFAULT_MEMORY_ID),
-            default_memory,
+            quick_entry_value(&snapshot, "principal_id"),
+            "princ...pal-1",
             "{name}"
         );
         assert_eq!(
-            quick_entry_value(&snapshot, "preferences"),
-            status,
+            quick_entry_value(&snapshot, SETTINGS_ENTRY_DEFAULT_MEMORY_ID),
+            default_memory,
             "{name}"
         );
         assert_eq!(
@@ -175,5 +198,76 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             status,
             "{name}"
         );
+        assert_eq!(
+            section_titles,
+            vec!["Saved preferences", "Current session", "Account"],
+            "{name}"
+        );
     }
+}
+
+#[test]
+fn settings_snapshot_projects_account_cost_section_from_overview() {
+    let mut overview = deferred_overview();
+    overview.balance_base_units = Some(1_234_000_000u128);
+    overview.price_base_units = Some(Nat::from(150_000_000u128));
+
+    let snapshot = build_settings_snapshot(
+        &overview,
+        &UserPreferences::default(),
+        &Vec::new(),
+        &PreferencesHealth::default(),
+    );
+
+    assert_eq!(
+        section_entry_value(&snapshot, "Account", "principal_id"),
+        "principal-1"
+    );
+    assert_eq!(
+        quick_entry_value(&snapshot, "principal_id"),
+        "princ...pal-1"
+    );
+    assert_eq!(
+        quick_entry_value(&snapshot, "kinic_balance"),
+        "12.34000000 KINIC"
+    );
+    assert_eq!(
+        section_entry_note(&snapshot, "Account", "kinic_balance"),
+        None
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account", "kinic_balance"),
+        "12.34000000 KINIC"
+    );
+}
+
+#[test]
+fn settings_snapshot_marks_partial_account_cost_with_error_notes() {
+    let mut overview = deferred_overview();
+    overview.balance_base_units = Some(1_234_000_000u128);
+    overview.price_error = Some("price unavailable".to_string());
+
+    let snapshot = build_settings_snapshot(
+        &overview,
+        &UserPreferences::default(),
+        &Vec::new(),
+        &PreferencesHealth::default(),
+    );
+
+    assert_eq!(
+        section_entry_value(&snapshot, "Account", "principal_id"),
+        "principal-1"
+    );
+    assert_eq!(
+        quick_entry_value(&snapshot, "principal_id"),
+        "princ...pal-1"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Account", "kinic_balance"),
+        "12.34000000 KINIC"
+    );
+    assert_eq!(
+        section_entry_note(&snapshot, "Account", "kinic_balance"),
+        Some("Could not fetch create price. Cause: price unavailable")
+    );
 }

@@ -134,7 +134,7 @@ impl<'a> TuiKitUi<'a> {
         let text = lines
             .into_iter()
             .map(|line| {
-                if line == cfg.content_hint || line == cfg.close_hint {
+                if line == cfg.close_hint {
                     Line::from(Span::styled(line, self.theme.style_muted()))
                 } else if line.starts_with(' ') {
                     Line::from(vec![
@@ -326,15 +326,25 @@ fn settings_overlay_lines(
         if snapshot.quick_entries.is_empty() {
             lines.push(" No settings available yet.".to_string());
         } else {
-            for entry in snapshot.quick_entries.iter().take(7) {
-                lines.push(format!(" {}: {}", entry.label, entry.value));
+            let visible_entries = snapshot.quick_entries.iter().take(7).collect::<Vec<_>>();
+            let label_width = visible_entries
+                .iter()
+                .map(|entry| entry.label.chars().count())
+                .max()
+                .unwrap_or(0);
+            for entry in visible_entries {
+                lines.push(format!(
+                    " {label:<width$}: {value}",
+                    label = entry.label,
+                    width = label_width,
+                    value = entry.value,
+                ));
             }
         }
     } else {
         lines.push(" No settings available yet.".to_string());
     }
     lines.push(String::new());
-    lines.push(cfg.content_hint.clone());
     lines.push(cfg.close_hint.clone());
     lines
 }
@@ -362,8 +372,43 @@ mod tests {
 
         let joined = settings_overlay_lines(Some(&snapshot), &cfg).join("\n");
 
+        assert!(!joined.contains("Open the Settings tab for detailed view."));
         assert!(joined.contains("Item 7: Value 7"));
         assert!(!joined.contains("Item 8: Value 8"));
+    }
+
+    #[test]
+    fn settings_overlay_lines_align_quick_entry_columns() {
+        let cfg = UiConfig::default().settings;
+        let snapshot = SettingsSnapshot {
+            quick_entries: vec![
+                SettingsEntry {
+                    id: "auth".to_string(),
+                    label: "Auth".to_string(),
+                    value: "mock".to_string(),
+                    note: None,
+                },
+                SettingsEntry {
+                    id: "embedding_api_endpoint".to_string(),
+                    label: "Embedding".to_string(),
+                    value: "https://api.kinic.io".to_string(),
+                    note: None,
+                },
+            ],
+            sections: vec![SettingsSection::default()],
+        };
+
+        let lines = settings_overlay_lines(Some(&snapshot), &cfg);
+        let auth_line = lines
+            .iter()
+            .find(|line| line.contains("Auth"))
+            .expect("auth line");
+        let embedding_line = lines
+            .iter()
+            .find(|line| line.contains("Embedding"))
+            .expect("embedding line");
+
+        assert_eq!(auth_line.find(':'), embedding_line.find(':'));
     }
 
     #[test]
@@ -396,15 +441,12 @@ mod tests {
 
     #[test]
     fn default_memory_selector_window_keeps_selected_row_visible() {
-        let ids = (0..12)
-            .map(|index| format!("id-{index}"))
-            .collect::<Vec<_>>();
-        let labels = (0..12)
+        let items = (0..12)
             .map(|index| format!("Memory {index}"))
             .collect::<Vec<_>>();
 
         let near_end = visible_default_memory_selector_lines(
-            default_memory_selector_lines(&ids, &labels, 10, Some("id-2")),
+            default_memory_selector_lines(&items, 10, Some("Memory 2")),
             8,
         );
         let near_end_joined = near_end
@@ -416,7 +458,7 @@ mod tests {
         assert!(!near_end_joined.contains("› Memory 1\n"));
 
         let near_start = visible_default_memory_selector_lines(
-            default_memory_selector_lines(&ids, &labels, 1, Some("id-9")),
+            default_memory_selector_lines(&items, 1, Some("Memory 9")),
             8,
         );
         let near_start_joined = near_start

@@ -51,6 +51,7 @@ enum OverlayInputResult {
     NotHandled,
     Consumed,
     CloseSettings,
+    DispatchError(String),
     ApplyEffects(Vec<CoreEffect>),
 }
 
@@ -182,6 +183,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     show_settings = false;
                     continue;
                 }
+                OverlayInputResult::DispatchError(error) => {
+                    state.status_message = Some(error);
+                    continue;
+                }
                 OverlayInputResult::ApplyEffects(effects) => {
                     hooks.on_effects(provider, &mut state, &effects);
                     execute_effects_to_status(&mut state, effects);
@@ -208,11 +213,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     continue;
                 }
                 HostGlobalCommand::CloseChat => {
-                    if let Ok(effects) =
-                        dispatch_action(provider, &mut state, &CoreAction::ToggleChat)
+                    if let Err(error) =
+                        dispatch_with_effects(provider, &mut state, hooks, &CoreAction::ToggleChat)
                     {
-                        hooks.on_effects(provider, &mut state, &effects);
-                        execute_effects_to_status(&mut state, effects);
+                        state.status_message = Some(error);
                     }
                     continue;
                 }
@@ -225,15 +229,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     continue;
                 }
                 HostGlobalCommand::BackToMemoriesTab => {
-                    if let Ok(effects) = dispatch_action(
-                        provider,
-                        &mut state,
-                        &CoreAction::SetTab(KINIC_MEMORIES_TAB_ID.into()),
-                    ) {
-                        hooks.on_effects(provider, &mut state, &effects);
-                        execute_effects_to_status(&mut state, effects);
+                    if let Err(error) =
+                        switch_to_tab(provider, &mut state, hooks, KINIC_MEMORIES_TAB_ID)
+                    {
+                        state.status_message = Some(error);
                     }
-                    normalize_focus_after_set_tab(&mut state);
                     continue;
                 }
                 HostGlobalCommand::OpenCreateTab => {
@@ -245,32 +245,33 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     continue;
                 }
                 HostGlobalCommand::ToggleChat => {
-                    if let Ok(effects) =
-                        dispatch_action(provider, &mut state, &CoreAction::ToggleChat)
+                    if let Err(error) =
+                        dispatch_with_effects(provider, &mut state, hooks, &CoreAction::ToggleChat)
                     {
-                        hooks.on_effects(provider, &mut state, &effects);
-                        execute_effects_to_status(&mut state, effects);
+                        state.status_message = Some(error);
                     }
                     continue;
                 }
                 HostGlobalCommand::ToggleSettings => {
-                    if let Ok(effects) =
-                        dispatch_action(provider, &mut state, &CoreAction::ToggleSettings)
-                    {
-                        hooks.on_effects(provider, &mut state, &effects);
-                        execute_effects_to_status(&mut state, effects);
+                    match dispatch_with_effects(
+                        provider,
+                        &mut state,
+                        hooks,
+                        &CoreAction::ToggleSettings,
+                    ) {
+                        Ok(()) => show_settings = true,
+                        Err(error) => state.status_message = Some(error),
                     }
-                    show_settings = true;
                     continue;
                 }
                 HostGlobalCommand::SetDefaultFromSelection => {
-                    if let Ok(effects) = dispatch_action(
+                    if let Err(error) = dispatch_with_effects(
                         provider,
                         &mut state,
+                        hooks,
                         &CoreAction::SetDefaultMemoryFromSelection,
                     ) {
-                        hooks.on_effects(provider, &mut state, &effects);
-                        execute_effects_to_status(&mut state, effects);
+                        state.status_message = Some(error);
                     }
                     continue;
                 }
@@ -279,20 +280,24 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     continue;
                 }
                 HostGlobalCommand::RefreshCurrentView => {
-                    if let Ok(effects) =
-                        dispatch_action(provider, &mut state, &CoreAction::RefreshCurrentView)
-                    {
-                        hooks.on_effects(provider, &mut state, &effects);
-                        execute_effects_to_status(&mut state, effects);
+                    if let Err(error) = dispatch_with_effects(
+                        provider,
+                        &mut state,
+                        hooks,
+                        &CoreAction::RefreshCurrentView,
+                    ) {
+                        state.status_message = Some(error);
                     }
                     continue;
                 }
                 HostGlobalCommand::ClearQuery => {
-                    if let Ok(effects) =
-                        dispatch_action(provider, &mut state, &CoreAction::SetQuery(String::new()))
-                    {
-                        hooks.on_effects(provider, &mut state, &effects);
-                        execute_effects_to_status(&mut state, effects);
+                    if let Err(error) = dispatch_with_effects(
+                        provider,
+                        &mut state,
+                        hooks,
+                        &CoreAction::SetQuery(String::new()),
+                    ) {
+                        state.status_message = Some(error);
                     }
                     continue;
                 }
@@ -344,7 +349,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         hooks.on_effects(provider, &mut state, &effects);
                         execute_effects_to_status(&mut state, effects)
                     }
-                    Err(e) => state.status_message = Some(format!("Dispatch error: {}", e)),
+                    Err(e) => state.status_message = Some(dispatch_error_message(&e)),
                 }
                 if should_reset_scroll {
                     inspector_scroll = 0;
@@ -394,7 +399,7 @@ fn handle_overlay_input<P: DataProvider>(
         };
         return match dispatch_action(provider, state, &action) {
             Ok(effects) => OverlayInputResult::ApplyEffects(effects),
-            Err(_) => OverlayInputResult::Consumed,
+            Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
         };
     }
 
@@ -425,17 +430,65 @@ fn open_form_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
     tab_id: &str,
     reset_form_state: bool,
 ) {
-    if reset_form_state
+    let should_reset_form_state = reset_form_state
         && state.current_tab_id != tab_id
-        && matches!(tab_kind(tab_id), TabKind::Form)
-    {
-        reset_create_form_state(state);
+        && matches!(tab_kind(tab_id), TabKind::Form);
+    match dispatch_tab_with_rollback(provider, state, hooks, tab_id) {
+        Ok(()) => {
+            if should_reset_form_state {
+                reset_create_form_state(state);
+            }
+            normalize_focus_after_set_tab(state);
+        }
+        Err(error) => state.status_message = Some(error),
     }
-    if let Ok(effects) = dispatch_action(provider, state, &CoreAction::SetTab(tab_id.into())) {
-        hooks.on_effects(provider, state, &effects);
-        execute_effects_to_status(state, effects);
+}
+
+fn dispatch_with_effects<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    action: &CoreAction,
+) -> Result<(), String> {
+    match dispatch_action(provider, state, action) {
+        Ok(effects) => {
+            hooks.on_effects(provider, state, &effects);
+            execute_effects_to_status(state, effects);
+            Ok(())
+        }
+        Err(error) => Err(dispatch_error_message(&error)),
     }
+}
+
+fn switch_to_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    tab_id: &str,
+) -> Result<(), String> {
+    dispatch_tab_with_rollback(provider, state, hooks, tab_id)?;
     normalize_focus_after_set_tab(state);
+    Ok(())
+}
+
+fn dispatch_tab_with_rollback<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    tab_id: &str,
+) -> Result<(), String> {
+    let previous_state = state.clone();
+    match dispatch_with_effects(provider, state, hooks, &CoreAction::SetTab(tab_id.into())) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            *state = previous_state;
+            Err(error)
+        }
+    }
+}
+
+fn dispatch_error_message(error: &dyn std::fmt::Display) -> String {
+    format!("Dispatch error: {}", error)
 }
 
 fn keep_selection_visible_scroll(
@@ -483,92 +536,5 @@ fn apply_content_scroll_action(action: &CoreAction, inspector_scroll: &mut usize
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tui_kit_runtime::kinic_tabs::{
-        KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
-    };
-
-    #[test]
-    fn normalize_focus_keeps_memories_on_tabs_after_tab_switch() {
-        let mut state = CoreState {
-            current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
-            focus: PaneFocus::Items,
-            ..CoreState::default()
-        };
-
-        normalize_focus_after_set_tab(&mut state);
-
-        assert_eq!(state.focus, PaneFocus::Tabs);
-    }
-
-    #[test]
-    fn normalize_focus_resets_create_tab_to_tabs_and_name_field() {
-        let mut state = CoreState {
-            current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
-            focus: PaneFocus::Content,
-            create_focus: tui_kit_runtime::CreateModalFocus::Submit,
-            ..CoreState::default()
-        };
-
-        normalize_focus_after_set_tab(&mut state);
-
-        assert_eq!(state.focus, PaneFocus::Tabs);
-        assert_eq!(state.create_focus, tui_kit_runtime::CreateModalFocus::Name);
-    }
-
-    #[test]
-    fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
-        let mut state = CoreState {
-            current_tab_id: KINIC_MARKET_TAB_ID.to_string(),
-            focus: PaneFocus::Content,
-            ..CoreState::default()
-        };
-
-        normalize_focus_after_set_tab(&mut state);
-
-        assert_eq!(state.focus, PaneFocus::Tabs);
-    }
-
-    #[test]
-    fn selector_overlay_action_maps_arrow_keys_only() {
-        assert_eq!(
-            selector_overlay_action(
-                crossterm::event::KeyCode::Down,
-                crossterm::event::KeyModifiers::NONE
-            ),
-            Some(CoreAction::MoveDefaultMemoryPickerNext)
-        );
-        assert_eq!(
-            selector_overlay_action(
-                crossterm::event::KeyCode::Up,
-                crossterm::event::KeyModifiers::NONE
-            ),
-            Some(CoreAction::MoveDefaultMemoryPickerPrev)
-        );
-        assert_eq!(
-            selector_overlay_action(
-                crossterm::event::KeyCode::Char('j'),
-                crossterm::event::KeyModifiers::NONE
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn content_scroll_helper_handles_scroll_end_only() {
-        let mut inspector_scroll = 3usize;
-
-        assert!(apply_content_scroll_action(
-            &CoreAction::ScrollContentEnd,
-            &mut inspector_scroll
-        ));
-        assert_eq!(inspector_scroll, 10002);
-
-        assert!(!apply_content_scroll_action(
-            &CoreAction::MoveEnd,
-            &mut inspector_scroll
-        ));
-        assert_eq!(inspector_scroll, 10002);
-    }
-}
+#[path = "runtime_loop_tests.rs"]
+mod tests;

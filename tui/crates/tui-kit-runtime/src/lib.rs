@@ -1,10 +1,11 @@
-//! Domain-agnostic core contracts for driving tui-kit style UIs.
+//! Shared runtime contracts for the Kinic tui-kit stack.
 //!
-//! This crate defines generic actions/effects, shared runtime state, and the
-//! `DataProvider` trait so multiple domains can plug into the same UI shell.
+//! This crate defines common actions/effects, shared runtime state, and the
+//! `DataProvider` trait used by the Kinic TUI crates.
 
 pub mod kinic_tabs;
 
+use candid::Nat;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
 
 pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
@@ -123,22 +124,120 @@ pub enum CreateCostState {
     Hidden,
     Loading,
     Unavailable,
-    Error(String),
-    Ready(CreateCostDetails),
+    Loaded(Box<LoadedCreateCost>),
+    Error(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateCostDetails {
+pub struct SessionSettingsSnapshot {
+    pub auth_mode: String,
+    pub identity_name: String,
+    pub principal_id: String,
+    pub network: String,
+    pub embedding_api_endpoint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionAccountOverview {
+    pub session: SessionSettingsSnapshot,
+    pub balance_base_units: Option<u128>,
+    pub price_base_units: Option<Nat>,
+    pub principal_error: Option<String>,
+    pub balance_error: Option<String>,
+    pub price_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedCreateCost {
     pub principal: String,
     pub balance_kinic: String,
-    pub balance_base_units: String,
     pub price_kinic: String,
-    pub price_base_units: String,
     pub required_total_kinic: String,
     pub required_total_base_units: String,
     pub difference_kinic: String,
     pub difference_base_units: String,
     pub sufficient_balance: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedCreateCost {
+    pub overview: SessionAccountOverview,
+    pub details: Option<DerivedCreateCost>,
+}
+
+impl SessionAccountOverview {
+    pub fn new(session: SessionSettingsSnapshot) -> Self {
+        Self {
+            session,
+            balance_base_units: None,
+            price_base_units: None,
+            principal_error: None,
+            balance_error: None,
+            price_error: None,
+        }
+    }
+
+    pub fn has_complete_create_cost(&self) -> bool {
+        self.balance_base_units.is_some() && self.price_base_units.is_some()
+    }
+
+    pub fn account_issue_messages(&self) -> Vec<String> {
+        let mut messages = Vec::new();
+        if let Some(error) = &self.principal_error {
+            messages.push(format!("Could not derive principal. Cause: {error}"));
+        }
+        if let Some(error) = &self.balance_error {
+            messages.push(format!("Could not fetch KINIC balance. Cause: {error}"));
+        }
+        if let Some(error) = &self.price_error {
+            messages.push(format!("Could not fetch create price. Cause: {error}"));
+        }
+        messages
+    }
+
+    pub fn account_issue_note(&self) -> Option<String> {
+        let issues = self.account_issue_messages();
+        (!issues.is_empty()).then(|| issues.join(" | "))
+    }
+
+    pub fn session_settings_refresh_failure_message(&self) -> Option<String> {
+        self.principal_error
+            .as_ref()
+            .map(|error| format!("Session settings refresh failed: {error}"))
+    }
+
+    pub fn session_settings_refresh_notify_message(&self) -> String {
+        let account_incomplete = self.principal_error.is_some()
+            || self.balance_error.is_some()
+            || self.price_error.is_some()
+            || !self.has_complete_create_cost();
+        if account_incomplete {
+            "Session settings updated (partial account info). See Settings → Account.".to_string()
+        } else {
+            "Session settings refreshed.".to_string()
+        }
+    }
+}
+
+pub fn format_e8s_to_kinic_string_u128(value: u128) -> String {
+    format_e8s_to_kinic_string_str(value.to_string().as_str())
+}
+
+pub fn format_e8s_to_kinic_string_nat(value: &Nat) -> String {
+    format_e8s_to_kinic_string_str(value.to_string().as_str())
+}
+
+fn format_e8s_to_kinic_string_str(value: &str) -> String {
+    const SCALE: usize = 8;
+
+    let digits = value.replace('_', "");
+    if digits.len() <= SCALE {
+        return format!("0.{:0>width$}", digits, width = SCALE);
+    }
+
+    let split_at = digits.len() - SCALE;
+    let (whole, fraction) = digits.split_at(split_at);
+    format!("{whole}.{fraction}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -367,6 +466,31 @@ pub struct ProviderSnapshot {
 pub struct ProviderOutput {
     pub snapshot: Option<ProviderSnapshot>,
     pub effects: Vec<CoreEffect>,
+}
+
+#[cfg(test)]
+mod formatter_tests {
+    use super::{format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128};
+    use candid::Nat;
+
+    #[test]
+    fn format_e8s_to_kinic_string_u128_keeps_eight_fraction_digits() {
+        assert_eq!(
+            format_e8s_to_kinic_string_u128(123_456_789u128),
+            "1.23456789"
+        );
+        assert_eq!(format_e8s_to_kinic_string_u128(42u128), "0.00000042");
+    }
+
+    #[test]
+    fn format_e8s_to_kinic_string_nat_supports_values_larger_than_u128() {
+        let large = Nat::parse(b"340282366920938463463374607431768211456").expect("valid Nat");
+
+        assert_eq!(
+            format_e8s_to_kinic_string_nat(&large),
+            "3402823669209384634633746074317.68211456"
+        );
+    }
 }
 
 /// Input key abstraction for shared key->action mapping.
