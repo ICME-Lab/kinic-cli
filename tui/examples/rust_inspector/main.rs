@@ -24,7 +24,7 @@ use tui_kit_host::{HostInputEvent, poll_host_input};
 use tui_kit_runtime::{CreateCostState, CreateSubmitState};
 use ui::{
     AnimationState, TuiKitUi,
-    app::{list_viewport_height_for_area, tabs_rect_for_area},
+    app::list_viewport_height_for_area,
 };
 
 fn main() -> Result<()> {
