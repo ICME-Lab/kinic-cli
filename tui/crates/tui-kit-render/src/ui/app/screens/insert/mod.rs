@@ -260,6 +260,17 @@ mod tests {
     use super::*;
     use crate::ui::theme::Theme;
 
+    fn render_insert_form(mode: InsertMode) -> String {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(mode);
+        insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn memory_id_value_prefers_default_memory_placeholder_when_empty() {
         let theme = Theme::default();
@@ -279,67 +290,20 @@ mod tests {
     }
 
     #[test]
-    fn insert_form_hides_file_path_for_inline_text_mode() {
-        let theme = Theme::default();
-        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::InlineText);
-        let lines = insert_form_lines(&ui, 80)
-            .lines
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+    fn insert_form_toggles_fields_by_mode() {
+        let cases = [
+            (InsertMode::InlineText, true, false, false),
+            (InsertMode::Markdown, false, true, false),
+            (InsertMode::Pdf, false, true, false),
+            (InsertMode::ManualEmbedding, true, false, true),
+        ];
 
-        assert!(lines.contains("Text"));
-        assert!(!lines.contains("File Path"));
-        assert!(!lines.contains("Embedding JSON"));
-    }
-
-    #[test]
-    fn insert_form_shows_file_path_for_markdown_mode_only() {
-        let theme = Theme::default();
-        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::Markdown);
-        let lines = insert_form_lines(&ui, 80)
-            .lines
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(!lines.contains("Text"));
-        assert!(lines.contains("File Path"));
-        assert!(!lines.contains("Embedding JSON"));
-    }
-
-    #[test]
-    fn insert_form_shows_file_path_for_pdf_mode_only() {
-        let theme = Theme::default();
-        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::Pdf);
-        let lines = insert_form_lines(&ui, 80)
-            .lines
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(!lines.contains("Text"));
-        assert!(lines.contains("File Path"));
-        assert!(!lines.contains("Embedding JSON"));
-    }
-
-    #[test]
-    fn insert_form_shows_text_and_embedding_for_manual_embedding_mode() {
-        let theme = Theme::default();
-        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::ManualEmbedding);
-        let lines = insert_form_lines(&ui, 80)
-            .lines
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(lines.contains("Text"));
-        assert!(!lines.contains("File Path"));
-        assert!(lines.contains("Embedding JSON"));
+        for (mode, has_inline_text, has_file_path, has_embedding) in cases {
+            let lines = render_insert_form(mode);
+            assert_eq!(lines.contains("<inline text>"), has_inline_text);
+            assert_eq!(lines.contains("<file path>"), has_file_path);
+            assert_eq!(lines.contains("<json array>"), has_embedding);
+        }
     }
 
     #[test]

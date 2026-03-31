@@ -868,11 +868,7 @@ impl KinicProvider {
         }
 
         let request = self.build_insert_request(state);
-        validate_insert_request(&request).map_err(|error| {
-            error
-                .to_string()
-                .replace("raw insert", "manual embedding insert")
-        })
+        validate_insert_request(&request).map_err(|error| error.to_string())
     }
 
     fn invalidate_pending_create_cost(&mut self) {

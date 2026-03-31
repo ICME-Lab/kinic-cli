@@ -273,7 +273,7 @@ fn mock_insert_rejects_blank_raw_text() {
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::InsertFormError(Some(message))
-            if message == "Text is required for manual embedding insert."
+            if message == "Text is required for raw insert."
     )));
 }
 
