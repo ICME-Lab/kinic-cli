@@ -119,6 +119,13 @@ pub enum InsertMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchScope {
+    #[default]
+    All,
+    Selected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InsertFormFocus {
     #[default]
     Mode,
@@ -331,6 +338,7 @@ pub struct CoreState {
     pub default_memory_selector_selected_id: Option<String>,
     pub saved_default_memory_id: Option<String>,
     pub default_memory_selector_context: MemorySelectorContext,
+    pub search_scope: SearchScope,
     pub insert_mode: InsertMode,
     pub insert_memory_id: String,
     pub insert_memory_placeholder: Option<String>,
@@ -375,6 +383,7 @@ impl Default for CoreState {
             default_memory_selector_selected_id: None,
             saved_default_memory_id: None,
             default_memory_selector_context: MemorySelectorContext::default(),
+            search_scope: SearchScope::default(),
             insert_mode: InsertMode::default(),
             insert_memory_id: String::new(),
             insert_memory_placeholder: None,
@@ -414,6 +423,8 @@ pub enum CoreAction {
     SearchInput(char),
     SearchBackspace,
     SearchSubmit,
+    SearchScopePrev,
+    SearchScopeNext,
     SetQuery(String),
     SelectTabIndex(usize),
     SelectNextTab,
@@ -750,6 +761,16 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             state.query.pop();
             state.selected_index = Some(0);
         }
+        CoreAction::SearchScopePrev => {
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+                state.search_scope = prev_search_scope(state.search_scope);
+            }
+        }
+        CoreAction::SearchScopeNext => {
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+                state.search_scope = next_search_scope(state.search_scope);
+            }
+        }
         CoreAction::SetTab(tab_id) => {
             state.current_tab_id = tab_id.0.clone();
             state.selected_index = Some(0);
@@ -1022,6 +1043,17 @@ fn prev_insert_mode(mode: InsertMode) -> InsertMode {
     }
 }
 
+fn next_search_scope(scope: SearchScope) -> SearchScope {
+    match scope {
+        SearchScope::All => SearchScope::Selected,
+        SearchScope::Selected => SearchScope::All,
+    }
+}
+
+fn prev_search_scope(scope: SearchScope) -> SearchScope {
+    next_search_scope(scope)
+}
+
 fn insert_form_locked(state: &CoreState) -> bool {
     state.insert_submit_state == CreateSubmitState::Submitting
 }
@@ -1115,6 +1147,12 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             PaneFocus::Search => match key {
                 CoreKey::Backspace => Some(CoreAction::SearchBackspace),
                 CoreKey::Enter => Some(CoreAction::SearchSubmit),
+                CoreKey::Left if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
+                    Some(CoreAction::SearchScopePrev)
+                }
+                CoreKey::Right if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
+                    Some(CoreAction::SearchScopeNext)
+                }
                 CoreKey::Down => Some(CoreAction::FocusItems),
                 CoreKey::Char(c) if !c.is_control() => Some(CoreAction::SearchInput(c)),
                 _ => None,
@@ -1610,6 +1648,53 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn memories_search_focus_maps_left_right_to_scope_changes() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Left,
+                PaneFocus::Search,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::SearchScopePrev)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Right,
+                PaneFocus::Search,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::SearchScopeNext)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Left,
+                PaneFocus::Search,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn search_scope_actions_only_mutate_memories_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            search_scope: SearchScope::All,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::SearchScopeNext);
+        assert_eq!(state.search_scope, SearchScope::Selected);
+
+        apply_core_action(&mut state, &CoreAction::SearchScopePrev);
+        assert_eq!(state.search_scope, SearchScope::All);
+
+        state.current_tab_id = kinic_tabs::KINIC_CREATE_TAB_ID.to_string();
+        apply_core_action(&mut state, &CoreAction::SearchScopeNext);
+        assert_eq!(state.search_scope, SearchScope::All);
     }
 
     #[test]

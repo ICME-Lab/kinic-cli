@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tui_kit_runtime::{
-    CreateCostState, LoadedCreateCost, MemorySelectorItem, SessionAccountOverview,
+    CreateCostState, LoadedCreateCost, MemorySelectorItem, SearchScope, SessionAccountOverview,
 };
 
 fn session_snapshot(principal_id: &str) -> tui_kit_runtime::SessionSettingsSnapshot {
@@ -67,11 +67,20 @@ fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
     }
 }
 
-fn pending_search_context(request_id: u64, memory_id: &str, query: &str) -> SearchRequestContext {
+fn pending_search_context(
+    request_id: u64,
+    query: &str,
+    scope: SearchScope,
+    target_memory_ids: &[&str],
+) -> SearchRequestContext {
     SearchRequestContext {
         request_id,
-        memory_id: memory_id.to_string(),
         query: query.to_string(),
+        scope,
+        target_memory_ids: target_memory_ids
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect(),
     }
 }
 
@@ -318,7 +327,10 @@ fn build_snapshot_exposes_saved_default_memory_id() {
 
     let snapshot = provider.build_snapshot(&CoreState::default());
 
-    assert_eq!(snapshot.saved_default_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(
+        snapshot.saved_default_memory_id.as_deref(),
+        Some("aaaaa-aa")
+    );
 }
 
 #[test]
@@ -831,6 +843,51 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
 }
 
 #[test]
+fn set_default_memory_from_search_result_uses_selected_result_memory() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+    provider.memories_mode = MemoriesMode::Results;
+    provider.result_records = vec![
+        record_from_search_result(
+            0,
+            SearchResultItem {
+                memory_id: "aaaaa-aa".to_string(),
+                score: 0.9,
+                payload: "alpha".to_string(),
+            },
+        ),
+        record_from_search_result(
+            1,
+            SearchResultItem {
+                memory_id: "bbbbb-bb".to_string(),
+                score: 0.8,
+                payload: "beta".to_string(),
+            },
+        ),
+    ];
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+
+    let output = provider
+        .handle_action(
+            &CoreAction::SetDefaultMemoryFromSelection,
+            &CoreState {
+                selected_index: Some(1),
+                ..CoreState::default()
+            },
+        )
+        .expect("set default from result output");
+
+    assert_eq!(
+        provider.user_preferences.default_memory_id.as_deref(),
+        Some("bbbbb-bb")
+    );
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Default memory set to bbbbb-bb"
+    )));
+}
+
+#[test]
 fn poll_create_cost_background_updates_overview_and_error_state_from_partial_loader() {
     let mut provider = KinicProvider::new(live_config());
     provider.session_overview = refreshed_session_overview();
@@ -1078,16 +1135,26 @@ fn poll_background_returns_search_results_with_tab_specific_focus() {
     let mut provider = KinicProvider::new(live_config());
     let (tx, rx) = mpsc::channel();
     provider.pending_search = Some(rx);
-    provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
+    provider.pending_search_context = Some(pending_search_context(
+        0,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    ));
     provider.search_in_flight = true;
     tx.send(SearchTaskOutput {
         request_id: 0,
-        memory_id: "aaaaa-aa".to_string(),
         query: "alpha".to_string(),
-        result: Ok(vec![SearchResultItem {
-            score: 0.9,
-            payload: "hello".to_string(),
-        }]),
+        scope: SearchScope::Selected,
+        target_memory_ids: vec!["aaaaa-aa".to_string()],
+        result: Ok(SearchBatchResult {
+            items: vec![SearchResultItem {
+                memory_id: "aaaaa-aa".to_string(),
+                score: 0.9,
+                payload: "hello".to_string(),
+            }],
+            failed_memory_ids: Vec::new(),
+        }),
     })
     .unwrap();
 
@@ -1115,16 +1182,26 @@ fn poll_background_returns_search_results_with_tab_specific_focus() {
     let mut off_tab_provider = KinicProvider::new(live_config());
     let (tx, rx) = mpsc::channel();
     off_tab_provider.pending_search = Some(rx);
-    off_tab_provider.pending_search_context = Some(pending_search_context(1, "aaaaa-aa", "alpha"));
+    off_tab_provider.pending_search_context = Some(pending_search_context(
+        1,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    ));
     off_tab_provider.search_in_flight = true;
     tx.send(SearchTaskOutput {
         request_id: 1,
-        memory_id: "aaaaa-aa".to_string(),
         query: "alpha".to_string(),
-        result: Ok(vec![SearchResultItem {
-            score: 0.9,
-            payload: "hello".to_string(),
-        }]),
+        scope: SearchScope::Selected,
+        target_memory_ids: vec!["aaaaa-aa".to_string()],
+        result: Ok(SearchBatchResult {
+            items: vec![SearchResultItem {
+                memory_id: "aaaaa-aa".to_string(),
+                score: 0.9,
+                payload: "hello".to_string(),
+            }],
+            failed_memory_ids: Vec::new(),
+        }),
     })
     .unwrap();
 
@@ -1151,7 +1228,12 @@ fn poll_background_returns_search_results_with_tab_specific_focus() {
 
 #[test]
 fn poll_background_discards_stale_search_results_after_context_changes() {
-    let scenarios = ["query_change", "active_memory_change", "query_clear"];
+    let scenarios = [
+        "query_change",
+        "active_memory_change",
+        "query_clear",
+        "scope_change",
+    ];
 
     for scenario in scenarios {
         let mut provider = KinicProvider::new(live_config());
@@ -1164,7 +1246,12 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
         provider.query = "alpha".to_string();
         let (tx, rx) = mpsc::channel();
         provider.pending_search = Some(rx);
-        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
+        provider.pending_search_context = Some(pending_search_context(
+            0,
+            "alpha",
+            SearchScope::Selected,
+            &["aaaaa-aa"],
+        ));
         provider.search_in_flight = true;
 
         match scenario {
@@ -1192,17 +1279,34 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
                     .handle_action(&CoreAction::SetQuery(String::new()), &CoreState::default())
                     .expect("clearing query should succeed");
             }
+            "scope_change" => {
+                provider
+                    .handle_action(
+                        &CoreAction::SearchScopePrev,
+                        &CoreState {
+                            current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                            search_scope: SearchScope::Selected,
+                            ..CoreState::default()
+                        },
+                    )
+                    .expect("scope update should succeed");
+            }
             _ => unreachable!(),
         }
 
         tx.send(SearchTaskOutput {
             request_id: 0,
-            memory_id: "aaaaa-aa".to_string(),
             query: "alpha".to_string(),
-            result: Ok(vec![SearchResultItem {
-                score: 0.9,
-                payload: "stale".to_string(),
-            }]),
+            scope: SearchScope::Selected,
+            target_memory_ids: vec!["aaaaa-aa".to_string()],
+            result: Ok(SearchBatchResult {
+                items: vec![SearchResultItem {
+                    memory_id: "aaaaa-aa".to_string(),
+                    score: 0.9,
+                    payload: "stale".to_string(),
+                }],
+                failed_memory_ids: Vec::new(),
+            }),
         })
         .unwrap();
 
@@ -1233,8 +1337,8 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
     provider.active_memory_id = Some("aaaaa-aa".to_string());
     provider.result_records = vec![record_from_search_result(
         0,
-        "aaaaa-aa",
         SearchResultItem {
+            memory_id: "aaaaa-aa".to_string(),
             score: 0.9,
             payload: "hello".to_string(),
         },
@@ -1242,12 +1346,18 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
     provider.memories_mode = MemoriesMode::Results;
     let (tx, rx) = mpsc::channel();
     provider.pending_search = Some(rx);
-    provider.pending_search_context = Some(pending_search_context(1, "aaaaa-aa", "alpha"));
+    provider.pending_search_context = Some(pending_search_context(
+        1,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    ));
     provider.search_in_flight = true;
     tx.send(SearchTaskOutput {
         request_id: 1,
-        memory_id: "aaaaa-aa".to_string(),
         query: "alpha".to_string(),
+        scope: SearchScope::Selected,
+        target_memory_ids: vec!["aaaaa-aa".to_string()],
         result: Err("boom".to_string()),
     })
     .unwrap();
@@ -1270,8 +1380,12 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
     let mut disconnected_provider = KinicProvider::new(live_config());
     let (tx, rx) = mpsc::channel::<SearchTaskOutput>();
     disconnected_provider.pending_search = Some(rx);
-    disconnected_provider.pending_search_context =
-        Some(pending_search_context(3, "aaaaa-aa", "alpha"));
+    disconnected_provider.pending_search_context = Some(pending_search_context(
+        3,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    ));
     disconnected_provider.search_in_flight = true;
     drop(tx);
 
@@ -1291,7 +1405,7 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
 }
 
 #[test]
-fn sync_active_memory_tracks_visible_records_and_restores_after_query_clears() {
+fn query_updates_do_not_filter_memories_or_clear_active_memory() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_records = vec![
         live_memory("aaaaa-aa", "Alpha Memory"),
@@ -1299,37 +1413,25 @@ fn sync_active_memory_tracks_visible_records_and_restores_after_query_clears() {
     ];
     provider.all = provider.memory_records.clone();
     provider.active_memory_id = Some("aaaaa-aa".to_string());
-    provider.query = "beta".to_string();
+    provider
+        .handle_action(
+            &CoreAction::SetQuery("gamma".to_string()),
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                ..CoreState::default()
+            },
+        )
+        .expect("query update should succeed");
 
-    provider.sync_active_memory_to_visible_records();
-    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
-    assert_eq!(
-        provider.live_search_target_id().as_deref(),
-        Some("bbbbb-bb")
-    );
-
-    provider.query = "gamma".to_string();
-    provider.sync_active_memory_to_visible_records();
-    assert_eq!(provider.active_memory_id, None);
-    let empty_snapshot = provider.build_snapshot(&CoreState::default());
-    assert!(empty_snapshot.selected_content.is_none());
-    assert!(empty_snapshot.items.is_empty());
-
-    provider.query.clear();
-    provider.sync_active_memory_to_visible_records();
     assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
     assert_eq!(
-        provider
-            .build_snapshot(&CoreState::default())
-            .selected_content
-            .as_ref()
-            .map(|detail| detail.id.as_str()),
-        Some("aaaaa-aa")
+        provider.build_snapshot(&CoreState::default()).items.len(),
+        provider.memory_records.len()
     );
 }
 
 #[test]
-fn memory_navigation_stays_within_visible_filtered_records() {
+fn memory_navigation_uses_loaded_memory_order_without_query_filtering() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_records = vec![
         live_memory("aaaaa-aa", "Alpha Memory"),
@@ -1350,7 +1452,7 @@ fn memory_navigation_stays_within_visible_filtered_records() {
         )
         .expect("move next should succeed");
 
-    assert_eq!(provider.active_memory_id.as_deref(), Some("ccccc-cc"));
+    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
     assert!(output.snapshot.is_some());
     provider
         .handle_action(
@@ -1361,7 +1463,7 @@ fn memory_navigation_stays_within_visible_filtered_records() {
             },
         )
         .expect("move home should succeed");
-    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
 
     let output = provider
         .handle_action(
@@ -1381,4 +1483,55 @@ fn memory_navigation_stays_within_visible_filtered_records() {
             .map(|detail| detail.id.as_str()),
         Some("ccccc-cc")
     );
+}
+
+#[test]
+fn poll_background_combines_all_scope_results_and_reports_partial_failures() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel();
+    provider.pending_search = Some(rx);
+    provider.pending_search_context = Some(pending_search_context(
+        4,
+        "alpha",
+        SearchScope::All,
+        &["aaaaa-aa", "bbbbb-bb"],
+    ));
+    provider.search_in_flight = true;
+    tx.send(SearchTaskOutput {
+        request_id: 4,
+        query: "alpha".to_string(),
+        scope: SearchScope::All,
+        target_memory_ids: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+        result: Ok(SearchBatchResult {
+            items: vec![
+                SearchResultItem {
+                    memory_id: "bbbbb-bb".to_string(),
+                    score: 0.7,
+                    payload: "{\"sentence\":\"beta\",\"tag\":\"docs\"}".to_string(),
+                },
+                SearchResultItem {
+                    memory_id: "aaaaa-aa".to_string(),
+                    score: 0.9,
+                    payload: "{\"sentence\":\"alpha\",\"tag\":\"docs\"}".to_string(),
+                },
+            ],
+            failed_memory_ids: vec!["bbbbb-bb".to_string()],
+        }),
+    })
+    .unwrap();
+
+    let output = provider
+        .poll_background(&CoreState::default())
+        .expect("all-scope search output");
+
+    assert_eq!(provider.memories_mode, MemoriesMode::Results);
+    assert_eq!(provider.result_records.len(), 2);
+    assert_eq!(provider.result_records[0].id, "aaaaa-aa-result-1");
+    assert_eq!(provider.result_records[1].id, "bbbbb-bb-result-2");
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message.contains("Loaded 2 search results across 2 memories")
+                && message.contains("1 memory search(es) failed")
+    )));
 }

@@ -7,6 +7,7 @@ use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::{
     create_domain::derive_create_cost,
+    embedding::fetch_embedding,
     insert_service::{InsertRequest, validate_insert_request},
     tui::TuiAuth,
 };
@@ -15,7 +16,7 @@ use tokio::runtime::Runtime;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, InsertMode,
     LoadedCreateCost, MemorySelectorContext, MemorySelectorItem, PaneFocus, ProviderOutput,
-    ProviderSnapshot, SessionAccountOverview, SessionSettingsSnapshot,
+    ProviderSnapshot, SearchScope, SessionAccountOverview, SessionSettingsSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -35,6 +36,7 @@ pub struct KinicRecord {
     pub group: String,
     pub summary: String,
     pub content_md: String,
+    pub source_memory_id: Option<String>,
 }
 
 impl KinicRecord {
@@ -51,7 +53,13 @@ impl KinicRecord {
             group: group.into(),
             summary: summary.into(),
             content_md: content_md.into(),
+            source_memory_id: None,
         }
+    }
+
+    pub fn with_source_memory_id(mut self, memory_id: impl Into<String>) -> Self {
+        self.source_memory_id = Some(memory_id.into());
+        self
     }
 }
 
@@ -85,6 +93,7 @@ pub struct KinicProvider {
     pending_search_context: Option<SearchRequestContext>,
     next_search_request_id: u64,
     search_in_flight: bool,
+    last_search_state: Option<LastSearchState>,
     create_cost_state: CreateCostState,
     pending_create_cost: Option<mpsc::Receiver<CreateCostTaskOutput>>,
     pending_create_cost_request_id: Option<u64>,
@@ -106,15 +115,29 @@ pub struct KinicProvider {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SearchRequestContext {
     request_id: u64,
-    memory_id: String,
     query: String,
+    scope: SearchScope,
+    target_memory_ids: Vec<String>,
 }
 
 struct SearchTaskOutput {
     request_id: u64,
-    memory_id: String,
     query: String,
-    result: Result<Vec<SearchResultItem>, String>,
+    scope: SearchScope,
+    target_memory_ids: Vec<String>,
+    result: Result<SearchBatchResult, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LastSearchState {
+    scope: SearchScope,
+    target_memory_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SearchBatchResult {
+    items: Vec<SearchResultItem>,
+    failed_memory_ids: Vec<String>,
 }
 
 struct InitialMemoriesTaskOutput {
@@ -296,6 +319,7 @@ impl KinicProvider {
             pending_search_context: None,
             next_search_request_id: 0,
             search_in_flight: false,
+            last_search_state: None,
             create_cost_state: CreateCostState::Hidden,
             pending_create_cost: None,
             pending_create_cost_request_id: None,
@@ -410,7 +434,10 @@ impl KinicProvider {
             &self.all
         };
 
-        if self.memories_mode == MemoriesMode::Results || self.query.is_empty() {
+        if self.memories_mode == MemoriesMode::Results
+            || self.query.is_empty()
+            || (self.is_live() && self.memories_mode == MemoriesMode::Browser)
+        {
             return base.iter().collect();
         }
 
@@ -432,72 +459,7 @@ impl KinicProvider {
         if self.memory_records.is_empty() {
             return Vec::new();
         }
-        self.current_records()
-    }
-
-    fn sync_active_memory_to_visible_records(&mut self) {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
-            return;
-        }
-
-        let previous_active_memory_id = self.active_memory_id.clone();
-        if self.query.is_empty() {
-            if self.active_memory_id.is_none() {
-                self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
-            }
-            if self.active_memory_id != previous_active_memory_id {
-                self.invalidate_pending_search();
-            }
-            return;
-        }
-
-        let visible_ids = self
-            .visible_memory_records()
-            .into_iter()
-            .map(|record| record.id.clone())
-            .collect::<Vec<_>>();
-
-        if visible_ids.is_empty() {
-            self.active_memory_id = None;
-            if self.active_memory_id != previous_active_memory_id {
-                self.invalidate_pending_search();
-            }
-            return;
-        }
-
-        if self
-            .active_memory_id
-            .as_ref()
-            .is_some_and(|active_id| visible_ids.iter().any(|id| id == active_id))
-        {
-            return;
-        }
-
-        self.active_memory_id = visible_ids.first().cloned();
-        self.invalidate_pending_search();
-    }
-
-    fn live_search_target_id(&self) -> Option<String> {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
-            return self.active_memory_id.clone();
-        }
-
-        if self.query.is_empty() {
-            return self.active_memory_id.clone();
-        }
-
-        let visible_records = self.visible_memory_records();
-        if visible_records.is_empty() {
-            return None;
-        }
-
-        if let Some(active_id) = self.active_memory_id.as_ref()
-            && visible_records.iter().any(|record| &record.id == active_id)
-        {
-            return Some(active_id.clone());
-        }
-
-        visible_records.first().map(|record| record.id.clone())
+        self.memory_records.iter().collect()
     }
 
     fn active_visible_memory_record(&self) -> Option<&KinicRecord> {
@@ -588,7 +550,7 @@ impl KinicProvider {
             selected_content,
             selected_context: None,
             total_count: filtered.len(),
-            status_message: Some(self.status_message(filtered.len())),
+            status_message: Some(self.status_message(state, filtered.len())),
             create_cost_state: self.create_cost_state.clone(),
             create_submit_state: state.create_submit_state.clone(),
             settings: settings::build_settings_snapshot(
@@ -786,7 +748,7 @@ impl KinicProvider {
         }
     }
 
-    fn status_message(&self, visible_count: usize) -> String {
+    fn status_message(&self, state: &CoreState, visible_count: usize) -> String {
         if self.tab_id == KINIC_INSERT_TAB_ID {
             return "kinic(insert): choose mode, target memory, and payload, then press Enter on submit.".to_string();
         }
@@ -797,16 +759,35 @@ impl KinicProvider {
             )
         } else {
             match self.memories_mode {
-                MemoriesMode::Browser => match self.active_memory_id.as_deref() {
-                    Some(memory_id) => format!(
-                        "kinic(live): target {memory_id} | Enter in search runs remote search | Shift+D saves default"
+                MemoriesMode::Browser => {
+                    let scope = match state.search_scope {
+                        SearchScope::All => "all memories",
+                        SearchScope::Selected => "selected memory",
+                    };
+                    match self.active_memory_id.as_deref() {
+                        Some(memory_id) => format!(
+                            "kinic(live): target {memory_id} | search scope {scope} | Enter runs semantic search | ←/→ changes scope | Shift+D saves default"
+                        ),
+                        None => format!(
+                            "kinic(live): search scope {scope} | Enter runs semantic search | ←/→ changes scope | Shift+D saves default"
+                        ),
+                    }
+                }
+                MemoriesMode::Results => match self.last_search_state.as_ref() {
+                    Some(last) if last.scope == SearchScope::All => format!(
+                        "kinic(live): {visible_count} search results across {} memories | Esc clears search and returns | Shift+D saves default",
+                        last.target_memory_ids.len()
                     ),
-                    None => "kinic(live): no memory selected".to_string(),
-                },
-                MemoriesMode::Results => match self.active_memory_id.as_deref() {
-                    Some(memory_id) => format!(
-                        "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
-                    ),
+                    Some(last) => {
+                        let memory_id = last
+                            .target_memory_ids
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("selected");
+                        format!(
+                            "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
+                        )
+                    }
                     None => format!("kinic(live): {visible_count} search results"),
                 },
             }
@@ -869,23 +850,62 @@ impl KinicProvider {
         };
     }
 
-    fn search_context(request_id: u64, memory_id: String, query: String) -> SearchRequestContext {
+    fn search_context(
+        request_id: u64,
+        query: String,
+        scope: SearchScope,
+        target_memory_ids: Vec<String>,
+    ) -> SearchRequestContext {
         SearchRequestContext {
             request_id,
-            memory_id,
             query,
+            scope,
+            target_memory_ids,
         }
     }
 
     fn matches_pending_search(&self, output: &SearchTaskOutput) -> bool {
         self.pending_search_context.as_ref().is_some_and(|context| {
             context.request_id == output.request_id
-                && context.memory_id == output.memory_id
                 && context.query == output.query
+                && context.scope == output.scope
+                && context.target_memory_ids == output.target_memory_ids
         })
     }
 
-    fn run_live_search(&mut self) -> Option<CoreEffect> {
+    fn selected_memory_id_for_default(&self, state: &CoreState) -> Option<String> {
+        match self.memories_mode {
+            MemoriesMode::Browser => self.active_memory_id.clone(),
+            MemoriesMode::Results => self
+                .result_records
+                .get(state.selected_index.unwrap_or(0))
+                .and_then(|record| record.source_memory_id.clone()),
+        }
+    }
+
+    fn search_target_memory_ids(&self, scope: SearchScope) -> Result<Vec<String>, String> {
+        match scope {
+            SearchScope::All => {
+                let targets = self
+                    .memory_records
+                    .iter()
+                    .map(|record| record.id.clone())
+                    .collect::<Vec<_>>();
+                if targets.is_empty() {
+                    Err("No memories available to search yet.".to_string())
+                } else {
+                    Ok(targets)
+                }
+            }
+            SearchScope::Selected => self
+                .active_memory_id
+                .clone()
+                .map(|memory_id| vec![memory_id])
+                .ok_or_else(|| "Select a memory in the list before running search.".to_string()),
+        }
+    }
+
+    fn run_live_search(&mut self, scope: SearchScope) -> Option<CoreEffect> {
         let auth = self.config.auth.clone();
         if !auth.is_live() {
             return None;
@@ -895,16 +915,16 @@ impl KinicProvider {
                 "Search already running. Wait for the current request to finish.".to_string(),
             ));
         }
-        let Some(memory_id) = self.live_search_target_id() else {
-            return Some(CoreEffect::Notify(
-                "Select a memory in the list before running search.".to_string(),
-            ));
+        let target_memory_ids = match self.search_target_memory_ids(scope) {
+            Ok(targets) => targets,
+            Err(message) => return Some(CoreEffect::Notify(message)),
         };
         let query = self.query.trim().to_string();
         if query.is_empty() {
             self.memories_mode = MemoriesMode::Browser;
             self.result_records.clear();
             self.invalidate_pending_search();
+            self.last_search_state = None;
             return Some(CoreEffect::Notify(
                 "Cleared search query and returned to memories.".to_string(),
             ));
@@ -915,8 +935,9 @@ impl KinicProvider {
         self.next_search_request_id += 1;
         self.pending_search_context = Some(Self::search_context(
             request_id,
-            memory_id.clone(),
             query.clone(),
+            scope,
+            target_memory_ids.clone(),
         ));
         let (tx, rx) = mpsc::channel();
         self.pending_search = Some(rx);
@@ -924,18 +945,72 @@ impl KinicProvider {
 
         thread::spawn(move || {
             let runtime = Runtime::new().expect("failed to create tokio runtime for search");
+            let output_target_memory_ids = target_memory_ids.clone();
+            let output_query = query.clone();
             let result = runtime
-                .block_on(bridge::search_memory(
-                    use_mainnet,
-                    auth,
-                    memory_id.clone(),
-                    query.clone(),
-                ))
+                .block_on(async move {
+                    let embedding = fetch_embedding(&query)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let mut tasks = tokio::task::JoinSet::new();
+                    for memory_id in target_memory_ids.clone() {
+                        let auth = auth.clone();
+                        let embedding = embedding.clone();
+                        tasks.spawn(async move {
+                            let result = bridge::search_memory_with_embedding(
+                                use_mainnet,
+                                auth,
+                                memory_id.clone(),
+                                embedding,
+                            )
+                            .await;
+                            (memory_id, result)
+                        });
+                    }
+
+                    let mut items = Vec::new();
+                    let mut failed_memory_ids = Vec::new();
+                    let mut first_error = None;
+                    while let Some(task) = tasks.join_next().await {
+                        match task {
+                            Ok((_, Ok(mut search_items))) => items.append(&mut search_items),
+                            Ok((memory_id, Err(error))) => {
+                                if first_error.is_none() {
+                                    first_error = Some(error.to_string());
+                                }
+                                failed_memory_ids.push(memory_id);
+                            }
+                            Err(error) => {
+                                if first_error.is_none() {
+                                    first_error = Some(error.to_string());
+                                }
+                            }
+                        }
+                    }
+
+                    items.sort_by(|left, right| {
+                        right
+                            .score
+                            .partial_cmp(&left.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if failed_memory_ids.len() == target_memory_ids.len() {
+                        Err(first_error.unwrap_or_else(|| {
+                            "Search failed before any memory returned results.".to_string()
+                        }))
+                    } else {
+                        Ok(SearchBatchResult {
+                            items,
+                            failed_memory_ids,
+                        })
+                    }
+                })
                 .map_err(|error| error.to_string());
             let _ = tx.send(SearchTaskOutput {
                 request_id,
-                memory_id,
-                query,
+                query: output_query,
+                scope,
+                target_memory_ids: output_target_memory_ids,
                 result,
             });
         });
@@ -975,26 +1050,57 @@ impl KinicProvider {
 
         let effects = match output.result {
             Ok(results) => {
-                self.result_records = results
+                let failed_count = results.failed_memory_ids.len();
+                let mut items = results.items;
+                items.sort_by(|left, right| {
+                    right
+                        .score
+                        .partial_cmp(&left.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                self.result_records = items
                     .into_iter()
                     .enumerate()
-                    .map(|(index, item)| record_from_search_result(index, &output.memory_id, item))
+                    .map(|(index, item)| record_from_search_result(index, item))
                     .collect();
                 self.memories_mode = MemoriesMode::Results;
+                self.last_search_state = Some(LastSearchState {
+                    scope: output.scope,
+                    target_memory_ids: output.target_memory_ids.clone(),
+                });
                 let mut effects = vec![CoreEffect::SelectFirstListItem];
                 if state.current_tab_id == KINIC_MEMORIES_TAB_ID {
                     effects.push(CoreEffect::FocusPane(PaneFocus::Items));
                 }
-                effects.push(CoreEffect::Notify(format!(
-                    "Loaded {} search results for {}",
-                    self.result_records.len(),
-                    output.memory_id
-                )));
+                let success_message = match output.scope {
+                    SearchScope::All => format!(
+                        "Loaded {} search results across {} memories",
+                        self.result_records.len(),
+                        output.target_memory_ids.len()
+                    ),
+                    SearchScope::Selected => format!(
+                        "Loaded {} search results for {}",
+                        self.result_records.len(),
+                        output
+                            .target_memory_ids
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("selected memory")
+                    ),
+                };
+                if failed_count == 0 {
+                    effects.push(CoreEffect::Notify(success_message));
+                } else {
+                    effects.push(CoreEffect::Notify(format!(
+                        "{success_message}; {failed_count} memory search(es) failed"
+                    )));
+                }
                 effects
             }
             Err(error) => {
                 self.result_records.clear();
                 self.memories_mode = MemoriesMode::Browser;
+                self.last_search_state = None;
                 vec![CoreEffect::Notify(format!("Search failed: {error}"))]
             }
         };
@@ -1038,6 +1144,7 @@ impl KinicProvider {
                     .default_memory_selection()
                     .preferred_initial_memory_id()
                     .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
+                self.last_search_state = None;
                 Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
                     effects: vec![CoreEffect::Notify("Loaded memories.".to_string())],
@@ -1049,6 +1156,7 @@ impl KinicProvider {
                 self.memories_mode = MemoriesMode::Browser;
                 self.all = vec![load_error_record(error)];
                 self.active_memory_id = None;
+                self.last_search_state = None;
                 Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
                     effects: vec![CoreEffect::Notify("Unable to load memories.".to_string())],
@@ -1166,6 +1274,7 @@ impl KinicProvider {
                 self.memories_mode = MemoriesMode::Browser;
                 self.result_records.clear();
                 self.invalidate_pending_search();
+                self.last_search_state = None;
                 let _ = self.start_create_cost_refresh();
                 effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
                 effects.push(CoreEffect::SelectFirstListItem);
@@ -1289,11 +1398,13 @@ impl KinicProvider {
             self.memories_mode = MemoriesMode::Browser;
             self.result_records.clear();
             self.invalidate_pending_search();
+            self.last_search_state = None;
         }
     }
 
     fn set_tab(&mut self, tab_id: &str) -> Vec<CoreEffect> {
         self.tab_id = tab_id.to_string();
+        self.invalidate_pending_search();
 
         match tab_id {
             KINIC_MEMORIES_TAB_ID => {
@@ -1342,12 +1453,10 @@ impl DataProvider for KinicProvider {
                 if self.tab_id == KINIC_MEMORIES_TAB_ID && q.is_empty() {
                     self.reset_memories_browser();
                 }
-                self.sync_active_memory_to_visible_records();
             }
             CoreAction::SearchInput(c) => {
                 self.query.push(*c);
                 self.invalidate_pending_search();
-                self.sync_active_memory_to_visible_records();
             }
             CoreAction::SearchBackspace => {
                 self.query.pop();
@@ -1355,11 +1464,16 @@ impl DataProvider for KinicProvider {
                 if self.query.is_empty() {
                     self.reset_memories_browser();
                 }
-                self.sync_active_memory_to_visible_records();
+            }
+            CoreAction::SearchScopePrev => {
+                self.invalidate_pending_search();
+            }
+            CoreAction::SearchScopeNext => {
+                self.invalidate_pending_search();
             }
             CoreAction::SearchSubmit => {
                 if self.is_live()
-                    && let Some(effect) = self.run_live_search()
+                    && let Some(effect) = self.run_live_search(state.search_scope)
                 {
                     effects.push(effect);
                 }
@@ -1498,7 +1612,7 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::SetDefaultMemoryFromSelection => {
-                let Some(memory_id) = self.active_memory_id.clone() else {
+                let Some(memory_id) = self.selected_memory_id_for_default(state) else {
                     effects.push(CoreEffect::Notify(
                         "Select a memory before setting the default.".to_string(),
                     ));
@@ -1558,13 +1672,13 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         "memories",
         format!("Status: {}", memory.status),
         format!(
-            "## Memory\n\n- Id: `{}`\n- Status: `{}`\n\n### Content\n{}\n\n### Search\nSelect this item, then type a query and press Enter in the search box.",
+            "## Memory\n\n- Id: `{}`\n- Status: `{}`\n\n### Content\n{}\n\n### Search\nUse the search box to query all memories or switch scope to search only this memory.",
             memory.id, memory.status, memory.detail
         ),
     )
 }
 
-fn record_from_search_result(index: usize, memory_id: &str, item: SearchResultItem) -> KinicRecord {
+fn record_from_search_result(index: usize, item: SearchResultItem) -> KinicRecord {
     let parsed = parse_search_payload(&item.payload);
     let sentence = parsed
         .as_ref()
@@ -1581,15 +1695,16 @@ fn record_from_search_result(index: usize, memory_id: &str, item: SearchResultIt
         .unwrap_or("search-result");
     let detail_body = sentence.unwrap_or_else(|| item.payload.clone());
     KinicRecord::new(
-        format!("{memory_id}-result-{}", index + 1),
+        format!("{}-result-{}", item.memory_id, index + 1),
         title,
         "search-result",
         format!("Score: {score} | Tag: {tag}"),
         format!(
-            "## Search Hit\n\n- Memory: `{memory_id}`\n- Score: `{score}`\n- Tag: `{tag}`\n\n### Sentence\n{}\n\n### Raw Payload\n{}\n",
-            detail_body, item.payload
+            "## Search Hit\n\n- Memory: `{}`\n- Score: `{score}`\n- Tag: `{tag}`\n\n### Sentence\n{}\n\n### Raw Payload\n{}\n",
+            item.memory_id, detail_body, item.payload
         ),
     )
+    .with_source_memory_id(item.memory_id)
 }
 
 fn search_result_title(payload: &str, index: usize) -> String {

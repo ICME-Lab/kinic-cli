@@ -122,6 +122,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .list_selected(state.selected_index)
                     .list_scroll(list_scroll_offset)
                     .search_input(&state.query)
+                    .search_scope(state.search_scope)
                     .current_tab_id(TabId::new(state.current_tab_id.clone()))
                     .focus(focus)
                     .status_message(state.status_message.as_deref().unwrap_or("ready"))
