@@ -3,6 +3,7 @@ pub mod agent;
 pub mod cli;
 pub(crate) mod clients;
 mod commands;
+pub(crate) mod create_domain;
 mod embedding;
 pub(crate) mod identity_store;
 pub(crate) mod insert_service;

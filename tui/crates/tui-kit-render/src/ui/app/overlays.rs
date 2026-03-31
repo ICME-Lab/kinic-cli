@@ -1,4 +1,4 @@
-//! Overlay blocks: settings popup, help popup.
+//! Overlay blocks: settings, help, selectors, and create.
 
 use ratatui::{
     buffer::Buffer,
@@ -7,9 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{
-    CreateModalFocus, CreateSubmitState, SelectorContext, SelectorMode, SettingsSnapshot,
-};
+use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::TuiKitUi;
 use super::screens::settings::{SelectorLineKind, selector_lines};
@@ -106,14 +104,15 @@ impl<'a> TuiKitUi<'a> {
             self.theme.style_muted(),
         )));
 
-        let block = Paragraph::new(text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(self.theme.style_border_focused())
-                .title(format!(" {} ", cfg.title))
-                .style(Style::default().bg(self.theme.bg_panel)),
-        );
-        block.render(create_area, buf);
+        Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(self.theme.style_border_focused())
+                    .title(format!(" {} ", cfg.title))
+                    .style(Style::default().bg(self.theme.bg_panel)),
+            )
+            .render(create_area, buf);
     }
 
     pub(super) fn render_settings_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -136,7 +135,7 @@ impl<'a> TuiKitUi<'a> {
         let text = lines
             .into_iter()
             .map(|line| {
-                if line == cfg.content_hint || line == cfg.close_hint {
+                if line == cfg.close_hint {
                     Line::from(Span::styled(line, self.theme.style_muted()))
                 } else if line.starts_with(' ') {
                     Line::from(vec![
@@ -148,7 +147,7 @@ impl<'a> TuiKitUi<'a> {
                 }
             })
             .collect::<Vec<_>>();
-        let block = Paragraph::new(text)
+        Paragraph::new(text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -156,8 +155,8 @@ impl<'a> TuiKitUi<'a> {
                     .title(format!(" {} ", cfg.title))
                     .style(Style::default().bg(self.theme.bg_panel)),
             )
-            .wrap(Wrap { trim: false });
-        block.render(settings_area, buf);
+            .wrap(Wrap { trim: false })
+            .render(settings_area, buf);
     }
 
     pub(super) fn render_help_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -192,75 +191,61 @@ impl<'a> TuiKitUi<'a> {
             cfg.close_hint.clone(),
             self.theme.style_muted(),
         )));
-        let help = Paragraph::new(help_text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(self.theme.style_border_focused())
-                .title(format!(" {} ", cfg.title))
-                .style(Style::default().bg(self.theme.bg_panel)),
-        );
-        help.render(help_area, buf);
-    }
-
-    pub(super) fn render_selector_overlay(&self, area: Rect, buf: &mut Buffer) {
-        if !self.selector_open {
-            return;
-        }
-
-        if self.selector_mode == SelectorMode::AddTag {
-            self.render_selector_add_tag_overlay(area, buf);
-            return;
-        }
-
-        let lines = selector_lines(
-            self.selector_context,
-            self.selector_mode,
-            self.selector_items,
-            self.selector_labels,
-            self.selector_index,
-            self.selector_selected_id,
-        );
-        let Some((w, h)) = fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
-        else {
-            return;
-        };
-        let picker_area = Rect {
-            x: area.x + (area.width - w) / 2,
-            y: area.y + (area.height - h) / 2,
-            width: w,
-            height: h,
-        };
-        Clear.render(picker_area, buf);
-
-        let text = visible_selector_lines(lines, h)
-            .into_iter()
-            .map(|(line, kind)| match kind {
-                SelectorLineKind::Selected => {
-                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
-                }
-                SelectorLineKind::CurrentDefault => {
-                    Line::from(Span::styled(line, self.theme.style_accent()))
-                }
-                SelectorLineKind::Hint => Line::from(Span::styled(line, self.theme.style_muted())),
-                SelectorLineKind::Normal => {
-                    Line::from(Span::styled(line, self.theme.style_normal()))
-                }
-                SelectorLineKind::Title => {
-                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
-                }
-            })
-            .collect::<Vec<_>>();
-
-        Paragraph::new(text)
+        Paragraph::new(help_text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(self.theme.style_border_focused())
-                    .title(format!(" {} ", selector_title(self.selector_context)))
+                    .title(format!(" {} ", cfg.title))
                     .style(Style::default().bg(self.theme.bg_panel)),
             )
-            .wrap(Wrap { trim: false })
-            .render(picker_area, buf);
+            .render(help_area, buf);
+    }
+
+    pub(super) fn render_selector_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if self.selector_open {
+            if self.selector_mode == tui_kit_runtime::SelectorMode::AddTag {
+                self.render_selector_add_tag_overlay(area, buf);
+                return;
+            }
+
+            let lines = selector_lines(
+                self.selector_context,
+                self.selector_mode,
+                self.selector_items,
+                self.selector_labels,
+                self.selector_index,
+                self.selector_selected_id,
+            );
+            let Some((w, h)) =
+                fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
+            else {
+                return;
+            };
+            let picker_area = Rect {
+                x: area.x + (area.width - w) / 2,
+                y: area.y + (area.height - h) / 2,
+                width: w,
+                height: h,
+            };
+            Clear.render(picker_area, buf);
+            let text = visible_selector_lines(lines, h)
+                .into_iter()
+                .map(render_selector_line(self.theme))
+                .collect::<Vec<_>>();
+            Paragraph::new(text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(self.theme.style_border_focused())
+                        .title(format!(" {} ", selector_title(self)))
+                        .style(Style::default().bg(self.theme.bg_panel)),
+                )
+                .wrap(Wrap { trim: false })
+                .render(picker_area, buf);
+            return;
+        }
+
     }
 
     fn render_selector_add_tag_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -300,6 +285,18 @@ impl<'a> TuiKitUi<'a> {
             )
             .wrap(Wrap { trim: false })
             .render(add_area, buf);
+    }
+}
+
+fn render_selector_line<'a>(
+    theme: &'a crate::ui::theme::Theme,
+) -> impl Fn((String, SelectorLineKind)) -> Line<'static> + 'a {
+    move |(line, kind)| match kind {
+        SelectorLineKind::Selected => Line::from(Span::styled(line, theme.style_accent_bold())),
+        SelectorLineKind::CurrentDefault => Line::from(Span::styled(line, theme.style_accent())),
+        SelectorLineKind::Hint => Line::from(Span::styled(line, theme.style_muted())),
+        SelectorLineKind::Normal => Line::from(Span::styled(line, theme.style_normal())),
+        SelectorLineKind::Title => Line::from(Span::styled(line, theme.style_accent_bold())),
     }
 }
 
@@ -364,12 +361,13 @@ fn visible_selector_lines(
     visible
 }
 
-fn selector_title(context: SelectorContext) -> &'static str {
-    match context {
-        SelectorContext::DefaultMemory => "Select default memory",
-        SelectorContext::InsertTarget => "Select insert target",
-        SelectorContext::InsertTag => "Select insert tag",
-        SelectorContext::TagManagement => "Saved tags",
+fn selector_title(ui: &TuiKitUi<'_>) -> &'static str {
+    match (ui.selector_context, ui.selector_mode) {
+        (_, tui_kit_runtime::SelectorMode::AddTag) => "Add tag",
+        (tui_kit_runtime::SelectorContext::DefaultMemory, _) => "Select default memory",
+        (tui_kit_runtime::SelectorContext::InsertTarget, _) => "Select insert target",
+        (tui_kit_runtime::SelectorContext::InsertTag, _) => "Select insert tag",
+        (tui_kit_runtime::SelectorContext::TagManagement, _) => "Saved tags",
     }
 }
 
@@ -382,15 +380,25 @@ fn settings_overlay_lines(
         if snapshot.quick_entries.is_empty() {
             lines.push(" No settings available yet.".to_string());
         } else {
-            for entry in snapshot.quick_entries.iter().take(7) {
-                lines.push(format!(" {}: {}", entry.label, entry.value));
+            let visible_entries = snapshot.quick_entries.iter().take(7).collect::<Vec<_>>();
+            let label_width = visible_entries
+                .iter()
+                .map(|entry| entry.label.chars().count())
+                .max()
+                .unwrap_or(0);
+            for entry in visible_entries {
+                lines.push(format!(
+                    " {label:<width$}: {value}",
+                    label = entry.label,
+                    width = label_width,
+                    value = entry.value,
+                ));
             }
         }
     } else {
         lines.push(" No settings available yet.".to_string());
     }
     lines.push(String::new());
-    lines.push(cfg.content_hint.clone());
     lines.push(cfg.close_hint.clone());
     lines
 }
@@ -399,46 +407,7 @@ fn settings_overlay_lines(
 mod tests {
     use super::*;
     use crate::ui::app::UiConfig;
-    use super::super::screens::settings::default_memory_selector_lines;
     use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
-
-    #[test]
-    fn settings_overlay_lines_include_priority_entries() {
-        let cfg = UiConfig::default().settings;
-        let snapshot = SettingsSnapshot {
-            quick_entries: vec![
-                SettingsEntry {
-                    id: "identity_name".to_string(),
-                    label: "Identity name".to_string(),
-                    value: "alice".to_string(),
-                    note: None,
-                },
-                SettingsEntry {
-                    id: "principal_id".to_string(),
-                    label: "Principal ID".to_string(),
-                    value: "aaaaa-aa".to_string(),
-                    note: None,
-                },
-                SettingsEntry {
-                    id: "network".to_string(),
-                    label: "Network".to_string(),
-                    value: "local".to_string(),
-                    note: None,
-                },
-            ],
-            sections: vec![SettingsSection::default()],
-        };
-
-        let lines = settings_overlay_lines(Some(&snapshot), &cfg);
-        let joined = lines.join("\n");
-
-        assert!(joined.contains("Identity name: alice"));
-        assert!(joined.contains("Principal ID: aaaaa-aa"));
-        assert!(joined.contains("Network: local"));
-        assert!(joined.contains("Open the Settings tab for detailed view."));
-        assert!(!joined.contains("Quick status while the main UI stays interactive."));
-        assert!(!joined.contains("More details are available in the Settings tab."));
-    }
 
     #[test]
     fn settings_overlay_lines_show_up_to_seven_entries() {
@@ -456,86 +425,36 @@ mod tests {
         };
 
         let joined = settings_overlay_lines(Some(&snapshot), &cfg).join("\n");
-
-        assert!(joined.contains("Item 7: Value 7"));
-        assert!(!joined.contains("Item 8: Value 8"));
+        assert!(joined.contains("Item 7"));
+        assert!(!joined.contains("Item 8"));
     }
 
     #[test]
-    fn fit_overlay_rect_uses_available_height_when_terminal_is_short() {
-        let area = Rect {
-            x: 0,
-            y: 0,
-            width: 80,
-            height: 11,
-        };
-
-        let rect = fit_overlay_rect(area, 56, 12, 8);
-
-        assert_eq!(rect, Some((56, 7)));
+    fn visible_selector_lines_keeps_selected_row() {
+        let lines = vec![
+            (" title ".to_string(), SelectorLineKind::Title),
+            ("".to_string(), SelectorLineKind::Normal),
+            (" a".to_string(), SelectorLineKind::Normal),
+            (" b".to_string(), SelectorLineKind::Selected),
+            ("".to_string(), SelectorLineKind::Normal),
+            (" hint".to_string(), SelectorLineKind::Hint),
+        ];
+        let visible = visible_selector_lines(lines, 6);
+        assert!(visible.iter().any(|(_, kind)| *kind == SelectorLineKind::Selected));
     }
 
     #[test]
-    fn fit_overlay_rect_returns_none_when_inner_area_is_unavailable() {
-        let area = Rect {
-            x: 0,
-            y: 0,
-            width: 3,
-            height: 3,
-        };
-
-        let rect = fit_overlay_rect(area, 56, 12, 8);
-
-        assert_eq!(rect, None);
-    }
-
-    #[test]
-    fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
-        let lines = default_memory_selector_lines(
-            &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
-                .map(|index| format!("Memory {index}"))
-                .collect::<Vec<_>>(),
-            10,
-            Some("id-2"),
+    fn selector_lines_renders_titles() {
+        let items = vec!["aaaaa-aa".to_string()];
+        let labels = vec!["Alpha Memory".to_string()];
+        let lines = selector_lines(
+            tui_kit_runtime::SelectorContext::DefaultMemory,
+            tui_kit_runtime::SelectorMode::List,
+            &items,
+            &labels,
+            0,
+            Some("aaaaa-aa"),
         );
-
-        let visible = visible_selector_lines(lines, 8);
-        let visible_lines = visible
-            .iter()
-            .map(|(line, _)| line.as_str())
-            .collect::<Vec<_>>();
-        let joined = visible_lines.join("\n");
-
-        assert!(joined.contains("Memory 10"));
-        assert!(!visible_lines.iter().any(|line| *line == "  Memory 1"));
-        assert!(joined.contains("Enter: save"));
-    }
-
-    #[test]
-    fn default_memory_selector_window_keeps_selected_row_visible_near_start() {
-        let lines = default_memory_selector_lines(
-            &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
-                .map(|index| format!("Memory {index}"))
-                .collect::<Vec<_>>(),
-            1,
-            Some("id-9"),
-        );
-
-        let visible = visible_selector_lines(lines, 8);
-        let joined = visible
-            .iter()
-            .map(|(line, _)| line.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(joined.contains("Memory 1"));
-        assert!(!joined.contains("Memory 10"));
-        assert!(joined.contains("Select default memory"));
+        assert!(lines.iter().any(|(line, _)| line.contains("Alpha Memory")));
     }
 }

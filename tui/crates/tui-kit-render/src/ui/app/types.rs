@@ -102,7 +102,6 @@ pub struct InsertScreenText {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsOverlayText {
     pub title: String,
-    pub content_hint: String,
     pub close_hint: String,
 }
 
@@ -122,8 +121,26 @@ pub struct StatusText {
     pub quit_label: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InsertFormCopy {
+    pub close_hint: &'static str,
+    pub help_line: &'static str,
+    pub status_enter_hint: &'static str,
+}
+
+pub(crate) fn insert_form_copy() -> InsertFormCopy {
+    InsertFormCopy {
+        close_hint:
+            "Tab: cycle fields, Enter: cycle mode / open target picker / submit, Esc: back to tab focus",
+        help_line:
+            "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits",
+        status_enter_hint: " cycle/picker/submit ",
+    }
+}
+
 impl Default for UiConfig {
     fn default() -> Self {
+        let insert_form_copy = insert_form_copy();
         Self {
             tabs: default_tab_specs(),
             branding: BrandingText {
@@ -155,9 +172,7 @@ impl Default for UiConfig {
                 embedding_label: "Embedding JSON".to_string(),
                 submit_label: "Insert".to_string(),
                 submit_pending_label: "Inserting...".to_string(),
-                close_hint:
-                    "Tab: cycle fields, Enter: cycle mode or submit, Esc: back to tab focus"
-                        .to_string(),
+                close_hint: insert_form_copy.close_hint.to_string(),
             },
             create: CreateOverlayText {
                 title: "Create Memory".to_string(),
@@ -190,7 +205,6 @@ impl Default for UiConfig {
             },
             settings: SettingsOverlayText {
                 title: "Settings".to_string(),
-                content_hint: "Open the Settings tab for detailed view.".to_string(),
                 close_hint: "Esc: close".to_string(),
             },
             help: HelpOverlayText {
@@ -198,6 +212,7 @@ impl Default for UiConfig {
                 lines: vec![
                     "Tab: enter selected tab or move focus, Shift+Tab: previous focus"
                         .to_string(),
+                    insert_form_copy.help_line.to_string(),
                     "/: focus search".to_string(),
                     "Esc: back / clear / close".to_string(),
                     "F5: refresh current view".to_string(),
@@ -303,5 +318,19 @@ impl Focus {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_config_uses_shared_insert_form_copy() {
+        let config = UiConfig::default();
+        let copy = insert_form_copy();
+
+        assert_eq!(config.insert.close_hint, copy.close_hint);
+        assert!(config.help.lines.iter().any(|line| line == copy.help_line));
     }
 }

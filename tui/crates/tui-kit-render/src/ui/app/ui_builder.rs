@@ -265,6 +265,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn insert_memory_placeholder(mut self, value: Option<&'a str>) -> Self {
+        self.insert_memory_placeholder = value;
+        self
+    }
+
+    #[must_use]
     pub fn insert_tag(mut self, value: &'a str) -> Self {
         self.insert_tag = value;
         self
