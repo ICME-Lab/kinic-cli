@@ -6,9 +6,7 @@ use tui_kit_runtime::kinic_tabs::{
 
 mod key_mapping {
     use super::*;
-    use crossterm::event::{
-        KeyEvent, KeyEventKind, KeyEventState, MouseButton, MouseEvent, MouseEventKind,
-    };
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState};
 
     #[test]
     fn action_from_keycode_maps_search_input() {
@@ -37,15 +35,15 @@ mod key_mapping {
     }
 
     #[test]
-    fn normalize_host_input_event_ignores_mouse_input() {
-        let mouse_event = Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 4,
-            row: 2,
+    fn normalize_host_input_event_ignores_non_press_key_events() {
+        let key_event = Event::Key(KeyEvent {
+            code: KeyCode::Enter,
             modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
         });
 
-        assert_eq!(normalize_host_input_event(mouse_event), None);
+        assert_eq!(normalize_host_input_event(key_event), None);
     }
 }
 
