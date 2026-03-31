@@ -280,7 +280,10 @@ fn build_snapshot_exposes_saved_default_memory_id() {
 
     let snapshot = provider.build_snapshot(&CoreState::default());
 
-    assert_eq!(snapshot.saved_default_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(
+        snapshot.saved_default_memory_id.as_deref(),
+        Some("aaaaa-aa")
+    );
 }
 
 #[test]
@@ -433,9 +436,12 @@ fn mock_insert_rejects_valid_request_after_validation() {
         CoreEffect::Notify(message)
             if message == "Insert submit is only available in live mode."
     )));
-    assert!(!output.effects.iter().any(
-        |effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat)
-    ));
+    assert!(
+        !output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat))
+    );
 }
 
 #[test]

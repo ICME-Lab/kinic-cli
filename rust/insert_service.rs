@@ -147,7 +147,9 @@ pub fn validate_insert_request_for_submit(request: &InsertRequest) -> Result<()>
     Ok(())
 }
 
-fn validate_and_transform_insert_request(request: &InsertRequest) -> Result<ValidatedInsertRequest> {
+fn validate_and_transform_insert_request(
+    request: &InsertRequest,
+) -> Result<ValidatedInsertRequest> {
     validate_shared_fields(request.memory_id(), request.tag())?;
     validate_memory_id(request.memory_id())?;
 
@@ -215,7 +217,9 @@ fn validate_and_transform_insert_request(request: &InsertRequest) -> Result<Vali
     }
 }
 
-async fn prepare_insert_request(request: &ValidatedInsertRequest) -> Result<Vec<PreparedInsertItem>> {
+async fn prepare_insert_request(
+    request: &ValidatedInsertRequest,
+) -> Result<Vec<PreparedInsertItem>> {
     match request {
         ValidatedInsertRequest::Normal {
             tag,
@@ -502,7 +506,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(err.to_string().contains("Memory ID must be a valid principal"));
+        assert!(
+            err.to_string()
+                .contains("Memory ID must be a valid principal")
+        );
     }
 
     #[test]
@@ -515,9 +522,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(err
-            .to_string()
-            .contains("Embedding must be a JSON array of floats"));
+        assert!(
+            err.to_string()
+                .contains("Embedding must be a JSON array of floats")
+        );
     }
 
     #[test]
@@ -530,9 +538,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(err
-            .to_string()
-            .contains("File path does not exist: /path/that/does/not/need/to/exist.md"));
+        assert!(
+            err.to_string()
+                .contains("File path does not exist: /path/that/does/not/need/to/exist.md")
+        );
     }
 
     #[test]
@@ -555,9 +564,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(err
-            .to_string()
-            .contains("File path does not exist: /path/that/does/not/need/to/exist.pdf"));
+        assert!(
+            err.to_string()
+                .contains("File path does not exist: /path/that/does/not/need/to/exist.pdf")
+        );
     }
 
     #[test]
@@ -570,9 +580,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(err
-            .to_string()
-            .contains(&format!("File path is not a file: {}", dir.display())));
+        assert!(
+            err.to_string()
+                .contains(&format!("File path is not a file: {}", dir.display()))
+        );
     }
 
     #[test]

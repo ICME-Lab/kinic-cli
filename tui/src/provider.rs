@@ -7,7 +7,9 @@ use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::{
     create_domain::derive_create_cost,
-    insert_service::{InsertRequest, validate_insert_request_fields, validate_insert_request_for_submit},
+    insert_service::{
+        InsertRequest, validate_insert_request_fields, validate_insert_request_for_submit,
+    },
     tui::TuiAuth,
 };
 use serde::Deserialize;
