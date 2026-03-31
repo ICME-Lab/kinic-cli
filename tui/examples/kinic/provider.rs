@@ -307,22 +307,6 @@ Maintain keyboard-first behavior as baseline.
 "#,
             ),
             KinicRecord::new(
-                "kinic-22",
-                "Content Sample Library",
-                "memories",
-                "Centralized sample snippets for demos and screenshots.",
-                r#"## Content Sample Library
-- Keep short and long variants
-- Include bullets, headings, and pseudo code
-- Avoid domain-sensitive terms by default
-
-```md
-## Heading
-- item
-```
-"#,
-            ),
-            KinicRecord::new(
                 "kinic-2",
                 "Theme Presets",
                 "create",
