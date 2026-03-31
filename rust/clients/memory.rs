@@ -56,6 +56,17 @@ impl MemoryClient {
         Ok(results)
     }
 
+    pub async fn get_dim(&self) -> Result<u64> {
+        let response = self
+            .agent
+            .query(&self.canister_id, "get_dim")
+            .call()
+            .await
+            .context("Failed to call get_dim on memory canister")?;
+
+        decode_get_dim_response(&response)
+    }
+
     pub async fn add_new_user(&self, principal: Principal, role: u8) -> Result<()> {
         let payload = encode_add_user_args(principal, role)?;
         self.agent
@@ -101,4 +112,22 @@ fn encode_tagged_embeddings_args(tag: String) -> Result<Vec<u8>> {
 }
 fn encode_reset_args(dim: usize) -> Result<Vec<u8>> {
     Ok(candid::encode_one(dim)?)
+}
+
+fn decode_get_dim_response(response: &[u8]) -> Result<u64> {
+    Decode!(response, u64).context("Failed to decode get_dim response")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_get_dim_response;
+
+    #[test]
+    fn decode_get_dim_response_parses_nat64_payload() {
+        let payload = candid::encode_one(1024u64).expect("dim payload should encode");
+
+        let dim = decode_get_dim_response(&payload).expect("dim payload should decode");
+
+        assert_eq!(dim, 1024);
+    }
 }

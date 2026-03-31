@@ -1,6 +1,6 @@
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
-use std::{sync::mpsc, thread};
+use std::{collections::HashMap, sync::mpsc, thread};
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
@@ -8,7 +8,8 @@ use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::{
     create_domain::derive_create_cost,
     insert_service::{
-        InsertRequest, validate_insert_request_fields, validate_insert_request_for_submit,
+        InsertRequest, parse_embedding_json, validate_insert_request_fields,
+        validate_insert_request_for_submit,
     },
     tui::TuiAuth,
 };
@@ -103,6 +104,10 @@ pub struct KinicProvider {
     pending_insert_submit_request_id: Option<u64>,
     insert_submit_in_flight: bool,
     next_insert_request_id: u64,
+    insert_expected_dims: HashMap<String, u64>,
+    insert_dim_errors: HashMap<String, String>,
+    pending_insert_dim: Option<mpsc::Receiver<InsertDimTaskOutput>>,
+    pending_insert_dim_memory_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -257,6 +262,12 @@ struct InsertSubmitTaskOutput {
     request_id: u64,
     result: Result<bridge::InsertMemorySuccess, bridge::InsertMemoryError>,
 }
+
+struct InsertDimTaskOutput {
+    memory_id: String,
+    result: Result<u64, bridge::InsertMemoryError>,
+}
+
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
         #[cfg(test)]
@@ -314,6 +325,10 @@ impl KinicProvider {
             pending_insert_submit_request_id: None,
             insert_submit_in_flight: false,
             next_insert_request_id: 0,
+            insert_expected_dims: HashMap::new(),
+            insert_dim_errors: HashMap::new(),
+            pending_insert_dim: None,
+            pending_insert_dim_memory_id: None,
         }
     }
 
@@ -548,6 +563,76 @@ impl KinicProvider {
         self.invalidate_pending_search();
     }
 
+    fn selected_insert_memory_id(&self, state: &CoreState) -> Option<String> {
+        let insert_memory_id = state.insert_memory_id.trim();
+        if !insert_memory_id.is_empty() {
+            return Some(insert_memory_id.to_string());
+        }
+
+        let default_memory_id = self.user_preferences.default_memory_id.as_deref()?;
+        self.memory_records
+            .iter()
+            .find(|record| record.id == default_memory_id)
+            .map(|record| record.id.clone())
+    }
+
+    fn insert_expected_dim(&self, state: &CoreState) -> Option<u64> {
+        let memory_id = self.selected_insert_memory_id(state)?;
+        self.insert_expected_dims.get(&memory_id).copied()
+    }
+
+    fn insert_expected_dim_loading(&self, state: &CoreState) -> bool {
+        let Some(memory_id) = self.selected_insert_memory_id(state) else {
+            return false;
+        };
+
+        self.pending_insert_dim_memory_id.as_deref() == Some(memory_id.as_str())
+    }
+
+    fn ensure_insert_memory_dim_loaded(&mut self, state: &CoreState) {
+        let Some(memory_id) = self.selected_insert_memory_id(state) else {
+            return;
+        };
+
+        self.start_insert_dim_load_for_memory(memory_id);
+    }
+
+    fn start_insert_dim_load_for_memory(&mut self, memory_id: String) {
+        if !self.is_live() {
+            return;
+        }
+        if self.insert_expected_dims.contains_key(&memory_id) {
+            return;
+        }
+        if self.insert_dim_errors.contains_key(&memory_id) {
+            return;
+        }
+        if self.pending_insert_dim_memory_id.as_deref() == Some(memory_id.as_str()) {
+            return;
+        }
+
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        let requested_memory_id = memory_id.clone();
+        let (tx, rx) = mpsc::channel();
+        self.pending_insert_dim = Some(rx);
+        self.pending_insert_dim_memory_id = Some(memory_id);
+
+        thread::spawn(move || {
+            let runtime =
+                Runtime::new().expect("failed to create tokio runtime for insert dim load");
+            let result = runtime.block_on(bridge::load_memory_dim(
+                use_mainnet,
+                auth,
+                requested_memory_id.clone(),
+            ));
+            let _ = tx.send(InsertDimTaskOutput {
+                memory_id: requested_memory_id,
+                result,
+            });
+        });
+    }
+
     fn should_handle_memory_navigation(&self, state: &CoreState) -> bool {
         state.current_tab_id == KINIC_MEMORIES_TAB_ID
             && self.tab_id == KINIC_MEMORIES_TAB_ID
@@ -604,6 +689,8 @@ impl KinicProvider {
             saved_default_memory_id: self.user_preferences.default_memory_id.clone(),
             default_memory_selector_context,
             insert_memory_placeholder,
+            insert_expected_dim: self.insert_expected_dim(state),
+            insert_expected_dim_loading: self.insert_expected_dim_loading(state),
         }
     }
 
@@ -854,6 +941,74 @@ impl KinicProvider {
         self.pending_insert_submit_request_id = None;
     }
 
+    fn validate_insert_expected_dim(
+        &self,
+        request: &InsertRequest,
+        state: &CoreState,
+    ) -> Result<(), String> {
+        let InsertRequest::Raw { embedding_json, .. } = request else {
+            return Ok(());
+        };
+        let Some(expected_dim) = self.insert_expected_dim(state) else {
+            return Ok(());
+        };
+
+        let provided_dim = parse_embedding_json(embedding_json)
+            .map_err(|error| error.to_string())?
+            .len() as u64;
+        if provided_dim == expected_dim {
+            return Ok(());
+        }
+
+        Err(format!(
+            "Embedding dimension mismatch. Received {provided_dim} values, expected {expected_dim}."
+        ))
+    }
+
+    fn poll_insert_dim_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.pending_insert_dim.as_ref()?;
+        let output = match receiver.try_recv() {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.pending_insert_dim = None;
+                self.pending_insert_dim_memory_id = None;
+                return Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: Vec::new(),
+                });
+            }
+        };
+
+        self.pending_insert_dim = None;
+        let is_current =
+            self.pending_insert_dim_memory_id.as_deref() == Some(output.memory_id.as_str());
+        self.pending_insert_dim_memory_id = None;
+        if !is_current {
+            return Some(ProviderOutput {
+                snapshot: Some(self.build_snapshot(state)),
+                effects: Vec::new(),
+            });
+        }
+
+        match output.result {
+            Ok(dim) => {
+                self.insert_expected_dims.insert(output.memory_id.clone(), dim);
+                self.insert_dim_errors.remove(&output.memory_id);
+            }
+            Err(error) => {
+                self.insert_expected_dims.remove(&output.memory_id);
+                self.insert_dim_errors
+                    .insert(output.memory_id, format_insert_submit_error(&error));
+            }
+        }
+
+        Some(ProviderOutput {
+            snapshot: Some(self.build_snapshot(state)),
+            effects: Vec::new(),
+        })
+    }
+
     fn apply_session_overview(&mut self, overview: SessionAccountOverview) {
         let same_session_context =
             has_same_session_context(&self.session_overview.session, &overview.session);
@@ -1040,6 +1195,7 @@ impl KinicProvider {
                     .default_memory_selection()
                     .preferred_initial_memory_id()
                     .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
+                self.ensure_insert_memory_dim_loaded(state);
                 Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
                     effects: vec![CoreEffect::Notify("Loaded memories.".to_string())],
@@ -1328,7 +1484,9 @@ impl KinicProvider {
 impl DataProvider for KinicProvider {
     fn initialize(&mut self) -> CoreResult<ProviderSnapshot> {
         self.initialize_live_memories();
-        Ok(self.build_snapshot(&CoreState::default()))
+        let state = CoreState::default();
+        self.ensure_insert_memory_dim_loaded(&state);
+        Ok(self.build_snapshot(&state))
     }
 
     fn handle_action(
@@ -1389,6 +1547,9 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::SetTab(id) => {
                 effects.extend(self.set_tab(id.0.as_str()));
+                if id.0.as_str() == KINIC_INSERT_TAB_ID {
+                    self.ensure_insert_memory_dim_loaded(state);
+                }
             }
             CoreAction::ChatSubmit => {
                 effects.push(CoreEffect::Notify(
@@ -1432,11 +1593,14 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::InsertSubmit => {
+                self.ensure_insert_memory_dim_loaded(state);
                 let request = self.build_insert_request(state);
                 if let Err(error) = validate_insert_request_fields(&request) {
                     effects.push(CoreEffect::InsertFormError(Some(error.to_string())));
                 } else if let Err(error) = validate_insert_request_for_submit(&request) {
                     effects.push(CoreEffect::InsertFormError(Some(error.to_string())));
+                } else if let Err(error) = self.validate_insert_expected_dim(&request, state) {
+                    effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if self.insert_submit_in_flight {
                     effects.push(CoreEffect::Notify(
                         "Insert request already running.".to_string(),
@@ -1489,6 +1653,7 @@ impl DataProvider for KinicProvider {
                             .set_default_memory_preference(memory_id),
                     ),
                     MemorySelectorContext::InsertTarget => {
+                        self.start_insert_dim_load_for_memory(memory_id.clone());
                         effects.push(CoreEffect::SetInsertMemoryId(memory_id.clone()));
                         effects.push(CoreEffect::Notify(format!(
                             "Selected target memory {memory_id}"
@@ -1523,6 +1688,7 @@ impl DataProvider for KinicProvider {
     fn poll_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
         self.poll_initial_memories_background(state)
             .or_else(|| self.poll_create_submit_background(state))
+            .or_else(|| self.poll_insert_dim_background(state))
             .or_else(|| self.poll_insert_submit_background(state))
             .or_else(|| self.poll_create_cost_background(state))
             .or_else(|| self.poll_session_settings_background(state))

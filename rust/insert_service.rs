@@ -169,7 +169,7 @@ fn validate_and_transform_insert_request(
                 let path = file_path
                     .as_ref()
                     .expect("normal insert should have file path when text is absent");
-                validate_file_path(path)?;
+                validate_text_file_path(path)?;
             }
 
             Ok(ValidatedInsertRequest::Normal {
@@ -305,6 +305,13 @@ fn validate_file_path(path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn validate_text_file_path(path: &PathBuf) -> Result<()> {
+    validate_file_path(path)?;
+    fs::read_to_string(path)
+        .map(|_| ())
+        .with_context(|| format!("File path is not valid UTF-8 text: {}", path.display()))
+}
+
 fn normalized_optional_text(text: Option<String>) -> Option<String> {
     text.filter(|value| !value.trim().is_empty())
 }
@@ -377,6 +384,16 @@ mod tests {
             .as_nanos();
         let path = env::temp_dir().join(format!("kinic-insert-test-{unique_suffix}.md"));
         fs::write(&path, contents).expect("temporary markdown file should be writable");
+        path
+    }
+
+    fn write_temp_bytes_file(extension: &str, contents: &[u8]) -> PathBuf {
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let path = env::temp_dir().join(format!("kinic-insert-test-{unique_suffix}.{extension}"));
+        fs::write(&path, contents).expect("temporary bytes file should be writable");
         path
     }
 
@@ -542,6 +559,26 @@ mod tests {
             err.to_string()
                 .contains("File path does not exist: /path/that/does/not/need/to/exist.md")
         );
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_rejects_non_utf8_normal_file_path() {
+        let path = write_temp_bytes_file("md", &[0xff, 0xfe, 0xfd]);
+
+        let err = validate_insert_request_for_submit(&InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("   ".to_string()),
+            file_path: Some(path.clone()),
+        })
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains(&format!("File path is not valid UTF-8 text: {}", path.display()))
+        );
+
+        fs::remove_file(path).expect("temporary bytes file should be removable");
     }
 
     #[test]

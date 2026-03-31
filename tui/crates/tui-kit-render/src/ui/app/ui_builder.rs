@@ -256,6 +256,18 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn insert_expected_dim(mut self, value: Option<u64>) -> Self {
+        self.insert_expected_dim = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_expected_dim_loading(mut self, value: bool) -> Self {
+        self.insert_expected_dim_loading = value;
+        self
+    }
+
+    #[must_use]
     pub fn insert_tag(mut self, value: &'a str) -> Self {
         self.insert_tag = value;
         self

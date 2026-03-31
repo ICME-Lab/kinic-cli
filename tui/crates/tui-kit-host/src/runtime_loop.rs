@@ -146,6 +146,8 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .insert_mode(state.insert_mode)
                     .insert_memory_id(&state.insert_memory_id)
                     .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())
+                    .insert_expected_dim(state.insert_expected_dim)
+                    .insert_expected_dim_loading(state.insert_expected_dim_loading)
                     .insert_tag(&state.insert_tag)
                     .insert_text(&state.insert_text)
                     .insert_file_path(&state.insert_file_path)

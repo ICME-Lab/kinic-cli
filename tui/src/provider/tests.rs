@@ -325,6 +325,12 @@ fn format_insert_submit_error_reports_error_stage() {
         )),
         "Could not resolve memory canister. Cause: invalid principal"
     );
+    assert_eq!(
+        format_insert_submit_error(&bridge::InsertMemoryError::Execute(
+            "Embedding dimension mismatch. Received 4 values, expected 1024.".to_string(),
+        )),
+        "Insert failed. Cause: Embedding dimension mismatch. Received 4 values, expected 1024."
+    );
 }
 
 #[test]
@@ -347,6 +353,55 @@ fn mock_insert_rejects_blank_raw_text() {
         effect,
         CoreEffect::InsertFormError(Some(message))
             if message == "Text is required for raw insert."
+    )));
+}
+
+#[test]
+fn mock_insert_rejects_raw_embedding_dim_mismatch_when_expected_dim_known() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.insert_expected_dims.insert("aaaaa-aa".to_string(), 1024);
+    let state = CoreState {
+        insert_mode: InsertMode::Raw,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "payload".to_string(),
+        insert_embedding: "[0.1, 0.2, 0.3, 0.4]".to_string(),
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message == "Embedding dimension mismatch. Received 4 values, expected 1024."
+    )));
+    assert!(provider.pending_insert_submit.is_none());
+}
+
+#[test]
+fn mock_insert_allows_raw_embedding_when_expected_dim_matches() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.insert_expected_dims.insert("aaaaa-aa".to_string(), 4);
+    let state = CoreState {
+        insert_mode: InsertMode::Raw,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "payload".to_string(),
+        insert_embedding: "[0.1, 0.2, 0.3, 0.4]".to_string(),
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message == "Insert submit is only available in live mode."
     )));
 }
 
@@ -466,6 +521,7 @@ fn poll_initial_memories_background_applies_loaded_memories_and_prefers_saved_de
     assert!(!provider.initial_memories_in_flight);
     assert_eq!(provider.memory_records.len(), 2);
     assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(provider.pending_insert_dim_memory_id.as_deref(), Some("bbbbb-bb"));
     assert!(output.snapshot.is_some());
 }
 
@@ -489,6 +545,36 @@ fn poll_initial_memories_background_falls_back_to_first_when_default_missing() {
         .expect("initial memories output");
 
     assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+}
+
+#[test]
+fn build_snapshot_exposes_insert_expected_dim_for_selected_target() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.insert_expected_dims.insert("aaaaa-aa".to_string(), 768);
+    let state = CoreState {
+        insert_memory_id: "aaaaa-aa".to_string(),
+        ..CoreState::default()
+    };
+
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(snapshot.insert_expected_dim, Some(768));
+    assert!(!snapshot.insert_expected_dim_loading);
+}
+
+#[test]
+fn build_snapshot_marks_insert_expected_dim_loading_for_selected_target() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.pending_insert_dim_memory_id = Some("aaaaa-aa".to_string());
+    let state = CoreState {
+        insert_memory_id: "aaaaa-aa".to_string(),
+        ..CoreState::default()
+    };
+
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(snapshot.insert_expected_dim, None);
+    assert!(snapshot.insert_expected_dim_loading);
 }
 
 #[test]

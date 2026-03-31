@@ -139,6 +139,9 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             display_value(ui.insert_embedding, "<json array>"),
             max_width,
         );
+        if let Some(value) = expected_dim_value(ui) {
+            push_readonly_field(&mut lines, ui, "Expected Dim", value);
+        }
     }
     push_field(
         &mut lines,
@@ -190,6 +193,18 @@ fn push_field(
     lines.push(Line::from(""));
 }
 
+fn push_readonly_field(lines: &mut Vec<Line<'_>>, ui: &TuiKitUi<'_>, label: &str, value: String) {
+    lines.push(Line::from(Span::styled(
+        label.to_string(),
+        ui.theme.style_dim(),
+    )));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(value, ui.theme.style_muted()),
+    ]));
+    lines.push(Line::from(""));
+}
+
 fn field_style(ui: &TuiKitUi<'_>, focus: InsertFormFocus) -> ratatui::style::Style {
     if ui.focus == Focus::Form && ui.insert_focus == focus {
         ui.theme.style_accent_bold()
@@ -223,6 +238,14 @@ fn mode_value(mode: InsertMode) -> String {
         InsertMode::Pdf => (" normal ", " raw ", "[pdf]"),
     };
     format!("{normal} / {raw} / {pdf}")
+}
+
+fn expected_dim_value(ui: &TuiKitUi<'_>) -> Option<String> {
+    if ui.insert_expected_dim_loading {
+        return Some("loading...".to_string());
+    }
+
+    ui.insert_expected_dim.map(|value| value.to_string())
 }
 
 fn submit_value(ui: &TuiKitUi<'_>) -> String {
@@ -270,5 +293,33 @@ mod tests {
             .insert_memory_id("bbbbb-bb");
 
         assert_eq!(memory_id_value(&ui), "bbbbb-bb");
+    }
+
+    #[test]
+    fn expected_dim_value_prefers_loading_state() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_mode(InsertMode::Raw)
+            .insert_expected_dim(Some(1024))
+            .insert_expected_dim_loading(true);
+
+        assert_eq!(expected_dim_value(&ui).as_deref(), Some("loading..."));
+    }
+
+    #[test]
+    fn insert_form_shows_expected_dim_for_raw_mode() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_mode(InsertMode::Raw)
+            .insert_expected_dim(Some(1024));
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Expected Dim"));
+        assert!(rendered.contains("1024"));
     }
 }

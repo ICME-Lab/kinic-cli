@@ -334,6 +334,8 @@ pub struct CoreState {
     pub insert_mode: InsertMode,
     pub insert_memory_id: String,
     pub insert_memory_placeholder: Option<String>,
+    pub insert_expected_dim: Option<u64>,
+    pub insert_expected_dim_loading: bool,
     pub insert_tag: String,
     pub insert_text: String,
     pub insert_file_path: String,
@@ -378,6 +380,8 @@ impl Default for CoreState {
             insert_mode: InsertMode::default(),
             insert_memory_id: String::new(),
             insert_memory_placeholder: None,
+            insert_expected_dim: None,
+            insert_expected_dim_loading: false,
             insert_tag: String::new(),
             insert_text: String::new(),
             insert_file_path: String::new(),
@@ -540,6 +544,8 @@ pub struct ProviderSnapshot {
     pub saved_default_memory_id: Option<String>,
     pub default_memory_selector_context: MemorySelectorContext,
     pub insert_memory_placeholder: Option<String>,
+    pub insert_expected_dim: Option<u64>,
+    pub insert_expected_dim_loading: bool,
 }
 
 /// Provider response to one action.
@@ -1178,6 +1184,8 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.saved_default_memory_id = snapshot.saved_default_memory_id;
     state.default_memory_selector_context = snapshot.default_memory_selector_context;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
+    state.insert_expected_dim = snapshot.insert_expected_dim;
+    state.insert_expected_dim_loading = snapshot.insert_expected_dim_loading;
     if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty()
     {
         state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();

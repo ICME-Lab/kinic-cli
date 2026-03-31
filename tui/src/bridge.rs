@@ -213,6 +213,27 @@ pub async fn search_memory(
         .collect())
 }
 
+pub async fn load_memory_dim(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+) -> Result<u64, InsertMemoryError> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)
+        .map_err(|error| InsertMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| InsertMemoryError::BuildAgent(short_error(&error.to_string())))?;
+    let memory = Principal::from_text(&memory_id)
+        .map_err(|error| InsertMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
+    let client = MemoryClient::new(agent, memory);
+
+    client
+        .get_dim()
+        .await
+        .map_err(|error| InsertMemoryError::Execute(short_error(&error.to_string())))
+}
+
 pub async fn run_insert(
     use_mainnet: bool,
     auth: TuiAuth,
@@ -229,7 +250,7 @@ pub async fn run_insert(
     let client = MemoryClient::new(agent, memory);
     let result = execute_insert_request(&client, &request)
         .await
-        .map_err(|error| InsertMemoryError::Execute(short_error(&error.to_string())))?;
+        .map_err(|error| InsertMemoryError::Execute(format_insert_execute_error(&error.to_string())))?;
 
     Ok(insert_success_from_result(result))
 }
@@ -273,6 +294,31 @@ fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
 
+fn format_insert_execute_error(message: &str) -> String {
+    parse_embedding_dimension_mismatch(message).unwrap_or_else(|| short_error(message))
+}
+
+fn parse_embedding_dimension_mismatch(message: &str) -> Option<String> {
+    if !message.contains("left == right") {
+        return None;
+    }
+
+    let provided = message
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("left:"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let expected = message
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("right:"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+
+    Some(format!(
+        "Embedding dimension mismatch. Received {provided} values, expected {expected}."
+    ))
+}
+
 fn insert_success_from_result(result: InsertExecutionResult) -> InsertMemorySuccess {
     InsertMemorySuccess {
         mode: match result.mode {
@@ -292,6 +338,7 @@ mod tests {
     use candid::Nat;
     use ic_agent::identity::AnonymousIdentity;
     use std::sync::Arc;
+    use tokio::runtime::Runtime;
 
     #[test]
     fn resolve_agent_factory_accepts_resolved_identity() {
@@ -362,6 +409,38 @@ mod tests {
             execute,
             InsertMemoryError::Execute(message) if message == "insert failed"
         ));
+    }
+
+    #[test]
+    fn format_insert_execute_error_rewrites_embedding_dimension_mismatch() {
+        let message = "update call failed: Canister trapped: assertion `left == right` failed\n  left: 4\n right: 1024";
+
+        assert_eq!(
+            format_insert_execute_error(message),
+            "Embedding dimension mismatch. Received 4 values, expected 1024."
+        );
+    }
+
+    #[test]
+    fn format_insert_execute_error_falls_back_to_first_line_for_other_errors() {
+        let message = "insert failed\nmore detail";
+
+        assert_eq!(format_insert_execute_error(message), "insert failed");
+    }
+
+    #[test]
+    fn load_memory_dim_reports_invalid_memory_id_before_network_call() {
+        let runtime = Runtime::new().expect("tokio runtime");
+
+        let error = runtime
+            .block_on(load_memory_dim(
+                false,
+                TuiAuth::resolved_for_tests(),
+                "not-a-principal".to_string(),
+            ))
+            .unwrap_err();
+
+        assert!(matches!(error, InsertMemoryError::ParseMemoryId(_)));
     }
 
     #[test]
