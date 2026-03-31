@@ -1,6 +1,6 @@
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
-use std::{sync::mpsc, thread};
+use std::{path::Path, sync::mpsc, thread};
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
@@ -866,14 +866,10 @@ impl KinicProvider {
                 }
             }
             InsertMode::Markdown => {
-                if state.insert_file_path.trim().is_empty() {
-                    return Err("File path is required for markdown insert.".to_string());
-                }
+                validate_existing_insert_file_path(state.insert_file_path.trim(), "markdown")?;
             }
             InsertMode::Pdf => {
-                if state.insert_file_path.trim().is_empty() {
-                    return Err("File path is required for PDF insert.".to_string());
-                }
+                validate_insert_file_path(state.insert_file_path.trim(), &["pdf"], "PDF")?;
             }
             InsertMode::ManualEmbedding => {}
         }
@@ -1345,7 +1341,8 @@ impl KinicProvider {
             }
             KINIC_INSERT_TAB_ID => {
                 vec![CoreEffect::Notify(
-                    "Insert text, embeddings, or PDFs into an existing memory.".to_string(),
+                    "Insert markdown, PDFs, inline text, or embeddings into an existing memory."
+                        .to_string(),
                 )]
             }
             KINIC_CREATE_TAB_ID => {
@@ -1364,6 +1361,63 @@ impl KinicProvider {
             _ => vec![CoreEffect::Notify(format!("Switched kinic tab: {tab_id}"))],
         }
     }
+}
+
+fn validate_existing_insert_file_path(path: &str, mode_label: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err(format!("File path is required for {mode_label} insert."));
+    }
+
+    let file_path = Path::new(path);
+    if !file_path.exists() {
+        return Err(format!("File path does not exist for {mode_label} insert."));
+    }
+    if !file_path.is_file() {
+        return Err(format!(
+            "File path must point to a file for {mode_label} insert."
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_insert_file_path(
+    path: &str,
+    allowed_extensions: &[&str],
+    mode_label: &str,
+) -> Result<(), String> {
+    validate_existing_insert_file_path(path, mode_label)?;
+    let file_path = Path::new(path);
+
+    let extension = file_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase());
+    let Some(extension) = extension else {
+        return Err(format!(
+            "File path must use a supported {} extension.",
+            allowed_extension_list(allowed_extensions)
+        ));
+    };
+    if allowed_extensions
+        .iter()
+        .any(|allowed| *allowed == extension)
+    {
+        return Ok(());
+    }
+
+    Err(format!(
+        "File path must use a supported {} extension.",
+        allowed_extension_list(allowed_extensions)
+    ))
+}
+
+fn allowed_extension_list(allowed_extensions: &[&str]) -> String {
+    allowed_extensions
+        .iter()
+        .map(|extension| format!(".{extension}"))
+        .collect::<Vec<_>>()
+        .join(" or ")
 }
 
 impl DataProvider for KinicProvider {

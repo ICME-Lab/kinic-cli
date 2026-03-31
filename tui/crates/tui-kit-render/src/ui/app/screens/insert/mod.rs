@@ -118,7 +118,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             &mut rows,
             ui,
             InsertFormFocus::Text,
-            ui.ui_config.insert.text_label.as_str(),
+            text_label(ui),
             display_value(ui.insert_text, text_placeholder(ui.insert_mode)),
             max_width,
         );
@@ -233,6 +233,16 @@ fn mode_value(mode: InsertMode) -> String {
     format!("{markdown} / {pdf} / {text} / {embedding}")
 }
 
+fn text_label<'a>(ui: &'a TuiKitUi<'a>) -> &'a str {
+    match ui.insert_mode {
+        InsertMode::InlineText => ui.ui_config.insert.text_label.as_str(),
+        InsertMode::ManualEmbedding => ui.ui_config.insert.payload_text_label.as_str(),
+        InsertMode::Markdown | InsertMode::Pdf => {
+            unreachable!("text label is only used for text-capable insert modes")
+        }
+    }
+}
+
 fn text_placeholder(mode: InsertMode) -> &'static str {
     match mode {
         InsertMode::InlineText => "<inline text>",
@@ -320,6 +330,35 @@ mod tests {
             assert_eq!(lines.contains("<file path>"), has_file_path);
             assert_eq!(lines.contains("<json array>"), has_embedding);
         }
+    }
+
+    #[test]
+    fn insert_form_uses_payload_text_label_for_manual_embedding() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::ManualEmbedding);
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Payload Text"));
+        assert!(!rendered.contains("Inline Text\n  <payload text stored with embedding>"));
+    }
+
+    #[test]
+    fn insert_form_keeps_inline_text_label_for_inline_mode() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::InlineText);
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Inline Text"));
     }
 
     #[test]

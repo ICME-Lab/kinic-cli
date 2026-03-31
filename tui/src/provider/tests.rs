@@ -42,6 +42,16 @@ fn write_temp_markdown_file(contents: &str) -> String {
     path.display().to_string()
 }
 
+fn write_temp_file_with_extension(extension: &str, contents: &str) -> String {
+    let unique_suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after epoch")
+        .as_nanos();
+    let path = env::temp_dir().join(format!("kinic-provider-test-{unique_suffix}.{extension}"));
+    fs::write(&path, contents).expect("temporary file should be writable");
+    path.display().to_string()
+}
+
 fn live_memory(id: &str, title: &str) -> KinicRecord {
     KinicRecord::new(
         id,
@@ -337,6 +347,109 @@ fn poll_insert_submit_background_resets_form_and_notifies_on_success() {
 }
 
 #[test]
+fn validate_insert_state_rejects_missing_markdown_file() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::Markdown,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: env::temp_dir()
+            .join("kinic-missing-markdown-file.md")
+            .display()
+            .to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.validate_insert_state(&state),
+        Err("File path does not exist for markdown insert.".to_string())
+    );
+}
+
+#[test]
+fn validate_insert_state_accepts_existing_markdown_mode_file_without_markdown_extension() {
+    let provider = KinicProvider::new(mock_config());
+    let file_path = write_temp_file_with_extension("pdf", "not really a pdf");
+    let state = CoreState {
+        insert_mode: InsertMode::Markdown,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: file_path.clone(),
+        ..CoreState::default()
+    };
+
+    assert!(provider.validate_insert_state(&state).is_ok());
+    fs::remove_file(file_path).expect("temporary file should be removable");
+}
+
+#[test]
+fn validate_insert_state_rejects_missing_pdf_file() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::Pdf,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: env::temp_dir()
+            .join("kinic-missing-pdf-file.pdf")
+            .display()
+            .to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.validate_insert_state(&state),
+        Err("File path does not exist for PDF insert.".to_string())
+    );
+}
+
+#[test]
+fn validate_insert_state_rejects_markdown_extension_for_pdf_mode() {
+    let provider = KinicProvider::new(mock_config());
+    let file_path = write_temp_markdown_file("# title");
+    let state = CoreState {
+        insert_mode: InsertMode::Pdf,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: file_path.clone(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.validate_insert_state(&state),
+        Err("File path must use a supported .pdf extension.".to_string())
+    );
+    fs::remove_file(file_path).expect("temporary markdown file should be removable");
+}
+
+#[test]
+fn validate_insert_state_accepts_uppercase_pdf_extension() {
+    let provider = KinicProvider::new(mock_config());
+    let file_path = write_temp_file_with_extension("PDF", "not really a pdf");
+    let state = CoreState {
+        insert_mode: InsertMode::Pdf,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: file_path.clone(),
+        ..CoreState::default()
+    };
+
+    assert!(provider.validate_insert_state(&state).is_ok());
+    fs::remove_file(file_path).expect("temporary file should be removable");
+}
+
+#[test]
+fn set_tab_insert_mentions_markdown_in_notification() {
+    let mut provider = KinicProvider::new(mock_config());
+    let effects = provider.set_tab(KINIC_INSERT_TAB_ID);
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message == "Insert markdown, PDFs, inline text, or embeddings into an existing memory."
+    )));
+}
+
+#[test]
 fn build_insert_request_prefers_explicit_memory_over_saved_default() {
     let mut provider = KinicProvider::new(mock_config());
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
@@ -457,13 +570,14 @@ fn mock_insert_rejects_missing_pdf_path() {
 }
 
 #[test]
-fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
+fn mock_insert_accepts_existing_pdf_without_prevalidating_conversion() {
     let mut provider = KinicProvider::new(mock_config());
+    let file_path = write_temp_file_with_extension("pdf", "not really a pdf");
     let state = CoreState {
         insert_mode: InsertMode::Pdf,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: "/path/that/does/not/need/to/exist.pdf".to_string(),
+        insert_file_path: file_path.clone(),
         ..CoreState::default()
     };
 
@@ -476,6 +590,7 @@ fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
         CoreEffect::Notify(message)
             if message == "Mock insert accepted for aaaaa-aa [docs]"
     )));
+    fs::remove_file(file_path).expect("temporary file should be removable");
 }
 
 #[test]

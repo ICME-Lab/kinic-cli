@@ -11,7 +11,7 @@ use crate::{
     },
     create_domain::{BalanceDelta, balance_delta, required_balance},
     embedding::{embedding_base_url, fetch_embedding},
-    insert_service::{InsertExecutionResult, InsertRequest, execute_insert_request},
+    insert_service::{InsertRequest, execute_insert_request},
     ledger::fetch_balance,
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
@@ -230,7 +230,11 @@ pub async fn run_insert(
         .await
         .map_err(|error| InsertMemoryError::Execute(short_error(&error.to_string())))?;
 
-    Ok(insert_success_from_result(result))
+    Ok(InsertMemorySuccess {
+        memory_id: result.memory_id,
+        tag: result.tag,
+        inserted_count: result.inserted_count,
+    })
 }
 
 fn memory_summary_from_state(state: State) -> MemorySummary {
@@ -270,14 +274,6 @@ fn memory_summary_from_state(state: State) -> MemorySummary {
 
 fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
-}
-
-fn insert_success_from_result(result: InsertExecutionResult) -> InsertMemorySuccess {
-    InsertMemorySuccess {
-        memory_id: result.memory_id,
-        tag: result.tag,
-        inserted_count: result.inserted_count,
-    }
 }
 
 #[cfg(test)]
