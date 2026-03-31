@@ -7,6 +7,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
+#[cfg(test)]
+use tui_kit_runtime::MemorySelectorItem;
 use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::TuiKitUi;
@@ -241,9 +243,6 @@ impl<'a> TuiKitUi<'a> {
                 DefaultMemorySelectorLineKind::Normal => {
                     Line::from(Span::styled(line, self.theme.style_normal()))
                 }
-                DefaultMemorySelectorLineKind::Title => {
-                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
-                }
             })
             .collect::<Vec<_>>();
 
@@ -285,7 +284,7 @@ fn visible_default_memory_selector_lines(
     lines: Vec<(String, DefaultMemorySelectorLineKind)>,
     overlay_height: u16,
 ) -> Vec<(String, DefaultMemorySelectorLineKind)> {
-    let fixed_prefix_len = 2usize;
+    let fixed_prefix_len = 0usize;
     let fixed_suffix_len = 2usize;
     if lines.len() <= fixed_prefix_len + fixed_suffix_len {
         return lines;
@@ -301,7 +300,22 @@ fn visible_default_memory_selector_lines(
     let body_end = lines.len().saturating_sub(fixed_suffix_len);
     let body = &lines[body_start..body_end];
     if body.len() <= visible_body_len {
-        return lines;
+        let extra_space = visible_body_len.saturating_sub(body.len());
+        let top_padding = extra_space / 2;
+        let bottom_padding = extra_space.saturating_sub(top_padding);
+
+        let mut visible =
+            Vec::with_capacity(fixed_prefix_len + visible_body_len + fixed_suffix_len);
+        visible.extend_from_slice(&lines[..fixed_prefix_len]);
+        visible.extend(
+            (0..top_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)),
+        );
+        visible.extend_from_slice(body);
+        visible.extend(
+            (0..bottom_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)),
+        );
+        visible.extend_from_slice(&lines[body_end..]);
+        return visible;
     }
 
     let selected_in_body = body
@@ -418,6 +432,15 @@ mod tests {
     }
 
     #[test]
+    fn help_overlay_insert_line_mentions_target_picker() {
+        let cfg = UiConfig::default().help;
+
+        assert!(cfg.lines.iter().any(|line| {
+            line == "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits"
+        }));
+    }
+
+    #[test]
     fn fit_overlay_rect_uses_available_height_when_terminal_is_short() {
         let area = Rect {
             x: 0,
@@ -449,10 +472,13 @@ mod tests {
     fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
         let lines = default_memory_selector_lines(
             &(0..12)
-                .map(|index| format!("Memory {index}"))
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
                 .collect::<Vec<_>>(),
             10,
-            Some("Memory 2"),
+            Some("id-2"),
             default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
 
@@ -464,7 +490,7 @@ mod tests {
         let joined = visible_lines.join("\n");
 
         assert!(joined.contains("Memory 10"));
-        assert!(!visible_lines.iter().any(|line| *line == "  Memory 1"));
+        assert!(!visible_lines.iter().any(|line| *line == "   Memory 1"));
         assert!(joined.contains("Enter: save"));
     }
 
@@ -472,10 +498,13 @@ mod tests {
     fn default_memory_selector_window_keeps_selected_row_visible_near_start() {
         let lines = default_memory_selector_lines(
             &(0..12)
-                .map(|index| format!("Memory {index}"))
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
                 .collect::<Vec<_>>(),
             1,
-            Some("Memory 9"),
+            Some("id-9"),
             default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
         let near_start = visible_default_memory_selector_lines(lines, 8);
@@ -487,15 +516,18 @@ mod tests {
 
         assert!(near_start_joined.contains("Memory 1"));
         assert!(!near_start_joined.contains("Memory 10"));
-        assert!(near_start_joined.contains("Select Default Memory"));
+        assert!(!near_start_joined.contains("Select Default Memory"));
     }
 
     #[test]
     fn insert_target_selector_window_uses_insert_specific_copy() {
         let lines = default_memory_selector_lines(
-            &["Memory 0".to_string()],
+            &[MemorySelectorItem {
+                id: "id-0".to_string(),
+                title: Some("Memory 0".to_string()),
+            }],
             0,
-            Some("Memory 0"),
+            Some("id-0"),
             default_memory_selector_copy(MemorySelectorContext::InsertTarget),
         );
 
@@ -506,7 +538,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(joined.contains("Select Target Memory"));
+        assert!(!joined.contains("Select Target Memory"));
         assert!(joined.contains("Enter: use target"));
         assert!(!joined.contains('★'));
     }

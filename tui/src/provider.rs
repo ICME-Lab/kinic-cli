@@ -14,8 +14,8 @@ use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, InsertMode,
-    LoadedCreateCost, MemorySelectorContext, PaneFocus, ProviderOutput, ProviderSnapshot,
-    SessionAccountOverview, SessionSettingsSnapshot,
+    LoadedCreateCost, MemorySelectorContext, MemorySelectorItem, PaneFocus, ProviderOutput,
+    ProviderSnapshot, SessionAccountOverview, SessionSettingsSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -143,10 +143,13 @@ struct DefaultMemorySelection<'a> {
 }
 
 impl<'a> DefaultMemorySelection<'a> {
-    fn available_memory_ids(self) -> Vec<String> {
+    fn selector_items(self) -> Vec<MemorySelectorItem> {
         self.memory_records
             .iter()
-            .map(|record| record.id.clone())
+            .map(|record| MemorySelectorItem {
+                id: record.id.clone(),
+                title: Some(record.title.trim().to_string()).filter(|title| !title.is_empty()),
+            })
             .collect()
     }
 
@@ -166,7 +169,7 @@ impl<'a> DefaultMemorySelection<'a> {
         self.user_preferences.default_memory_id.as_deref() == Some(memory_id)
     }
 
-    fn label_for_id(self, memory_id: &str) -> Option<String> {
+    fn title_for_id(self, memory_id: &str) -> Option<String> {
         self.memory_records.iter().find_map(|record| {
             if record.id != memory_id {
                 return None;
@@ -552,7 +555,7 @@ impl KinicProvider {
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
         let filtered = self.current_records();
         let default_memory = self.default_memory_selection();
-        let default_memory_selector_items = default_memory.available_memory_ids();
+        let default_memory_selector_items = default_memory.selector_items();
         let default_memory_selector_context = state.default_memory_selector_context;
         let default_memory_selector_selected_id =
             self.selector_selected_memory_id(state, default_memory_selector_context);
@@ -596,6 +599,7 @@ impl KinicProvider {
             ),
             default_memory_selector_items,
             default_memory_selector_selected_id,
+            saved_default_memory_id: self.user_preferences.default_memory_id.clone(),
             default_memory_selector_context,
             insert_memory_placeholder,
         }
@@ -627,7 +631,7 @@ impl KinicProvider {
         let default_memory_id = self.user_preferences.default_memory_id.as_deref()?;
         Some(
             self.default_memory_selection()
-                .label_for_id(default_memory_id)
+                .title_for_id(default_memory_id)
                 .unwrap_or_else(|| default_memory_id.to_string()),
         )
     }
@@ -1471,17 +1475,20 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::Notify(
                         "Insert request already running.".to_string(),
                     ));
-                } else if self.is_live() {
-                    let request = self.build_insert_request(state);
-                    effects.push(self.start_insert_submit(request));
                 } else {
-                    effects.push(CoreEffect::InsertFormError(None));
-                    effects.push(CoreEffect::ResetInsertFormForRepeat);
-                    effects.push(CoreEffect::Notify(format!(
-                        "Mock insert accepted for {} [{}]",
-                        state.insert_memory_id.trim(),
-                        state.insert_tag.trim()
-                    )));
+                    let request = self.build_insert_request(state);
+                    if self.is_live() {
+                        effects.push(self.start_insert_submit(request));
+                    } else {
+                        let target_memory_id = request.memory_id().to_string();
+                        effects.push(CoreEffect::InsertFormError(None));
+                        effects.push(CoreEffect::ResetInsertFormForRepeat);
+                        effects.push(CoreEffect::Notify(format!(
+                            "Mock insert accepted for {} [{}]",
+                            target_memory_id,
+                            state.insert_tag.trim()
+                        )));
+                    }
                 }
             }
             CoreAction::CreateRefresh => {
@@ -1506,7 +1513,7 @@ impl DataProvider for KinicProvider {
             CoreAction::ScrollContentHome => {}
             CoreAction::ScrollContentEnd => {}
             CoreAction::SubmitDefaultMemoryPicker => {
-                let Some(memory_id) = state
+                let Some(item) = state
                     .default_memory_selector_items
                     .get(state.default_memory_selector_index)
                     .cloned()
@@ -1517,6 +1524,7 @@ impl DataProvider for KinicProvider {
                         effects,
                     });
                 };
+                let memory_id = item.id;
                 match state.default_memory_selector_context {
                     MemorySelectorContext::DefaultPreference => effects.push(
                         self.default_memory_controller()
@@ -1716,7 +1724,13 @@ fn format_create_submit_error(error: &bridge::CreateMemoryError) -> String {
 
 fn format_insert_submit_error(error: &bridge::InsertMemoryError) -> String {
     match error {
-        bridge::InsertMemoryError::Principal(reason) => {
+        bridge::InsertMemoryError::ResolveAgentFactory(reason) => {
+            format!("Could not resolve agent configuration. Cause: {reason}")
+        }
+        bridge::InsertMemoryError::BuildAgent(reason) => {
+            format!("Could not build agent. Cause: {reason}")
+        }
+        bridge::InsertMemoryError::ParseMemoryId(reason) => {
             format!("Could not resolve memory canister. Cause: {reason}")
         }
         bridge::InsertMemoryError::Execute(reason) => {

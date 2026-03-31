@@ -1,6 +1,8 @@
 use super::*;
 use candid::Nat;
-use tui_kit_runtime::{SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview};
+use tui_kit_runtime::{
+    MemorySelectorItem, SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview,
+};
 
 fn deferred_session() -> SessionSettingsSnapshot {
     session_settings_snapshot(
@@ -16,6 +18,13 @@ fn deferred_session() -> SessionSettingsSnapshot {
 
 fn deferred_overview() -> SessionAccountOverview {
     SessionAccountOverview::new(deferred_session())
+}
+
+fn selector_item(id: &str, title: Option<&str>) -> MemorySelectorItem {
+    MemorySelectorItem {
+        id: id.to_string(),
+        title: title.map(str::to_string),
+    }
 }
 
 fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {
@@ -124,7 +133,7 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
         (
             "not set",
             UserPreferences::default(),
-            Vec::<String>::new(),
+            Vec::<MemorySelectorItem>::new(),
             PreferencesHealth::default(),
             NOT_SET,
             "ok",
@@ -134,7 +143,7 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             UserPreferences {
                 default_memory_id: Some("aaaaa-aa".to_string()),
             },
-            vec!["bbbbb-bb".to_string()],
+            vec![selector_item("bbbbb-bb", Some("Beta Memory"))],
             PreferencesHealth::default(),
             "aaaaa-aa (missing)",
             "ok",
@@ -142,7 +151,7 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
         (
             "load error wins over save status",
             UserPreferences::default(),
-            Vec::<String>::new(),
+            Vec::<MemorySelectorItem>::new(),
             PreferencesHealth {
                 load_error: Some("invalid YAML".to_string()),
                 save_error: Some("permission denied".to_string()),
@@ -155,19 +164,19 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             UserPreferences {
                 default_memory_id: Some("aaaaa-aa".to_string()),
             },
-            vec!["aaaaa-aa".to_string()],
+            vec![selector_item("aaaaa-aa", Some("Alpha Memory"))],
             PreferencesHealth {
                 load_error: None,
                 save_error: Some("permission denied".to_string()),
             },
-            "aaaaa-aa",
+            "Alpha Memory",
             "last save failed",
         ),
     ];
 
-    for (name, preferences, memory_ids, health, default_memory, status) in cases {
+    for (name, preferences, selector_items, health, default_memory, status) in cases {
         let overview = deferred_overview();
-        let snapshot = build_settings_snapshot(&overview, &preferences, &memory_ids, &health);
+        let snapshot = build_settings_snapshot(&overview, &preferences, &selector_items, &health);
         let section_titles = snapshot
             .sections
             .iter()

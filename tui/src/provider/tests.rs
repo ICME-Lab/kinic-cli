@@ -5,7 +5,9 @@ use std::{
     env, fs,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tui_kit_runtime::{CreateCostState, LoadedCreateCost, SessionAccountOverview};
+use tui_kit_runtime::{
+    CreateCostState, LoadedCreateCost, MemorySelectorItem, SessionAccountOverview,
+};
 
 fn session_snapshot(principal_id: &str) -> tui_kit_runtime::SessionSettingsSnapshot {
     settings::session_settings_snapshot(
@@ -48,6 +50,13 @@ fn live_memory(id: &str, title: &str) -> KinicRecord {
         "Status: running",
         format!("detail for {id}"),
     )
+}
+
+fn selector_item(id: &str, title: Option<&str>) -> MemorySelectorItem {
+    MemorySelectorItem {
+        id: id.to_string(),
+        title: title.map(str::to_string),
+    }
 }
 
 fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
@@ -207,7 +216,10 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
     let state = CoreState {
-        default_memory_selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+        default_memory_selector_items: vec![
+            selector_item("aaaaa-aa", Some("Alpha Memory")),
+            selector_item("bbbbb-bb", Some("Beta Memory")),
+        ],
         default_memory_selector_index: 1,
         default_memory_selector_context: MemorySelectorContext::InsertTarget,
         ..CoreState::default()
@@ -252,6 +264,105 @@ fn mock_insert_rejects_invalid_embedding_json() {
         CoreEffect::InsertFormError(Some(message))
             if message.contains("Embedding must be a JSON array")
     )));
+}
+
+#[test]
+fn mock_insert_uses_saved_default_memory_when_target_is_blank() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+    let state = CoreState {
+        saved_default_memory_id: Some("aaaaa-aa".to_string()),
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_mode: InsertMode::InlineText,
+        insert_tag: "docs".to_string(),
+        insert_text: "payload".to_string(),
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message == "Mock insert accepted for aaaaa-aa [docs]"
+    )));
+}
+
+#[test]
+fn build_insert_request_prefers_explicit_memory_over_saved_default() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+    let state = CoreState {
+        insert_mode: InsertMode::ManualEmbedding,
+        insert_memory_id: "bbbbb-bb".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "payload".to_string(),
+        insert_embedding: "[0.1]".to_string(),
+        ..CoreState::default()
+    };
+
+    let request = provider.build_insert_request(&state);
+
+    assert!(matches!(
+        request,
+        InsertRequest::Raw { memory_id, .. } if memory_id == "bbbbb-bb"
+    ));
+}
+
+#[test]
+fn build_snapshot_exposes_saved_default_memory_id() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+
+    let snapshot = provider.build_snapshot(&CoreState::default());
+
+    assert_eq!(
+        snapshot.saved_default_memory_id.as_deref(),
+        Some("aaaaa-aa")
+    );
+}
+
+#[test]
+fn build_snapshot_exposes_selector_titles() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![
+        live_memory("aaaaa-aa", "Alpha Memory"),
+        live_memory("bbbbb-bb", "Beta Memory"),
+    ];
+
+    let snapshot = provider.build_snapshot(&CoreState::default());
+
+    assert_eq!(
+        snapshot.default_memory_selector_items,
+        vec![
+            selector_item("aaaaa-aa", Some("Alpha Memory")),
+            selector_item("bbbbb-bb", Some("Beta Memory")),
+        ]
+    );
+}
+
+#[test]
+fn format_insert_submit_error_reports_error_stage() {
+    assert_eq!(
+        format_insert_submit_error(&bridge::InsertMemoryError::ResolveAgentFactory(
+            "auth missing".to_string(),
+        )),
+        "Could not resolve agent configuration. Cause: auth missing"
+    );
+    assert_eq!(
+        format_insert_submit_error(&bridge::InsertMemoryError::BuildAgent(
+            "transport down".to_string(),
+        )),
+        "Could not build agent. Cause: transport down"
+    );
+    assert_eq!(
+        format_insert_submit_error(&bridge::InsertMemoryError::ParseMemoryId(
+            "invalid principal".to_string(),
+        )),
+        "Could not resolve memory canister. Cause: invalid principal"
+    );
 }
 
 #[test]
@@ -825,7 +936,10 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
     assert_eq!(snapshot.items[1].leading_marker.as_deref(), Some("★"));
     assert_eq!(
         snapshot.default_memory_selector_items,
-        vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()]
+        vec![
+            selector_item("aaaaa-aa", Some("Alpha Memory")),
+            selector_item("bbbbb-bb", Some("Beta Memory")),
+        ]
     );
 }
 
