@@ -39,7 +39,6 @@ pub struct CreateMemorySuccess {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InsertMemorySuccess {
-    pub mode: String,
     pub memory_id: String,
     pub tag: String,
     pub inserted_count: usize,
@@ -275,11 +274,6 @@ fn short_error(message: &str) -> String {
 
 fn insert_success_from_result(result: InsertExecutionResult) -> InsertMemorySuccess {
     InsertMemorySuccess {
-        mode: match result.mode {
-            crate::insert_service::InsertMode::Normal => "insert".to_string(),
-            crate::insert_service::InsertMode::Raw => "insert-raw".to_string(),
-            crate::insert_service::InsertMode::Pdf => "insert-pdf".to_string(),
-        },
         memory_id: result.memory_id,
         tag: result.tag,
         inserted_count: result.inserted_count,

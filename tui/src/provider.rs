@@ -255,6 +255,13 @@ struct InsertSubmitTaskOutput {
     request_id: u64,
     result: Result<bridge::InsertMemorySuccess, bridge::InsertMemoryError>,
 }
+
+fn insert_success_status(success: &bridge::InsertMemorySuccess) -> String {
+    format!(
+        "Inserted {} chunks (tag: {}) into {}",
+        success.inserted_count, success.tag, success.memory_id
+    )
+}
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
         #[cfg(test)]
@@ -1307,10 +1314,7 @@ impl KinicProvider {
             Ok(success) => vec![
                 CoreEffect::InsertFormError(None),
                 CoreEffect::ResetInsertFormForRepeat,
-                CoreEffect::Notify(format!(
-                    "Inserted {} item(s) via {} into {} [{}]",
-                    success.inserted_count, success.mode, success.memory_id, success.tag
-                )),
+                CoreEffect::Notify(insert_success_status(&success)),
             ],
             Err(error) => vec![CoreEffect::InsertFormError(Some(
                 format_insert_submit_error(&error),

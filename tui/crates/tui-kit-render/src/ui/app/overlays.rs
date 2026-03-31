@@ -300,22 +300,12 @@ fn visible_default_memory_selector_lines(
     let body_end = lines.len().saturating_sub(fixed_suffix_len);
     let body = &lines[body_start..body_end];
     if body.len() <= visible_body_len {
-        let extra_space = visible_body_len.saturating_sub(body.len());
-        let top_padding = extra_space / 2;
-        let bottom_padding = extra_space.saturating_sub(top_padding);
-
-        let mut visible =
-            Vec::with_capacity(fixed_prefix_len + visible_body_len + fixed_suffix_len);
-        visible.extend_from_slice(&lines[..fixed_prefix_len]);
-        visible.extend(
-            (0..top_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)),
+        return center_default_memory_selector_body(
+            &lines[..fixed_prefix_len],
+            body,
+            &lines[body_end..],
+            visible_body_len,
         );
-        visible.extend_from_slice(body);
-        visible.extend(
-            (0..bottom_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)),
-        );
-        visible.extend_from_slice(&lines[body_end..]);
-        return visible;
     }
 
     let selected_in_body = body
@@ -332,6 +322,28 @@ fn visible_default_memory_selector_lines(
     visible.extend_from_slice(&lines[..fixed_prefix_len]);
     visible.extend_from_slice(&body[start..end]);
     visible.extend_from_slice(&lines[body_end..]);
+    visible
+}
+
+fn center_default_memory_selector_body(
+    prefix: &[(String, DefaultMemorySelectorLineKind)],
+    body: &[(String, DefaultMemorySelectorLineKind)],
+    suffix: &[(String, DefaultMemorySelectorLineKind)],
+    visible_body_len: usize,
+) -> Vec<(String, DefaultMemorySelectorLineKind)> {
+    let extra_space = visible_body_len.saturating_sub(body.len());
+    let top_padding = extra_space / 2;
+    let bottom_padding = extra_space.saturating_sub(top_padding);
+
+    let mut visible = Vec::with_capacity(prefix.len() + visible_body_len + suffix.len());
+    visible.extend_from_slice(prefix);
+    visible
+        .extend((0..top_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)));
+    visible.extend_from_slice(body);
+    visible.extend(
+        (0..bottom_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)),
+    );
+    visible.extend_from_slice(suffix);
     visible
 }
 

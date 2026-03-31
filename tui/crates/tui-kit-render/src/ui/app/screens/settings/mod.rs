@@ -15,7 +15,6 @@ use crate::ui::app::{Focus, TuiKitUi};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DefaultMemorySelectorLineKind {
-    Title,
     Selected,
     CurrentDefault,
     Normal,
@@ -27,7 +26,6 @@ pub(crate) struct DefaultMemorySelectorCopy<'a> {
     pub title: &'a str,
     pub hint: &'a str,
     pub show_current_default_marker: bool,
-    pub show_inline_title: bool,
 }
 
 impl<'a> TuiKitUi<'a> {
@@ -85,13 +83,6 @@ pub(crate) fn default_memory_selector_lines(
     copy: DefaultMemorySelectorCopy<'_>,
 ) -> Vec<(String, DefaultMemorySelectorLineKind)> {
     let mut lines = Vec::new();
-    if copy.show_inline_title {
-        lines.push((
-            format!(" {} ", copy.title),
-            DefaultMemorySelectorLineKind::Title,
-        ));
-        lines.push((String::new(), DefaultMemorySelectorLineKind::Normal));
-    }
 
     if items.is_empty() {
         lines.push((
@@ -129,13 +120,11 @@ pub(crate) fn default_memory_selector_copy(
             title: "Select Default Memory",
             hint: " Enter: save  ↑/↓: move  Esc: close",
             show_current_default_marker: true,
-            show_inline_title: true,
         },
         MemorySelectorContext::InsertTarget => DefaultMemorySelectorCopy {
             title: "Select Target Memory",
             hint: " Enter: use target  ↑/↓: move  Esc: close",
             show_current_default_marker: false,
-            show_inline_title: false,
         },
     }
 }
@@ -339,23 +328,6 @@ mod tests {
         assert!(!joined.contains("Select Target Memory"));
         assert!(joined.contains("Enter: use target"));
         assert!(!joined.contains('★'));
-    }
-
-    #[test]
-    fn insert_target_selector_lines_start_with_selected_memory() {
-        let lines = default_memory_selector_lines(
-            &[MemorySelectorItem {
-                id: "aaaaa-aa".to_string(),
-                title: Some("Alpha Memory".to_string()),
-            }],
-            0,
-            Some("aaaaa-aa"),
-            default_memory_selector_copy(MemorySelectorContext::InsertTarget),
-        );
-
-        let first_line = lines.first().map(|(line, _)| line.as_str());
-
-        assert_eq!(first_line, Some(" › Alpha Memory"));
     }
 
     #[test]

@@ -291,6 +291,52 @@ fn mock_insert_uses_saved_default_memory_when_target_is_blank() {
 }
 
 #[test]
+fn insert_success_status_includes_count_tag_and_memory_id() {
+    let success = bridge::InsertMemorySuccess {
+        memory_id: "aaaaa-aa".to_string(),
+        tag: "docs".to_string(),
+        inserted_count: 12,
+    };
+
+    assert_eq!(
+        insert_success_status(&success),
+        "Inserted 12 chunks (tag: docs) into aaaaa-aa"
+    );
+}
+
+#[test]
+fn poll_insert_submit_background_resets_form_and_notifies_on_success() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let request_id = 7;
+    provider.pending_insert_submit = Some(rx);
+    provider.pending_insert_submit_request_id = Some(request_id);
+    provider.insert_submit_in_flight = true;
+    tx.send(InsertSubmitTaskOutput {
+        request_id,
+        result: Ok(bridge::InsertMemorySuccess {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            inserted_count: 12,
+        }),
+    })
+    .expect("background insert result should send");
+
+    let output = provider
+        .poll_insert_submit_background(&CoreState::default())
+        .expect("provider output");
+
+    assert!(matches!(
+        output.effects.as_slice(),
+        [
+            CoreEffect::InsertFormError(None),
+            CoreEffect::ResetInsertFormForRepeat,
+            CoreEffect::Notify(message),
+        ] if message == "Inserted 12 chunks (tag: docs) into aaaaa-aa"
+    ));
+}
+
+#[test]
 fn build_insert_request_prefers_explicit_memory_over_saved_default() {
     let mut provider = KinicProvider::new(mock_config());
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
