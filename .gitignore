@@ -34,3 +34,6 @@ pylate-index/
 #web
 .next/
 node_modules/
+
+# local edit logs
+.local/*/edit.md
