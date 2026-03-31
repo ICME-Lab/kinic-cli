@@ -112,7 +112,7 @@ impl<'a> TuiKitUi<'a> {
             default_memory_selector_items: &[],
             default_memory_selector_selected_id: None,
             default_memory_selector_context: MemorySelectorContext::DefaultPreference,
-            insert_mode: InsertMode::Text,
+            insert_mode: InsertMode::default(),
             insert_memory_id: "",
             insert_memory_placeholder: None,
             insert_tag: "",

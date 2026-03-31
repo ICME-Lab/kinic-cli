@@ -113,9 +113,10 @@ pub enum CreateModalFocus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InsertMode {
     #[default]
-    Text,
-    File,
-    Raw,
+    Markdown,
+    Pdf,
+    InlineText,
+    ManualEmbedding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -951,21 +952,21 @@ fn normalize_focus_for_tab(state: &mut CoreState, previous_focus: PaneFocus) {
 
 fn insert_focus_order(mode: InsertMode) -> &'static [InsertFormFocus] {
     match mode {
-        InsertMode::Text => &[
+        InsertMode::InlineText => &[
             InsertFormFocus::Mode,
             InsertFormFocus::MemoryId,
             InsertFormFocus::Tag,
             InsertFormFocus::Text,
             InsertFormFocus::Submit,
         ],
-        InsertMode::File => &[
+        InsertMode::Markdown | InsertMode::Pdf => &[
             InsertFormFocus::Mode,
             InsertFormFocus::MemoryId,
             InsertFormFocus::Tag,
             InsertFormFocus::FilePath,
             InsertFormFocus::Submit,
         ],
-        InsertMode::Raw => &[
+        InsertMode::ManualEmbedding => &[
             InsertFormFocus::Mode,
             InsertFormFocus::MemoryId,
             InsertFormFocus::Tag,
@@ -996,17 +997,19 @@ fn prev_insert_focus(mode: InsertMode, focus: InsertFormFocus) -> InsertFormFocu
 
 fn next_insert_mode(mode: InsertMode) -> InsertMode {
     match mode {
-        InsertMode::Text => InsertMode::File,
-        InsertMode::File => InsertMode::Raw,
-        InsertMode::Raw => InsertMode::Text,
+        InsertMode::Markdown => InsertMode::Pdf,
+        InsertMode::Pdf => InsertMode::InlineText,
+        InsertMode::InlineText => InsertMode::ManualEmbedding,
+        InsertMode::ManualEmbedding => InsertMode::Markdown,
     }
 }
 
 fn prev_insert_mode(mode: InsertMode) -> InsertMode {
     match mode {
-        InsertMode::Text => InsertMode::Raw,
-        InsertMode::File => InsertMode::Text,
-        InsertMode::Raw => InsertMode::File,
+        InsertMode::Markdown => InsertMode::ManualEmbedding,
+        InsertMode::Pdf => InsertMode::Markdown,
+        InsertMode::InlineText => InsertMode::Pdf,
+        InsertMode::ManualEmbedding => InsertMode::InlineText,
     }
 }
 
@@ -1866,7 +1869,7 @@ mod tests {
     #[test]
     fn insert_navigation_is_ignored_while_submit_is_running() {
         let mut state = CoreState {
-            insert_mode: InsertMode::Text,
+            insert_mode: InsertMode::InlineText,
             insert_focus: InsertFormFocus::Text,
             insert_submit_state: CreateSubmitState::Submitting,
             ..CoreState::default()
@@ -1876,13 +1879,13 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertCycleMode);
 
         assert_eq!(state.insert_focus, InsertFormFocus::Text);
-        assert_eq!(state.insert_mode, InsertMode::Text);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
     }
 
     #[test]
-    fn insert_cycle_mode_prev_moves_backwards_and_resets_focus() {
+    fn insert_cycle_mode_prev_moves_to_inline_text_and_resets_focus() {
         let mut state = CoreState {
-            insert_mode: InsertMode::Raw,
+            insert_mode: InsertMode::ManualEmbedding,
             insert_focus: InsertFormFocus::Embedding,
             insert_error: Some("boom".to_string()),
             insert_submit_state: CreateSubmitState::Error,
@@ -1891,7 +1894,7 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
 
-        assert_eq!(state.insert_mode, InsertMode::File);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
         assert_eq!(state.insert_error, None);
         assert_eq!(state.insert_submit_state, CreateSubmitState::Idle);
@@ -1900,23 +1903,23 @@ mod tests {
     #[test]
     fn insert_cycle_mode_wraps_between_first_and_last_modes() {
         let mut state = CoreState {
-            insert_mode: InsertMode::Text,
+            insert_mode: InsertMode::Markdown,
             insert_focus: InsertFormFocus::Mode,
             ..CoreState::default()
         };
 
         apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
-        assert_eq!(state.insert_mode, InsertMode::Raw);
+        assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
 
         apply_core_action(&mut state, &CoreAction::InsertCycleMode);
-        assert_eq!(state.insert_mode, InsertMode::Text);
+        assert_eq!(state.insert_mode, InsertMode::Markdown);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
     }
 
     #[test]
-    fn insert_file_mode_skips_text_and_embedding_fields() {
+    fn insert_markdown_mode_skips_text_and_embedding_fields() {
         let mut state = CoreState {
-            insert_mode: InsertMode::File,
+            insert_mode: InsertMode::Markdown,
             insert_focus: InsertFormFocus::Tag,
             ..CoreState::default()
         };
@@ -1926,5 +1929,23 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::InsertNextField);
         assert_eq!(state.insert_focus, InsertFormFocus::Submit);
+    }
+
+    #[test]
+    fn insert_cycle_mode_visits_markdown_then_pdf_before_raw() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::Markdown,
+            insert_focus: InsertFormFocus::Mode,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::Pdf);
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
     }
 }

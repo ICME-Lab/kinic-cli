@@ -235,7 +235,7 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
 fn mock_insert_rejects_invalid_embedding_json() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Raw,
+        insert_mode: InsertMode::ManualEmbedding,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "payload".to_string(),
@@ -258,7 +258,7 @@ fn mock_insert_rejects_invalid_embedding_json() {
 fn mock_insert_rejects_blank_raw_text() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Raw,
+        insert_mode: InsertMode::ManualEmbedding,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "   ".to_string(),
@@ -273,7 +273,7 @@ fn mock_insert_rejects_blank_raw_text() {
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::InsertFormError(Some(message))
-            if message == "Text is required for raw insert."
+            if message == "Text is required for manual embedding insert."
     )));
 }
 
@@ -281,7 +281,7 @@ fn mock_insert_rejects_blank_raw_text() {
 fn mock_insert_rejects_missing_pdf_path() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::File,
+        insert_mode: InsertMode::Pdf,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path: String::new(),
@@ -295,7 +295,7 @@ fn mock_insert_rejects_missing_pdf_path() {
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::InsertFormError(Some(message))
-            if message == "File path is required for file insert."
+            if message == "File path is required for PDF insert."
     )));
 }
 
@@ -303,7 +303,7 @@ fn mock_insert_rejects_missing_pdf_path() {
 fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::File,
+        insert_mode: InsertMode::Pdf,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path: "/path/that/does/not/need/to/exist.pdf".to_string(),
@@ -322,11 +322,11 @@ fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
 }
 
 #[test]
-fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
+fn mock_insert_accepts_markdown_file_without_inline_text() {
     let mut provider = KinicProvider::new(mock_config());
     let file_path = write_temp_markdown_file("# title");
     let state = CoreState {
-        insert_mode: InsertMode::File,
+        insert_mode: InsertMode::Markdown,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "   ".to_string(),
@@ -350,7 +350,7 @@ fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
 fn mock_insert_accepts_valid_request_only_after_validation() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Text,
+        insert_mode: InsertMode::InlineText,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "  keep spacing  ".to_string(),
@@ -375,10 +375,10 @@ fn mock_insert_accepts_valid_request_only_after_validation() {
 }
 
 #[test]
-fn build_insert_request_uses_text_mode_without_file_path() {
+fn build_insert_request_uses_inline_text_mode_without_file_path() {
     let provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Text,
+        insert_mode: InsertMode::InlineText,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "hello".to_string(),
@@ -398,10 +398,10 @@ fn build_insert_request_uses_text_mode_without_file_path() {
 }
 
 #[test]
-fn mock_insert_rejects_missing_text_for_text_mode() {
+fn mock_insert_rejects_missing_text_for_inline_text_mode() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Text,
+        insert_mode: InsertMode::InlineText,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "   ".to_string(),
@@ -415,15 +415,36 @@ fn mock_insert_rejects_missing_text_for_text_mode() {
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::InsertFormError(Some(message))
-            if message == "Text is required for text insert."
+            if message == "Text is required for inline text insert."
     )));
 }
 
 #[test]
-fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
+fn mock_insert_rejects_missing_file_path_for_markdown_mode() {
+    let mut provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::Markdown,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message == "File path is required for markdown insert."
+    )));
+}
+
+#[test]
+fn build_insert_request_uses_markdown_mode_for_file_paths() {
     let provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::File,
+        insert_mode: InsertMode::Markdown,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "ignored".to_string(),
@@ -446,7 +467,7 @@ fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
 fn build_insert_request_uses_pdf_mode_for_pdf_paths() {
     let provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::File,
+        insert_mode: InsertMode::Pdf,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path: "/tmp/doc.PDF".to_string(),

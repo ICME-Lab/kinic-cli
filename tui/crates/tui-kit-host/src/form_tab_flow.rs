@@ -70,7 +70,7 @@ pub fn reset_form_focus(state: &mut CoreState) {
 
 pub fn reset_form_state_for_tab(state: &mut CoreState, tab_id: &str) {
     if is_kinic_insert_tab(tab_id) {
-        state.insert_mode = tui_kit_runtime::InsertMode::Text;
+        state.insert_mode = tui_kit_runtime::InsertMode::default();
         state.insert_memory_id.clear();
         state.insert_tag.clear();
         state.insert_text.clear();

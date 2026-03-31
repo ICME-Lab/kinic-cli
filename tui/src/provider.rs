@@ -763,18 +763,13 @@ impl KinicProvider {
             .then(|| std::path::PathBuf::from(state.insert_file_path.trim()));
 
         match state.insert_mode {
-            InsertMode::Text => InsertRequest::Normal {
+            InsertMode::InlineText => InsertRequest::Normal {
                 memory_id,
                 tag,
                 text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
                 file_path: None,
             },
-            InsertMode::File => match file_path {
-                Some(path) if is_pdf_file_path(&path) => InsertRequest::Pdf {
-                    memory_id,
-                    tag,
-                    file_path: path,
-                },
+            InsertMode::Markdown => match file_path {
                 Some(path) => InsertRequest::Normal {
                     memory_id,
                     tag,
@@ -788,7 +783,12 @@ impl KinicProvider {
                     file_path: None,
                 },
             },
-            InsertMode::Raw => InsertRequest::Raw {
+            InsertMode::Pdf => InsertRequest::Pdf {
+                memory_id,
+                tag,
+                file_path: file_path.unwrap_or_default(),
+            },
+            InsertMode::ManualEmbedding => InsertRequest::Raw {
                 memory_id,
                 tag,
                 text: state.insert_text.clone(),
@@ -849,21 +849,30 @@ impl KinicProvider {
 
     fn validate_insert_state(&self, state: &CoreState) -> Result<(), String> {
         match state.insert_mode {
-            InsertMode::Text => {
+            InsertMode::InlineText => {
                 if state.insert_text.trim().is_empty() {
-                    return Err("Text is required for text insert.".to_string());
+                    return Err("Text is required for inline text insert.".to_string());
                 }
             }
-            InsertMode::File => {
+            InsertMode::Markdown => {
                 if state.insert_file_path.trim().is_empty() {
-                    return Err("File path is required for file insert.".to_string());
+                    return Err("File path is required for markdown insert.".to_string());
                 }
             }
-            InsertMode::Raw => {}
+            InsertMode::Pdf => {
+                if state.insert_file_path.trim().is_empty() {
+                    return Err("File path is required for PDF insert.".to_string());
+                }
+            }
+            InsertMode::ManualEmbedding => {}
         }
 
         let request = self.build_insert_request(state);
-        validate_insert_request(&request).map_err(|error| error.to_string())
+        validate_insert_request(&request).map_err(|error| {
+            error
+                .to_string()
+                .replace("raw insert", "manual embedding insert")
+        })
     }
 
     fn invalidate_pending_create_cost(&mut self) {
@@ -1996,12 +2005,6 @@ Maintain keyboard-first behavior as baseline.
 "#,
         ),
     ]
-}
-
-fn is_pdf_file_path(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
 #[cfg(test)]

@@ -288,10 +288,9 @@ mod tests {
     #[test]
     fn default_memory_selector_lines_mark_selected_and_current_entries() {
         let lines = default_memory_selector_lines(
-            &["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
             &["Alpha Memory".to_string(), "Beta Memory".to_string()],
             1,
-            Some("aaaaa-aa"),
+            Some("Alpha Memory"),
             default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
         let joined = lines
@@ -311,10 +310,9 @@ mod tests {
     #[test]
     fn insert_target_selector_lines_use_insert_specific_copy() {
         let lines = default_memory_selector_lines(
-            &["aaaaa-aa".to_string()],
             &["Alpha Memory".to_string()],
             0,
-            Some("aaaaa-aa"),
+            Some("Alpha Memory"),
             default_memory_selector_copy(MemorySelectorContext::InsertTarget),
         );
         let joined = lines

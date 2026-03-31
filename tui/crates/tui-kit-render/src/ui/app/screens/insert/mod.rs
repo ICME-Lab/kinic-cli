@@ -107,7 +107,10 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         display_value(ui.insert_tag, "<tag>"),
         max_width,
     );
-    if matches!(ui.insert_mode, InsertMode::Text | InsertMode::Raw) {
+    if matches!(
+        ui.insert_mode,
+        InsertMode::InlineText | InsertMode::ManualEmbedding
+    ) {
         push_field(
             &mut lines,
             &mut rows,
@@ -118,7 +121,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             max_width,
         );
     }
-    if matches!(ui.insert_mode, InsertMode::File) {
+    if matches!(ui.insert_mode, InsertMode::Markdown | InsertMode::Pdf) {
         push_field(
             &mut lines,
             &mut rows,
@@ -129,7 +132,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             max_width,
         );
     }
-    if matches!(ui.insert_mode, InsertMode::Raw) {
+    if matches!(ui.insert_mode, InsertMode::ManualEmbedding) {
         push_field(
             &mut lines,
             &mut rows,
@@ -217,12 +220,15 @@ fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
 }
 
 fn mode_value(mode: InsertMode) -> String {
-    let (text, file, raw) = match mode {
-        InsertMode::Text => ("[text]", " file ", " raw "),
-        InsertMode::File => (" text ", "[file]", " raw "),
-        InsertMode::Raw => (" text ", " file ", "[raw]"),
+    let (markdown, pdf, text, embedding) = match mode {
+        InsertMode::Markdown => ("[Markdown]", " PDF ", " Inline Text ", " Manual Embedding "),
+        InsertMode::Pdf => (" Markdown ", "[PDF]", " Inline Text ", " Manual Embedding "),
+        InsertMode::InlineText => (" Markdown ", " PDF ", "[Inline Text]", " Manual Embedding "),
+        InsertMode::ManualEmbedding => {
+            (" Markdown ", " PDF ", " Inline Text ", "[Manual Embedding]")
+        }
     };
-    format!("{text} / {file} / {raw}")
+    format!("{markdown} / {pdf} / {text} / {embedding}")
 }
 
 fn submit_value(ui: &TuiKitUi<'_>) -> String {
@@ -273,9 +279,9 @@ mod tests {
     }
 
     #[test]
-    fn insert_form_hides_file_path_for_text_mode() {
+    fn insert_form_hides_file_path_for_inline_text_mode() {
         let theme = Theme::default();
-        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::Text);
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::InlineText);
         let lines = insert_form_lines(&ui, 80)
             .lines
             .into_iter()
@@ -289,9 +295,9 @@ mod tests {
     }
 
     #[test]
-    fn insert_form_hides_text_for_file_mode() {
+    fn insert_form_shows_file_path_for_markdown_mode_only() {
         let theme = Theme::default();
-        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::File);
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::Markdown);
         let lines = insert_form_lines(&ui, 80)
             .lines
             .into_iter()
@@ -305,9 +311,54 @@ mod tests {
     }
 
     #[test]
-    fn mode_value_uses_text_file_raw_labels() {
-        assert_eq!(mode_value(InsertMode::Text), "[text] /  file  /  raw ");
-        assert_eq!(mode_value(InsertMode::File), " text  / [file] /  raw ");
-        assert_eq!(mode_value(InsertMode::Raw), " text  /  file  / [raw]");
+    fn insert_form_shows_file_path_for_pdf_mode_only() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::Pdf);
+        let lines = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!lines.contains("Text"));
+        assert!(lines.contains("File Path"));
+        assert!(!lines.contains("Embedding JSON"));
+    }
+
+    #[test]
+    fn insert_form_shows_text_and_embedding_for_manual_embedding_mode() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::ManualEmbedding);
+        let lines = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(lines.contains("Text"));
+        assert!(!lines.contains("File Path"));
+        assert!(lines.contains("Embedding JSON"));
+    }
+
+    #[test]
+    fn mode_value_uses_markdown_pdf_inline_text_manual_embedding_labels() {
+        assert_eq!(
+            mode_value(InsertMode::Markdown),
+            "[Markdown] /  PDF  /  Inline Text  /  Manual Embedding "
+        );
+        assert_eq!(
+            mode_value(InsertMode::Pdf),
+            " Markdown  / [PDF] /  Inline Text  /  Manual Embedding "
+        );
+        assert_eq!(
+            mode_value(InsertMode::InlineText),
+            " Markdown  /  PDF  / [Inline Text] /  Manual Embedding "
+        );
+        assert_eq!(
+            mode_value(InsertMode::ManualEmbedding),
+            " Markdown  /  PDF  /  Inline Text  / [Manual Embedding]"
+        );
     }
 }

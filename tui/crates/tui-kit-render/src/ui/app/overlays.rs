@@ -449,13 +449,10 @@ mod tests {
     fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
         let lines = default_memory_selector_lines(
             &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
                 .map(|index| format!("Memory {index}"))
                 .collect::<Vec<_>>(),
             10,
-            Some("id-2"),
+            Some("Memory 2"),
             default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
 
@@ -475,15 +472,13 @@ mod tests {
     fn default_memory_selector_window_keeps_selected_row_visible_near_start() {
         let lines = default_memory_selector_lines(
             &(0..12)
-                .map(|index| format!("id-{index}"))
-                .collect::<Vec<_>>(),
-            &(0..12)
                 .map(|index| format!("Memory {index}"))
                 .collect::<Vec<_>>(),
             1,
-            Some("id-9"),
+            Some("Memory 9"),
             default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
+        let near_start = visible_default_memory_selector_lines(lines, 8);
         let near_start_joined = near_start
             .iter()
             .map(|(line, _)| line.as_str())
@@ -498,10 +493,9 @@ mod tests {
     #[test]
     fn insert_target_selector_window_uses_insert_specific_copy() {
         let lines = default_memory_selector_lines(
-            &["id-0".to_string()],
             &["Memory 0".to_string()],
             0,
-            Some("id-0"),
+            Some("Memory 0"),
             default_memory_selector_copy(MemorySelectorContext::InsertTarget),
         );
 
