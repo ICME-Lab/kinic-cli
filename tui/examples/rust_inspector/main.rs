@@ -22,10 +22,7 @@ use std::{env, io, path::PathBuf, time::Duration};
 use tui_kit_host::terminal::{HostTerminal, with_terminal};
 use tui_kit_host::{HostInputEvent, poll_host_input};
 use tui_kit_runtime::{CreateCostState, CreateSubmitState};
-use ui::{
-    AnimationState, TuiKitUi,
-    app::list_viewport_height_for_area,
-};
+use ui::{AnimationState, TuiKitUi, app::list_viewport_height_for_area};
 
 fn main() -> Result<()> {
     // Load .env so GITHUB_TOKEN etc. are available (cwd first, then project path overrides)

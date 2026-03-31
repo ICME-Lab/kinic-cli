@@ -15,7 +15,9 @@ use tui_kit_runtime::{
 
 use crate::tui::TuiAuth;
 
+#[cfg(not(test))]
 const APP_NAMESPACE: &str = "kinic";
+#[cfg(not(test))]
 const SETTINGS_FILE_NAME: &str = "tui.yaml";
 const UNAVAILABLE: &str = "unavailable";
 const NOT_SET: &str = "not set";
