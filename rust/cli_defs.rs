@@ -80,7 +80,10 @@ pub enum Command {
     AskAi(AskAiArgs),
     #[command(about = "Login via Internet Identity and store a delegation")]
     Login(LoginArgs),
-    #[command(about = "Launch the Kinic terminal UI")]
+    #[command(
+        about = "Launch the Kinic terminal UI (requires global --identity)",
+        after_help = "Required invocation:\n  kinic-cli --identity <IDENTITY> tui"
+    )]
     Tui(TuiArgs),
 }
 

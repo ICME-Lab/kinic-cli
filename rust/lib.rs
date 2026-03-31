@@ -13,7 +13,7 @@ mod python;
 pub mod tui;
 
 use anyhow::{Result, anyhow};
-use clap::Parser;
+use clap::{CommandFactory, Parser, error::ErrorKind};
 use std::path::PathBuf;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::fmt;
@@ -36,6 +36,7 @@ use tokio::runtime::Runtime;
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+    validate_tui_cli_args(&cli)?;
 
     let max = match cli.global.verbose {
         0 => LevelFilter::INFO,
@@ -77,6 +78,22 @@ pub async fn run() -> Result<()> {
     };
 
     run_command(cli.command, context).await
+}
+
+fn validate_tui_cli_args(cli: &Cli) -> Result<()> {
+    if matches!(&cli.command, cli::Command::Tui(_)) && cli.global.identity.is_none() && !cli.global.ii
+    {
+        let mut command = Cli::command();
+        let error = command
+            .error(
+                ErrorKind::MissingRequiredArgument,
+                "--identity is required for the Kinic TUI",
+            )
+            .with_cmd(&command);
+        return Err(error.into());
+    }
+
+    Ok(())
 }
 
 fn build_cli_command_context(global: &cli::GlobalOpts) -> Result<(AgentFactory, Option<PathBuf>)> {
@@ -169,6 +186,14 @@ mod tests {
         let path = resolve_identity_path(&global).unwrap();
 
         assert!(path.ends_with(PathBuf::from(".config/kinic/identity.json")));
+    }
+
+    #[test]
+    fn validate_tui_cli_args_accepts_identity_for_tui_command() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--identity", "alice", "tui"])
+            .expect("cli parsing should succeed");
+
+        validate_tui_cli_args(&cli).expect("validation should accept tui with identity");
     }
 }
 
