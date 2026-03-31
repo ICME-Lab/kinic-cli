@@ -184,7 +184,8 @@ impl Default for UiConfig {
                 status_label: "Status".to_string(),
                 status_ready_label: "Ready to create".to_string(),
                 status_insufficient_label: "Insufficient balance".to_string(),
-                unavailable_message: "Live account info unavailable in mock mode.".to_string(),
+                unavailable_message: "Live account info is currently unavailable."
+                    .to_string(),
                 error_prefix: "Account info error".to_string(),
             },
             settings: SettingsOverlayText {

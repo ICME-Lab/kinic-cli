@@ -308,10 +308,10 @@ Maintain keyboard-first behavior as baseline.
             ),
             KinicRecord::new(
                 "kinic-22",
-                "Content Mock Library",
+                "Content Sample Library",
                 "memories",
-                "Centralized mock snippets for demos and screenshots.",
-                r#"## Content Mock Library
+                "Centralized sample snippets for demos and screenshots.",
+                r#"## Content Sample Library
 - Keep short and long variants
 - Include bullets, headings, and pseudo code
 - Avoid domain-sensitive terms by default
