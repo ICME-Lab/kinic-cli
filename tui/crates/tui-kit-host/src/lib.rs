@@ -272,11 +272,22 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
     for effect in effects {
         match effect {
             CoreEffect::Notify(message) => {
+                state.persistent_status_message = None;
+                state.status_message = Some(message);
+            }
+            CoreEffect::NotifyPersistent(message) => {
+                state.persistent_status_message = Some(message.clone());
                 state.status_message = Some(message);
             }
             CoreEffect::OpenExternal(url) => match open_external(&url) {
-                Ok(()) => state.status_message = Some(format!("Opened: {url}")),
-                Err(e) => state.status_message = Some(format!("Failed to open URL: {url} ({e})")),
+                Ok(()) => {
+                    state.persistent_status_message = None;
+                    state.status_message = Some(format!("Opened: {url}"));
+                }
+                Err(e) => {
+                    state.persistent_status_message = None;
+                    state.status_message = Some(format!("Failed to open URL: {url} ({e})"));
+                }
             },
             CoreEffect::RequestRefresh => {}
             CoreEffect::CreateFormError(message) => {
@@ -292,7 +303,7 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                     };
                 }
                 state.create_error = message.clone();
-            }
+            },
             CoreEffect::InsertFormError(message) => {
                 state.insert_submit_state = if message.is_some() {
                     CreateSubmitState::Error
@@ -346,6 +357,7 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.insert_error = None;
             }
             CoreEffect::Custom { id, payload } => {
+                state.persistent_status_message = None;
                 state.status_message = Some(match payload {
                     Some(p) => format!("Custom effect: {id} ({p})"),
                     None => format!("Custom effect: {id}"),

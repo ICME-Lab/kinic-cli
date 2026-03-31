@@ -33,8 +33,7 @@ pub fn kinic_ui_config() -> UiConfig {
             TabSpec {
                 id: TabId::new(KINIC_INSERT_TAB_ID),
                 title: "Insert".to_string(),
-                search_placeholder: "Insert markdown, PDFs, inline text, or embeddings..."
-                    .to_string(),
+                search_placeholder: "Insert files, inline text, or embeddings...".to_string(),
             },
             TabSpec {
                 id: TabId::new(KINIC_CREATE_TAB_ID),

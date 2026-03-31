@@ -770,17 +770,17 @@ impl KinicProvider {
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
         let memory_id = state.insert_memory_id.trim().to_string();
         let tag = state.insert_tag.trim().to_string();
-        let file_path = (!state.insert_file_path.trim().is_empty())
-            .then(|| std::path::PathBuf::from(state.insert_file_path.trim()));
+        let normalized_file_path = normalize_insert_file_path_input(state.insert_file_path.trim());
+        let file_path = (!normalized_file_path.is_empty())
+            .then(|| std::path::PathBuf::from(normalized_file_path));
 
         match state.insert_mode {
-            InsertMode::InlineText => InsertRequest::Normal {
-                memory_id,
-                tag,
-                text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
-                file_path: None,
-            },
-            InsertMode::Markdown => match file_path {
+            InsertMode::File => match file_path {
+                Some(path) if insert_file_path_is_pdf(path.as_path()) => InsertRequest::Pdf {
+                    memory_id,
+                    tag,
+                    file_path: path,
+                },
                 Some(path) => InsertRequest::Normal {
                     memory_id,
                     tag,
@@ -794,10 +794,11 @@ impl KinicProvider {
                     file_path: None,
                 },
             },
-            InsertMode::Pdf => InsertRequest::Pdf {
+            InsertMode::InlineText => InsertRequest::Normal {
                 memory_id,
                 tag,
-                file_path: file_path.unwrap_or_default(),
+                text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
+                file_path: None,
             },
             InsertMode::ManualEmbedding => InsertRequest::Raw {
                 memory_id,
@@ -860,16 +861,15 @@ impl KinicProvider {
 
     fn validate_insert_state(&self, state: &CoreState) -> Result<(), String> {
         match state.insert_mode {
+            InsertMode::File => {
+                validate_supported_file_mode_path(normalize_insert_file_path_input(
+                    state.insert_file_path.trim(),
+                ))?;
+            }
             InsertMode::InlineText => {
                 if state.insert_text.trim().is_empty() {
                     return Err("Text is required for inline text insert.".to_string());
                 }
-            }
-            InsertMode::Markdown => {
-                validate_existing_insert_file_path(state.insert_file_path.trim(), "markdown")?;
-            }
-            InsertMode::Pdf => {
-                validate_insert_file_path(state.insert_file_path.trim(), &["pdf"], "PDF")?;
             }
             InsertMode::ManualEmbedding => {}
         }
@@ -1310,7 +1310,7 @@ impl KinicProvider {
             Ok(success) => vec![
                 CoreEffect::InsertFormError(None),
                 CoreEffect::ResetInsertFormForRepeat,
-                CoreEffect::Notify(insert_success_status(&success)),
+                CoreEffect::NotifyPersistent(insert_success_status(&success)),
             ],
             Err(error) => vec![CoreEffect::InsertFormError(Some(
                 format_insert_submit_error(&error),
@@ -1341,8 +1341,7 @@ impl KinicProvider {
             }
             KINIC_INSERT_TAB_ID => {
                 vec![CoreEffect::Notify(
-                    "Insert markdown, PDFs, inline text, or embeddings into an existing memory."
-                        .to_string(),
+                    "Insert files, inline text, or embeddings into an existing memory.".to_string(),
                 )]
             }
             KINIC_CREATE_TAB_ID => {
@@ -1381,34 +1380,51 @@ fn validate_existing_insert_file_path(path: &str, mode_label: &str) -> Result<()
     Ok(())
 }
 
-fn validate_insert_file_path(
-    path: &str,
-    allowed_extensions: &[&str],
-    mode_label: &str,
-) -> Result<(), String> {
-    validate_existing_insert_file_path(path, mode_label)?;
+fn normalize_insert_file_path_input(path: &str) -> &str {
+    let trimmed = path.trim();
+    if let Some(inner) = trimmed
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+    {
+        return inner;
+    }
+    if let Some(inner) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return inner;
+    }
+    trimmed
+}
+
+const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
+    "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
+];
+
+fn validate_supported_file_mode_path(path: &str) -> Result<(), String> {
+    validate_existing_insert_file_path(path, "file")?;
     let file_path = Path::new(path);
 
-    let extension = file_path
+    let Some(extension) = file_path
         .extension()
         .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase());
-    let Some(extension) = extension else {
+    else {
         return Err(format!(
             "File path must use a supported {} extension.",
-            allowed_extension_list(allowed_extensions)
+            allowed_extension_list(FILE_MODE_ALLOWED_EXTENSIONS)
         ));
     };
-    if allowed_extensions
+
+    if FILE_MODE_ALLOWED_EXTENSIONS
         .iter()
-        .any(|allowed| *allowed == extension)
+        .any(|allowed| extension.eq_ignore_ascii_case(allowed))
     {
         return Ok(());
     }
 
     Err(format!(
         "File path must use a supported {} extension.",
-        allowed_extension_list(allowed_extensions)
+        allowed_extension_list(FILE_MODE_ALLOWED_EXTENSIONS)
     ))
 }
 
@@ -1417,7 +1433,13 @@ fn allowed_extension_list(allowed_extensions: &[&str]) -> String {
         .iter()
         .map(|extension| format!(".{extension}"))
         .collect::<Vec<_>>()
-        .join(" or ")
+        .join(", ")
+}
+
+fn insert_file_path_is_pdf(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
 impl DataProvider for KinicProvider {
@@ -1534,18 +1556,12 @@ impl DataProvider for KinicProvider {
                         "Insert request already running.".to_string(),
                     ));
                 } else {
-                    let request = self.build_insert_request(state);
                     if self.is_live() {
+                        let request = self.build_insert_request(state);
                         effects.push(self.start_insert_submit(request));
                     } else {
-                        let target_memory_id = request.memory_id().to_string();
                         effects.push(CoreEffect::InsertFormError(None));
                         effects.push(CoreEffect::ResetInsertFormForRepeat);
-                        effects.push(CoreEffect::Notify(format!(
-                            "Mock insert accepted for {} [{}]",
-                            target_memory_id,
-                            state.insert_tag.trim()
-                        )));
                     }
                 }
             }
@@ -1562,7 +1578,6 @@ impl DataProvider for KinicProvider {
                     effects.push(effect);
                 }
             }
-            CoreAction::OpenDefaultMemoryPicker => {}
             CoreAction::CloseDefaultMemoryPicker => {}
             CoreAction::MoveDefaultMemoryPickerNext => {}
             CoreAction::MoveDefaultMemoryPickerPrev => {}

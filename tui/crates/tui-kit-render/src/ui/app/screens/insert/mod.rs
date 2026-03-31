@@ -123,7 +123,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             max_width,
         );
     }
-    if matches!(ui.insert_mode, InsertMode::Markdown | InsertMode::Pdf) {
+    if matches!(ui.insert_mode, InsertMode::File) {
         push_field(
             &mut lines,
             &mut rows,
@@ -222,22 +222,19 @@ fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
 }
 
 fn mode_value(mode: InsertMode) -> String {
-    let (markdown, pdf, text, embedding) = match mode {
-        InsertMode::Markdown => ("[Markdown]", " PDF ", " Inline Text ", " Manual Embedding "),
-        InsertMode::Pdf => (" Markdown ", "[PDF]", " Inline Text ", " Manual Embedding "),
-        InsertMode::InlineText => (" Markdown ", " PDF ", "[Inline Text]", " Manual Embedding "),
-        InsertMode::ManualEmbedding => {
-            (" Markdown ", " PDF ", " Inline Text ", "[Manual Embedding]")
-        }
+    let (file, text, embedding) = match mode {
+        InsertMode::File => ("[File]", " Inline Text ", " Manual Embedding "),
+        InsertMode::InlineText => (" File ", "[Inline Text]", " Manual Embedding "),
+        InsertMode::ManualEmbedding => (" File ", " Inline Text ", "[Manual Embedding]"),
     };
-    format!("{markdown} / {pdf} / {text} / {embedding}")
+    format!("{file} / {text} / {embedding}")
 }
 
 fn text_label<'a>(ui: &'a TuiKitUi<'a>) -> &'a str {
     match ui.insert_mode {
         InsertMode::InlineText => ui.ui_config.insert.text_label.as_str(),
         InsertMode::ManualEmbedding => ui.ui_config.insert.payload_text_label.as_str(),
-        InsertMode::Markdown | InsertMode::Pdf => {
+        InsertMode::File => {
             unreachable!("text label is only used for text-capable insert modes")
         }
     }
@@ -313,8 +310,7 @@ mod tests {
     fn insert_form_toggles_fields_by_mode() {
         let cases = [
             (InsertMode::InlineText, true, false, false),
-            (InsertMode::Markdown, false, true, false),
-            (InsertMode::Pdf, false, true, false),
+            (InsertMode::File, false, true, false),
             (InsertMode::ManualEmbedding, true, false, true),
         ];
 
@@ -324,7 +320,7 @@ mod tests {
                 InsertMode::InlineText | InsertMode::ManualEmbedding => {
                     lines.contains(text_placeholder(mode))
                 }
-                InsertMode::Markdown | InsertMode::Pdf => false,
+                InsertMode::File => false,
             };
             assert_eq!(has_text_placeholder, has_inline_text);
             assert_eq!(lines.contains("<file path>"), has_file_path);
@@ -362,22 +358,18 @@ mod tests {
     }
 
     #[test]
-    fn mode_value_uses_markdown_pdf_inline_text_manual_embedding_labels() {
+    fn mode_value_uses_file_inline_text_manual_embedding_labels() {
         assert_eq!(
-            mode_value(InsertMode::Markdown),
-            "[Markdown] /  PDF  /  Inline Text  /  Manual Embedding "
-        );
-        assert_eq!(
-            mode_value(InsertMode::Pdf),
-            " Markdown  / [PDF] /  Inline Text  /  Manual Embedding "
+            mode_value(InsertMode::File),
+            "[File] /  Inline Text  /  Manual Embedding "
         );
         assert_eq!(
             mode_value(InsertMode::InlineText),
-            " Markdown  /  PDF  / [Inline Text] /  Manual Embedding "
+            " File  / [Inline Text] /  Manual Embedding "
         );
         assert_eq!(
             mode_value(InsertMode::ManualEmbedding),
-            " Markdown  /  PDF  /  Inline Text  / [Manual Embedding]"
+            " File  /  Inline Text  / [Manual Embedding]"
         );
     }
 

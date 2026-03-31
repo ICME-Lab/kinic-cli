@@ -24,7 +24,25 @@ impl<'a> TuiKitUi<'a> {
             Focus::Chat => ("💬", "Chat"),
         };
 
-        let status_line = if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
+        let status_line = if self.prioritize_status_message && !self.status_message.is_empty() {
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} ", self.status_message),
+                    self.theme.style_string(),
+                ),
+                Span::styled(" │ ", self.theme.style_muted()),
+                Span::styled("Tab", self.theme.style_accent()),
+                Span::styled(" focus ", self.theme.style_muted()),
+                Span::styled("↑/↓ Enter / ", self.theme.style_accent()),
+                Span::styled(
+                    format!("? help q {} ", cfg.quit_label),
+                    self.theme.style_muted(),
+                ),
+                Span::styled("│ ", self.theme.style_dim()),
+                Span::styled(focus_indicator.0, self.theme.style_accent()),
+                Span::styled(format!(" {}", focus_indicator.1), self.theme.style_dim()),
+            ])
+        } else if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
             let tab_label = self
                 .tab_specs
                 .iter()
@@ -146,24 +164,6 @@ impl<'a> TuiKitUi<'a> {
                     self.theme.style_normal(),
                 ),
             ])
-        } else if !self.status_message.is_empty() {
-            Line::from(vec![
-                Span::styled(
-                    format!(" {} ", self.status_message),
-                    self.theme.style_string(),
-                ),
-                Span::styled(" │ ", self.theme.style_muted()),
-                Span::styled("Tab", self.theme.style_accent()),
-                Span::styled(" focus ", self.theme.style_muted()),
-                Span::styled("↑/↓ Enter / ", self.theme.style_accent()),
-                Span::styled(
-                    format!("? help q {} ", cfg.quit_label),
-                    self.theme.style_muted(),
-                ),
-                Span::styled("│ ", self.theme.style_dim()),
-                Span::styled(focus_indicator.0, self.theme.style_accent()),
-                Span::styled(format!(" {}", focus_indicator.1), self.theme.style_dim()),
-            ])
         } else {
             let selection_info = if let Some(selected) = self.list_selected {
                 format!("[{}/{}]", selected + 1, self.ui_summaries.len())
@@ -233,6 +233,7 @@ fn form_enter_hint(tab_id: &str) -> &'static str {
 mod tests {
     use super::*;
     use tui_kit_runtime::kinic_tabs::KINIC_CREATE_TAB_ID;
+    use crate::ui::theme::Theme;
 
     #[test]
     fn insert_tab_enter_hint_mentions_picker_and_submit() {
@@ -246,5 +247,31 @@ mod tests {
     fn mode_shortcut_is_insert_only() {
         assert!(show_form_mode_shortcut(KINIC_INSERT_TAB_ID));
         assert!(!show_form_mode_shortcut(KINIC_CREATE_TAB_ID));
+    }
+
+    #[test]
+    fn form_tabs_prefer_status_message_over_static_hints() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
+            .focus(Focus::Form)
+            .status_message("Inserted 12 chunks")
+            .prioritize_status_message(true);
+        let area = Rect::new(0, 0, 80, 3);
+        let mut buf = Buffer::empty(area);
+
+        ui.render_status(area, &mut buf);
+
+        let rendered = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Inserted 12 chunks"));
+        assert!(!rendered.contains("cycle/picker/submit"));
     }
 }

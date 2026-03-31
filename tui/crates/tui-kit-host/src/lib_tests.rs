@@ -1,5 +1,5 @@
 use super::*;
-use tui_kit_runtime::CoreState;
+use tui_kit_runtime::{CoreState, ProviderSnapshot, apply_snapshot};
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
 };
@@ -40,6 +40,38 @@ mod effect_application {
         let mut state = CoreState::default();
         execute_effects_to_status(&mut state, vec![CoreEffect::Notify("hello".to_string())]);
         assert_eq!(state.status_message.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn persistent_notify_survives_snapshot_until_cleared() {
+        let mut state = CoreState::default();
+        execute_effects_to_status(
+            &mut state,
+            vec![CoreEffect::NotifyPersistent("done".to_string())],
+        );
+        assert_eq!(state.status_message.as_deref(), Some("done"));
+        assert_eq!(state.persistent_status_message.as_deref(), Some("done"));
+
+        apply_snapshot(
+            &mut state,
+            ProviderSnapshot {
+                status_message: Some("generic".to_string()),
+                ..ProviderSnapshot::default()
+            },
+        );
+        assert_eq!(state.status_message.as_deref(), Some("done"));
+
+        state.persistent_status_message = None;
+        assert_eq!(state.persistent_status_message, None);
+
+        apply_snapshot(
+            &mut state,
+            ProviderSnapshot {
+                status_message: Some("generic".to_string()),
+                ..ProviderSnapshot::default()
+            },
+        );
+        assert_eq!(state.status_message.as_deref(), Some("generic"));
     }
 
     #[test]

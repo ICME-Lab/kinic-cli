@@ -129,7 +129,7 @@ fn insert_submit_focus_uses_enter_to_submit() {
 fn reset_insert_form_state_clears_insert_fields() {
     let mut state = CoreState {
         saved_default_memory_id: Some("bbbbb-bb".to_string()),
-        insert_mode: InsertMode::Pdf,
+        insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path: "/tmp/doc.pdf".to_string(),
@@ -141,7 +141,7 @@ fn reset_insert_form_state_clears_insert_fields() {
 
     reset_form_state_for_tab(&mut state, KINIC_INSERT_TAB_ID);
 
-    assert_eq!(state.insert_mode, InsertMode::Markdown);
+    assert_eq!(state.insert_mode, InsertMode::File);
     assert_eq!(state.insert_memory_id, "bbbbb-bb");
     assert_eq!(state.insert_tag, "");
     assert_eq!(state.insert_file_path, "");
