@@ -32,15 +32,15 @@ pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<
         KeyCode::BackTab => Some(CoreAction::InsertPrevField),
         KeyCode::Backspace => Some(CoreAction::InsertBackspace),
         KeyCode::Left => match state.insert_focus {
-            InsertFormFocus::Mode => Some(CoreAction::InsertCycleModePrev),
+            InsertFormFocus::Mode => Some(CoreAction::InsertPrevMode),
             _ => None,
         },
         KeyCode::Right => match state.insert_focus {
-            InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
+            InsertFormFocus::Mode => Some(CoreAction::InsertNextMode),
             _ => None,
         },
         KeyCode::Enter => match state.insert_focus {
-            InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
+            InsertFormFocus::Mode => Some(CoreAction::InsertNextMode),
             InsertFormFocus::MemoryId => Some(CoreAction::OpenDefaultMemoryPicker),
             InsertFormFocus::FilePath => Some(CoreAction::InsertOpenFileDialog),
             InsertFormFocus::Submit => Some(CoreAction::InsertSubmit),

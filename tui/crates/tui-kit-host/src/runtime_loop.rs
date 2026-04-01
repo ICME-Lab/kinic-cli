@@ -529,8 +529,8 @@ fn should_clear_persistent_status(action: &CoreAction) -> bool {
         action,
         CoreAction::InsertInput(_)
             | CoreAction::InsertBackspace
-            | CoreAction::InsertCycleModePrev
-            | CoreAction::InsertCycleMode
+            | CoreAction::InsertPrevMode
+            | CoreAction::InsertNextMode
             | CoreAction::InsertSubmit
             | CoreAction::OpenDefaultMemoryPicker
             | CoreAction::SubmitDefaultMemoryPicker

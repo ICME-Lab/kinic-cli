@@ -56,7 +56,7 @@ fn insert_form_routes_chars_into_active_field() {
 }
 
 #[test]
-fn insert_mode_focus_uses_enter_to_cycle_modes() {
+fn insert_mode_focus_uses_enter_to_move_to_next_mode() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
@@ -66,7 +66,7 @@ fn insert_mode_focus_uses_enter_to_cycle_modes() {
 
     let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
 
-    assert_eq!(action, Some(CoreAction::InsertCycleMode));
+    assert_eq!(action, Some(CoreAction::InsertNextMode));
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn insert_memory_id_focus_uses_enter_to_open_picker() {
 }
 
 #[test]
-fn insert_mode_focus_uses_left_to_cycle_modes_backwards() {
+fn insert_mode_focus_uses_left_to_move_to_prev_mode() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
@@ -94,11 +94,11 @@ fn insert_mode_focus_uses_left_to_cycle_modes_backwards() {
 
     let action = form_tab_action_from_key(KeyCode::Left, &mut state);
 
-    assert_eq!(action, Some(CoreAction::InsertCycleModePrev));
+    assert_eq!(action, Some(CoreAction::InsertPrevMode));
 }
 
 #[test]
-fn insert_mode_focus_uses_right_to_cycle_modes_forwards() {
+fn insert_mode_focus_uses_right_to_move_to_next_mode() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
@@ -108,7 +108,7 @@ fn insert_mode_focus_uses_right_to_cycle_modes_forwards() {
 
     let action = form_tab_action_from_key(KeyCode::Right, &mut state);
 
-    assert_eq!(action, Some(CoreAction::InsertCycleMode));
+    assert_eq!(action, Some(CoreAction::InsertNextMode));
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn reset_insert_form_state_clears_insert_fields() {
 }
 
 #[test]
-fn submit_tab_cycles_back_to_name() {
+fn submit_tab_wraps_back_to_name() {
     let mut state = CoreState {
         current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
         focus: PaneFocus::Form,
@@ -180,7 +180,7 @@ fn submit_tab_cycles_back_to_name() {
 }
 
 #[test]
-fn name_backtab_cycles_to_submit() {
+fn name_backtab_wraps_to_submit() {
     let mut state = CoreState {
         current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
         focus: PaneFocus::Form,

@@ -449,7 +449,7 @@ mod tests {
 
         assert!(cfg.lines.iter().any(|line| {
             line
-                == "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / browses file / submits"
+                == "Insert form: ←/→ switch mode, Enter moves to next mode / opens target picker / browses file / submits"
         }));
     }
 

@@ -442,8 +442,8 @@ pub enum CoreAction {
     InsertOpenFileDialog,
     InsertNextField,
     InsertPrevField,
-    InsertCycleModePrev,
-    InsertCycleMode,
+    InsertPrevMode,
+    InsertNextMode,
     InsertSubmit,
     Submit,
     Cancel,
@@ -677,7 +677,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
             state.insert_focus = prev_insert_focus(state.insert_mode, state.insert_focus);
         }
-        CoreAction::InsertCycleModePrev => {
+        CoreAction::InsertPrevMode => {
             if is_insert_form_locked(state) {
                 return;
             }
@@ -688,7 +688,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 state.insert_submit_state = CreateSubmitState::Idle;
             }
         }
-        CoreAction::InsertCycleMode => {
+        CoreAction::InsertNextMode => {
             if is_insert_form_locked(state) {
                 return;
             }
@@ -1432,7 +1432,7 @@ mod tests {
     }
 
     #[test]
-    fn create_next_field_cycles_back_to_name() {
+    fn create_next_field_wraps_back_to_name() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
             focus: PaneFocus::Form,
@@ -1968,14 +1968,14 @@ mod tests {
         };
 
         apply_core_action(&mut state, &CoreAction::InsertNextField);
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
 
         assert_eq!(state.insert_focus, InsertFormFocus::Text);
         assert_eq!(state.insert_mode, InsertMode::InlineText);
     }
 
     #[test]
-    fn insert_cycle_mode_prev_moves_to_inline_text_and_resets_focus() {
+    fn insert_prev_mode_moves_to_inline_text_and_resets_focus() {
         let mut state = CoreState {
             insert_mode: InsertMode::ManualEmbedding,
             insert_focus: InsertFormFocus::Embedding,
@@ -1984,7 +1984,7 @@ mod tests {
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
+        apply_core_action(&mut state, &CoreAction::InsertPrevMode);
 
         assert_eq!(state.insert_mode, InsertMode::InlineText);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
@@ -1993,17 +1993,17 @@ mod tests {
     }
 
     #[test]
-    fn insert_cycle_mode_wraps_between_first_and_last_modes() {
+    fn insert_mode_wraps_between_first_and_last_modes() {
         let mut state = CoreState {
             insert_mode: InsertMode::File,
             insert_focus: InsertFormFocus::Mode,
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
+        apply_core_action(&mut state, &CoreAction::InsertPrevMode);
         assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
         assert_eq!(state.insert_mode, InsertMode::File);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
     }
@@ -2024,20 +2024,20 @@ mod tests {
     }
 
     #[test]
-    fn insert_cycle_mode_visits_file_then_inline_text_before_raw() {
+    fn insert_next_mode_visits_file_then_inline_text_before_raw() {
         let mut state = CoreState {
             insert_mode: InsertMode::File,
             insert_focus: InsertFormFocus::Mode,
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
         assert_eq!(state.insert_mode, InsertMode::InlineText);
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
         assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
         assert_eq!(state.insert_mode, InsertMode::File);
     }
 }
