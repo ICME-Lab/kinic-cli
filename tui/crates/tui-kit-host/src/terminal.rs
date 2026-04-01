@@ -6,7 +6,7 @@
 use std::{fmt, io, path::PathBuf};
 
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::DisableMouseCapture,
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -37,11 +37,7 @@ impl std::error::Error for PickFilePathError {}
 
 fn enter_terminal(terminal: &mut HostTerminal) -> io::Result<()> {
     enable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        EnterAlternateScreen,
-        EnableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
     terminal.hide_cursor()?;
     Ok(())
 }
