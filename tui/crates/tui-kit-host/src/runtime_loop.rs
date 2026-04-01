@@ -125,7 +125,6 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .current_tab_id(TabId::new(state.current_tab_id.clone()))
                     .focus(focus)
                     .status_message(state.status_message.as_deref().unwrap_or("ready"))
-                    .prioritize_status_message(state.persistent_status_message.is_some())
                     .show_help(show_help)
                     .show_settings(show_settings)
                     .show_create_modal(false)

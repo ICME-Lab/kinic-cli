@@ -449,15 +449,11 @@ fn validate_insert_state_rejects_unsupported_file_extension() {
 }
 
 #[test]
-fn set_tab_insert_mentions_markdown_in_notification() {
+fn set_tab_insert_does_not_emit_redundant_notification() {
     let mut provider = KinicProvider::new(mock_config());
     let effects = provider.set_tab(KINIC_INSERT_TAB_ID);
 
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message)
-            if message == "Insert files, inline text, or embeddings into an existing memory."
-    )));
+    assert!(effects.is_empty());
 }
 
 #[test]
@@ -863,11 +859,51 @@ fn set_tab_create_handles_mock_and_live_modes() {
     assert_eq!(provider.create_cost_state, CreateCostState::Loading);
     assert!(provider.create_cost_in_flight);
     assert!(provider.pending_create_cost.is_some());
-    assert!(
-        effects
-            .iter()
-            .any(|effect| matches!(effect, CoreEffect::Notify(_)))
+    assert!(effects.is_empty());
+}
+
+#[test]
+fn status_message_uses_settings_specific_copy() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_SETTINGS_TAB_ID.to_string();
+
+    assert_eq!(
+        provider.status_message(2),
+        "Review session details and default memory settings here."
     );
+}
+
+#[test]
+fn duplicate_create_and_insert_submits_do_not_emit_notify() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.create_submit_in_flight = true;
+    provider.insert_submit_in_flight = true;
+
+    let create_output = provider
+        .handle_action(
+            &CoreAction::CreateSubmit,
+            &CoreState {
+                create_name: "Alpha".to_string(),
+                create_description: "Desc".to_string(),
+                ..CoreState::default()
+            },
+        )
+        .expect("create submit output");
+    assert!(create_output.effects.is_empty());
+
+    let insert_output = provider
+        .handle_action(
+            &CoreAction::InsertSubmit,
+            &CoreState {
+                insert_mode: InsertMode::InlineText,
+                insert_memory_id: "aaaaa-aa".to_string(),
+                insert_tag: "docs".to_string(),
+                insert_text: "payload".to_string(),
+                ..CoreState::default()
+            },
+        )
+        .expect("insert submit output");
+    assert!(insert_output.effects.is_empty());
 }
 
 #[test]
@@ -889,10 +925,7 @@ fn poll_background_applies_refreshed_session_settings() {
 
     assert!(!provider.session_settings_in_flight);
     assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message) if message == "Session settings refreshed."
-    )));
+    assert!(output.effects.is_empty());
 }
 
 #[test]
@@ -1041,7 +1074,7 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
             id: "aaaaa-aa".to_string(),
             memories: None,
             refresh_warning: Some(
-                "Automatic reload failed after create. Press F5 to refresh. Cause: boom"
+                "Automatic reload failed after create. Press Ctrl-R to refresh. Cause: boom"
                     .to_string(),
             ),
         }),
@@ -1070,7 +1103,7 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
         effect,
         CoreEffect::Notify(message)
             if message.contains("Created memory aaaaa-aa.")
-                && message.contains("Press F5 to refresh")
+                && message.contains("Press Ctrl-R to refresh")
     )));
 }
 
@@ -1322,10 +1355,7 @@ fn refresh_current_view_restarts_live_memories_load() {
     assert!(provider.pending_initial_memories.is_some());
     assert_eq!(provider.all[0].id, "kinic-live-loading");
     assert_eq!(provider.query, "alpha");
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message) if message == "Refreshing memories..."
-    )));
+    assert!(output.effects.is_empty());
 }
 
 #[test]

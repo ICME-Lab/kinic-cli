@@ -310,12 +310,6 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn prioritize_status_message(mut self, prioritize: bool) -> Self {
-        self.prioritize_status_message = prioritize;
-        self
-    }
-
-    #[must_use]
     pub fn inspector_scroll(mut self, scroll: usize) -> Self {
         self.inspector_scroll = scroll;
         self

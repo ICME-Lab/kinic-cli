@@ -125,7 +125,7 @@ pub async fn create_memory(
         Err(error) => (
             None,
             Some(format!(
-                "Automatic reload failed after create. Press F5 to refresh. Cause: {}",
+                "Automatic reload failed after create. Press Ctrl-R to refresh. Cause: {}",
                 short_error(&error.to_string())
             )),
         ),
@@ -314,7 +314,7 @@ mod tests {
             id: "aaaaa-aa".to_string(),
             memories: None,
             refresh_warning: Some(
-                "Automatic reload failed after create. Press F5 to refresh. Cause: boom"
+                "Automatic reload failed after create. Press Ctrl-R to refresh. Cause: boom"
                     .to_string(),
             ),
         };
@@ -325,7 +325,7 @@ mod tests {
             success
                 .refresh_warning
                 .as_deref()
-                .is_some_and(|message| message.contains("Press F5 to refresh"))
+                .is_some_and(|message| message.contains("Press Ctrl-R to refresh"))
         );
     }
 

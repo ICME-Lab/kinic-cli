@@ -15,7 +15,7 @@ impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_status(&self, area: Rect, buf: &mut Buffer) {
         let tab_id = self.current_tab_id.0.as_str();
 
-        let status_line = if self.prioritize_status_message && !self.status_message.is_empty() {
+        let status_line = if !self.status_message.is_empty() {
             self.generic_status_line()
         } else if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
             self.form_status_line(tab_id)
@@ -97,11 +97,7 @@ impl<'a> TuiKitUi<'a> {
             Span::styled(format!(" {}", label), self.theme.style_dim()),
         ]);
         if self.focus == Focus::Form {
-            let insert_at = if show_form_mode_shortcut(tab_id) {
-                8
-            } else {
-                4
-            };
+            let insert_at = if show_form_mode_shortcut(tab_id) { 8 } else { 4 };
             spans.splice(
                 insert_at..insert_at,
                 [
@@ -263,10 +259,10 @@ fn show_form_mode_shortcut(tab_id: &str) -> bool {
 
 fn form_enter_hint(tab_id: &str) -> &'static str {
     if tab_id == KINIC_INSERT_TAB_ID {
-        insert_form_copy().status_enter_hint
-    } else {
-        " submit "
+        return insert_form_copy().status_enter_hint;
     }
+
+    " submit "
 }
 
 #[cfg(test)]
@@ -295,8 +291,7 @@ mod tests {
         let ui = TuiKitUi::new(&theme)
             .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
             .focus(Focus::Form)
-            .status_message("Inserted 12 chunks")
-            .prioritize_status_message(true);
+            .status_message("Inserted 12 chunks");
         let area = Rect::new(0, 0, 80, 3);
         let mut buf = Buffer::empty(area);
 
@@ -316,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn form_tabs_keep_static_hints_when_status_is_not_prioritized() {
+    fn form_tabs_render_status_message_even_without_prioritization() {
         let theme = Theme::default();
         let ui = TuiKitUi::new(&theme)
             .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
@@ -336,7 +331,31 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(!rendered.contains("Inserted 12 chunks"));
-        assert!(rendered.contains("cycle/picker/submit"));
+        assert!(rendered.contains("Inserted 12 chunks"));
+        assert!(!rendered.contains("cycle/picker/submit"));
+    }
+
+    #[test]
+    fn non_form_tabs_render_status_message_without_prioritization() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new("tab-1"))
+            .focus(Focus::Items)
+            .status_message("Loaded memories.");
+        let area = Rect::new(0, 0, 80, 3);
+        let mut buf = Buffer::empty(area);
+
+        ui.render_status(area, &mut buf);
+
+        let rendered = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Loaded memories."));
     }
 }

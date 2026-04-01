@@ -172,8 +172,8 @@ mod global_commands {
                 HostGlobalCommand::OpenCreateTab,
             ),
             (
-                KeyCode::F(5),
-                KeyModifiers::NONE,
+                KeyCode::Char('r'),
+                KeyModifiers::CONTROL,
                 PaneFocus::Items,
                 KINIC_MEMORIES_TAB_ID,
                 true,

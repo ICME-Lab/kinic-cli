@@ -131,7 +131,8 @@ pub(crate) struct InsertFormCopy {
 
 pub(crate) fn insert_form_copy() -> InsertFormCopy {
     InsertFormCopy {
-        close_hint: "Tab: cycle fields, Enter: cycle mode / open target picker / submit, Esc: back to tab focus",
+        close_hint:
+            "File: .md/.markdown/.mdx/.txt/.json/.yaml/.yml/.csv/.log/.pdf\nInline Text: plain text\nManual Embedding: text + embedding JSON",
         help_line: "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits",
         status_enter_hint: " cycle/picker/submit ",
     }
@@ -190,7 +191,7 @@ impl Default for UiConfig {
                     "Tabs focused. Press Enter or Tab to edit from Name, or Esc for Memories."
                         .to_string(),
                 close_hint:
-                    "Tab: cycle fields, Enter: submit, F5: refresh account info, Esc: back to tab focus"
+                    "Tab: cycle fields, Enter: submit, Ctrl-R: refresh account info, Esc: back to tab focus"
                         .to_string(),
                 account_title: "Account & Cost".to_string(),
                 loading_message: "Loading account info...".to_string(),
@@ -215,7 +216,7 @@ impl Default for UiConfig {
                     insert_form_copy.help_line.to_string(),
                     "/: focus search".to_string(),
                     "Esc: back / clear / close".to_string(),
-                    "F5: refresh current view".to_string(),
+                    "Ctrl-R: refresh current view".to_string(),
                     "↑/↓: move selection".to_string(),
                     "Enter or →: open/focus content".to_string(),
                     "C: toggle chat panel".to_string(),

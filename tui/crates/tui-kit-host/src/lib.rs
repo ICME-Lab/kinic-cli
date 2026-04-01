@@ -247,7 +247,7 @@ pub fn global_command_for_key(
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateTab;
     }
-    if code == KeyCode::F(5) && modifiers.is_empty() {
+    if code == KeyCode::Char('r') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::RefreshCurrentView;
     }
     if code == KeyCode::Esc {
