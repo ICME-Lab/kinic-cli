@@ -184,6 +184,20 @@ impl PickerItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PickerListMode {
+    #[default]
+    Browsing,
+    Confirm {
+        kind: PickerConfirmKind,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PickerConfirmKind {
+    DeleteTag { tag_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum PickerState {
     #[default]
     Closed,
@@ -192,7 +206,7 @@ pub enum PickerState {
         items: Vec<PickerItem>,
         selected_index: usize,
         selected_id: Option<String>,
-        confirm_delete_id: Option<String>,
+        mode: PickerListMode,
     },
     Input {
         context: PickerContext,
@@ -1322,7 +1336,7 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
             items,
             selected_index,
             selected_id,
-            confirm_delete_id,
+            mode,
         } => {
             let previous_index = match &state.picker {
                 PickerState::List {
@@ -1340,13 +1354,13 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
                 } if *previous_context == context => selected_id.clone(),
                 _ => selected_id.clone(),
             };
-            let previous_confirm_delete_id = match &state.picker {
+            let previous_mode = match &state.picker {
                 PickerState::List {
                     context: previous_context,
-                    confirm_delete_id,
+                    mode,
                     ..
-                } if *previous_context == context => confirm_delete_id.clone(),
-                _ => confirm_delete_id.clone(),
+                } if *previous_context == context => mode.clone(),
+                _ => mode.clone(),
             };
             if previous_selected_id.is_none()
                 && previous_index < items.len()
@@ -1357,7 +1371,7 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
                     items,
                     selected_index: previous_index,
                     selected_id: None,
-                    confirm_delete_id: None,
+                    mode: PickerListMode::Browsing,
                 };
             }
             let resolved_selected_id = previous_selected_id.or(selected_id);
@@ -1372,15 +1386,22 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
                 PickerItemKind::Option => Some(item.id.clone()),
                 PickerItemKind::AddAction => None,
             });
-            let resolved_confirm_delete_id = previous_confirm_delete_id
-                .filter(|confirm_id| items.iter().any(|item| item.id == *confirm_id));
+            let resolved_mode = match previous_mode {
+                PickerListMode::Browsing => PickerListMode::Browsing,
+                PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag { tag_id },
+                } if items.iter().any(|item| item.id == tag_id) => PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag { tag_id },
+                },
+                PickerListMode::Confirm { .. } => PickerListMode::Browsing,
+            };
 
             PickerState::List {
                 context,
                 items,
                 selected_index: resolved_index,
                 selected_id: resolved_selected_id,
-                confirm_delete_id: resolved_confirm_delete_id,
+                mode: resolved_mode,
             }
         }
     }
@@ -1432,16 +1453,14 @@ fn open_picker(state: &mut CoreState, context: PickerContext) {
         items: Vec::new(),
         selected_index: 0,
         selected_id: None,
-        confirm_delete_id: None,
+        mode: PickerListMode::Browsing,
     };
 }
 
 fn close_picker(state: &mut CoreState) {
     match &mut state.picker {
-        PickerState::List {
-            confirm_delete_id, ..
-        } if confirm_delete_id.is_some() => {
-            *confirm_delete_id = None;
+        PickerState::List { mode, .. } if matches!(mode, PickerListMode::Confirm { .. }) => {
+            *mode = PickerListMode::Browsing;
         }
         _ => {
             state.picker = PickerState::Closed;
@@ -1454,14 +1473,14 @@ fn move_picker_next(state: &mut CoreState) {
         items,
         selected_index,
         selected_id,
-        confirm_delete_id,
+        mode,
         ..
     } = &mut state.picker
     else {
         return;
     };
 
-    if confirm_delete_id.is_some() {
+    if !matches!(mode, PickerListMode::Browsing) {
         return;
     }
 
@@ -1483,14 +1502,14 @@ fn move_picker_prev(state: &mut CoreState) {
         items,
         selected_index,
         selected_id,
-        confirm_delete_id,
+        mode,
         ..
     } = &mut state.picker
     else {
         return;
     };
 
-    if confirm_delete_id.is_some() {
+    if !matches!(mode, PickerListMode::Browsing) {
         return;
     }
 
@@ -1506,14 +1525,14 @@ fn begin_picker_delete_confirm(state: &mut CoreState) {
         context,
         items,
         selected_index,
-        confirm_delete_id,
+        mode,
         ..
     } = &mut state.picker
     else {
         return;
     };
 
-    if *context != PickerContext::TagManagement || confirm_delete_id.is_some() {
+    if *context != PickerContext::TagManagement || !matches!(mode, PickerListMode::Browsing) {
         return;
     }
 
@@ -1524,7 +1543,11 @@ fn begin_picker_delete_confirm(state: &mut CoreState) {
         return;
     }
 
-    *confirm_delete_id = Some(item.id.clone());
+    *mode = PickerListMode::Confirm {
+        kind: PickerConfirmKind::DeleteTag {
+            tag_id: item.id.clone(),
+        },
+    };
 }
 
 fn submit_picker(state: &mut CoreState) {
@@ -1547,9 +1570,9 @@ fn submit_picker(state: &mut CoreState) {
             items,
             selected_index,
             selected_id,
-            confirm_delete_id,
+            mode,
         } => {
-            if confirm_delete_id.is_some() {
+            if let PickerListMode::Confirm { .. } = mode {
                 return;
             }
             let Some(item) = items.get(*selected_index).cloned() else {
@@ -1972,7 +1995,7 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("bbbbb-bb".to_string()),
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             },
             ..CoreState::default()
         };
@@ -1989,7 +2012,7 @@ mod tests {
                 items: Vec::new(),
                 selected_index: 0,
                 selected_id: None,
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             }
         );
     }
@@ -2019,7 +2042,7 @@ mod tests {
                     ],
                     selected_index: 0,
                     selected_id: None,
-                    confirm_delete_id: None,
+                    mode: PickerListMode::Browsing,
                 },
                 ..ProviderSnapshot::default()
             },
@@ -2035,7 +2058,7 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("aaaaa-aa".to_string()),
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             }
         );
     }
@@ -2281,7 +2304,7 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             },
             ..CoreState::default()
         };
@@ -2298,7 +2321,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: None,
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             }
         );
     }
@@ -2314,7 +2337,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: None,
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             },
             ..CoreState::default()
         };
@@ -2342,7 +2365,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: None,
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             },
             ..CoreState::default()
         };
@@ -2355,7 +2378,7 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             },
             ..ProviderSnapshot::default()
         };
@@ -2372,7 +2395,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: None,
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             }
         );
     }
@@ -2398,7 +2421,7 @@ mod tests {
                     ],
                     selected_index: 0,
                     selected_id: None,
-                    confirm_delete_id: None,
+                    mode: PickerListMode::Browsing,
                 },
                 ..ProviderSnapshot::default()
             },
@@ -2414,7 +2437,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: Some("bbbbb-bb".to_string()),
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             }
         );
     }
@@ -2441,7 +2464,7 @@ mod tests {
                     ],
                     selected_index: 0,
                     selected_id: None,
-                    confirm_delete_id: None,
+                    mode: PickerListMode::Browsing,
                 },
                 ..ProviderSnapshot::default()
             },
@@ -2457,7 +2480,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: Some("bbbbb-bb".to_string()),
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             }
         );
     }
@@ -2470,7 +2493,7 @@ mod tests {
                 items: vec![PickerItem::option("docs", "docs", false)],
                 selected_index: 0,
                 selected_id: None,
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             },
             ..CoreState::default()
         };
@@ -2507,7 +2530,7 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             },
             ..CoreState::default()
         };
@@ -2524,7 +2547,11 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
-                confirm_delete_id: Some("docs".to_string()),
+                mode: PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag {
+                        tag_id: "docs".to_string(),
+                    },
+                },
             }
         );
     }
@@ -2540,7 +2567,11 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
-                confirm_delete_id: Some("docs".to_string()),
+                mode: PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag {
+                        tag_id: "docs".to_string(),
+                    },
+                },
             },
             ..CoreState::default()
         };
@@ -2557,9 +2588,136 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
-                confirm_delete_id: Some("docs".to_string()),
+                mode: PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag {
+                        tag_id: "docs".to_string(),
+                    },
+                },
             }
         );
+    }
+
+    #[test]
+    fn apply_snapshot_preserves_delete_confirm_when_tag_still_exists() {
+        let mut state = CoreState {
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::option("research", "research", false),
+                ],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+                mode: PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag {
+                        tag_id: "docs".to_string(),
+                    },
+                },
+            },
+            ..CoreState::default()
+        };
+
+        apply_snapshot(
+            &mut state,
+            ProviderSnapshot {
+                picker: PickerState::List {
+                    context: PickerContext::TagManagement,
+                    items: vec![
+                        PickerItem::option("docs", "docs", false),
+                        PickerItem::option("research", "research", false),
+                    ],
+                    selected_index: 1,
+                    selected_id: Some("research".to_string()),
+                    mode: PickerListMode::Browsing,
+                },
+                ..ProviderSnapshot::default()
+            },
+        );
+
+        assert!(matches!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::TagManagement,
+                mode: PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag { ref tag_id },
+                },
+                ..
+            } if tag_id == "docs"
+        ));
+    }
+
+    #[test]
+    fn apply_snapshot_clears_delete_confirm_when_tag_disappears() {
+        let mut state = CoreState {
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::option("research", "research", false),
+                ],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+                mode: PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag {
+                        tag_id: "docs".to_string(),
+                    },
+                },
+            },
+            ..CoreState::default()
+        };
+
+        apply_snapshot(
+            &mut state,
+            ProviderSnapshot {
+                picker: PickerState::List {
+                    context: PickerContext::TagManagement,
+                    items: vec![PickerItem::option("research", "research", false)],
+                    selected_index: 0,
+                    selected_id: Some("research".to_string()),
+                    mode: PickerListMode::Browsing,
+                },
+                ..ProviderSnapshot::default()
+            },
+        );
+
+        assert!(matches!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::TagManagement,
+                mode: PickerListMode::Browsing,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn picker_delete_key_ignores_add_action_rows() {
+        let mut state = CoreState {
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 1,
+                selected_id: None,
+                mode: PickerListMode::Browsing,
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::DeleteSelectedPickerItem);
+
+        assert!(matches!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::TagManagement,
+                selected_index: 1,
+                selected_id: None,
+                mode: PickerListMode::Browsing,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2570,7 +2728,11 @@ mod tests {
                 items: vec![PickerItem::option("docs", "docs", false)],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
-                confirm_delete_id: Some("docs".to_string()),
+                mode: PickerListMode::Confirm {
+                    kind: PickerConfirmKind::DeleteTag {
+                        tag_id: "docs".to_string(),
+                    },
+                },
             },
             ..CoreState::default()
         };
@@ -2584,7 +2746,7 @@ mod tests {
                 items: vec![PickerItem::option("docs", "docs", false)],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
-                confirm_delete_id: None,
+                mode: PickerListMode::Browsing,
             }
         );
     }

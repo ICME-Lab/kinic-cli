@@ -14,8 +14,9 @@ use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, InsertMode,
-    LoadedCreateCost, PaneFocus, PickerContext, PickerItem, PickerItemKind, PickerState,
-    ProviderOutput, ProviderSnapshot, SessionAccountOverview, SessionSettingsSnapshot,
+    LoadedCreateCost, PaneFocus, PickerConfirmKind, PickerContext, PickerItem, PickerItemKind,
+    PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SessionAccountOverview,
+    SessionSettingsSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -753,7 +754,7 @@ impl KinicProvider {
                 context,
                 selected_index,
                 selected_id,
-                confirm_delete_id,
+                mode,
                 ..
             } => {
                 let items = picker_items_for_context(
@@ -775,15 +776,23 @@ impl KinicProvider {
                         PickerItemKind::Option => Some(item.id.clone()),
                         PickerItemKind::AddAction => None,
                     });
-                let resolved_confirm_delete_id = confirm_delete_id
-                    .clone()
-                    .filter(|confirm_id| items.iter().any(|item| item.id == *confirm_id));
+                let resolved_mode = match mode {
+                    PickerListMode::Browsing => PickerListMode::Browsing,
+                    PickerListMode::Confirm {
+                        kind: PickerConfirmKind::DeleteTag { tag_id },
+                    } if items.iter().any(|item| item.id == *tag_id) => PickerListMode::Confirm {
+                        kind: PickerConfirmKind::DeleteTag {
+                            tag_id: tag_id.clone(),
+                        },
+                    },
+                    PickerListMode::Confirm { .. } => PickerListMode::Browsing,
+                };
                 PickerState::List {
                     context: *context,
                     items,
                     selected_index: resolved_index,
                     selected_id: resolved_selected_id,
-                    confirm_delete_id: resolved_confirm_delete_id,
+                    mode: resolved_mode,
                 }
             }
         };
@@ -940,16 +949,17 @@ impl KinicProvider {
         }
     }
 
-    fn picker_confirm_delete_effect(
+    fn picker_confirm_effect(
         &mut self,
         context: PickerContext,
-        tag: &str,
+        kind: &PickerConfirmKind,
     ) -> Option<CoreEffect> {
-        if context == PickerContext::TagManagement {
-            return Some(self.delete_tag_from_preferences(tag));
+        match (context, kind) {
+            (PickerContext::TagManagement, PickerConfirmKind::DeleteTag { tag_id }) => {
+                Some(self.delete_tag_from_preferences(tag_id))
+            }
+            _ => None,
         }
-
-        None
     }
 
     fn picker_option_submit_effects(
@@ -1913,11 +1923,11 @@ impl DataProvider for KinicProvider {
                     context,
                     items,
                     selected_index,
-                    confirm_delete_id,
+                    mode,
                     ..
                 } => {
-                    if let Some(tag) = confirm_delete_id {
-                        if let Some(effect) = self.picker_confirm_delete_effect(*context, tag) {
+                    if let PickerListMode::Confirm { kind } = mode {
+                        if let Some(effect) = self.picker_confirm_effect(*context, kind) {
                             effects.push(effect);
                         }
                         return Ok(ProviderOutput {
@@ -1986,7 +1996,7 @@ impl DataProvider for KinicProvider {
                 match &state.picker {
                     PickerState::List {
                         context,
-                        confirm_delete_id: Some(_),
+                        mode: PickerListMode::Confirm { .. },
                         ..
                     } if *context == PickerContext::TagManagement => self.build_snapshot(state),
                     _ => self.build_snapshot_with_picker(state, PickerState::Closed),

@@ -6,8 +6,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tui_kit_runtime::{
-    CreateCostState, LoadedCreateCost, PickerContext, PickerItem, PickerState,
-    SessionAccountOverview,
+    CreateCostState, LoadedCreateCost, PickerConfirmKind, PickerContext, PickerItem,
+    PickerListMode, PickerState, SessionAccountOverview,
 };
 
 fn session_snapshot(principal_id: &str) -> tui_kit_runtime::SessionSettingsSnapshot {
@@ -183,7 +183,7 @@ fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {
             items: Vec::new(),
             selected_index: 0,
             selected_id: None,
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
         },
         ..CoreState::default()
     });
@@ -198,7 +198,7 @@ fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {
             ],
             selected_index: 0,
             selected_id: Some("aaaaa-aa".to_string()),
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
         }
     );
     assert_eq!(
@@ -223,7 +223,7 @@ fn build_snapshot_prefers_explicit_insert_memory_id_for_insert_selector() {
             items: Vec::new(),
             selected_index: 0,
             selected_id: None,
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
         },
         insert_memory_id: "bbbbb-bb".to_string(),
         ..CoreState::default()
@@ -239,7 +239,7 @@ fn build_snapshot_prefers_explicit_insert_memory_id_for_insert_selector() {
             ],
             selected_index: 1,
             selected_id: Some("bbbbb-bb".to_string()),
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
         }
     );
     assert_eq!(snapshot.insert_memory_placeholder, None);
@@ -258,7 +258,7 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
             ],
             selected_index: 1,
             selected_id: Some("bbbbb-bb".to_string()),
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
         },
         ..CoreState::default()
     };
@@ -296,7 +296,7 @@ fn submit_tag_management_existing_tag_sets_insert_tag_without_switching_tabs() {
             ],
             selected_index: 0,
             selected_id: Some("docs".to_string()),
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
         },
         insert_tag: "existing-insert-tag".to_string(),
         ..CoreState::default()
@@ -391,7 +391,11 @@ fn submit_tag_management_delete_confirm_removes_saved_tag_and_keeps_picker_open(
                     ],
                     selected_index: 1,
                     selected_id: Some("research".to_string()),
-                    confirm_delete_id: Some("research".to_string()),
+                    mode: PickerListMode::Confirm {
+                        kind: PickerConfirmKind::DeleteTag {
+                            tag_id: "research".to_string(),
+                        },
+                    },
                 },
                 insert_tag: "research".to_string(),
                 ..CoreState::default()
@@ -408,7 +412,7 @@ fn submit_tag_management_delete_confirm_removes_saved_tag_and_keeps_picker_open(
         output.snapshot.expect("snapshot").picker,
         PickerState::List {
             context: PickerContext::TagManagement,
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
             ..
         }
     ));
@@ -665,7 +669,7 @@ fn build_snapshot_exposes_picker_titles() {
             items: Vec::new(),
             selected_index: 0,
             selected_id: None,
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
         },
         ..CoreState::default()
     });
@@ -680,7 +684,7 @@ fn build_snapshot_exposes_picker_titles() {
             ],
             selected_index: 0,
             selected_id: Some("aaaaa-aa".to_string()),
-            confirm_delete_id: None,
+            mode: PickerListMode::Browsing,
         }
     );
 }

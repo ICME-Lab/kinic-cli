@@ -7,11 +7,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, PickerState, SettingsSnapshot};
+use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::TuiKitUi;
 use super::screens::settings::{
-    PickerLineKind, picker_hint, picker_input_placeholder, picker_lines, picker_title,
+    PickerLineKind, picker_lines, picker_presentation, picker_requires_vertical_centering,
+    picker_title,
 };
 
 impl<'a> TuiKitUi<'a> {
@@ -205,103 +206,46 @@ impl<'a> TuiKitUi<'a> {
     }
 
     pub(super) fn render_picker_overlay(&self, area: Rect, buf: &mut Buffer) {
-        match self.picker {
-            PickerState::Closed => {}
-            PickerState::List {
-                context,
-                items,
-                selected_index,
-                confirm_delete_id,
-                ..
-            } => {
-                let lines = picker_lines(
-                    *context,
-                    items,
-                    *selected_index,
-                    confirm_delete_id.as_deref(),
-                );
-                let Some((w, h)) =
-                    fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
-                else {
-                    return;
-                };
-                let picker_area = Rect {
-                    x: area.x + (area.width - w) / 2,
-                    y: area.y + (area.height - h) / 2,
-                    width: w,
-                    height: h,
-                };
-                Clear.render(picker_area, buf);
-                let mut visible = visible_picker_lines(lines, h);
-                if confirm_delete_id.is_some() {
-                    let content_height = h.saturating_sub(2) as usize;
-                    if content_height > visible.len() {
-                        let top_padding = (content_height - visible.len()) / 2;
-                        let mut padded = Vec::with_capacity(top_padding + visible.len());
-                        padded.extend(
-                            (0..top_padding).map(|_| (String::new(), PickerLineKind::Normal)),
-                        );
-                        padded.append(&mut visible);
-                        visible = padded;
-                    }
-                }
-                let text = visible
-                    .into_iter()
-                    .map(render_picker_line(self.theme))
-                    .collect::<Vec<_>>();
-                Paragraph::new(text)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(self.theme.style_border_focused())
-                            .title(format!(
-                                " {} ",
-                                picker_title(*context, confirm_delete_id.as_deref())
-                            ))
-                            .style(Style::default().bg(self.theme.bg_panel)),
-                    )
-                    .wrap(Wrap { trim: false })
-                    .render(picker_area, buf);
-            }
-            PickerState::Input { context, value, .. } => {
-                let w = 52.min(area.width.saturating_sub(4));
-                let h = 9.min(area.height.saturating_sub(4));
-                let input_area = Rect {
-                    x: area.x + (area.width - w) / 2,
-                    y: area.y + (area.height - h) / 2,
-                    width: w,
-                    height: h,
-                };
-                Clear.render(input_area, buf);
-                let input = if value.is_empty() {
-                    picker_input_placeholder(*context).to_string()
-                } else {
-                    value.clone()
-                };
-                let lines = vec![
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        format!("  {input}"),
-                        self.theme.style_accent_bold(),
-                    )),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        picker_hint(*context),
-                        self.theme.style_muted(),
-                    )),
-                ];
-                Paragraph::new(lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(self.theme.style_border_focused())
-                            .title(format!(" {} ", picker_title(*context, None)))
-                            .style(Style::default().bg(self.theme.bg_panel)),
-                    )
-                    .wrap(Wrap { trim: false })
-                    .render(input_area, buf);
+        let Some(presentation) = picker_presentation(self.picker) else {
+            return;
+        };
+        let lines = picker_lines(&presentation);
+        let Some((w, h)) = fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
+        else {
+            return;
+        };
+        let picker_area = Rect {
+            x: area.x + (area.width - w) / 2,
+            y: area.y + (area.height - h) / 2,
+            width: w,
+            height: h,
+        };
+        Clear.render(picker_area, buf);
+        let mut visible = visible_picker_lines(lines, h);
+        if picker_requires_vertical_centering(&presentation) {
+            let content_height = h.saturating_sub(2) as usize;
+            if content_height > visible.len() {
+                let top_padding = (content_height - visible.len()) / 2;
+                let mut padded = Vec::with_capacity(top_padding + visible.len());
+                padded.extend((0..top_padding).map(|_| (String::new(), PickerLineKind::Normal)));
+                padded.append(&mut visible);
+                visible = padded;
             }
         }
+        let text = visible
+            .into_iter()
+            .map(render_picker_line(self.theme))
+            .collect::<Vec<_>>();
+        Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(self.theme.style_border_focused())
+                    .title(format!(" {} ", picker_title(&presentation)))
+                    .style(Style::default().bg(self.theme.bg_panel)),
+            )
+            .wrap(Wrap { trim: false })
+            .render(picker_area, buf);
     }
 }
 
@@ -427,6 +371,7 @@ fn settings_overlay_lines(
 mod tests {
     use super::*;
     use crate::ui::app::UiConfig;
+    use crate::ui::app::screens::settings::{PickerPresentation, picker_input_placeholder};
     use tui_kit_runtime::{
         PickerContext, PickerItem, SettingsEntry, SettingsSection, SettingsSnapshot,
     };
@@ -453,16 +398,16 @@ mod tests {
 
     #[test]
     fn visible_picker_lines_keep_selected_row() {
-        let lines = picker_lines(
-            PickerContext::DefaultMemory,
-            &(0..12)
-                .map(|index| {
-                    PickerItem::option(format!("id-{index}"), format!("Memory {index}"), false)
-                })
-                .collect::<Vec<_>>(),
-            10,
-            None,
-        );
+        let items = (0..12)
+            .map(|index| {
+                PickerItem::option(format!("id-{index}"), format!("Memory {index}"), false)
+            })
+            .collect::<Vec<_>>();
+        let lines = picker_lines(&PickerPresentation::List {
+            context: PickerContext::DefaultMemory,
+            items: &items,
+            selected_index: 10,
+        });
         let visible = visible_picker_lines(lines, 8);
         assert!(
             visible
