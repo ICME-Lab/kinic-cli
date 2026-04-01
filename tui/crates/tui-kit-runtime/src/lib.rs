@@ -675,7 +675,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
             match state.insert_focus {
                 InsertFormFocus::Mode | InsertFormFocus::Submit => {}
-                InsertFormFocus::MemoryId => state.insert_memory_id.push(*c),
+                InsertFormFocus::MemoryId => {}
                 InsertFormFocus::Tag => {}
                 InsertFormFocus::Text => state.insert_text.push(*c),
                 InsertFormFocus::FilePath => state.insert_file_path.push(*c),
@@ -692,9 +692,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
             match state.insert_focus {
                 InsertFormFocus::Mode | InsertFormFocus::Submit => {}
-                InsertFormFocus::MemoryId => {
-                    state.insert_memory_id.pop();
-                }
+                InsertFormFocus::MemoryId => {}
                 InsertFormFocus::Tag => {}
                 InsertFormFocus::Text => {
                     state.insert_text.pop();
@@ -2249,6 +2247,8 @@ mod tests {
         };
 
         apply_core_action(&mut state, &CoreAction::InsertInput('x'));
+        assert_eq!(state.insert_memory_id, "aaaaa-aa");
+
         apply_core_action(&mut state, &CoreAction::InsertBackspace);
 
         assert_eq!(state.insert_memory_id, "aaaaa-aa");

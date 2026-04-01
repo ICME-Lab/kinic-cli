@@ -340,6 +340,40 @@ fn save_tags_to_preferences_updates_saved_tags_in_tests() {
 }
 
 #[test]
+fn add_tag_submit_failure_keeps_picker_input_open() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.saved_tags = vec!["docs".to_string()];
+    set_next_test_settings_save_to_fail();
+
+    let state = CoreState {
+        picker: PickerState::Input {
+            context: PickerContext::AddTag,
+            origin_context: Some(PickerContext::InsertTag),
+            value: "research".to_string(),
+        },
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::SubmitPicker, &state)
+        .expect("add tag submit output");
+
+    assert_eq!(provider.user_preferences.saved_tags, vec!["docs"]);
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Tag save failed: No config directory found"
+    )));
+    assert_eq!(
+        output.snapshot.expect("snapshot").picker,
+        PickerState::Input {
+            context: PickerContext::AddTag,
+            origin_context: Some(PickerContext::InsertTag),
+            value: "research".to_string(),
+        }
+    );
+}
+
+#[test]
 fn submit_tag_management_delete_confirm_removes_saved_tag_and_keeps_picker_open() {
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.saved_tags = vec!["docs".to_string(), "research".to_string()];

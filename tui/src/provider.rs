@@ -317,7 +317,7 @@ impl<'a> DefaultMemoryController<'a> {
         let _settings_io_lock = settings_io_lock()
             .lock()
             .expect("settings io lock should be available");
-        match settings::save_user_preferences(&updated_preferences) {
+        match save_user_preferences_for_apply(&updated_preferences) {
             Ok(()) => {
                 let reloaded_preferences = reload_preferences_for_apply(&updated_preferences);
                 self.apply_reloaded_preferences(updated_preferences, reloaded_preferences);
@@ -384,10 +384,48 @@ fn reload_preferences_for_apply(
     }
 }
 
+fn save_user_preferences_for_apply(
+    preferences: &UserPreferences,
+) -> Result<(), tui_kit_host::settings::SettingsError> {
+    #[cfg(test)]
+    if take_test_settings_save_override().is_some() {
+        return Err(tui_kit_host::settings::SettingsError::NoConfigDir);
+    }
+
+    settings::save_user_preferences(preferences)
+}
+
 #[cfg(test)]
 fn settings_io_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[cfg(test)]
+fn test_settings_save_override() -> &'static Mutex<bool> {
+    static OVERRIDE: OnceLock<Mutex<bool>> = OnceLock::new();
+    OVERRIDE.get_or_init(|| Mutex::new(false))
+}
+
+#[cfg(test)]
+fn set_next_test_settings_save_to_fail() {
+    let mut guard = test_settings_save_override()
+        .lock()
+        .expect("test settings save override lock should be available");
+    *guard = true;
+}
+
+#[cfg(test)]
+fn take_test_settings_save_override() -> Option<()> {
+    let mut guard = test_settings_save_override()
+        .lock()
+        .expect("test settings save override lock should be available");
+    if *guard {
+        *guard = false;
+        Some(())
+    } else {
+        None
+    }
 }
 
 struct InsertSubmitTaskOutput {
@@ -845,7 +883,7 @@ impl KinicProvider {
         let _settings_io_lock = settings_io_lock()
             .lock()
             .expect("settings io lock should be available");
-        match settings::save_user_preferences(&updated_preferences) {
+        match save_user_preferences_for_apply(&updated_preferences) {
             Ok(()) => {
                 let reloaded_preferences = reload_preferences_for_apply(&updated_preferences);
                 apply_reloaded_preferences(
@@ -861,6 +899,10 @@ impl KinicProvider {
                 CoreEffect::Notify(format!("Tag save failed: {error}"))
             }
         }
+    }
+
+    fn add_tag_submit_succeeded(effect: &CoreEffect) -> bool {
+        matches!(effect, CoreEffect::Notify(message) if message.starts_with("Saved tag "))
     }
 
     fn delete_tag_from_preferences(&mut self, tag: &str) -> CoreEffect {
@@ -880,7 +922,7 @@ impl KinicProvider {
         let _settings_io_lock = settings_io_lock()
             .lock()
             .expect("settings io lock should be available");
-        match settings::save_user_preferences(&updated_preferences) {
+        match save_user_preferences_for_apply(&updated_preferences) {
             Ok(()) => {
                 let reloaded_preferences = reload_preferences_for_apply(&updated_preferences);
                 apply_reloaded_preferences(
@@ -1925,7 +1967,10 @@ impl DataProvider for KinicProvider {
                 context: PickerContext::AddTag,
                 value,
                 ..
-            } if matches!(action, CoreAction::SubmitPicker) && !value.trim().is_empty() => {
+            } if matches!(action, CoreAction::SubmitPicker)
+                && effects.last().is_some_and(Self::add_tag_submit_succeeded)
+                && !value.trim().is_empty() =>
+            {
                 self.build_snapshot_with_picker(state, PickerState::Closed)
             }
             PickerState::List { context, .. }
