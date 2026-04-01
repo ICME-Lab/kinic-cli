@@ -344,7 +344,8 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             }
             CoreEffect::ResetInsertFormForRepeat => {
                 state.insert_text.clear();
-                state.insert_file_path.clear();
+                state.insert_file_path_input.clear();
+                state.insert_selected_file_path = None;
                 state.insert_embedding.clear();
                 state.insert_submit_state = CreateSubmitState::Idle;
                 state.insert_spinner_frame = 0;

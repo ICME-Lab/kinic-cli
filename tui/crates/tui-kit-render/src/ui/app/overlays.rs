@@ -448,7 +448,8 @@ mod tests {
         let cfg = UiConfig::default().help;
 
         assert!(cfg.lines.iter().any(|line| {
-            line == "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits"
+            line
+                == "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / browses file / submits"
         }));
     }
 

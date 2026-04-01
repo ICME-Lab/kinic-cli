@@ -132,8 +132,9 @@ pub(crate) struct InsertFormCopy {
 pub(crate) fn insert_form_copy() -> InsertFormCopy {
     InsertFormCopy {
         mode_help: "File: .md/.markdown/.mdx/.txt/.json/.yaml/.yml/.csv/.log/.pdf\nInline Text: plain text\nManual Embedding: text + embedding JSON",
-        help_line: "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits",
-        status_enter_hint: " cycle/picker/submit ",
+        help_line:
+            "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / browses file / submits",
+        status_enter_hint: " cycle/picker/file/submit ",
     }
 }
 

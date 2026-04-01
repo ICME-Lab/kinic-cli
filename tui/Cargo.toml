@@ -41,7 +41,7 @@ test = false
 clap = { version = "4.5.51", features = ["derive"] }
 kinic_core = { package = "kinic-cli", path = ".." }
 tokio = { version = "1.48", features = ["rt-multi-thread"] }
-tui-kit-host = { path = "crates/tui-kit-host" }
+tui-kit-host = { path = "crates/tui-kit-host", features = ["rfd-file-picker"] }
 tui-kit-runtime = { path = "crates/tui-kit-runtime" }
 tui-kit-model = { path = "crates/tui-kit-model" }
 tui-kit-render = { path = "crates/tui-kit-render" }

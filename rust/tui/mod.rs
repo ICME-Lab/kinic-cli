@@ -26,6 +26,7 @@ mod ui_config;
 use tui_kit_host::{
     execute_effects_to_status,
     runtime_loop::{RuntimeLoopConfig, RuntimeLoopHooks, run_provider_app_with_hooks},
+    terminal::rfd_file_picker,
 };
 use tui_kit_runtime::{
     CoreState, CreateCostState, CreateSubmitState, DataProvider, PaneFocus, apply_snapshot,
@@ -148,6 +149,7 @@ fn kinic_runtime_loop_config() -> RuntimeLoopConfig {
         tab_ids: &kinic_tabs::KINIC_TAB_IDS,
         initial_focus: PaneFocus::Search,
         ui_config: ui_config::kinic_ui_config,
+        file_picker: Some(rfd_file_picker),
     }
 }
 
