@@ -11,7 +11,7 @@ use crate::{
     },
     create_domain::{BalanceDelta, balance_delta, required_balance},
     embedding::{embedding_base_url, fetch_embedding},
-    insert_service::{InsertExecutionResult, InsertRequest, execute_insert_request},
+    insert_service::{InsertRequest, execute_insert_request},
     ledger::fetch_balance,
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
@@ -39,7 +39,6 @@ pub struct CreateMemorySuccess {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InsertMemorySuccess {
-    pub mode: String,
     pub memory_id: String,
     pub tag: String,
     pub inserted_count: usize,
@@ -126,7 +125,7 @@ pub async fn create_memory(
         Err(error) => (
             None,
             Some(format!(
-                "Automatic reload failed after create. Press F5 to refresh. Cause: {}",
+                "Automatic reload failed after create. Press Ctrl-R to refresh. Cause: {}",
                 short_error(&error.to_string())
             )),
         ),
@@ -231,7 +230,11 @@ pub async fn run_insert(
         .await
         .map_err(|error| InsertMemoryError::Execute(short_error(&error.to_string())))?;
 
-    Ok(insert_success_from_result(result))
+    Ok(InsertMemorySuccess {
+        memory_id: result.memory_id,
+        tag: result.tag,
+        inserted_count: result.inserted_count,
+    })
 }
 
 fn memory_summary_from_state(state: State) -> MemorySummary {
@@ -273,19 +276,6 @@ fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
 
-fn insert_success_from_result(result: InsertExecutionResult) -> InsertMemorySuccess {
-    InsertMemorySuccess {
-        mode: match result.mode {
-            crate::insert_service::InsertMode::Normal => "insert".to_string(),
-            crate::insert_service::InsertMode::Raw => "insert-raw".to_string(),
-            crate::insert_service::InsertMode::Pdf => "insert-pdf".to_string(),
-        },
-        memory_id: result.memory_id,
-        tag: result.tag,
-        inserted_count: result.inserted_count,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,7 +314,7 @@ mod tests {
             id: "aaaaa-aa".to_string(),
             memories: None,
             refresh_warning: Some(
-                "Automatic reload failed after create. Press F5 to refresh. Cause: boom"
+                "Automatic reload failed after create. Press Ctrl-R to refresh. Cause: boom"
                     .to_string(),
             ),
         };
@@ -335,7 +325,7 @@ mod tests {
             success
                 .refresh_warning
                 .as_deref()
-                .is_some_and(|message| message.contains("Press F5 to refresh"))
+                .is_some_and(|message| message.contains("Press Ctrl-R to refresh"))
         );
     }
 

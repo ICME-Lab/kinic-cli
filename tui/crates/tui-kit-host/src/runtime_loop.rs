@@ -7,6 +7,7 @@ use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, apply_snapshot, dispatch_action,
+    PickerContext, PickerState,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
@@ -136,14 +137,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .create_focus(state.create_focus)
                     .create_cost_state(&state.create_cost_state)
                     .settings_snapshot(Some(&state.settings))
-                    .selector_open(state.selector_open)
-                    .selector_context(state.selector_context)
-                    .selector_mode(state.selector_mode)
-                    .selector_index(state.selector_index)
-                    .selector_items(&state.selector_items)
-                    .selector_labels(&state.selector_labels)
-                    .selector_selected_id(state.selector_selected_id.as_deref())
-                    .selector_add_tag_input(&state.selector_add_tag_input)
+                    .picker(&state.picker)
                     .saved_default_memory_id(state.saved_default_memory_id.as_deref())
                     .insert_mode(state.insert_mode)
                     .insert_memory_id(&state.insert_memory_id)
@@ -322,15 +316,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 if code == crossterm::event::KeyCode::Enter
                     && should_open_default_memory_picker(&state)
                 {
-                    return Some(CoreAction::OpenSelector(
-                        tui_kit_runtime::SelectorContext::DefaultMemory,
-                    ));
+                    return Some(CoreAction::OpenPicker(PickerContext::DefaultMemory));
                 }
                 if code == crossterm::event::KeyCode::Enter && should_open_saved_tags_picker(&state)
                 {
-                    return Some(CoreAction::OpenSelector(
-                        tui_kit_runtime::SelectorContext::TagManagement,
-                    ));
+                    return Some(CoreAction::OpenPicker(PickerContext::TagManagement));
                 }
                 action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
                     |a| {
@@ -363,7 +353,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::MovePageUp
                         | CoreAction::OpenSelected
                 );
-                match dispatch_action(provider, &mut state, &action) {
+                match dispatch_action_with_persistent_clear(provider, &mut state, &action) {
                     Ok(effects) => {
                         if matches!(&action, CoreAction::SetTab(_)) {
                             normalize_focus_after_set_tab(&mut state);
@@ -418,11 +408,11 @@ fn handle_overlay_input<P: DataProvider>(
     code: crossterm::event::KeyCode,
     modifiers: crossterm::event::KeyModifiers,
 ) -> OverlayInputResult {
-    if state.selector_open {
-        let Some(action) = selector_overlay_action(state.selector_mode, code, modifiers) else {
+    if !matches!(state.picker, PickerState::Closed) {
+        let Some(action) = picker_overlay_action(&state.picker, code, modifiers) else {
             return OverlayInputResult::Consumed;
         };
-        return match dispatch_action(provider, state, &action) {
+        return match dispatch_action_with_persistent_clear(provider, state, &action) {
             Ok(effects) => OverlayInputResult::ApplyEffects(effects),
             Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
         };
@@ -435,26 +425,25 @@ fn handle_overlay_input<P: DataProvider>(
     OverlayInputResult::NotHandled
 }
 
-fn selector_overlay_action(
-    mode: tui_kit_runtime::SelectorMode,
+fn picker_overlay_action(
+    picker: &PickerState,
     code: crossterm::event::KeyCode,
     _modifiers: crossterm::event::KeyModifiers,
 ) -> Option<CoreAction> {
-    match mode {
-        tui_kit_runtime::SelectorMode::List => match code {
-            crossterm::event::KeyCode::Esc => Some(CoreAction::CloseSelector),
-            crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitSelector),
-            crossterm::event::KeyCode::Down => Some(CoreAction::MoveSelectorNext),
-            crossterm::event::KeyCode::Up => Some(CoreAction::MoveSelectorPrev),
+    match picker {
+        PickerState::Closed => None,
+        PickerState::List { .. } => match code {
+            crossterm::event::KeyCode::Esc => Some(CoreAction::ClosePicker),
+            crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitPicker),
+            crossterm::event::KeyCode::Down => Some(CoreAction::MovePickerNext),
+            crossterm::event::KeyCode::Up => Some(CoreAction::MovePickerPrev),
             _ => None,
         },
-        tui_kit_runtime::SelectorMode::AddTag => match code {
-            crossterm::event::KeyCode::Esc => Some(CoreAction::CancelAddTag),
-            crossterm::event::KeyCode::Enter => Some(CoreAction::ConfirmAddTag),
-            crossterm::event::KeyCode::Backspace => Some(CoreAction::AddTagBackspace),
-            crossterm::event::KeyCode::Char(c) if !c.is_control() => {
-                Some(CoreAction::AddTagInput(c))
-            }
+        PickerState::Input { .. } => match code {
+            crossterm::event::KeyCode::Esc => Some(CoreAction::ClosePicker),
+            crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitPicker),
+            crossterm::event::KeyCode::Backspace => Some(CoreAction::PickerBackspace),
+            crossterm::event::KeyCode::Char(c) if !c.is_control() => Some(CoreAction::PickerInput(c)),
             _ => None,
         },
     }
@@ -487,7 +476,7 @@ fn dispatch_with_effects<P: DataProvider, H: RuntimeLoopHooks<P>>(
     hooks: &mut H,
     action: &CoreAction,
 ) -> Result<(), String> {
-    match dispatch_action(provider, state, action) {
+    match dispatch_action_with_persistent_clear(provider, state, action) {
         Ok(effects) => {
             hooks.on_effects(provider, state, &effects);
             execute_effects_to_status(state, effects);
@@ -495,6 +484,43 @@ fn dispatch_with_effects<P: DataProvider, H: RuntimeLoopHooks<P>>(
         }
         Err(error) => Err(dispatch_error_message(&error)),
     }
+}
+
+fn dispatch_action_with_persistent_clear(
+    provider: &mut impl DataProvider,
+    state: &mut CoreState,
+    action: &CoreAction,
+) -> tui_kit_runtime::CoreResult<Vec<CoreEffect>> {
+    if should_clear_persistent_status(action) {
+        state.persistent_status_message = None;
+        state.status_message = None;
+    }
+    dispatch_action(provider, state, action)
+}
+
+fn should_clear_persistent_status(action: &CoreAction) -> bool {
+    matches!(
+        action,
+        CoreAction::InsertInput(_)
+            | CoreAction::InsertBackspace
+            | CoreAction::InsertCycleModePrev
+            | CoreAction::InsertCycleMode
+            | CoreAction::InsertSubmit
+            | CoreAction::OpenPicker(_)
+            | CoreAction::MovePickerNext
+            | CoreAction::MovePickerPrev
+            | CoreAction::SubmitPicker
+            | CoreAction::PickerInput(_)
+            | CoreAction::PickerBackspace
+            | CoreAction::CreateInput(_)
+            | CoreAction::CreateBackspace
+            | CoreAction::CreateSubmit
+            | CoreAction::SearchInput(_)
+            | CoreAction::SearchBackspace
+            | CoreAction::SetQuery(_)
+            | CoreAction::SearchSubmit
+            | CoreAction::SetTab(_)
+    )
 }
 
 fn switch_to_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(

@@ -2,7 +2,7 @@
 
 use crossterm::event::KeyCode;
 use tui_kit_runtime::{
-    CoreAction, CoreState, CreateModalFocus, InsertFormFocus, PaneFocus, SelectorContext,
+    CoreAction, CoreState, CreateModalFocus, InsertFormFocus, PaneFocus, PickerContext,
     kinic_tabs::{is_form_tab, is_kinic_create_tab, is_kinic_insert_tab},
 };
 
@@ -41,10 +41,8 @@ pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<
         },
         KeyCode::Enter => match state.insert_focus {
             InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
-            InsertFormFocus::MemoryId => {
-                Some(CoreAction::OpenSelector(SelectorContext::InsertTarget))
-            }
-            InsertFormFocus::Tag => Some(CoreAction::OpenSelector(SelectorContext::InsertTag)),
+            InsertFormFocus::MemoryId => Some(CoreAction::OpenPicker(PickerContext::InsertTarget)),
+            InsertFormFocus::Tag => Some(CoreAction::OpenPicker(PickerContext::InsertTag)),
             InsertFormFocus::Submit => Some(CoreAction::InsertSubmit),
             _ => None,
         },
@@ -75,7 +73,7 @@ pub fn reset_form_focus(state: &mut CoreState) {
 
 pub fn reset_form_state_for_tab(state: &mut CoreState, tab_id: &str) {
     if is_kinic_insert_tab(tab_id) {
-        state.insert_mode = tui_kit_runtime::InsertMode::Normal;
+        state.insert_mode = tui_kit_runtime::InsertMode::default();
         state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
         state.insert_tag.clear();
         state.insert_text.clear();

@@ -7,6 +7,7 @@ pub mod placeholder;
 pub mod settings;
 
 use ratatui::{buffer::Buffer, layout::Rect};
+use tui_kit_runtime::CreateSubmitState;
 use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
 
 use crate::ui::app::TuiKitUi;
@@ -53,4 +54,23 @@ impl<'a> TuiKitUi<'a> {
             }
         }
     }
+}
+
+fn submit_button_text(
+    submit_state: &CreateSubmitState,
+    spinner_frame_index: usize,
+    idle_label: &str,
+    pending_label: &str,
+) -> String {
+    match submit_state {
+        CreateSubmitState::Submitting => {
+            format!("{} {}", spinner_frame(spinner_frame_index), pending_label)
+        }
+        CreateSubmitState::Idle | CreateSubmitState::Error => idle_label.to_string(),
+    }
+}
+
+fn spinner_frame(frame: usize) -> &'static str {
+    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+    FRAMES[frame % FRAMES.len()]
 }

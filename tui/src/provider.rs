@@ -1,6 +1,6 @@
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
-use std::{sync::mpsc, thread};
+use std::{path::Path, sync::mpsc, thread};
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
@@ -14,8 +14,8 @@ use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, InsertMode,
-    LoadedCreateCost, PaneFocus, ProviderOutput, ProviderSnapshot, SelectorContext,
-    SessionAccountOverview, SessionSettingsSnapshot,
+    LoadedCreateCost, PaneFocus, PickerContext, PickerItem, PickerItemKind, PickerState,
+    ProviderOutput, ProviderSnapshot, SessionAccountOverview, SessionSettingsSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -176,10 +176,6 @@ impl<'a> DefaultMemorySelection<'a> {
             .map(|record| record.id.clone())
     }
 
-    fn selected_default_memory_id(self) -> Option<String> {
-        self.user_preferences.default_memory_id.clone()
-    }
-
     fn is_default_memory(self, memory_id: &str) -> bool {
         self.user_preferences.default_memory_id.as_deref() == Some(memory_id)
     }
@@ -203,64 +199,42 @@ fn saved_tag_selection(preferences: &UserPreferences) -> Vec<String> {
     settings::normalize_saved_tags(preferences.saved_tags.clone())
 }
 
-fn selector_snapshot_for_context(
-    context: SelectorContext,
+fn picker_items_for_context(
+    context: PickerContext,
     state: &CoreState,
     memory_selection: DefaultMemorySelection<'_>,
     user_preferences: &UserPreferences,
-) -> (Vec<String>, Vec<String>, Option<String>) {
+) -> Vec<PickerItem> {
     match context {
-        SelectorContext::DefaultMemory => {
-            let items = memory_selection.available_memory_ids();
-            let labels = memory_selection.selector_labels();
-            let selected_id = memory_selection.selected_default_memory_id();
-            (items, labels, selected_id)
+        PickerContext::DefaultMemory | PickerContext::InsertTarget => memory_selection
+            .memory_records
+            .iter()
+            .map(|record| {
+                PickerItem::option(
+                    record.id.clone(),
+                    memory_selection
+                        .title_for_id(record.id.as_str())
+                        .unwrap_or_else(|| record.id.clone()),
+                    memory_selection.is_default_memory(record.id.as_str()),
+                )
+            })
+            .collect(),
+        PickerContext::InsertTag | PickerContext::TagManagement => {
+            let mut items = saved_tag_selection(user_preferences)
+                .into_iter()
+                .map(|tag| PickerItem::option(tag.clone(), tag, false))
+                .collect::<Vec<_>>();
+            items.push(PickerItem::add_action("+ Add new tag"));
+            items
         }
-        SelectorContext::InsertTarget => {
-            let items = memory_selection.available_memory_ids();
-            let labels = memory_selection.selector_labels();
-            let selected_id = {
-                let insert_memory_id = state.insert_memory_id.trim();
-                if !insert_memory_id.is_empty() {
-                    Some(insert_memory_id.to_string())
-                } else {
-                    memory_selection.selected_default_memory_id()
-                }
-            };
-            (items, labels, selected_id)
-        }
-        SelectorContext::InsertTag => {
-            let items = saved_tag_selection(user_preferences);
-            let labels = items.clone();
-            let selected_id = if state.selector_mode == tui_kit_runtime::SelectorMode::AddTag
-                || state.selector_index == items.len()
-            {
-                None
-            } else {
-                state
-                    .selector_selected_id
-                    .clone()
-                    .filter(|selected| items.iter().any(|item| item == selected))
-                    .or_else(|| items.get(state.selector_index).cloned())
-            };
-            (items, labels, selected_id)
-        }
-        SelectorContext::TagManagement => {
-            let items = saved_tag_selection(user_preferences);
-            let labels = items.clone();
-            let selected_id = if state.selector_mode == tui_kit_runtime::SelectorMode::AddTag
-                || state.selector_index == items.len()
-            {
-                None
-            } else {
-                state
-                    .selector_selected_id
-                    .clone()
-                    .filter(|selected| items.iter().any(|item| item == selected))
-                    .or_else(|| items.get(state.selector_index).cloned())
-            };
-            (items, labels, selected_id)
-        }
+        PickerContext::AddTag => match &state.picker {
+            PickerState::Input { origin_context, .. } => origin_context
+                .map(|origin_context| {
+                    picker_items_for_context(origin_context, state, memory_selection, user_preferences)
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        },
     }
 }
 
@@ -326,6 +300,24 @@ impl<'a> DefaultMemoryController<'a> {
     }
 }
 
+fn picker_selected_index(
+    items: &[PickerItem],
+    selected_id: Option<&str>,
+    selected_index: usize,
+) -> usize {
+    if items.is_empty() {
+        return 0;
+    }
+
+    if let Some(selected_id) = selected_id
+        && let Some(index) = items.iter().position(|item| item.id == selected_id)
+    {
+        return index;
+    }
+
+    selected_index.min(items.len().saturating_sub(1))
+}
+
 fn apply_reloaded_preferences(
     user_preferences: &mut UserPreferences,
     preferences_health: &mut PreferencesHealth,
@@ -356,6 +348,13 @@ fn settings_io_lock() -> &'static Mutex<()> {
 struct InsertSubmitTaskOutput {
     request_id: u64,
     result: Result<bridge::InsertMemorySuccess, bridge::InsertMemoryError>,
+}
+
+fn insert_success_status(success: &bridge::InsertMemorySuccess) -> String {
+    format!(
+        "Inserted {} chunks (tag: {}) into {}",
+        success.inserted_count, success.tag, success.memory_id
+    )
 }
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
@@ -437,9 +436,7 @@ impl KinicProvider {
         }
 
         if self.initial_memories_in_flight {
-            return Some(CoreEffect::Notify(
-                "Memories are already loading.".to_string(),
-            ));
+            return None;
         }
 
         self.memories_mode = MemoriesMode::Browser;
@@ -481,11 +478,9 @@ impl KinicProvider {
     fn refresh_current_view(&mut self) -> Vec<CoreEffect> {
         match self.tab_id.as_str() {
             KINIC_CREATE_TAB_ID => self.start_create_cost_refresh().into_iter().collect(),
-            KINIC_INSERT_TAB_ID => vec![CoreEffect::Notify(
-                "Insert tab is ready. Submit to write into a memory.".to_string(),
-            )],
+            KINIC_INSERT_TAB_ID => Vec::new(),
             KINIC_MEMORIES_TAB_ID => self
-                .start_live_memories_load(Some("Refreshing memories..."), true)
+                .start_live_memories_load(None, true)
                 .into_iter()
                 .collect(),
             _ => Vec::new(),
@@ -657,15 +652,55 @@ impl KinicProvider {
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
         let filtered = self.current_records();
         let default_memory = self.default_memory_selection();
-        let (selector_items, selector_labels, selector_selected_id) = selector_snapshot_for_context(
-            state.selector_context,
-            state,
-            default_memory,
-            &self.user_preferences,
-        );
         let default_memory_items = default_memory.available_memory_ids();
         let default_memory_labels = default_memory.selector_labels();
         let insert_memory_placeholder = self.insert_memory_placeholder_label(state);
+        let picker = match &state.picker {
+            PickerState::Closed => PickerState::Closed,
+            PickerState::Input {
+                context,
+                origin_context,
+                value,
+            } => PickerState::Input {
+                context: *context,
+                origin_context: *origin_context,
+                value: value.clone(),
+            },
+            PickerState::List {
+                context,
+                selected_index,
+                selected_id,
+                ..
+            } => {
+                let items =
+                    picker_items_for_context(*context, state, default_memory, &self.user_preferences);
+                let preferred_selected_id = selected_id.clone().or_else(|| match context {
+                    PickerContext::DefaultMemory => self.user_preferences.default_memory_id.clone(),
+                    PickerContext::InsertTarget => {
+                        let insert_memory_id = state.insert_memory_id.trim();
+                        (!insert_memory_id.is_empty()).then(|| insert_memory_id.to_string())
+                    }
+                    PickerContext::InsertTag => {
+                        let insert_tag = state.insert_tag.trim();
+                        (!insert_tag.is_empty()).then(|| insert_tag.to_string())
+                    }
+                    PickerContext::TagManagement | PickerContext::AddTag => None,
+                });
+                let resolved_index =
+                    picker_selected_index(&items, preferred_selected_id.as_deref(), *selected_index);
+                let resolved_selected_id =
+                    items.get(resolved_index).and_then(|item| match item.kind {
+                        PickerItemKind::Option => Some(item.id.clone()),
+                        PickerItemKind::AddAction => None,
+                    });
+                PickerState::List {
+                    context: *context,
+                    items,
+                    selected_index: resolved_index,
+                    selected_id: resolved_selected_id,
+                }
+            }
+        };
         let items = filtered
             .iter()
             .map(|record| {
@@ -704,12 +739,16 @@ impl KinicProvider {
                 &default_memory_labels,
                 &self.preferences_health,
             ),
-            selector_items,
-            selector_labels,
-            selector_selected_id,
+            picker,
             saved_default_memory_id: self.user_preferences.default_memory_id.clone(),
             insert_memory_placeholder,
         }
+    }
+
+    fn build_snapshot_with_picker(&self, state: &CoreState, picker: PickerState) -> ProviderSnapshot {
+        let mut snapshot = self.build_snapshot(state);
+        snapshot.picker = picker;
+        snapshot
     }
 
     fn insert_memory_placeholder_label(&self, state: &CoreState) -> Option<String> {
@@ -799,9 +838,7 @@ impl KinicProvider {
             });
         });
 
-        Some(CoreEffect::Notify(
-            "Refreshing session settings...".to_string(),
-        ))
+        None
     }
 
     fn start_create_cost_refresh(&mut self) -> Option<CoreEffect> {
@@ -812,9 +849,7 @@ impl KinicProvider {
             ));
         }
         if self.create_cost_in_flight {
-            return Some(CoreEffect::Notify(
-                "Account info refresh already running.".to_string(),
-            ));
+            return None;
         }
 
         let request_id = self.next_create_request_id;
@@ -838,7 +873,7 @@ impl KinicProvider {
             });
         });
 
-        Some(CoreEffect::Notify("Refreshing account info...".to_string()))
+        None
     }
 
     fn start_create_submit(&mut self, name: String, description: String) -> CoreEffect {
@@ -883,51 +918,74 @@ impl KinicProvider {
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
         let memory_id = state.insert_memory_id.trim().to_string();
         let tag = state.insert_tag.trim().to_string();
+        let normalized_file_path = normalize_insert_file_path_input(state.insert_file_path.trim());
+        let file_path = (!normalized_file_path.is_empty())
+            .then(|| std::path::PathBuf::from(normalized_file_path));
 
         match state.insert_mode {
-            InsertMode::Normal => InsertRequest::Normal {
+            InsertMode::File => match file_path {
+                Some(path) if insert_file_path_is_pdf(path.as_path()) => InsertRequest::Pdf {
+                    memory_id,
+                    tag,
+                    file_path: path,
+                },
+                Some(path) => InsertRequest::Normal {
+                    memory_id,
+                    tag,
+                    text: None,
+                    file_path: Some(path),
+                },
+                None => InsertRequest::Normal {
+                    memory_id,
+                    tag,
+                    text: None,
+                    file_path: None,
+                },
+            },
+            InsertMode::InlineText => InsertRequest::Normal {
                 memory_id,
                 tag,
                 text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
-                file_path: (!state.insert_file_path.trim().is_empty())
-                    .then(|| std::path::PathBuf::from(state.insert_file_path.trim())),
+                file_path: None,
             },
-            InsertMode::Raw => InsertRequest::Raw {
+            InsertMode::ManualEmbedding => InsertRequest::Raw {
                 memory_id,
                 tag,
                 text: state.insert_text.clone(),
                 embedding_json: state.insert_embedding.clone(),
-            },
-            InsertMode::Pdf => InsertRequest::Pdf {
-                memory_id,
-                tag,
-                file_path: std::path::PathBuf::from(state.insert_file_path.trim()),
             },
         }
     }
 
     fn status_message(&self, visible_count: usize) -> String {
         if self.tab_id == KINIC_INSERT_TAB_ID {
-            return "kinic(insert): choose mode, target memory, and payload, then press Enter on submit.".to_string();
+            return "Choose mode, target memory, and payload, then press Enter to submit."
+                .to_string();
+        }
+        if self.tab_id == KINIC_CREATE_TAB_ID {
+            return "Create a new memory canister from this form.".to_string();
+        }
+        if self.tab_id == KINIC_SETTINGS_TAB_ID {
+            return "Review session details and default memory settings here.".to_string();
+        }
+        if self.tab_id == KINIC_MARKET_TAB_ID {
+            return "Market is not implemented yet.".to_string();
         }
         let base = if !self.is_live() {
-            format!(
-                "kinic(mock): {visible_count} filtered / {} total",
-                self.all.len()
-            )
+            format!("{visible_count} filtered / {} total", self.all.len())
         } else {
             match self.memories_mode {
                 MemoriesMode::Browser => match self.active_memory_id.as_deref() {
                     Some(memory_id) => format!(
-                        "kinic(live): target {memory_id} | Enter in search runs remote search | Shift+D saves default"
+                        "Target {memory_id} | Enter runs remote search | Shift+D saves default"
                     ),
-                    None => "kinic(live): no memory selected".to_string(),
+                    None => "No memory selected".to_string(),
                 },
                 MemoriesMode::Results => match self.active_memory_id.as_deref() {
                     Some(memory_id) => format!(
-                        "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
+                        "{visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
                     ),
-                    None => format!("kinic(live): {visible_count} search results"),
+                    None => format!("{visible_count} search results"),
                 },
             }
         };
@@ -937,10 +995,10 @@ impl KinicProvider {
         }
 
         if self.initial_memories_in_flight {
-            return "kinic(live): loading memories...".to_string();
+            return "Loading memories...".to_string();
         }
         if self.is_memories_load_error_visible() {
-            return "kinic(live): memories unavailable | F5 retries loading".to_string();
+            return "Memories unavailable | Ctrl-R retries loading".to_string();
         }
 
         if let Some(error) = &self.preferences_health.save_error {
@@ -954,6 +1012,25 @@ impl KinicProvider {
 
     fn invalidate_pending_search(&mut self) {
         self.pending_search_context = None;
+    }
+
+    fn validate_insert_state(&self, state: &CoreState) -> Result<(), String> {
+        match state.insert_mode {
+            InsertMode::File => {
+                validate_supported_file_mode_path(normalize_insert_file_path_input(
+                    state.insert_file_path.trim(),
+                ))?;
+            }
+            InsertMode::InlineText => {
+                if state.insert_text.trim().is_empty() {
+                    return Err("Text is required for inline text insert.".to_string());
+                }
+            }
+            InsertMode::ManualEmbedding => {}
+        }
+
+        let request = self.build_insert_request(state);
+        validate_insert_request(&request).map_err(|error| error.to_string())
     }
 
     fn invalidate_pending_create_cost(&mut self) {
@@ -1011,9 +1088,7 @@ impl KinicProvider {
             return None;
         }
         if self.search_in_flight {
-            return Some(CoreEffect::Notify(
-                "Search already running. Wait for the current request to finish.".to_string(),
-            ));
+            return None;
         }
         let Some(memory_id) = self.live_search_target_id() else {
             return Some(CoreEffect::Notify(
@@ -1160,7 +1235,7 @@ impl KinicProvider {
                     .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
                 Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
-                    effects: vec![CoreEffect::Notify("Loaded memories.".to_string())],
+                    effects: Vec::new(),
                 })
             }
             Err(error) => {
@@ -1342,12 +1417,14 @@ impl KinicProvider {
             });
         }
 
-        let notify_message = output
-            .overview
-            .session_settings_refresh_failure_message()
-            .unwrap_or_else(|| output.overview.session_settings_refresh_notify_message());
+        let failure_message = output.overview.session_settings_refresh_failure_message();
+        let notify_message = output.overview.session_settings_refresh_notify_message();
         self.apply_session_overview(output.overview);
-        let effects = vec![CoreEffect::Notify(notify_message)];
+        let effects = failure_message
+            .or_else(|| (notify_message != "Session settings refreshed.").then_some(notify_message))
+            .map(CoreEffect::Notify)
+            .into_iter()
+            .collect();
 
         Some(ProviderOutput {
             snapshot: Some(self.build_snapshot(state)),
@@ -1388,10 +1465,7 @@ impl KinicProvider {
             Ok(success) => vec![
                 CoreEffect::InsertFormError(None),
                 CoreEffect::ResetInsertFormForRepeat,
-                CoreEffect::Notify(format!(
-                    "Inserted {} item(s) via {} into {} [{}]",
-                    success.inserted_count, success.mode, success.memory_id, success.tag
-                )),
+                CoreEffect::NotifyPersistent(insert_success_status(&success)),
             ],
             Err(error) => vec![CoreEffect::InsertFormError(Some(
                 format_insert_submit_error(&error),
@@ -1418,15 +1492,11 @@ impl KinicProvider {
         match tab_id {
             KINIC_MEMORIES_TAB_ID => {
                 self.reset_memories_browser();
-                vec![CoreEffect::Notify("Switched to memories.".to_string())]
+                Vec::new()
             }
-            KINIC_INSERT_TAB_ID => {
-                vec![CoreEffect::Notify(
-                    "Insert text, embeddings, or PDFs into an existing memory.".to_string(),
-                )]
-            }
+            KINIC_INSERT_TAB_ID => Vec::new(),
             KINIC_CREATE_TAB_ID => {
-                let mut effects = vec![CoreEffect::Notify("Create a new memory.".to_string())];
+                let mut effects = Vec::new();
                 if let Some(effect) = self.start_create_cost_refresh() {
                     effects.push(effect);
                 }
@@ -1441,6 +1511,86 @@ impl KinicProvider {
             _ => vec![CoreEffect::Notify(format!("Switched kinic tab: {tab_id}"))],
         }
     }
+}
+
+fn validate_existing_insert_file_path(path: &str, mode_label: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err(format!("File path is required for {mode_label} insert."));
+    }
+
+    let file_path = Path::new(path);
+    if !file_path.exists() {
+        return Err(format!("File path does not exist for {mode_label} insert."));
+    }
+    if !file_path.is_file() {
+        return Err(format!(
+            "File path must point to a file for {mode_label} insert."
+        ));
+    }
+
+    Ok(())
+}
+
+fn normalize_insert_file_path_input(path: &str) -> &str {
+    let trimmed = path.trim();
+    if let Some(inner) = trimmed
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+    {
+        return inner;
+    }
+    if let Some(inner) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return inner;
+    }
+    trimmed
+}
+
+const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
+    "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
+];
+
+fn validate_supported_file_mode_path(path: &str) -> Result<(), String> {
+    validate_existing_insert_file_path(path, "file")?;
+    let file_path = Path::new(path);
+
+    let Some(extension) = file_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+    else {
+        return Err(format!(
+            "File path must use a supported {} extension.",
+            allowed_extension_list(FILE_MODE_ALLOWED_EXTENSIONS)
+        ));
+    };
+
+    if FILE_MODE_ALLOWED_EXTENSIONS
+        .iter()
+        .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+    {
+        return Ok(());
+    }
+
+    Err(format!(
+        "File path must use a supported {} extension.",
+        allowed_extension_list(FILE_MODE_ALLOWED_EXTENSIONS)
+    ))
+}
+
+fn allowed_extension_list(allowed_extensions: &[&str]) -> String {
+    allowed_extensions
+        .iter()
+        .map(|extension| format!(".{extension}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn insert_file_path_is_pdf(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
 impl DataProvider for KinicProvider {
@@ -1521,9 +1671,6 @@ impl DataProvider for KinicProvider {
                         "Name and description are required.".to_string(),
                     )));
                 } else if self.create_submit_in_flight {
-                    effects.push(CoreEffect::Notify(
-                        "Create request already running.".to_string(),
-                    ));
                 } else if self.is_live() {
                     effects.push(self.start_create_submit(name, description));
                 } else {
@@ -1550,24 +1697,15 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::InsertSubmit => {
-                let request = self.build_insert_request(state);
-                if let Err(error) = validate_insert_request(&request) {
-                    effects.push(CoreEffect::InsertFormError(Some(error.to_string())));
+                if let Err(error) = self.validate_insert_state(state) {
+                    effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if self.insert_submit_in_flight {
-                    effects.push(CoreEffect::Notify(
-                        "Insert request already running.".to_string(),
-                    ));
                 } else if self.is_live() {
+                    let request = self.build_insert_request(state);
                     effects.push(self.start_insert_submit(request));
                 } else {
-                    let target_memory_id = request.memory_id().to_string();
                     effects.push(CoreEffect::InsertFormError(None));
                     effects.push(CoreEffect::ResetInsertFormForRepeat);
-                    effects.push(CoreEffect::Notify(format!(
-                        "Mock insert accepted for {} [{}]",
-                        target_memory_id,
-                        state.insert_tag.trim()
-                    )));
                 }
             }
             CoreAction::CreateRefresh => {
@@ -1583,60 +1721,66 @@ impl DataProvider for KinicProvider {
                     effects.push(effect);
                 }
             }
-            CoreAction::OpenSelector(_)
-            | CoreAction::CloseSelector
-            | CoreAction::MoveSelectorNext
-            | CoreAction::MoveSelectorPrev
-            | CoreAction::StartAddTag
-            | CoreAction::AddTagInput(_)
-            | CoreAction::AddTagBackspace
-            | CoreAction::CancelAddTag => {}
+            CoreAction::OpenPicker(_)
+            | CoreAction::ClosePicker
+            | CoreAction::MovePickerNext
+            | CoreAction::MovePickerPrev
+            | CoreAction::PickerInput(_)
+            | CoreAction::PickerBackspace => {}
             CoreAction::ScrollContentPageDown => {}
             CoreAction::ScrollContentPageUp => {}
             CoreAction::ScrollContentHome => {}
             CoreAction::ScrollContentEnd => {}
-            CoreAction::SubmitSelector
-                if matches!(
-                    state.selector_context,
-                    SelectorContext::DefaultMemory | SelectorContext::InsertTarget
-                ) =>
-            {
-                if let Some(memory_id) = state
-                    .selector_selected_id
-                    .clone()
-                    .or_else(|| state.selector_items.get(state.selector_index).cloned())
-                {
-                    match state.selector_context {
-                        SelectorContext::DefaultMemory => effects.push(
+            CoreAction::SubmitPicker => match &state.picker {
+                PickerState::Closed => {}
+                PickerState::Input {
+                    context: PickerContext::AddTag,
+                    value,
+                    ..
+                } => {
+                    if !value.trim().is_empty() {
+                        effects.push(self.save_tags_to_preferences(value.clone()));
+                    }
+                }
+                PickerState::Input { .. } => {}
+                PickerState::List {
+                    context,
+                    items,
+                    selected_index,
+                    ..
+                } => {
+                    let Some(item) = items.get(*selected_index) else {
+                        effects.push(CoreEffect::Notify("No options available yet.".to_string()));
+                        return Ok(ProviderOutput {
+                            snapshot: Some(self.build_snapshot(state)),
+                            effects,
+                        });
+                    };
+
+                    if item.kind == PickerItemKind::AddAction {
+                        return Ok(ProviderOutput {
+                            snapshot: Some(self.build_snapshot(state)),
+                            effects,
+                        });
+                    }
+
+                    match context {
+                        PickerContext::DefaultMemory => effects.push(
                             self.default_memory_controller()
-                                .set_default_memory_preference(memory_id),
+                                .set_default_memory_preference(item.id.clone()),
                         ),
-                        SelectorContext::InsertTarget => {
-                            effects.push(CoreEffect::SetInsertMemoryId(memory_id.clone()));
+                        PickerContext::InsertTarget => {
+                            effects.push(CoreEffect::SetInsertMemoryId(item.id.clone()));
                             effects.push(CoreEffect::Notify(format!(
-                                "Selected target memory {memory_id}"
+                                "Selected target memory {}",
+                                item.id
                             )));
                         }
-                        SelectorContext::InsertTag | SelectorContext::TagManagement => {}
+                        PickerContext::InsertTag | PickerContext::TagManagement => {}
+                        PickerContext::AddTag => {}
                     }
-                } else {
-                    effects.push(CoreEffect::Notify("No memories available yet.".to_string()));
                 }
-            }
-            CoreAction::SubmitSelector => {}
-            CoreAction::ConfirmAddTag
-                if matches!(
-                    state.selector_context,
-                    SelectorContext::InsertTag | SelectorContext::TagManagement
-                ) =>
-            {
-                let tag = state
-                    .selector_selected_id
-                    .clone()
-                    .unwrap_or_else(|| state.selector_add_tag_input.trim().to_string());
-                effects.push(self.save_tags_to_preferences(tag));
-            }
-            CoreAction::ConfirmAddTag => {}
+            },
             CoreAction::SetDefaultMemoryFromSelection => {
                 let Some(memory_id) = self.active_memory_id.clone() else {
                     effects.push(CoreEffect::Notify(
@@ -1655,8 +1799,31 @@ impl DataProvider for KinicProvider {
             _ => {}
         }
 
+        let snapshot = match &state.picker {
+            PickerState::Input {
+                context: PickerContext::AddTag,
+                value,
+                ..
+            } if matches!(action, CoreAction::SubmitPicker) && !value.trim().is_empty() => {
+                self.build_snapshot_with_picker(state, PickerState::Closed)
+            }
+            PickerState::List { context, .. }
+                if matches!(action, CoreAction::SubmitPicker)
+                    && matches!(
+                        context,
+                        PickerContext::DefaultMemory
+                            | PickerContext::InsertTarget
+                            | PickerContext::InsertTag
+                            | PickerContext::TagManagement
+                    ) =>
+            {
+                self.build_snapshot_with_picker(state, PickerState::Closed)
+            }
+            _ => self.build_snapshot(state),
+        };
+
         Ok(ProviderOutput {
-            snapshot: Some(self.build_snapshot(state)),
+            snapshot: Some(snapshot),
             effects,
         })
     }

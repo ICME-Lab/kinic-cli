@@ -7,10 +7,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use tui_kit_runtime::{CreateSubmitState, InsertFormFocus, InsertMode};
+use tui_kit_runtime::{InsertFormFocus, InsertMode};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::{Focus, TuiKitUi, shared};
+
+use super::submit_button_text;
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_insert_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -107,18 +109,21 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         display_value(ui.insert_tag, "<tag>"),
         max_width,
     );
-    if matches!(ui.insert_mode, InsertMode::Normal | InsertMode::Raw) {
+    if matches!(
+        ui.insert_mode,
+        InsertMode::InlineText | InsertMode::ManualEmbedding
+    ) {
         push_field(
             &mut lines,
             &mut rows,
             ui,
             InsertFormFocus::Text,
-            ui.ui_config.insert.text_label.as_str(),
-            display_value(ui.insert_text, "<inline text>"),
+            text_label(ui),
+            display_value(ui.insert_text, text_placeholder(ui.insert_mode)),
             max_width,
         );
     }
-    if matches!(ui.insert_mode, InsertMode::Normal | InsertMode::Pdf) {
+    if matches!(ui.insert_mode, InsertMode::File) {
         push_field(
             &mut lines,
             &mut rows,
@@ -129,7 +134,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             max_width,
         );
     }
-    if matches!(ui.insert_mode, InsertMode::Raw) {
+    if matches!(ui.insert_mode, InsertMode::ManualEmbedding) {
         push_field(
             &mut lines,
             &mut rows,
@@ -150,10 +155,13 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         max_width,
     );
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        ui.ui_config.insert.close_hint.as_str(),
-        ui.theme.style_muted(),
-    )));
+    lines.extend(
+        ui.ui_config
+            .insert
+            .mode_help
+            .lines()
+            .map(|line| Line::from(Span::styled(line.to_string(), ui.theme.style_muted()))),
+    );
     if let Some(error) = ui.insert_error {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -217,21 +225,39 @@ fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
 }
 
 fn mode_value(mode: InsertMode) -> String {
-    let (normal, raw, pdf) = match mode {
-        InsertMode::Normal => ("[normal]", " raw ", " pdf "),
-        InsertMode::Raw => (" normal ", "[raw]", " pdf "),
-        InsertMode::Pdf => (" normal ", " raw ", "[pdf]"),
+    let (file, text, embedding) = match mode {
+        InsertMode::File => ("[File]", " Inline Text ", " Manual Embedding "),
+        InsertMode::InlineText => (" File ", "[Inline Text]", " Manual Embedding "),
+        InsertMode::ManualEmbedding => (" File ", " Inline Text ", "[Manual Embedding]"),
     };
-    format!("{normal} / {raw} / {pdf}")
+    format!("{file} / {text} / {embedding}")
+}
+
+fn text_label<'a>(ui: &'a TuiKitUi<'a>) -> &'a str {
+    match ui.insert_mode {
+        InsertMode::InlineText => ui.ui_config.insert.text_label.as_str(),
+        InsertMode::ManualEmbedding => ui.ui_config.insert.payload_text_label.as_str(),
+        InsertMode::File => {
+            unreachable!("text label is only used for text-capable insert modes")
+        }
+    }
+}
+
+fn text_placeholder(mode: InsertMode) -> &'static str {
+    match mode {
+        InsertMode::InlineText => "<inline text>",
+        InsertMode::ManualEmbedding => "<payload text stored with embedding>",
+        _ => unreachable!("text placeholder is only used for text-capable insert modes"),
+    }
 }
 
 fn submit_value(ui: &TuiKitUi<'_>) -> String {
-    match ui.insert_submit_state {
-        CreateSubmitState::Submitting => ui.ui_config.insert.submit_pending_label.clone(),
-        CreateSubmitState::Idle | CreateSubmitState::Error => {
-            ui.ui_config.insert.submit_label.clone()
-        }
-    }
+    submit_button_text(
+        &ui.insert_submit_state,
+        ui.insert_spinner_frame,
+        ui.ui_config.insert.submit_label.as_str(),
+        ui.ui_config.insert.submit_pending_label.as_str(),
+    )
 }
 
 fn trim_to_width(value: &str, max_width: u16) -> String {
@@ -254,6 +280,17 @@ mod tests {
     use super::*;
     use crate::ui::theme::Theme;
 
+    fn render_insert_form(mode: InsertMode) -> String {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(mode);
+        insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn memory_id_value_prefers_default_memory_placeholder_when_empty() {
         let theme = Theme::default();
@@ -270,5 +307,82 @@ mod tests {
             .insert_memory_id("bbbbb-bb");
 
         assert_eq!(memory_id_value(&ui), "bbbbb-bb");
+    }
+
+    #[test]
+    fn insert_form_toggles_fields_by_mode() {
+        let cases = [
+            (InsertMode::InlineText, true, false, false),
+            (InsertMode::File, false, true, false),
+            (InsertMode::ManualEmbedding, true, false, true),
+        ];
+
+        for (mode, has_inline_text, has_file_path, has_embedding) in cases {
+            let lines = render_insert_form(mode);
+            let has_text_placeholder = match mode {
+                InsertMode::InlineText | InsertMode::ManualEmbedding => {
+                    lines.contains(text_placeholder(mode))
+                }
+                InsertMode::File => false,
+            };
+            assert_eq!(has_text_placeholder, has_inline_text);
+            assert_eq!(lines.contains("<file path>"), has_file_path);
+            assert_eq!(lines.contains("<json array>"), has_embedding);
+        }
+    }
+
+    #[test]
+    fn insert_form_uses_payload_text_label_for_manual_embedding() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::ManualEmbedding);
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Payload Text"));
+        assert!(!rendered.contains("Inline Text\n  <payload text stored with embedding>"));
+    }
+
+    #[test]
+    fn insert_form_keeps_inline_text_label_for_inline_mode() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).insert_mode(InsertMode::InlineText);
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Inline Text"));
+    }
+
+    #[test]
+    fn mode_value_uses_file_inline_text_manual_embedding_labels() {
+        assert_eq!(
+            mode_value(InsertMode::File),
+            "[File] /  Inline Text  /  Manual Embedding "
+        );
+        assert_eq!(
+            mode_value(InsertMode::InlineText),
+            " File  / [Inline Text] /  Manual Embedding "
+        );
+        assert_eq!(
+            mode_value(InsertMode::ManualEmbedding),
+            " File  /  Inline Text  / [Manual Embedding]"
+        );
+    }
+
+    #[test]
+    fn submit_value_shows_spinner_while_insert_is_submitting() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_submit_state(tui_kit_runtime::CreateSubmitState::Submitting)
+            .insert_spinner_frame(1);
+
+        assert_eq!(submit_value(&ui), "/ Inserting...");
     }
 }

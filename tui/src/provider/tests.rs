@@ -5,7 +5,10 @@ use std::{
     env, fs,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tui_kit_runtime::{CreateCostState, LoadedCreateCost, SelectorContext, SessionAccountOverview};
+use tui_kit_runtime::{
+    CreateCostState, LoadedCreateCost, PickerContext, PickerItem, PickerState,
+    SessionAccountOverview,
+};
 
 fn session_snapshot(principal_id: &str) -> tui_kit_runtime::SessionSettingsSnapshot {
     settings::session_settings_snapshot(
@@ -37,6 +40,16 @@ fn write_temp_markdown_file(contents: &str) -> String {
         .as_nanos();
     let path = env::temp_dir().join(format!("kinic-provider-test-{unique_suffix}.md"));
     fs::write(&path, contents).expect("temporary markdown file should be writable");
+    path.display().to_string()
+}
+
+fn write_temp_file_with_extension(extension: &str, contents: &str) -> String {
+    let unique_suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after epoch")
+        .as_nanos();
+    let path = env::temp_dir().join(format!("kinic-provider-test-{unique_suffix}.{extension}"));
+    fs::write(&path, contents).expect("temporary file should be writable");
     path.display().to_string()
 }
 
@@ -165,11 +178,27 @@ fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
 
     let snapshot = provider.build_snapshot(&CoreState {
-        selector_context: SelectorContext::InsertTarget,
+        picker: PickerState::List {
+            context: PickerContext::InsertTarget,
+            items: Vec::new(),
+            selected_index: 0,
+            selected_id: None,
+        },
         ..CoreState::default()
     });
 
-    assert_eq!(snapshot.selector_selected_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(
+        snapshot.picker,
+        PickerState::List {
+            context: PickerContext::InsertTarget,
+            items: vec![
+                PickerItem::option("aaaaa-aa", "Alpha Memory", true),
+                PickerItem::option("bbbbb-bb", "Beta Memory", false),
+            ],
+            selected_index: 0,
+            selected_id: Some("aaaaa-aa".to_string()),
+        }
+    );
     assert_eq!(
         snapshot.insert_memory_placeholder.as_deref(),
         Some("Alpha Memory")
@@ -187,12 +216,28 @@ fn build_snapshot_prefers_explicit_insert_memory_id_for_insert_selector() {
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
 
     let snapshot = provider.build_snapshot(&CoreState {
-        selector_context: SelectorContext::InsertTarget,
+        picker: PickerState::List {
+            context: PickerContext::InsertTarget,
+            items: Vec::new(),
+            selected_index: 0,
+            selected_id: None,
+        },
         insert_memory_id: "bbbbb-bb".to_string(),
         ..CoreState::default()
     });
 
-    assert_eq!(snapshot.selector_selected_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(
+        snapshot.picker,
+        PickerState::List {
+            context: PickerContext::InsertTarget,
+            items: vec![
+                PickerItem::option("aaaaa-aa", "Alpha Memory", true),
+                PickerItem::option("bbbbb-bb", "Beta Memory", false),
+            ],
+            selected_index: 1,
+            selected_id: Some("bbbbb-bb".to_string()),
+        }
+    );
     assert_eq!(snapshot.insert_memory_placeholder, None);
 }
 
@@ -201,15 +246,20 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
     let state = CoreState {
-        selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-        selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
-        selector_index: 1,
-        selector_context: SelectorContext::InsertTarget,
+        picker: PickerState::List {
+            context: PickerContext::InsertTarget,
+            items: vec![
+                PickerItem::option("aaaaa-aa", "Alpha Memory", true),
+                PickerItem::option("bbbbb-bb", "Beta Memory", false),
+            ],
+            selected_index: 1,
+            selected_id: Some("bbbbb-bb".to_string()),
+        },
         ..CoreState::default()
     };
 
     let output = provider
-        .handle_action(&CoreAction::SubmitSelector, &state)
+        .handle_action(&CoreAction::SubmitPicker, &state)
         .expect("picker submit output");
 
     assert_eq!(
@@ -230,7 +280,7 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
 fn mock_insert_rejects_invalid_embedding_json() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Raw,
+        insert_mode: InsertMode::ManualEmbedding,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "payload".to_string(),
@@ -256,7 +306,7 @@ fn mock_insert_uses_saved_default_memory_when_target_is_blank() {
     let state = CoreState {
         saved_default_memory_id: Some("aaaaa-aa".to_string()),
         insert_memory_id: "aaaaa-aa".to_string(),
-        insert_mode: InsertMode::Normal,
+        insert_mode: InsertMode::InlineText,
         insert_tag: "docs".to_string(),
         insert_text: "payload".to_string(),
         ..CoreState::default()
@@ -266,11 +316,167 @@ fn mock_insert_uses_saved_default_memory_when_target_is_blank() {
         .handle_action(&CoreAction::InsertSubmit, &state)
         .expect("insert submit should succeed");
 
+    assert!(output.effects.contains(&CoreEffect::InsertFormError(None)));
+    assert!(
+        output
+            .effects
+            .contains(&CoreEffect::ResetInsertFormForRepeat)
+    );
+}
+
+#[test]
+fn insert_success_status_includes_count_tag_and_memory_id() {
+    let success = bridge::InsertMemorySuccess {
+        memory_id: "aaaaa-aa".to_string(),
+        tag: "docs".to_string(),
+        inserted_count: 12,
+    };
+
+    assert_eq!(
+        insert_success_status(&success),
+        "Inserted 12 chunks (tag: docs) into aaaaa-aa"
+    );
+}
+
+#[test]
+fn poll_insert_submit_background_resets_form_and_notifies_on_success() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let request_id = 7;
+    provider.pending_insert_submit = Some(rx);
+    provider.pending_insert_submit_request_id = Some(request_id);
+    provider.insert_submit_in_flight = true;
+    tx.send(InsertSubmitTaskOutput {
+        request_id,
+        result: Ok(bridge::InsertMemorySuccess {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            inserted_count: 12,
+        }),
+    })
+    .expect("background insert result should send");
+
+    let output = provider
+        .poll_insert_submit_background(&CoreState::default())
+        .expect("provider output");
+
+    assert!(matches!(
+        output.effects.as_slice(),
+        [
+            CoreEffect::InsertFormError(None),
+            CoreEffect::ResetInsertFormForRepeat,
+            CoreEffect::NotifyPersistent(message),
+        ] if message == "Inserted 12 chunks (tag: docs) into aaaaa-aa"
+    ));
+}
+
+#[test]
+fn insert_success_status_emits_persistent_notify() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = std::sync::mpsc::channel();
+    provider.pending_insert_submit = Some(rx);
+    provider.pending_insert_submit_request_id = Some(1);
+    provider.insert_submit_in_flight = true;
+    tx.send(InsertSubmitTaskOutput {
+        request_id: 1,
+        result: Ok(bridge::InsertMemorySuccess {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            inserted_count: 12,
+        }),
+    })
+    .expect("background insert result should send");
+
+    let output = provider
+        .poll_insert_submit_background(&CoreState::default())
+        .expect("provider output");
+
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::Notify(message)
-            if message == "Mock insert accepted for aaaaa-aa [docs]"
+        CoreEffect::NotifyPersistent(message)
+            if message == "Inserted 12 chunks (tag: docs) into aaaaa-aa"
     )));
+}
+
+#[test]
+fn validate_insert_state_rejects_missing_file() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: env::temp_dir()
+            .join("kinic-missing-file.md")
+            .display()
+            .to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.validate_insert_state(&state),
+        Err("File path does not exist for file insert.".to_string())
+    );
+}
+
+#[test]
+fn validate_insert_state_accepts_existing_non_pdf_file() {
+    let provider = KinicProvider::new(mock_config());
+    let file_path = write_temp_file_with_extension("txt", "plain text");
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: file_path.clone(),
+        ..CoreState::default()
+    };
+
+    assert!(provider.validate_insert_state(&state).is_ok());
+    fs::remove_file(file_path).expect("temporary file should be removable");
+}
+
+#[test]
+fn validate_insert_state_accepts_uppercase_pdf_extension() {
+    let provider = KinicProvider::new(mock_config());
+    let file_path = write_temp_file_with_extension("PDF", "not really a pdf");
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: file_path.clone(),
+        ..CoreState::default()
+    };
+
+    assert!(provider.validate_insert_state(&state).is_ok());
+    fs::remove_file(file_path).expect("temporary file should be removable");
+}
+
+#[test]
+fn validate_insert_state_rejects_unsupported_file_extension() {
+    let provider = KinicProvider::new(mock_config());
+    let file_path = write_temp_file_with_extension("png", "not really an image");
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: file_path.clone(),
+        ..CoreState::default()
+    };
+
+    let error = provider
+        .validate_insert_state(&state)
+        .expect_err("unsupported file extension should fail");
+    assert!(error.contains("File path must use a supported"));
+    assert!(error.contains(".pdf"));
+    assert!(error.contains(".txt"));
+    fs::remove_file(file_path).expect("temporary file should be removable");
+}
+
+#[test]
+fn set_tab_insert_does_not_emit_redundant_notification() {
+    let mut provider = KinicProvider::new(mock_config());
+    let effects = provider.set_tab(KINIC_INSERT_TAB_ID);
+
+    assert!(effects.is_empty());
 }
 
 #[test]
@@ -278,7 +484,7 @@ fn build_insert_request_prefers_explicit_memory_over_saved_default() {
     let mut provider = KinicProvider::new(mock_config());
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
     let state = CoreState {
-        insert_mode: InsertMode::Raw,
+        insert_mode: InsertMode::ManualEmbedding,
         insert_memory_id: "bbbbb-bb".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "payload".to_string(),
@@ -308,22 +514,34 @@ fn build_snapshot_exposes_saved_default_memory_id() {
 }
 
 #[test]
-fn build_snapshot_exposes_selector_titles() {
+fn build_snapshot_exposes_picker_titles() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_records = vec![
         live_memory("aaaaa-aa", "Alpha Memory"),
         live_memory("bbbbb-bb", "Beta Memory"),
     ];
 
-    let snapshot = provider.build_snapshot(&CoreState::default());
+    let snapshot = provider.build_snapshot(&CoreState {
+        picker: PickerState::List {
+            context: PickerContext::DefaultMemory,
+            items: Vec::new(),
+            selected_index: 0,
+            selected_id: None,
+        },
+        ..CoreState::default()
+    });
 
     assert_eq!(
-        snapshot.selector_items,
-        vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()]
-    );
-    assert_eq!(
-        snapshot.selector_labels,
-        vec!["Alpha Memory".to_string(), "Beta Memory".to_string(),]
+        snapshot.picker,
+        PickerState::List {
+            context: PickerContext::DefaultMemory,
+            items: vec![
+                PickerItem::option("aaaaa-aa", "Alpha Memory", false),
+                PickerItem::option("bbbbb-bb", "Beta Memory", false),
+            ],
+            selected_index: 0,
+            selected_id: Some("aaaaa-aa".to_string()),
+        }
     );
 }
 
@@ -353,7 +571,7 @@ fn format_insert_submit_error_reports_error_stage() {
 fn mock_insert_rejects_blank_raw_text() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Raw,
+        insert_mode: InsertMode::ManualEmbedding,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "   ".to_string(),
@@ -376,7 +594,7 @@ fn mock_insert_rejects_blank_raw_text() {
 fn mock_insert_rejects_missing_pdf_path() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Pdf,
+        insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path: String::new(),
@@ -390,18 +608,19 @@ fn mock_insert_rejects_missing_pdf_path() {
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::InsertFormError(Some(message))
-            if message == "File path is required for PDF insert."
+            if message == "File path is required for file insert."
     )));
 }
 
 #[test]
-fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
+fn mock_insert_accepts_existing_pdf_without_prevalidating_conversion() {
     let mut provider = KinicProvider::new(mock_config());
+    let file_path = write_temp_file_with_extension("pdf", "not really a pdf");
     let state = CoreState {
-        insert_mode: InsertMode::Pdf,
+        insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: "/path/that/does/not/need/to/exist.pdf".to_string(),
+        insert_file_path: file_path.clone(),
         ..CoreState::default()
     };
 
@@ -409,19 +628,21 @@ fn mock_insert_accepts_pdf_without_prevalidating_conversion() {
         .handle_action(&CoreAction::InsertSubmit, &state)
         .expect("insert submit should succeed");
 
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message)
-            if message == "Mock insert accepted for aaaaa-aa [docs]"
-    )));
+    assert!(output.effects.contains(&CoreEffect::InsertFormError(None)));
+    assert!(
+        output
+            .effects
+            .contains(&CoreEffect::ResetInsertFormForRepeat)
+    );
+    fs::remove_file(file_path).expect("temporary file should be removable");
 }
 
 #[test]
-fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
+fn mock_insert_accepts_file_without_inline_text() {
     let mut provider = KinicProvider::new(mock_config());
     let file_path = write_temp_markdown_file("# title");
     let state = CoreState {
-        insert_mode: InsertMode::Normal,
+        insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "   ".to_string(),
@@ -433,19 +654,20 @@ fn mock_insert_ignores_whitespace_inline_text_when_file_path_exists() {
         .handle_action(&CoreAction::InsertSubmit, &state)
         .expect("insert submit should succeed");
 
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message)
-            if message == "Mock insert accepted for aaaaa-aa [docs]"
-    )));
-    fs::remove_file(file_path).expect("temporary markdown file should be removable");
+    assert!(output.effects.contains(&CoreEffect::InsertFormError(None)));
+    assert!(
+        output
+            .effects
+            .contains(&CoreEffect::ResetInsertFormForRepeat)
+    );
+    fs::remove_file(file_path).expect("temporary file should be removable");
 }
 
 #[test]
 fn mock_insert_accepts_valid_request_only_after_validation() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
-        insert_mode: InsertMode::Normal,
+        insert_mode: InsertMode::InlineText,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "  keep spacing  ".to_string(),
@@ -456,16 +678,122 @@ fn mock_insert_accepts_valid_request_only_after_validation() {
         .handle_action(&CoreAction::InsertSubmit, &state)
         .expect("insert submit should succeed");
 
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message)
-            if message == "Mock insert accepted for aaaaa-aa [docs]"
-    )));
+    assert!(output.effects.contains(&CoreEffect::InsertFormError(None)));
     assert!(
         output
             .effects
             .iter()
             .any(|effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat))
+    );
+}
+
+#[test]
+fn build_insert_request_uses_inline_text_mode_without_file_path() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::InlineText,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "hello".to_string(),
+        insert_file_path: "/tmp/ignored.md".to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.build_insert_request(&state),
+        InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("hello".to_string()),
+            file_path: None,
+        }
+    );
+}
+
+#[test]
+fn mock_insert_rejects_missing_text_for_inline_text_mode() {
+    let mut provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::InlineText,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "   ".to_string(),
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message == "Text is required for inline text insert."
+    )));
+}
+
+#[test]
+fn mock_insert_rejects_missing_file_path_for_file_mode() {
+    let mut provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message == "File path is required for file insert."
+    )));
+}
+
+#[test]
+fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_text: "ignored".to_string(),
+        insert_file_path: "/tmp/doc.md".to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.build_insert_request(&state),
+        InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: None,
+            file_path: Some(std::path::PathBuf::from("/tmp/doc.md")),
+        }
+    );
+}
+
+#[test]
+fn build_insert_request_uses_file_mode_for_pdf_paths() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path: "/tmp/doc.PDF".to_string(),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.build_insert_request(&state),
+        InsertRequest::Pdf {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            file_path: std::path::PathBuf::from("/tmp/doc.PDF"),
+        }
     );
 }
 
@@ -567,11 +895,51 @@ fn set_tab_create_handles_mock_and_live_modes() {
     assert_eq!(provider.create_cost_state, CreateCostState::Loading);
     assert!(provider.create_cost_in_flight);
     assert!(provider.pending_create_cost.is_some());
-    assert!(
-        effects
-            .iter()
-            .any(|effect| matches!(effect, CoreEffect::Notify(_)))
+    assert!(effects.is_empty());
+}
+
+#[test]
+fn status_message_uses_settings_specific_copy() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_SETTINGS_TAB_ID.to_string();
+
+    assert_eq!(
+        provider.status_message(2),
+        "Review session details and default memory settings here."
     );
+}
+
+#[test]
+fn duplicate_create_and_insert_submits_do_not_emit_notify() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.create_submit_in_flight = true;
+    provider.insert_submit_in_flight = true;
+
+    let create_output = provider
+        .handle_action(
+            &CoreAction::CreateSubmit,
+            &CoreState {
+                create_name: "Alpha".to_string(),
+                create_description: "Desc".to_string(),
+                ..CoreState::default()
+            },
+        )
+        .expect("create submit output");
+    assert!(create_output.effects.is_empty());
+
+    let insert_output = provider
+        .handle_action(
+            &CoreAction::InsertSubmit,
+            &CoreState {
+                insert_mode: InsertMode::InlineText,
+                insert_memory_id: "aaaaa-aa".to_string(),
+                insert_tag: "docs".to_string(),
+                insert_text: "payload".to_string(),
+                ..CoreState::default()
+            },
+        )
+        .expect("insert submit output");
+    assert!(insert_output.effects.is_empty());
 }
 
 #[test]
@@ -593,10 +961,7 @@ fn poll_background_applies_refreshed_session_settings() {
 
     assert!(!provider.session_settings_in_flight);
     assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message) if message == "Session settings refreshed."
-    )));
+    assert!(output.effects.is_empty());
 }
 
 #[test]
@@ -745,7 +1110,7 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
             id: "aaaaa-aa".to_string(),
             memories: None,
             refresh_warning: Some(
-                "Automatic reload failed after create. Press F5 to refresh. Cause: boom"
+                "Automatic reload failed after create. Press Ctrl-R to refresh. Cause: boom"
                     .to_string(),
             ),
         }),
@@ -774,7 +1139,7 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
         effect,
         CoreEffect::Notify(message)
             if message.contains("Created memory aaaaa-aa.")
-                && message.contains("Press F5 to refresh")
+                && message.contains("Press Ctrl-R to refresh")
     )));
 }
 
@@ -808,10 +1173,7 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
     )));
     let snapshot = provider.build_snapshot(&CoreState::default());
     assert_eq!(snapshot.items[1].leading_marker.as_deref(), Some("★"));
-    assert_eq!(
-        snapshot.selector_items,
-        vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string(),]
-    );
+    assert_eq!(snapshot.saved_default_memory_id.as_deref(), Some("bbbbb-bb"));
 }
 
 #[test]
@@ -1026,10 +1388,7 @@ fn refresh_current_view_restarts_live_memories_load() {
     assert!(provider.pending_initial_memories.is_some());
     assert_eq!(provider.all[0].id, "kinic-live-loading");
     assert_eq!(provider.query, "alpha");
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message) if message == "Refreshing memories..."
-    )));
+    assert!(output.effects.is_empty());
 }
 
 #[test]

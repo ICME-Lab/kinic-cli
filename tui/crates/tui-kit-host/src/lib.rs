@@ -10,7 +10,7 @@ use crossterm::event::{
 use std::time::Duration;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateCostState, CreateModalFocus,
-    CreateSubmitState, PaneFocus, action_for_key, tab_focus_policy,
+    CreateSubmitState, PaneFocus, PickerContext, PickerState, action_for_key, tab_focus_policy,
 };
 
 /// Fallback tab ids used when host does not provide explicit tabs.
@@ -247,7 +247,7 @@ pub fn global_command_for_key(
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateTab;
     }
-    if code == KeyCode::F(5) && modifiers.is_empty() {
+    if code == KeyCode::Char('r') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::RefreshCurrentView;
     }
     if code == KeyCode::Esc {
@@ -272,11 +272,22 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
     for effect in effects {
         match effect {
             CoreEffect::Notify(message) => {
+                state.persistent_status_message = None;
+                state.status_message = Some(message);
+            }
+            CoreEffect::NotifyPersistent(message) => {
+                state.persistent_status_message = Some(message.clone());
                 state.status_message = Some(message);
             }
             CoreEffect::OpenExternal(url) => match open_external(&url) {
-                Ok(()) => state.status_message = Some(format!("Opened: {url}")),
-                Err(e) => state.status_message = Some(format!("Failed to open URL: {url} ({e})")),
+                Ok(()) => {
+                    state.persistent_status_message = None;
+                    state.status_message = Some(format!("Opened: {url}"));
+                }
+                Err(e) => {
+                    state.persistent_status_message = None;
+                    state.status_message = Some(format!("Failed to open URL: {url} ({e})"));
+                }
             },
             CoreEffect::RequestRefresh => {}
             CoreEffect::CreateFormError(message) => {
@@ -342,10 +353,18 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             CoreEffect::SetInsertMemoryId(memory_id) => {
                 state.insert_memory_id = memory_id.clone();
                 state.insert_memory_placeholder = None;
-                state.selector_selected_id = Some(memory_id);
+                if let PickerState::List {
+                    context: PickerContext::InsertTarget,
+                    selected_id,
+                    ..
+                } = &mut state.picker
+                {
+                    *selected_id = Some(memory_id);
+                }
                 state.insert_error = None;
             }
             CoreEffect::Custom { id, payload } => {
+                state.persistent_status_message = None;
                 state.status_message = Some(match payload {
                     Some(p) => format!("Custom effect: {id} ({p})"),
                     None => format!("Custom effect: {id}"),

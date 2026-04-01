@@ -7,12 +7,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use tui_kit_runtime::{
-    CreateCostState, CreateModalFocus, CreateSubmitState, format_e8s_to_kinic_string_u128,
-};
+use tui_kit_runtime::{CreateCostState, CreateModalFocus, format_e8s_to_kinic_string_u128};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
+
+use super::submit_button_text;
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_create_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -416,16 +416,12 @@ fn display_create_value<'a>(value: &'a str, placeholder: &'a str) -> &'a str {
     if value.is_empty() { placeholder } else { value }
 }
 fn create_submit_text(ui: &TuiKitUi<'_>) -> String {
-    match ui.create_submit_state {
-        CreateSubmitState::Submitting => format!(
-            "{} {}",
-            spinner_frame(ui.create_spinner_frame),
-            ui.ui_config.create.submit_pending_label
-        ),
-        CreateSubmitState::Idle | CreateSubmitState::Error => {
-            ui.ui_config.create.submit_label.clone()
-        }
-    }
+    submit_button_text(
+        &ui.create_submit_state,
+        ui.create_spinner_frame,
+        ui.ui_config.create.submit_label.as_str(),
+        ui.ui_config.create.submit_pending_label.as_str(),
+    )
 }
 fn create_close_hint<'a>(ui: &'a TuiKitUi<'a>) -> &'a str {
     if ui.focus == Focus::Tabs {
@@ -489,10 +485,6 @@ fn next_entry_hint(ui: &TuiKitUi<'_>, focus: CreateModalFocus) -> Span<'static> 
         return Span::styled("  ← next input", ui.theme.style_muted());
     }
     Span::raw("")
-}
-fn spinner_frame(frame: usize) -> &'static str {
-    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
-    FRAMES[frame % FRAMES.len()]
 }
 #[cfg(test)]
 mod tests;

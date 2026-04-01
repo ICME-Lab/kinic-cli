@@ -5,8 +5,8 @@ use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
 use tui_kit_runtime::{
-    CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode,
-    SelectorContext, SelectorMode, SettingsSnapshot,
+    CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode, PickerState,
+    SettingsSnapshot,
 };
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
@@ -45,14 +45,7 @@ pub struct TuiKitUi<'a> {
     pub(super) create_focus: CreateModalFocus,
     pub(super) create_cost_state: &'a CreateCostState,
     pub(super) settings_snapshot: Option<&'a SettingsSnapshot>,
-    pub(super) selector_open: bool,
-    pub(super) selector_context: SelectorContext,
-    pub(super) selector_mode: SelectorMode,
-    pub(super) selector_index: usize,
-    pub(super) selector_items: &'a [String],
-    pub(super) selector_labels: &'a [String],
-    pub(super) selector_selected_id: Option<&'a str>,
-    pub(super) selector_add_tag_input: &'a str,
+    pub(super) picker: &'a PickerState,
     pub(super) saved_default_memory_id: Option<&'a str>,
     pub(super) insert_mode: InsertMode,
     pub(super) insert_memory_id: &'a str,
@@ -111,16 +104,9 @@ impl<'a> TuiKitUi<'a> {
             create_focus: CreateModalFocus::Name,
             create_cost_state: &CreateCostState::Hidden,
             settings_snapshot: None,
-            selector_open: false,
-            selector_context: SelectorContext::DefaultMemory,
-            selector_mode: SelectorMode::List,
-            selector_index: 0,
-            selector_items: &[],
-            selector_labels: &[],
-            selector_selected_id: None,
-            selector_add_tag_input: "",
+            picker: &PickerState::Closed,
             saved_default_memory_id: None,
-            insert_mode: InsertMode::Normal,
+            insert_mode: InsertMode::default(),
             insert_memory_id: "",
             insert_memory_placeholder: None,
             insert_tag: "",

@@ -1,4 +1,4 @@
-//! Overlay blocks: settings, help, selectors, and create.
+//! Overlay blocks: settings, help, picker, and create.
 
 use ratatui::{
     buffer::Buffer,
@@ -7,10 +7,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
+use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, PickerState, SettingsSnapshot};
 
 use super::TuiKitUi;
-use super::screens::settings::{SelectorLineKind, selector_lines};
+use super::screens::settings::{
+    PickerLineKind, picker_hint, picker_input_placeholder, picker_lines, picker_title,
+};
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_create_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -202,102 +204,93 @@ impl<'a> TuiKitUi<'a> {
             .render(help_area, buf);
     }
 
-    pub(super) fn render_selector_overlay(&self, area: Rect, buf: &mut Buffer) {
-        if self.selector_open {
-            if self.selector_mode == tui_kit_runtime::SelectorMode::AddTag {
-                self.render_selector_add_tag_overlay(area, buf);
-                return;
+    pub(super) fn render_picker_overlay(&self, area: Rect, buf: &mut Buffer) {
+        match self.picker {
+            PickerState::Closed => {}
+            PickerState::List {
+                context,
+                items,
+                selected_index,
+                ..
+            } => {
+                let lines = picker_lines(*context, items, *selected_index);
+                let Some((w, h)) =
+                    fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
+                else {
+                    return;
+                };
+                let picker_area = Rect {
+                    x: area.x + (area.width - w) / 2,
+                    y: area.y + (area.height - h) / 2,
+                    width: w,
+                    height: h,
+                };
+                Clear.render(picker_area, buf);
+                let text = visible_picker_lines(lines, h)
+                    .into_iter()
+                    .map(render_picker_line(self.theme))
+                    .collect::<Vec<_>>();
+                Paragraph::new(text)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(self.theme.style_border_focused())
+                            .title(format!(" {} ", picker_title(*context)))
+                            .style(Style::default().bg(self.theme.bg_panel)),
+                    )
+                    .wrap(Wrap { trim: false })
+                    .render(picker_area, buf);
             }
-
-            let lines = selector_lines(
-                self.selector_context,
-                self.selector_mode,
-                self.selector_items,
-                self.selector_labels,
-                self.selector_index,
-                selector_current_default_id(self),
-            );
-            let Some((w, h)) = fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
-            else {
-                return;
-            };
-            let picker_area = Rect {
-                x: area.x + (area.width - w) / 2,
-                y: area.y + (area.height - h) / 2,
-                width: w,
-                height: h,
-            };
-            Clear.render(picker_area, buf);
-            let text = visible_selector_lines(lines, h)
-                .into_iter()
-                .map(render_selector_line(self.theme))
-                .collect::<Vec<_>>();
-            Paragraph::new(text)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(self.theme.style_border_focused())
-                        .title(format!(" {} ", selector_title(self)))
-                        .style(Style::default().bg(self.theme.bg_panel)),
-                )
-                .wrap(Wrap { trim: false })
-                .render(picker_area, buf);
-            return;
+            PickerState::Input { context, value, .. } => {
+                let w = 52.min(area.width.saturating_sub(4));
+                let h = 9.min(area.height.saturating_sub(4));
+                let input_area = Rect {
+                    x: area.x + (area.width - w) / 2,
+                    y: area.y + (area.height - h) / 2,
+                    width: w,
+                    height: h,
+                };
+                Clear.render(input_area, buf);
+                let input = if value.is_empty() {
+                    picker_input_placeholder(*context).to_string()
+                } else {
+                    value.clone()
+                };
+                let lines = vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        format!("  {input}"),
+                        self.theme.style_accent_bold(),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        picker_hint(*context),
+                        self.theme.style_muted(),
+                    )),
+                ];
+                Paragraph::new(lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(self.theme.style_border_focused())
+                            .title(format!(" {} ", picker_title(*context)))
+                            .style(Style::default().bg(self.theme.bg_panel)),
+                    )
+                    .wrap(Wrap { trim: false })
+                    .render(input_area, buf);
+            }
         }
-    }
-
-    fn render_selector_add_tag_overlay(&self, area: Rect, buf: &mut Buffer) {
-        let w = 52.min(area.width.saturating_sub(4));
-        let h = 9.min(area.height.saturating_sub(4));
-        let add_area = Rect {
-            x: area.x + (area.width - w) / 2,
-            y: area.y + (area.height - h) / 2,
-            width: w,
-            height: h,
-        };
-        Clear.render(add_area, buf);
-
-        let input = if self.selector_add_tag_input.is_empty() {
-            "<enter a new tag>".to_string()
-        } else {
-            self.selector_add_tag_input.to_string()
-        };
-        let lines = vec![
-            Line::from(Span::styled(" Add tag ", self.theme.style_accent_bold())),
-            Line::from(""),
-            Line::from(Span::styled(
-                format!("  {input}"),
-                self.theme.style_accent_bold(),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                " Enter: save tag  Esc: return",
-                self.theme.style_muted(),
-            )),
-        ];
-
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(self.theme.style_border_focused())
-                    .title(" Add tag ")
-                    .style(Style::default().bg(self.theme.bg_panel)),
-            )
-            .wrap(Wrap { trim: false })
-            .render(add_area, buf);
     }
 }
 
-fn render_selector_line<'a>(
+fn render_picker_line<'a>(
     theme: &'a crate::ui::theme::Theme,
-) -> impl Fn((String, SelectorLineKind)) -> Line<'static> + 'a {
+) -> impl Fn((String, PickerLineKind)) -> Line<'static> + 'a {
     move |(line, kind)| match kind {
-        SelectorLineKind::Selected => Line::from(Span::styled(line, theme.style_accent_bold())),
-        SelectorLineKind::CurrentDefault => Line::from(Span::styled(line, theme.style_accent())),
-        SelectorLineKind::Hint => Line::from(Span::styled(line, theme.style_muted())),
-        SelectorLineKind::Normal => Line::from(Span::styled(line, theme.style_normal())),
-        SelectorLineKind::Title => Line::from(Span::styled(line, theme.style_accent_bold())),
+        PickerLineKind::Selected => Line::from(Span::styled(line, theme.style_accent_bold())),
+        PickerLineKind::CurrentDefault => Line::from(Span::styled(line, theme.style_accent())),
+        PickerLineKind::Hint => Line::from(Span::styled(line, theme.style_muted())),
+        PickerLineKind::Normal => Line::from(Span::styled(line, theme.style_normal())),
     }
 }
 
@@ -322,32 +315,30 @@ fn fit_overlay_rect(
     Some((width, height))
 }
 
-fn visible_selector_lines(
-    lines: Vec<(String, SelectorLineKind)>,
+fn visible_picker_lines(
+    lines: Vec<(String, PickerLineKind)>,
     overlay_height: u16,
-) -> Vec<(String, SelectorLineKind)> {
-    let fixed_prefix_len = 2usize;
+) -> Vec<(String, PickerLineKind)> {
     let fixed_suffix_len = 2usize;
-    if lines.len() <= fixed_prefix_len + fixed_suffix_len {
+    if lines.len() <= fixed_suffix_len {
         return lines;
     }
 
     let candidate_rows = overlay_height.saturating_sub(2) as usize;
-    let visible_body_len = candidate_rows.saturating_sub(fixed_prefix_len + fixed_suffix_len);
+    let visible_body_len = candidate_rows.saturating_sub(fixed_suffix_len);
     if visible_body_len == 0 {
         return lines;
     }
 
-    let body_start = fixed_prefix_len;
     let body_end = lines.len().saturating_sub(fixed_suffix_len);
-    let body = &lines[body_start..body_end];
+    let body = &lines[..body_end];
     if body.len() <= visible_body_len {
-        return lines;
+        return center_picker_body(body, &lines[body_end..], visible_body_len);
     }
 
     let selected_in_body = body
         .iter()
-        .position(|(_, kind)| *kind == SelectorLineKind::Selected)
+        .position(|(_, kind)| *kind == PickerLineKind::Selected)
         .unwrap_or(0);
     let max_start = body.len().saturating_sub(visible_body_len);
     let start = selected_in_body
@@ -355,30 +346,27 @@ fn visible_selector_lines(
         .min(max_start);
     let end = start + visible_body_len;
 
-    let mut visible = Vec::with_capacity(fixed_prefix_len + visible_body_len + fixed_suffix_len);
-    visible.extend_from_slice(&lines[..fixed_prefix_len]);
+    let mut visible = Vec::with_capacity(visible_body_len + fixed_suffix_len);
     visible.extend_from_slice(&body[start..end]);
     visible.extend_from_slice(&lines[body_end..]);
     visible
 }
 
-fn selector_title(ui: &TuiKitUi<'_>) -> &'static str {
-    match (ui.selector_context, ui.selector_mode) {
-        (_, tui_kit_runtime::SelectorMode::AddTag) => "Add tag",
-        (tui_kit_runtime::SelectorContext::DefaultMemory, _) => "Select default memory",
-        (tui_kit_runtime::SelectorContext::InsertTarget, _) => "Select insert target",
-        (tui_kit_runtime::SelectorContext::InsertTag, _) => "Select insert tag",
-        (tui_kit_runtime::SelectorContext::TagManagement, _) => "Saved tags",
-    }
-}
+fn center_picker_body(
+    body: &[(String, PickerLineKind)],
+    suffix: &[(String, PickerLineKind)],
+    visible_body_len: usize,
+) -> Vec<(String, PickerLineKind)> {
+    let extra_space = visible_body_len.saturating_sub(body.len());
+    let top_padding = extra_space / 2;
+    let bottom_padding = extra_space.saturating_sub(top_padding);
 
-fn selector_current_default_id<'a>(ui: &'a TuiKitUi<'_>) -> Option<&'a str> {
-    match ui.selector_context {
-        tui_kit_runtime::SelectorContext::DefaultMemory => ui.saved_default_memory_id,
-        tui_kit_runtime::SelectorContext::InsertTarget
-        | tui_kit_runtime::SelectorContext::InsertTag
-        | tui_kit_runtime::SelectorContext::TagManagement => None,
-    }
+    let mut visible = Vec::with_capacity(visible_body_len + suffix.len());
+    visible.extend((0..top_padding).map(|_| (String::new(), PickerLineKind::Normal)));
+    visible.extend_from_slice(body);
+    visible.extend((0..bottom_padding).map(|_| (String::new(), PickerLineKind::Normal)));
+    visible.extend_from_slice(suffix);
+    visible
 }
 
 fn settings_overlay_lines(
@@ -417,7 +405,9 @@ fn settings_overlay_lines(
 mod tests {
     use super::*;
     use crate::ui::app::UiConfig;
-    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
+    use tui_kit_runtime::{
+        PickerContext, PickerItem, SettingsEntry, SettingsSection, SettingsSnapshot,
+    };
 
     #[test]
     fn settings_overlay_lines_show_up_to_seven_entries() {
@@ -440,50 +430,29 @@ mod tests {
     }
 
     #[test]
-    fn visible_selector_lines_keeps_selected_row() {
-        let lines = vec![
-            (" title ".to_string(), SelectorLineKind::Title),
-            ("".to_string(), SelectorLineKind::Normal),
-            (" a".to_string(), SelectorLineKind::Normal),
-            (" b".to_string(), SelectorLineKind::Selected),
-            ("".to_string(), SelectorLineKind::Normal),
-            (" hint".to_string(), SelectorLineKind::Hint),
-        ];
-        let visible = visible_selector_lines(lines, 6);
+    fn visible_picker_lines_keep_selected_row() {
+        let lines = picker_lines(
+            PickerContext::DefaultMemory,
+            &(0..12)
+                .map(|index| {
+                    PickerItem::option(format!("id-{index}"), format!("Memory {index}"), false)
+                })
+                .collect::<Vec<_>>(),
+            10,
+        );
+        let visible = visible_picker_lines(lines, 8);
         assert!(
             visible
                 .iter()
-                .any(|(_, kind)| *kind == SelectorLineKind::Selected)
+                .any(|(_, kind)| *kind == PickerLineKind::Selected)
         );
     }
 
     #[test]
-    fn selector_lines_renders_titles() {
-        let items = vec!["aaaaa-aa".to_string()];
-        let labels = vec!["Alpha Memory".to_string()];
-        let lines = selector_lines(
-            tui_kit_runtime::SelectorContext::DefaultMemory,
-            tui_kit_runtime::SelectorMode::List,
-            &items,
-            &labels,
-            0,
-            Some("aaaaa-aa"),
+    fn picker_input_placeholder_is_available_for_add_tag() {
+        assert_eq!(
+            picker_input_placeholder(PickerContext::AddTag),
+            "<enter a new tag>"
         );
-        assert!(lines.iter().any(|(line, _)| line.contains("Alpha Memory")));
-    }
-
-    #[test]
-    fn selector_current_default_id_only_marks_default_memory_context() {
-        let theme = crate::ui::theme::Theme::default();
-        let ui = TuiKitUi::new(&theme)
-            .selector_context(tui_kit_runtime::SelectorContext::InsertTarget)
-            .saved_default_memory_id(Some("aaaaa-aa"));
-        assert_eq!(selector_current_default_id(&ui), None);
-
-        let theme = crate::ui::theme::Theme::default();
-        let ui = TuiKitUi::new(&theme)
-            .selector_context(tui_kit_runtime::SelectorContext::DefaultMemory)
-            .saved_default_memory_id(Some("aaaaa-aa"));
-        assert_eq!(selector_current_default_id(&ui), Some("aaaaa-aa"));
     }
 }

@@ -2,7 +2,7 @@ use super::*;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
 };
-use tui_kit_runtime::{CoreError, CoreResult, ProviderOutput, ProviderSnapshot};
+use tui_kit_runtime::{CoreError, CoreResult, PickerContext, PickerState, ProviderOutput, ProviderSnapshot};
 
 struct TestProvider {
     result: CoreResult<ProviderOutput>,
@@ -87,22 +87,31 @@ fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
 }
 
 #[test]
-fn selector_overlay_action_maps_generic_selector_keys() {
+fn picker_overlay_action_maps_generic_picker_keys() {
     assert_eq!(
-        selector_overlay_action(
-            tui_kit_runtime::SelectorMode::List,
+        picker_overlay_action(
+            &PickerState::List {
+                context: PickerContext::DefaultMemory,
+                items: Vec::new(),
+                selected_index: 0,
+                selected_id: None,
+            },
             crossterm::event::KeyCode::Down,
             crossterm::event::KeyModifiers::NONE
         ),
-        Some(CoreAction::MoveSelectorNext)
+        Some(CoreAction::MovePickerNext)
     );
     assert_eq!(
-        selector_overlay_action(
-            tui_kit_runtime::SelectorMode::AddTag,
+        picker_overlay_action(
+            &PickerState::Input {
+                context: PickerContext::AddTag,
+                origin_context: Some(PickerContext::InsertTag),
+                value: String::new(),
+            },
             crossterm::event::KeyCode::Backspace,
             crossterm::event::KeyModifiers::NONE
         ),
-        Some(CoreAction::AddTagBackspace)
+        Some(CoreAction::PickerBackspace)
     );
 }
 
@@ -110,7 +119,12 @@ fn selector_overlay_action_maps_generic_selector_keys() {
 fn handle_overlay_input_returns_dispatch_error_when_selector_action_fails() {
     let mut provider = TestProvider::err("selector failed");
     let mut state = CoreState {
-        selector_open: true,
+        picker: PickerState::List {
+            context: PickerContext::DefaultMemory,
+            items: Vec::new(),
+            selected_index: 0,
+            selected_id: None,
+        },
         ..CoreState::default()
     };
 
@@ -150,7 +164,12 @@ fn handle_overlay_input_closes_settings_without_provider_dispatch() {
 fn handle_overlay_input_consumes_unknown_selector_keys() {
     let mut provider = TestProvider::err("should not run");
     let mut state = CoreState {
-        selector_open: true,
+        picker: PickerState::List {
+            context: PickerContext::DefaultMemory,
+            items: Vec::new(),
+            selected_index: 0,
+            selected_id: None,
+        },
         ..CoreState::default()
     };
 
@@ -172,7 +191,7 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     let mut state = CoreState {
         current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Content,
-        insert_mode: tui_kit_runtime::InsertMode::Pdf,
+        insert_mode: tui_kit_runtime::InsertMode::File,
         insert_memory_id: "aaaaa-aa".into(),
         insert_tag: "docs".into(),
         insert_file_path: "/tmp/doc.pdf".into(),
@@ -190,7 +209,7 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     );
 
     assert_eq!(state.focus, PaneFocus::Content);
-    assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::Pdf);
+    assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::File);
     assert_eq!(state.insert_memory_id, "aaaaa-aa");
     assert_eq!(state.insert_tag, "docs");
     assert_eq!(state.insert_file_path, "/tmp/doc.pdf");
@@ -301,4 +320,48 @@ fn content_scroll_helper_handles_scroll_end_only() {
         &mut inspector_scroll
     ));
     assert_eq!(inspector_scroll, 10002);
+}
+
+#[test]
+fn dispatch_action_with_persistent_clear_clears_for_edit_actions() {
+    let mut provider = TestProvider {
+        result: Ok(ProviderOutput::default()),
+    };
+    let mut state = CoreState {
+        persistent_status_message: Some("done".into()),
+        status_message: Some("done".into()),
+        insert_focus: tui_kit_runtime::InsertFormFocus::Text,
+        ..CoreState::default()
+    };
+
+    let effects = dispatch_action_with_persistent_clear(
+        &mut provider,
+        &mut state,
+        &CoreAction::InsertInput('x'),
+    )
+    .expect("dispatch should succeed");
+
+    assert!(effects.is_empty());
+    assert_eq!(state.persistent_status_message, None);
+    assert_eq!(state.status_message, None);
+}
+
+#[test]
+fn dispatch_action_with_persistent_clear_keeps_for_navigation_actions() {
+    let mut provider = TestProvider {
+        result: Ok(ProviderOutput::default()),
+    };
+    let mut state = CoreState {
+        persistent_status_message: Some("done".into()),
+        status_message: Some("done".into()),
+        ..CoreState::default()
+    };
+
+    let effects =
+        dispatch_action_with_persistent_clear(&mut provider, &mut state, &CoreAction::MoveNext)
+            .expect("dispatch should succeed");
+
+    assert!(effects.is_empty());
+    assert_eq!(state.persistent_status_message.as_deref(), Some("done"));
+    assert_eq!(state.status_message.as_deref(), Some("done"));
 }

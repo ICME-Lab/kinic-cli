@@ -91,11 +91,12 @@ pub struct InsertScreenText {
     pub memory_id_label: String,
     pub tag_label: String,
     pub text_label: String,
+    pub payload_text_label: String,
     pub file_path_label: String,
     pub embedding_label: String,
     pub submit_label: String,
     pub submit_pending_label: String,
-    pub close_hint: String,
+    pub mode_help: String,
 }
 
 /// Settings overlay text configuration.
@@ -124,6 +125,7 @@ pub struct StatusText {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct InsertFormCopy {
     pub close_hint: &'static str,
+    pub mode_help: &'static str,
     pub help_line: &'static str,
     pub status_enter_hint: &'static str,
 }
@@ -131,6 +133,7 @@ pub(crate) struct InsertFormCopy {
 pub(crate) fn insert_form_copy() -> InsertFormCopy {
     InsertFormCopy {
         close_hint: "Tab: cycle fields, Enter: cycle mode / open target picker / submit, Esc: back to tab focus",
+        mode_help: "File: .md/.markdown/.mdx/.txt/.json/.yaml/.yml/.csv/.log/.pdf\nInline Text: plain text\nManual Embedding: text + embedding JSON",
         help_line: "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits",
         status_enter_hint: " cycle/picker/submit ",
     }
@@ -160,17 +163,18 @@ impl Default for UiConfig {
             insert: InsertScreenText {
                 title: "Insert Memory Content".to_string(),
                 intro_description:
-                    "Insert text, raw embeddings, or PDFs without leaving the tab view."
+                    "Insert files, inline text, or raw embeddings without leaving the tab view."
                         .to_string(),
                 mode_label: "Mode".to_string(),
                 memory_id_label: "Memory ID".to_string(),
                 tag_label: "Tag".to_string(),
-                text_label: "Text".to_string(),
+                text_label: "Inline Text".to_string(),
+                payload_text_label: "Payload Text".to_string(),
                 file_path_label: "File Path".to_string(),
                 embedding_label: "Embedding JSON".to_string(),
                 submit_label: "Insert".to_string(),
                 submit_pending_label: "Inserting...".to_string(),
-                close_hint: insert_form_copy.close_hint.to_string(),
+                mode_help: insert_form_copy.mode_help.to_string(),
             },
             create: CreateOverlayText {
                 title: "Create Memory".to_string(),
@@ -188,7 +192,7 @@ impl Default for UiConfig {
                     "Tabs focused. Press Enter or Tab to edit from Name, or Esc for Memories."
                         .to_string(),
                 close_hint:
-                    "Tab: cycle fields, Enter: submit, F5: refresh account info, Esc: back to tab focus"
+                    "Tab: cycle fields, Enter: submit, Ctrl-R: refresh account info, Esc: back to tab focus"
                         .to_string(),
                 account_title: "Account & Cost".to_string(),
                 loading_message: "Loading account info...".to_string(),
@@ -213,7 +217,7 @@ impl Default for UiConfig {
                     insert_form_copy.help_line.to_string(),
                     "/: focus search".to_string(),
                     "Esc: back / clear / close".to_string(),
-                    "F5: refresh current view".to_string(),
+                    "Ctrl-R: refresh current view".to_string(),
                     "↑/↓: move selection".to_string(),
                     "Enter or →: open/focus content".to_string(),
                     "C: toggle chat panel".to_string(),
@@ -328,7 +332,7 @@ mod tests {
         let config = UiConfig::default();
         let copy = insert_form_copy();
 
-        assert_eq!(config.insert.close_hint, copy.close_hint);
+        assert_eq!(config.insert.mode_help, copy.mode_help);
         assert!(config.help.lines.iter().any(|line| line == copy.help_line));
     }
 }

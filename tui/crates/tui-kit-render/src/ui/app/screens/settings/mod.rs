@@ -1,4 +1,4 @@
-//! Settings screen rendering and selector helper copy.
+//! Settings screen rendering and picker copy helpers.
 
 use ratatui::{
     buffer::Buffer,
@@ -6,13 +6,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{SelectorContext, SelectorMode, SettingsSnapshot};
+use tui_kit_runtime::{PickerContext, PickerItem, SettingsSnapshot};
 
 use crate::ui::app::{Focus, TuiKitUi};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SelectorLineKind {
-    Title,
+pub(crate) enum PickerLineKind {
     Selected,
     CurrentDefault,
     Normal,
@@ -67,63 +66,84 @@ impl<'a> TuiKitUi<'a> {
     }
 }
 
-pub(crate) fn selector_lines(
-    context: SelectorContext,
-    mode: SelectorMode,
-    items: &[String],
-    labels: &[String],
+pub(crate) fn picker_lines(
+    context: PickerContext,
+    items: &[PickerItem],
     selected_index: usize,
-    current_default_id: Option<&str>,
-) -> Vec<(String, SelectorLineKind)> {
-    let mut lines = vec![
-        (
-            format!(" {} ", selector_title(context, mode)),
-            SelectorLineKind::Title,
-        ),
-        (String::new(), SelectorLineKind::Normal),
-    ];
+) -> Vec<(String, PickerLineKind)> {
+    let mut lines = Vec::new();
 
     if items.is_empty() {
         lines.push((
-            selector_empty_message(context).to_string(),
-            SelectorLineKind::Normal,
+            picker_empty_message(context).to_string(),
+            PickerLineKind::Normal,
         ));
     } else {
         for (index, item) in items.iter().enumerate() {
-            let label = labels.get(index).unwrap_or(item);
             let is_selected = index == selected_index;
-            let is_default = current_default_id == Some(item.as_str());
-            let prefix = if is_selected { "›" } else { " " };
-            let suffix = if is_default { "  ★" } else { "" };
-            let kind = if is_selected {
-                SelectorLineKind::Selected
-            } else if is_default {
-                SelectorLineKind::CurrentDefault
+            let suffix = if item.is_current_default && show_current_default_marker(context) {
+                "  ★"
             } else {
-                SelectorLineKind::Normal
+                ""
             };
-            lines.push((format!(" {prefix} {label}{suffix}"), kind));
+            let prefix = if is_selected { "›" } else { " " };
+            let kind = if is_selected {
+                PickerLineKind::Selected
+            } else if item.is_current_default {
+                PickerLineKind::CurrentDefault
+            } else {
+                PickerLineKind::Normal
+            };
+            lines.push((format!(" {prefix} {}{suffix}", item.label), kind));
         }
     }
 
-    if selector_has_add_row(context, mode) {
-        lines.push((String::new(), SelectorLineKind::Normal));
-        lines.push((
-            " + Add new tag".to_string(),
-            if selected_index == items.len() {
-                SelectorLineKind::Selected
-            } else {
-                SelectorLineKind::Normal
-            },
-        ));
-    }
-
-    lines.push((String::new(), SelectorLineKind::Normal));
-    lines.push((
-        selector_hint(context, mode).to_string(),
-        SelectorLineKind::Hint,
-    ));
+    lines.push((String::new(), PickerLineKind::Normal));
+    lines.push((picker_hint(context).to_string(), PickerLineKind::Hint));
     lines
+}
+
+pub(crate) fn picker_title(context: PickerContext) -> &'static str {
+    match context {
+        PickerContext::DefaultMemory => "Select default memory",
+        PickerContext::InsertTarget => "Select target memory",
+        PickerContext::InsertTag => "Select insert tag",
+        PickerContext::TagManagement => "Saved tags",
+        PickerContext::AddTag => "Add tag",
+    }
+}
+
+pub(crate) fn picker_hint(context: PickerContext) -> &'static str {
+    match context {
+        PickerContext::DefaultMemory => " Enter: save  ↑/↓: move  Esc: close",
+        PickerContext::InsertTarget => " Enter: use target  ↑/↓: move  Esc: close",
+        PickerContext::InsertTag => " Enter: choose  ↑/↓: move  Esc: close",
+        PickerContext::TagManagement => " Enter: add/select  ↑/↓: move  Esc: close",
+        PickerContext::AddTag => " Enter: save tag  Esc: close",
+    }
+}
+
+pub(crate) fn picker_input_placeholder(context: PickerContext) -> &'static str {
+    match context {
+        PickerContext::AddTag => "<enter a new tag>",
+        PickerContext::DefaultMemory
+        | PickerContext::InsertTarget
+        | PickerContext::InsertTag
+        | PickerContext::TagManagement => "",
+    }
+}
+
+fn show_current_default_marker(context: PickerContext) -> bool {
+    matches!(context, PickerContext::DefaultMemory)
+}
+
+fn picker_empty_message(context: PickerContext) -> &'static str {
+    match context {
+        PickerContext::DefaultMemory | PickerContext::InsertTarget => " No memories available yet.",
+        PickerContext::InsertTag | PickerContext::TagManagement | PickerContext::AddTag => {
+            " No saved tags yet."
+        }
+    }
 }
 
 fn settings_screen_lines_with_selection(
@@ -173,45 +193,6 @@ fn settings_screen_lines_with_selection(
     lines
 }
 
-fn selector_title(context: SelectorContext, mode: SelectorMode) -> &'static str {
-    match (context, mode) {
-        (_, SelectorMode::AddTag) => "Add tag",
-        (SelectorContext::DefaultMemory, SelectorMode::List) => "Select default memory",
-        (SelectorContext::InsertTarget, SelectorMode::List) => "Select insert target",
-        (SelectorContext::InsertTag, SelectorMode::List) => "Select insert tag",
-        (SelectorContext::TagManagement, SelectorMode::List) => "Saved tags",
-    }
-}
-
-fn selector_empty_message(context: SelectorContext) -> &'static str {
-    match context {
-        SelectorContext::DefaultMemory | SelectorContext::InsertTarget => {
-            " No memories available yet."
-        }
-        SelectorContext::InsertTag | SelectorContext::TagManagement => " No saved tags yet.",
-    }
-}
-
-fn selector_has_add_row(context: SelectorContext, mode: SelectorMode) -> bool {
-    mode == SelectorMode::List
-        && matches!(
-            context,
-            SelectorContext::InsertTag | SelectorContext::TagManagement
-        )
-}
-
-fn selector_hint(context: SelectorContext, mode: SelectorMode) -> &'static str {
-    match mode {
-        SelectorMode::AddTag => " Enter: save tag  Esc: return",
-        SelectorMode::List => match context {
-            SelectorContext::DefaultMemory => " Enter: save  ↑/↓: move  Esc: close",
-            SelectorContext::InsertTarget => " Enter: choose  ↑/↓: move  Esc: close",
-            SelectorContext::InsertTag => " Enter: choose  ↑/↓: move  Esc: close",
-            SelectorContext::TagManagement => " Enter: add/select  ↑/↓: move  Esc: close",
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,32 +231,33 @@ mod tests {
     }
 
     #[test]
-    fn selector_lines_add_add_row_for_tag_management() {
-        let lines = selector_lines(
-            SelectorContext::TagManagement,
-            SelectorMode::List,
-            &["docs".to_string()],
-            &["docs".to_string()],
+    fn picker_lines_include_add_action_rows() {
+        let lines = picker_lines(
+            PickerContext::TagManagement,
+            &[
+                PickerItem::option("docs", "docs", false),
+                PickerItem::add_action("+ Add new tag"),
+            ],
             1,
-            None,
         );
 
         assert!(lines.iter().any(|(line, _)| line.contains("+ Add new tag")));
     }
 
     #[test]
-    fn selector_lines_mark_current_default() {
-        let items = vec!["aaaaa-aa".to_string()];
-        let labels = vec!["Alpha Memory".to_string()];
-        let lines = selector_lines(
-            SelectorContext::DefaultMemory,
-            SelectorMode::List,
-            &items,
-            &labels,
+    fn picker_lines_mark_current_default_only_for_default_memory() {
+        let default_lines = picker_lines(
+            PickerContext::DefaultMemory,
+            &[PickerItem::option("aaaaa-aa", "Alpha Memory", true)],
             0,
-            Some("aaaaa-aa"),
+        );
+        let insert_lines = picker_lines(
+            PickerContext::InsertTarget,
+            &[PickerItem::option("aaaaa-aa", "Alpha Memory", true)],
+            0,
         );
 
-        assert!(lines.iter().any(|(line, _)| line.contains('★')));
+        assert!(default_lines.iter().any(|(line, _)| line.contains('★')));
+        assert!(!insert_lines.iter().any(|(line, _)| line.contains('★')));
     }
 }

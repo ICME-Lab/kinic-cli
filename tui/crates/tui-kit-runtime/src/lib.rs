@@ -113,9 +113,9 @@ pub enum CreateModalFocus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InsertMode {
     #[default]
-    Normal,
-    Raw,
-    Pdf,
+    File,
+    InlineText,
+    ManualEmbedding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -131,24 +131,73 @@ pub enum InsertFormFocus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectorContext {
+pub enum PickerContext {
     DefaultMemory,
     InsertTarget,
     InsertTag,
     TagManagement,
+    AddTag,
 }
 
-impl Default for SelectorContext {
+impl Default for PickerContext {
     fn default() -> Self {
         Self::DefaultMemory
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SelectorMode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerItemKind {
+    Option,
+    AddAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickerItem {
+    pub id: String,
+    pub label: String,
+    pub is_current_default: bool,
+    pub kind: PickerItemKind,
+}
+
+impl PickerItem {
+    pub fn option(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        is_current_default: bool,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            is_current_default,
+            kind: PickerItemKind::Option,
+        }
+    }
+
+    pub fn add_action(label: impl Into<String>) -> Self {
+        Self {
+            id: String::new(),
+            label: label.into(),
+            is_current_default: false,
+            kind: PickerItemKind::AddAction,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PickerState {
     #[default]
-    List,
-    AddTag,
+    Closed,
+    List {
+        context: PickerContext,
+        items: Vec<PickerItem>,
+        selected_index: usize,
+        selected_id: Option<String>,
+    },
+    Input {
+        context: PickerContext,
+        origin_context: Option<PickerContext>,
+        value: String,
+    },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CreateSubmitState {
@@ -313,6 +362,7 @@ pub struct CoreState {
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
+    pub persistent_status_message: Option<String>,
     pub chat_open: bool,
     pub chat_messages: Vec<(String, String)>,
     pub chat_input: String,
@@ -326,14 +376,7 @@ pub struct CoreState {
     pub create_focus: CreateModalFocus,
     pub create_cost_state: CreateCostState,
     pub settings: SettingsSnapshot,
-    pub selector_open: bool,
-    pub selector_context: SelectorContext,
-    pub selector_mode: SelectorMode,
-    pub selector_index: usize,
-    pub selector_items: Vec<String>,
-    pub selector_labels: Vec<String>,
-    pub selector_selected_id: Option<String>,
-    pub selector_add_tag_input: String,
+    pub picker: PickerState,
     pub saved_default_memory_id: Option<String>,
     pub insert_mode: InsertMode,
     pub insert_memory_id: String,
@@ -360,6 +403,7 @@ impl Default for CoreState {
             selected_context: None,
             total_count: 0,
             status_message: None,
+            persistent_status_message: None,
             chat_open: false,
             chat_messages: Vec::new(),
             chat_input: String::new(),
@@ -373,14 +417,7 @@ impl Default for CoreState {
             create_focus: CreateModalFocus::default(),
             create_cost_state: CreateCostState::default(),
             settings: SettingsSnapshot::default(),
-            selector_open: false,
-            selector_context: SelectorContext::default(),
-            selector_mode: SelectorMode::default(),
-            selector_index: 0,
-            selector_items: Vec::new(),
-            selector_labels: Vec::new(),
-            selector_selected_id: None,
-            selector_add_tag_input: String::new(),
+            picker: PickerState::default(),
             saved_default_memory_id: None,
             insert_mode: InsertMode::default(),
             insert_memory_id: String::new(),
@@ -429,16 +466,13 @@ pub enum CoreAction {
     ToggleHelp,
     ToggleSettings,
     ToggleChat,
-    OpenSelector(SelectorContext),
-    CloseSelector,
-    MoveSelectorNext,
-    MoveSelectorPrev,
-    SubmitSelector,
-    StartAddTag,
-    AddTagInput(char),
-    AddTagBackspace,
-    ConfirmAddTag,
-    CancelAddTag,
+    OpenPicker(PickerContext),
+    ClosePicker,
+    MovePickerNext,
+    MovePickerPrev,
+    SubmitPicker,
+    PickerInput(char),
+    PickerBackspace,
     SetDefaultMemoryFromSelection,
     CreateInput(char),
     CreateBackspace,
@@ -512,6 +546,7 @@ impl CustomAction {
 pub enum CoreEffect {
     OpenExternal(String),
     Notify(String),
+    NotifyPersistent(String),
     RequestRefresh,
     /// Validation or async error for the create form (clears submitting state).
     CreateFormError(Option<String>),
@@ -547,9 +582,7 @@ pub struct ProviderSnapshot {
     pub create_cost_state: CreateCostState,
     pub create_submit_state: CreateSubmitState,
     pub settings: SettingsSnapshot,
-    pub selector_items: Vec<String>,
-    pub selector_labels: Vec<String>,
-    pub selector_selected_id: Option<String>,
+    pub picker: PickerState,
     pub saved_default_memory_id: Option<String>,
     pub insert_memory_placeholder: Option<String>,
 }
@@ -709,57 +742,29 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             state.insert_spinner_frame = 0;
             state.insert_error = None;
         }
-        CoreAction::OpenSelector(context) => {
-            open_selector(state, *context);
+        CoreAction::OpenPicker(context) => {
+            open_picker(state, *context);
         }
-        CoreAction::CloseSelector => {
-            close_selector(state);
+        CoreAction::ClosePicker => {
+            close_picker(state);
         }
-        CoreAction::MoveSelectorNext => {
-            move_selector_next(state);
+        CoreAction::MovePickerNext => {
+            move_picker_next(state);
         }
-        CoreAction::MoveSelectorPrev => {
-            move_selector_prev(state);
+        CoreAction::MovePickerPrev => {
+            move_picker_prev(state);
         }
-        CoreAction::SubmitSelector => {
-            submit_selector(state);
+        CoreAction::SubmitPicker => {
+            submit_picker(state);
         }
-        CoreAction::StartAddTag => {
-            if selector_allows_add_tag(state) {
-                state.selector_mode = SelectorMode::AddTag;
-                state.selector_add_tag_input.clear();
-                state.selector_selected_id = None;
+        CoreAction::PickerInput(c) => {
+            if let PickerState::Input { value, .. } = &mut state.picker {
+                value.push(*c);
             }
         }
-        CoreAction::AddTagInput(c) => {
-            if state.selector_open && state.selector_mode == SelectorMode::AddTag {
-                state.selector_add_tag_input.push(*c);
-            }
-        }
-        CoreAction::AddTagBackspace => {
-            if state.selector_open && state.selector_mode == SelectorMode::AddTag {
-                state.selector_add_tag_input.pop();
-            }
-        }
-        CoreAction::ConfirmAddTag => {
-            if state.selector_open && state.selector_mode == SelectorMode::AddTag {
-                let tag = state.selector_add_tag_input.trim().to_string();
-                if !tag.is_empty() {
-                    state.selector_selected_id = Some(tag.clone());
-                    if state.selector_context == SelectorContext::InsertTag {
-                        state.insert_tag = tag;
-                    }
-                }
-                state.selector_open = false;
-                state.selector_mode = SelectorMode::List;
-                state.selector_add_tag_input.clear();
-            }
-        }
-        CoreAction::CancelAddTag => {
-            if state.selector_open && state.selector_mode == SelectorMode::AddTag {
-                state.selector_mode = SelectorMode::List;
-                state.selector_add_tag_input.clear();
-                state.selector_selected_id = None;
+        CoreAction::PickerBackspace => {
+            if let PickerState::Input { value, .. } = &mut state.picker {
+                value.pop();
             }
         }
         CoreAction::CreateInput(c) => {
@@ -820,7 +825,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::SetTab(tab_id) => {
             state.current_tab_id = tab_id.0.clone();
             state.selected_index = Some(0);
-            close_selector(state);
+            close_picker(state);
         }
         CoreAction::SelectTabIndex(index) => {
             state.current_tab_id = format!("tab-{}", index + 1);
@@ -995,27 +1000,26 @@ fn normalize_focus_for_tab(state: &mut CoreState, previous_focus: PaneFocus) {
 
 fn insert_focus_order(mode: InsertMode) -> &'static [InsertFormFocus] {
     match mode {
-        InsertMode::Normal => &[
+        InsertMode::File => &[
+            InsertFormFocus::Mode,
+            InsertFormFocus::MemoryId,
+            InsertFormFocus::Tag,
+            InsertFormFocus::FilePath,
+            InsertFormFocus::Submit,
+        ],
+        InsertMode::InlineText => &[
             InsertFormFocus::Mode,
             InsertFormFocus::MemoryId,
             InsertFormFocus::Tag,
             InsertFormFocus::Text,
-            InsertFormFocus::FilePath,
             InsertFormFocus::Submit,
         ],
-        InsertMode::Raw => &[
+        InsertMode::ManualEmbedding => &[
             InsertFormFocus::Mode,
             InsertFormFocus::MemoryId,
             InsertFormFocus::Tag,
             InsertFormFocus::Text,
             InsertFormFocus::Embedding,
-            InsertFormFocus::Submit,
-        ],
-        InsertMode::Pdf => &[
-            InsertFormFocus::Mode,
-            InsertFormFocus::MemoryId,
-            InsertFormFocus::Tag,
-            InsertFormFocus::FilePath,
             InsertFormFocus::Submit,
         ],
     }
@@ -1041,17 +1045,17 @@ fn prev_insert_focus(mode: InsertMode, focus: InsertFormFocus) -> InsertFormFocu
 
 fn next_insert_mode(mode: InsertMode) -> InsertMode {
     match mode {
-        InsertMode::Normal => InsertMode::Raw,
-        InsertMode::Raw => InsertMode::Pdf,
-        InsertMode::Pdf => InsertMode::Normal,
+        InsertMode::File => InsertMode::InlineText,
+        InsertMode::InlineText => InsertMode::ManualEmbedding,
+        InsertMode::ManualEmbedding => InsertMode::File,
     }
 }
 
 fn prev_insert_mode(mode: InsertMode) -> InsertMode {
     match mode {
-        InsertMode::Normal => InsertMode::Pdf,
-        InsertMode::Raw => InsertMode::Normal,
-        InsertMode::Pdf => InsertMode::Raw,
+        InsertMode::File => InsertMode::ManualEmbedding,
+        InsertMode::InlineText => InsertMode::File,
+        InsertMode::ManualEmbedding => InsertMode::InlineText,
     }
 }
 
@@ -1202,40 +1206,13 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.selected_content = snapshot.selected_content;
     state.selected_context = snapshot.selected_context;
     state.total_count = snapshot.total_count;
-    state.status_message = snapshot.status_message;
+    if state.persistent_status_message.is_none() {
+        state.status_message = snapshot.status_message;
+    }
     state.create_cost_state = snapshot.create_cost_state;
     state.create_submit_state = snapshot.create_submit_state;
     state.settings = snapshot.settings;
-    state.selector_items = snapshot.selector_items;
-    state.selector_labels = snapshot.selector_labels;
-    state.selector_selected_id = snapshot.selector_selected_id;
-    let selector_len = selector_selectable_len(state);
-    if selector_len == 0 {
-        state.selector_index = 0;
-    } else if state.selector_open
-        && state.selector_mode == SelectorMode::List
-        && !selector_is_add_row(state)
-        && !matches!(
-            state.selector_context,
-            SelectorContext::DefaultMemory | SelectorContext::InsertTarget
-        )
-    {
-        if let Some(selected_id) = state.selector_selected_id.as_deref() {
-            if let Some(index) = state
-                .selector_items
-                .iter()
-                .position(|item| item == selected_id)
-            {
-                state.selector_index = index;
-            } else if state.selector_index >= selector_len {
-                state.selector_index = selector_len - 1;
-            }
-        } else if state.selector_index >= selector_len {
-            state.selector_index = selector_len - 1;
-        }
-    } else if state.selector_index >= selector_len {
-        state.selector_index = selector_len - 1;
-    }
+    state.picker = reconcile_picker_state(state, snapshot.picker);
     state.saved_default_memory_id = snapshot.saved_default_memory_id;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
     if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty()
@@ -1323,114 +1300,207 @@ pub fn should_open_saved_tags_picker(state: &CoreState) -> bool {
             == Some("saved_tags")
 }
 
-fn open_selector(state: &mut CoreState, context: SelectorContext) {
-    state.selector_open = true;
-    state.selector_context = context;
-    state.selector_mode = SelectorMode::List;
-    state.selector_add_tag_input.clear();
-    match context {
-        SelectorContext::DefaultMemory | SelectorContext::InsertTarget => {
-            state.selector_index = state
-                .selector_selected_id
-                .as_ref()
-                .and_then(|selected| {
-                    state
-                        .selector_items
-                        .iter()
-                        .position(|item| item == selected)
-                })
-                .unwrap_or(0);
-        }
-        SelectorContext::InsertTag => {
-            let current_tag = state.insert_tag.trim();
-            if let Some(index) = state
-                .selector_items
-                .iter()
-                .position(|item| item == current_tag)
+fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerState {
+    match snapshot {
+        PickerState::Closed => PickerState::Closed,
+        PickerState::Input {
+            context,
+            origin_context,
+            value,
+        } => PickerState::Input {
+            context,
+            origin_context,
+            value,
+        },
+        PickerState::List {
+            context,
+            items,
+            selected_index,
+            selected_id,
+        } => {
+            let previous_index = match &state.picker {
+                PickerState::List {
+                    context: previous_context,
+                    selected_index,
+                    ..
+                } if *previous_context == context => *selected_index,
+                _ => selected_index,
+            };
+            let previous_selected_id = match &state.picker {
+                PickerState::List {
+                    context: previous_context,
+                    selected_id,
+                    ..
+                } if *previous_context == context => selected_id.clone(),
+                _ => selected_id.clone(),
+            };
+            if previous_selected_id.is_none()
+                && previous_index < items.len()
+                && items[previous_index].kind == PickerItemKind::AddAction
             {
-                state.selector_index = index;
-                state.selector_selected_id = state.selector_items.get(index).cloned();
-            } else {
-                state.selector_index = 0;
-                state.selector_selected_id = state.selector_items.get(0).cloned();
+                return PickerState::List {
+                    context,
+                    items,
+                    selected_index: previous_index,
+                    selected_id: None,
+                };
+            }
+            let resolved_selected_id = previous_selected_id.or(selected_id);
+            let resolved_index = picker_selected_index(
+                &items,
+                context,
+                resolved_selected_id.as_deref(),
+                previous_index,
+                state,
+            );
+            let resolved_selected_id = items
+                .get(resolved_index)
+                .and_then(|item| match item.kind {
+                    PickerItemKind::Option => Some(item.id.clone()),
+                    PickerItemKind::AddAction => None,
+                });
+
+            PickerState::List {
+                context,
+                items,
+                selected_index: resolved_index,
+                selected_id: resolved_selected_id,
             }
         }
-        SelectorContext::TagManagement => {
-            state.selector_index = 0;
-            state.selector_selected_id = state.selector_items.get(0).cloned();
+    }
+}
+
+fn picker_selected_index(
+    items: &[PickerItem],
+    context: PickerContext,
+    preferred_selected_id: Option<&str>,
+    preferred_index: usize,
+    state: &CoreState,
+) -> usize {
+    if items.is_empty() {
+        return 0;
+    }
+
+    let preferred_selected_id = preferred_selected_id
+        .map(str::to_string)
+        .or_else(|| match context {
+            PickerContext::DefaultMemory => state.saved_default_memory_id.clone(),
+            PickerContext::InsertTarget => {
+                let insert_memory_id = state.insert_memory_id.trim();
+                if insert_memory_id.is_empty() {
+                    state.saved_default_memory_id.clone()
+                } else {
+                    Some(insert_memory_id.to_string())
+                }
+            }
+            PickerContext::InsertTag => {
+                let insert_tag = state.insert_tag.trim();
+                (!insert_tag.is_empty()).then(|| insert_tag.to_string())
+            }
+            PickerContext::TagManagement | PickerContext::AddTag => None,
+        });
+
+    if let Some(selected_id) = preferred_selected_id
+        && let Some(index) = items.iter().position(|item| item.id == selected_id)
+    {
+        return index;
+    }
+
+    preferred_index.min(items.len().saturating_sub(1))
+}
+
+fn open_picker(state: &mut CoreState, context: PickerContext) {
+    state.picker = PickerState::List {
+        context,
+        items: Vec::new(),
+        selected_index: 0,
+        selected_id: None,
+    };
+}
+
+fn close_picker(state: &mut CoreState) {
+    state.picker = PickerState::Closed;
+}
+
+fn move_picker_next(state: &mut CoreState) {
+    let PickerState::List {
+        items,
+        selected_index,
+        selected_id,
+        ..
+    } = &mut state.picker
+    else {
+        return;
+    };
+
+    if items.is_empty() {
+        *selected_index = 0;
+        *selected_id = None;
+        return;
+    }
+
+    *selected_index = (*selected_index + 1).min(items.len() - 1);
+    *selected_id = items.get(*selected_index).and_then(|item| match item.kind {
+        PickerItemKind::Option => Some(item.id.clone()),
+        PickerItemKind::AddAction => None,
+    });
+}
+
+fn move_picker_prev(state: &mut CoreState) {
+    let PickerState::List {
+        items,
+        selected_index,
+        selected_id,
+        ..
+    } = &mut state.picker
+    else {
+        return;
+    };
+
+    *selected_index = selected_index.saturating_sub(1);
+    *selected_id = items.get(*selected_index).and_then(|item| match item.kind {
+        PickerItemKind::Option => Some(item.id.clone()),
+        PickerItemKind::AddAction => None,
+    });
+}
+
+fn submit_picker(state: &mut CoreState) {
+    match &mut state.picker {
+        PickerState::Closed => {}
+        PickerState::Input { context, value, .. } => {
+            if *context == PickerContext::AddTag {
+                let tag = value.trim().to_string();
+                if !tag.is_empty() {
+                    state.insert_tag = tag;
+                }
+            }
+        }
+        PickerState::List {
+            context,
+            items,
+            selected_index,
+            selected_id,
+        } => {
+            let Some(item) = items.get(*selected_index).cloned() else {
+                return;
+            };
+            match item.kind {
+                PickerItemKind::AddAction => {
+                    state.picker = PickerState::Input {
+                        context: PickerContext::AddTag,
+                        origin_context: Some(*context),
+                        value: String::new(),
+                    };
+                }
+                PickerItemKind::Option => {
+                    *selected_id = Some(item.id.clone());
+                    if *context == PickerContext::InsertTag {
+                        state.insert_tag = item.id;
+                    }
+                }
+            }
         }
     }
-}
-
-fn close_selector(state: &mut CoreState) {
-    state.selector_open = false;
-    state.selector_mode = SelectorMode::List;
-    state.selector_add_tag_input.clear();
-}
-
-fn move_selector_next(state: &mut CoreState) {
-    let len = selector_selectable_len(state);
-    if len == 0 {
-        state.selector_index = 0;
-        state.selector_selected_id = None;
-        return;
-    }
-    state.selector_index = (state.selector_index + 1).min(len - 1);
-    update_selector_selected_id_for_index(state);
-}
-
-fn move_selector_prev(state: &mut CoreState) {
-    state.selector_index = state.selector_index.saturating_sub(1);
-    update_selector_selected_id_for_index(state);
-}
-
-fn submit_selector(state: &mut CoreState) {
-    if !state.selector_open {
-        return;
-    }
-    if state.selector_mode == SelectorMode::AddTag {
-        state.selector_open = false;
-        state.selector_mode = SelectorMode::List;
-        state.selector_add_tag_input.clear();
-        state.selector_selected_id = None;
-        return;
-    }
-    if selector_is_add_row(state) {
-        state.selector_mode = SelectorMode::AddTag;
-        state.selector_add_tag_input.clear();
-        state.selector_selected_id = None;
-        return;
-    }
-    if let Some(selected) = state.selector_items.get(state.selector_index).cloned() {
-        state.selector_selected_id = Some(selected.clone());
-        if state.selector_context == SelectorContext::InsertTag {
-            state.insert_tag = selected;
-        }
-    }
-    close_selector(state);
-}
-
-fn selector_is_add_row(state: &CoreState) -> bool {
-    selector_allows_add_tag(state) && state.selector_index == state.selector_items.len()
-}
-
-fn selector_allows_add_tag(state: &CoreState) -> bool {
-    matches!(
-        state.selector_context,
-        SelectorContext::InsertTag | SelectorContext::TagManagement
-    )
-}
-
-fn selector_selectable_len(state: &CoreState) -> usize {
-    state.selector_items.len() + usize::from(selector_allows_add_tag(state))
-}
-
-fn update_selector_selected_id_for_index(state: &mut CoreState) {
-    if selector_is_add_row(state) {
-        state.selector_selected_id = None;
-        return;
-    }
-    state.selector_selected_id = state.selector_items.get(state.selector_index).cloned();
 }
 
 #[cfg(test)]
@@ -1818,47 +1888,75 @@ mod tests {
     }
 
     #[test]
-    fn open_insert_target_selector_uses_selected_anchor() {
+    fn open_insert_target_picker_uses_selected_anchor() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
             focus: PaneFocus::Form,
             insert_focus: InsertFormFocus::MemoryId,
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
-            selector_selected_id: Some("bbbbb-bb".to_string()),
+            picker: PickerState::List {
+                context: PickerContext::InsertTarget,
+                items: vec![
+                    PickerItem::option("aaaaa-aa", "Alpha Memory", false),
+                    PickerItem::option("bbbbb-bb", "Beta Memory", false),
+                ],
+                selected_index: 0,
+                selected_id: Some("bbbbb-bb".to_string()),
+            },
             ..CoreState::default()
         };
 
-        apply_core_action(
-            &mut state,
-            &CoreAction::OpenSelector(SelectorContext::InsertTarget),
-        );
+        apply_core_action(&mut state, &CoreAction::OpenPicker(PickerContext::InsertTarget));
 
-        assert!(state.selector_open);
-        assert_eq!(state.selector_context, SelectorContext::InsertTarget);
-        assert_eq!(state.selector_index, 1);
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::InsertTarget,
+                items: Vec::new(),
+                selected_index: 0,
+                selected_id: None,
+            }
+        );
     }
 
     #[test]
-    fn open_insert_target_selector_prefers_explicit_insert_target_selection() {
+    fn open_insert_target_picker_prefers_explicit_insert_target_selection() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
             focus: PaneFocus::Form,
             insert_focus: InsertFormFocus::MemoryId,
             insert_memory_id: "aaaaa-aa".to_string(),
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
-            selector_selected_id: Some("aaaaa-aa".to_string()),
             ..CoreState::default()
         };
 
-        apply_core_action(
+        apply_core_action(&mut state, &CoreAction::OpenPicker(PickerContext::InsertTarget));
+        apply_snapshot(
             &mut state,
-            &CoreAction::OpenSelector(SelectorContext::InsertTarget),
+            ProviderSnapshot {
+                picker: PickerState::List {
+                    context: PickerContext::InsertTarget,
+                    items: vec![
+                        PickerItem::option("aaaaa-aa", "Alpha Memory", false),
+                        PickerItem::option("bbbbb-bb", "Beta Memory", false),
+                    ],
+                    selected_index: 0,
+                    selected_id: None,
+                },
+                ..ProviderSnapshot::default()
+            },
         );
 
-        assert_eq!(state.selector_selected_id.as_deref(), Some("aaaaa-aa"));
-        assert_eq!(state.selector_index, 0);
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::InsertTarget,
+                items: vec![
+                    PickerItem::option("aaaaa-aa", "Alpha Memory", false),
+                    PickerItem::option("bbbbb-bb", "Beta Memory", false),
+                ],
+                selected_index: 0,
+                selected_id: Some("aaaaa-aa".to_string()),
+            }
+        );
     }
 
     #[test]
@@ -2076,7 +2174,7 @@ mod tests {
     #[test]
     fn insert_navigation_is_ignored_while_submit_is_running() {
         let mut state = CoreState {
-            insert_mode: InsertMode::Normal,
+            insert_mode: InsertMode::InlineText,
             insert_focus: InsertFormFocus::Text,
             insert_submit_state: CreateSubmitState::Submitting,
             ..CoreState::default()
@@ -2086,183 +2184,222 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertCycleMode);
 
         assert_eq!(state.insert_focus, InsertFormFocus::Text);
-        assert_eq!(state.insert_mode, InsertMode::Normal);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
     }
 
     #[test]
-    fn selector_move_next_can_land_on_add_row_for_tag_management() {
+    fn picker_move_next_can_land_on_add_action_for_tag_management() {
         let mut state = CoreState {
-            selector_open: true,
-            selector_context: SelectorContext::TagManagement,
-            selector_items: vec!["docs".to_string()],
-            selector_index: 0,
-            selector_selected_id: Some("docs".to_string()),
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+            },
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::MoveSelectorNext);
+        apply_core_action(&mut state, &CoreAction::MovePickerNext);
 
-        assert_eq!(state.selector_index, 1);
-        assert_eq!(state.selector_selected_id, None);
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 1,
+                selected_id: None,
+            }
+        );
     }
 
     #[test]
-    fn selector_move_next_tracks_item_selection_for_tag_management() {
+    fn picker_submit_turns_add_action_into_input_mode() {
         let mut state = CoreState {
-            selector_open: true,
-            selector_context: SelectorContext::TagManagement,
-            selector_items: vec!["docs".to_string(), "research".to_string()],
-            selector_index: 0,
-            selector_selected_id: Some("docs".to_string()),
+            picker: PickerState::List {
+                context: PickerContext::InsertTag,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 1,
+                selected_id: None,
+            },
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::MoveSelectorNext);
+        apply_core_action(&mut state, &CoreAction::SubmitPicker);
 
-        assert_eq!(state.selector_index, 1);
-        assert_eq!(state.selector_selected_id.as_deref(), Some("research"));
+        assert_eq!(
+            state.picker,
+            PickerState::Input {
+                context: PickerContext::AddTag,
+                origin_context: Some(PickerContext::InsertTag),
+                value: String::new(),
+            }
+        );
     }
 
     #[test]
-    fn selector_snapshot_keeps_add_row_selection_visible_after_refresh() {
+    fn apply_snapshot_preserves_picker_add_action_selection() {
         let mut state = CoreState {
-            selector_open: true,
-            selector_context: SelectorContext::TagManagement,
-            selector_mode: SelectorMode::List,
-            selector_items: vec!["docs".to_string()],
-            selector_index: 1,
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 1,
+                selected_id: None,
+            },
             ..CoreState::default()
         };
         let snapshot = ProviderSnapshot {
-            selector_items: vec!["docs".to_string()],
-            selector_labels: vec!["docs".to_string()],
-            selector_selected_id: Some("docs".to_string()),
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+            },
             ..ProviderSnapshot::default()
         };
 
         apply_snapshot(&mut state, snapshot);
 
-        assert_eq!(state.selector_index, 1);
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 1,
+                selected_id: None,
+            }
+        );
     }
 
     #[test]
-    fn selector_snapshot_keeps_insert_tag_add_row_selection_visible_after_refresh() {
+    fn open_picker_uses_saved_default_memory_selection_after_snapshot() {
         let mut state = CoreState {
-            selector_open: true,
-            selector_context: SelectorContext::InsertTag,
-            selector_mode: SelectorMode::List,
-            selector_items: vec!["docs".to_string()],
-            selector_index: 1,
+            saved_default_memory_id: Some("bbbbb-bb".to_string()),
             ..CoreState::default()
         };
-        let snapshot = ProviderSnapshot {
-            selector_items: vec!["docs".to_string()],
-            selector_labels: vec!["docs".to_string()],
-            selector_selected_id: Some("docs".to_string()),
-            ..ProviderSnapshot::default()
-        };
+        apply_core_action(&mut state, &CoreAction::OpenPicker(PickerContext::DefaultMemory));
+        apply_snapshot(
+            &mut state,
+            ProviderSnapshot {
+                picker: PickerState::List {
+                    context: PickerContext::DefaultMemory,
+                    items: vec![
+                        PickerItem::option("aaaaa-aa", "Alpha Memory", false),
+                        PickerItem::option("bbbbb-bb", "Beta Memory", true),
+                    ],
+                    selected_index: 0,
+                    selected_id: None,
+                },
+                ..ProviderSnapshot::default()
+            },
+        );
 
-        apply_snapshot(&mut state, snapshot);
-
-        assert_eq!(state.selector_index, 1);
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::DefaultMemory,
+                items: vec![
+                    PickerItem::option("aaaaa-aa", "Alpha Memory", false),
+                    PickerItem::option("bbbbb-bb", "Beta Memory", true),
+                ],
+                selected_index: 1,
+                selected_id: Some("bbbbb-bb".to_string()),
+            }
+        );
     }
 
     #[test]
-    fn open_selector_uses_snapshot_default_memory_selection() {
+    fn open_picker_uses_insert_target_selection_after_snapshot() {
         let mut state = CoreState {
-            selector_context: SelectorContext::DefaultMemory,
-            selector_mode: SelectorMode::List,
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_selected_id: Some("aaaaa-aa".to_string()),
-            selector_index: 0,
+            insert_memory_id: "bbbbb-bb".to_string(),
             ..CoreState::default()
         };
-        let snapshot = ProviderSnapshot {
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
-            selector_selected_id: Some("bbbbb-bb".to_string()),
-            ..ProviderSnapshot::default()
-        };
 
-        apply_snapshot(&mut state, snapshot);
-        open_selector(&mut state, SelectorContext::DefaultMemory);
+        apply_core_action(&mut state, &CoreAction::OpenPicker(PickerContext::InsertTarget));
+        apply_snapshot(
+            &mut state,
+            ProviderSnapshot {
+                picker: PickerState::List {
+                    context: PickerContext::InsertTarget,
+                    items: vec![
+                        PickerItem::option("aaaaa-aa", "Alpha Memory", false),
+                        PickerItem::option("bbbbb-bb", "Beta Memory", false),
+                    ],
+                    selected_index: 0,
+                    selected_id: None,
+                },
+                ..ProviderSnapshot::default()
+            },
+        );
 
-        assert_eq!(state.selector_index, 1);
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::InsertTarget,
+                items: vec![
+                    PickerItem::option("aaaaa-aa", "Alpha Memory", false),
+                    PickerItem::option("bbbbb-bb", "Beta Memory", false),
+                ],
+                selected_index: 1,
+                selected_id: Some("bbbbb-bb".to_string()),
+            }
+        );
     }
 
     #[test]
-    fn selector_snapshot_keeps_default_memory_cursor_after_open() {
+    fn picker_submit_updates_insert_tag_for_selected_item() {
         let mut state = CoreState {
-            selector_open: true,
-            selector_context: SelectorContext::DefaultMemory,
-            selector_mode: SelectorMode::List,
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_selected_id: Some("bbbbb-bb".to_string()),
-            selector_index: 0,
+            picker: PickerState::List {
+                context: PickerContext::InsertTag,
+                items: vec![PickerItem::option("docs", "docs", false)],
+                selected_index: 0,
+                selected_id: None,
+            },
             ..CoreState::default()
         };
-        let snapshot = ProviderSnapshot {
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
-            selector_selected_id: Some("bbbbb-bb".to_string()),
-            ..ProviderSnapshot::default()
-        };
 
-        apply_snapshot(&mut state, snapshot);
+        apply_core_action(&mut state, &CoreAction::SubmitPicker);
 
-        assert_eq!(state.selector_index, 0);
+        assert_eq!(state.insert_tag, "docs");
     }
 
     #[test]
-    fn open_selector_uses_snapshot_insert_target_selection() {
+    fn picker_input_submit_keeps_local_tag_value() {
         let mut state = CoreState {
-            selector_context: SelectorContext::InsertTarget,
-            selector_mode: SelectorMode::List,
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_selected_id: Some("aaaaa-aa".to_string()),
-            selector_index: 0,
+            picker: PickerState::Input {
+                context: PickerContext::AddTag,
+                origin_context: Some(PickerContext::InsertTag),
+                value: "research".to_string(),
+            },
             ..CoreState::default()
         };
-        let snapshot = ProviderSnapshot {
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
-            selector_selected_id: Some("bbbbb-bb".to_string()),
-            ..ProviderSnapshot::default()
-        };
 
-        apply_snapshot(&mut state, snapshot);
-        open_selector(&mut state, SelectorContext::InsertTarget);
+        apply_core_action(&mut state, &CoreAction::SubmitPicker);
 
-        assert_eq!(state.selector_index, 1);
+        assert_eq!(state.insert_tag, "research");
     }
 
     #[test]
-    fn selector_snapshot_keeps_insert_target_cursor_after_open() {
+    fn insert_cycle_mode_prev_moves_to_inline_text_and_resets_focus() {
         let mut state = CoreState {
-            selector_open: true,
-            selector_context: SelectorContext::InsertTarget,
-            selector_mode: SelectorMode::List,
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_selected_id: Some("bbbbb-bb".to_string()),
-            selector_index: 0,
-            ..CoreState::default()
-        };
-        let snapshot = ProviderSnapshot {
-            selector_items: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
-            selector_labels: vec!["Alpha Memory".to_string(), "Beta Memory".to_string()],
-            selector_selected_id: Some("bbbbb-bb".to_string()),
-            ..ProviderSnapshot::default()
-        };
-
-        apply_snapshot(&mut state, snapshot);
-
-        assert_eq!(state.selector_index, 0);
-    }
-
-    #[test]
-    fn insert_cycle_mode_prev_moves_backwards_and_resets_focus() {
-        let mut state = CoreState {
-            insert_mode: InsertMode::Raw,
+            insert_mode: InsertMode::ManualEmbedding,
             insert_focus: InsertFormFocus::Embedding,
             insert_error: Some("boom".to_string()),
             insert_submit_state: CreateSubmitState::Error,
@@ -2271,7 +2408,7 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
 
-        assert_eq!(state.insert_mode, InsertMode::Normal);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
         assert_eq!(state.insert_error, None);
         assert_eq!(state.insert_submit_state, CreateSubmitState::Idle);
@@ -2280,16 +2417,49 @@ mod tests {
     #[test]
     fn insert_cycle_mode_wraps_between_first_and_last_modes() {
         let mut state = CoreState {
-            insert_mode: InsertMode::Normal,
+            insert_mode: InsertMode::File,
             insert_focus: InsertFormFocus::Mode,
             ..CoreState::default()
         };
 
         apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
-        assert_eq!(state.insert_mode, InsertMode::Pdf);
+        assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
 
         apply_core_action(&mut state, &CoreAction::InsertCycleMode);
-        assert_eq!(state.insert_mode, InsertMode::Normal);
+        assert_eq!(state.insert_mode, InsertMode::File);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
+    }
+
+    #[test]
+    fn insert_file_mode_skips_text_and_embedding_fields() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::File,
+            insert_focus: InsertFormFocus::Tag,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertNextField);
+        assert_eq!(state.insert_focus, InsertFormFocus::FilePath);
+
+        apply_core_action(&mut state, &CoreAction::InsertNextField);
+        assert_eq!(state.insert_focus, InsertFormFocus::Submit);
+    }
+
+    #[test]
+    fn insert_cycle_mode_visits_file_then_inline_text_before_raw() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::File,
+            insert_focus: InsertFormFocus::Mode,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::File);
     }
 }

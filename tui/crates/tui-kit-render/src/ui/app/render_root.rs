@@ -7,6 +7,7 @@ use ratatui::{
     style::Style,
     widgets::{Block, Borders, Widget, block::BorderType},
 };
+use tui_kit_runtime::PickerState;
 use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
 
 use crate::ui::components::TabBar;
@@ -31,7 +32,11 @@ impl<'a> TuiKitUi<'a> {
     }
 
     pub fn cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
-        if self.show_help || self.show_settings || self.show_create_modal || self.selector_open {
+        if self.show_help
+            || self.show_settings
+            || self.show_create_modal
+            || !matches!(self.picker, PickerState::Closed)
+        {
             return None;
         }
         match tab_kind(self.current_tab_id.0.as_str()) {
@@ -89,7 +94,7 @@ impl Widget for TuiKitUi<'_> {
         self.render_status(chunks[3], buf);
         self.render_create_overlay(area, buf);
         self.render_settings_overlay(area, buf);
-        self.render_selector_overlay(area, buf);
+        self.render_picker_overlay(area, buf);
         self.render_help_overlay(area, buf);
     }
 }
