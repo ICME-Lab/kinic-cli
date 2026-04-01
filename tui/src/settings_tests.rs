@@ -19,10 +19,7 @@ fn deferred_overview() -> SessionAccountOverview {
 }
 
 fn selector_pair(id: &str, title: Option<&str>) -> (String, String) {
-    (
-        id.to_string(),
-        title.unwrap_or(id).to_string(),
-    )
+    (id.to_string(), title.unwrap_or(id).to_string())
 }
 
 fn quick_entry_value<'a>(snapshot: &'a SettingsSnapshot, id: &str) -> &'a str {

@@ -165,7 +165,6 @@ fn handle_overlay_input_consumes_unknown_selector_keys() {
     assert!(matches!(result, OverlayInputResult::Consumed));
 }
 
-
 #[test]
 fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     let mut provider = TestProvider::err("tab failed");

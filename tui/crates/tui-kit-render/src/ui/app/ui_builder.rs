@@ -253,6 +253,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn saved_default_memory_id(mut self, value: Option<&'a str>) -> Self {
+        self.saved_default_memory_id = value;
+        self
+    }
+
+    #[must_use]
     pub fn insert_mode(mut self, value: InsertMode) -> Self {
         self.insert_mode = value;
         self

@@ -97,7 +97,10 @@ fn insert_memory_id_focus_uses_enter_to_open_picker() {
 
     let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
 
-    assert_eq!(action, Some(CoreAction::OpenSelector(SelectorContext::InsertTarget)));
+    assert_eq!(
+        action,
+        Some(CoreAction::OpenSelector(SelectorContext::InsertTarget))
+    );
 }
 
 #[test]

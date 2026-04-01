@@ -215,10 +215,9 @@ impl<'a> TuiKitUi<'a> {
                 self.selector_items,
                 self.selector_labels,
                 self.selector_index,
-                self.selector_selected_id,
+                selector_current_default_id(self),
             );
-            let Some((w, h)) =
-                fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
+            let Some((w, h)) = fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
             else {
                 return;
             };
@@ -245,7 +244,6 @@ impl<'a> TuiKitUi<'a> {
                 .render(picker_area, buf);
             return;
         }
-
     }
 
     fn render_selector_add_tag_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -267,7 +265,10 @@ impl<'a> TuiKitUi<'a> {
         let lines = vec![
             Line::from(Span::styled(" Add tag ", self.theme.style_accent_bold())),
             Line::from(""),
-            Line::from(Span::styled(format!("  {input}"), self.theme.style_accent_bold())),
+            Line::from(Span::styled(
+                format!("  {input}"),
+                self.theme.style_accent_bold(),
+            )),
             Line::from(""),
             Line::from(Span::styled(
                 " Enter: save tag  Esc: return",
@@ -371,6 +372,15 @@ fn selector_title(ui: &TuiKitUi<'_>) -> &'static str {
     }
 }
 
+fn selector_current_default_id<'a>(ui: &'a TuiKitUi<'_>) -> Option<&'a str> {
+    match ui.selector_context {
+        tui_kit_runtime::SelectorContext::DefaultMemory => ui.saved_default_memory_id,
+        tui_kit_runtime::SelectorContext::InsertTarget
+        | tui_kit_runtime::SelectorContext::InsertTag
+        | tui_kit_runtime::SelectorContext::TagManagement => None,
+    }
+}
+
 fn settings_overlay_lines(
     snapshot: Option<&SettingsSnapshot>,
     cfg: &super::types::SettingsOverlayText,
@@ -440,7 +450,11 @@ mod tests {
             (" hint".to_string(), SelectorLineKind::Hint),
         ];
         let visible = visible_selector_lines(lines, 6);
-        assert!(visible.iter().any(|(_, kind)| *kind == SelectorLineKind::Selected));
+        assert!(
+            visible
+                .iter()
+                .any(|(_, kind)| *kind == SelectorLineKind::Selected)
+        );
     }
 
     #[test]
@@ -456,5 +470,20 @@ mod tests {
             Some("aaaaa-aa"),
         );
         assert!(lines.iter().any(|(line, _)| line.contains("Alpha Memory")));
+    }
+
+    #[test]
+    fn selector_current_default_id_only_marks_default_memory_context() {
+        let theme = crate::ui::theme::Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .selector_context(tui_kit_runtime::SelectorContext::InsertTarget)
+            .saved_default_memory_id(Some("aaaaa-aa"));
+        assert_eq!(selector_current_default_id(&ui), None);
+
+        let theme = crate::ui::theme::Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .selector_context(tui_kit_runtime::SelectorContext::DefaultMemory)
+            .saved_default_memory_id(Some("aaaaa-aa"));
+        assert_eq!(selector_current_default_id(&ui), Some("aaaaa-aa"));
     }
 }

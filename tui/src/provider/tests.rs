@@ -301,7 +301,10 @@ fn build_snapshot_exposes_saved_default_memory_id() {
 
     let snapshot = provider.build_snapshot(&CoreState::default());
 
-    assert_eq!(snapshot.saved_default_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(
+        snapshot.saved_default_memory_id.as_deref(),
+        Some("aaaaa-aa")
+    );
 }
 
 #[test]
@@ -320,10 +323,7 @@ fn build_snapshot_exposes_selector_titles() {
     );
     assert_eq!(
         snapshot.selector_labels,
-        vec![
-            "Alpha Memory".to_string(),
-            "Beta Memory".to_string(),
-        ]
+        vec!["Alpha Memory".to_string(), "Beta Memory".to_string(),]
     );
 }
 
@@ -810,10 +810,7 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
     assert_eq!(snapshot.items[1].leading_marker.as_deref(), Some("★"));
     assert_eq!(
         snapshot.selector_items,
-        vec![
-            "aaaaa-aa".to_string(),
-            "bbbbb-bb".to_string(),
-        ]
+        vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string(),]
     );
 }
 

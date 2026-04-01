@@ -144,6 +144,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .selector_labels(&state.selector_labels)
                     .selector_selected_id(state.selector_selected_id.as_deref())
                     .selector_add_tag_input(&state.selector_add_tag_input)
+                    .saved_default_memory_id(state.saved_default_memory_id.as_deref())
                     .insert_mode(state.insert_mode)
                     .insert_memory_id(&state.insert_memory_id)
                     .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())

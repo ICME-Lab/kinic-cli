@@ -41,7 +41,9 @@ pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<
         },
         KeyCode::Enter => match state.insert_focus {
             InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
-            InsertFormFocus::MemoryId => Some(CoreAction::OpenSelector(SelectorContext::InsertTarget)),
+            InsertFormFocus::MemoryId => {
+                Some(CoreAction::OpenSelector(SelectorContext::InsertTarget))
+            }
             InsertFormFocus::Tag => Some(CoreAction::OpenSelector(SelectorContext::InsertTag)),
             InsertFormFocus::Submit => Some(CoreAction::InsertSubmit),
             _ => None,

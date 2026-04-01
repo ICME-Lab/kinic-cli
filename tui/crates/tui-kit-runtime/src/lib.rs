@@ -1238,7 +1238,8 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     }
     state.saved_default_memory_id = snapshot.saved_default_memory_id;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
-    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty() {
+    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty()
+    {
         state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
     }
 
@@ -1342,7 +1343,11 @@ fn open_selector(state: &mut CoreState, context: SelectorContext) {
         }
         SelectorContext::InsertTag => {
             let current_tag = state.insert_tag.trim();
-            if let Some(index) = state.selector_items.iter().position(|item| item == current_tag) {
+            if let Some(index) = state
+                .selector_items
+                .iter()
+                .position(|item| item == current_tag)
+            {
                 state.selector_index = index;
                 state.selector_selected_id = state.selector_items.get(index).cloned();
             } else {
@@ -1824,7 +1829,10 @@ mod tests {
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::OpenSelector(SelectorContext::InsertTarget));
+        apply_core_action(
+            &mut state,
+            &CoreAction::OpenSelector(SelectorContext::InsertTarget),
+        );
 
         assert!(state.selector_open);
         assert_eq!(state.selector_context, SelectorContext::InsertTarget);
@@ -1844,7 +1852,10 @@ mod tests {
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::OpenSelector(SelectorContext::InsertTarget));
+        apply_core_action(
+            &mut state,
+            &CoreAction::OpenSelector(SelectorContext::InsertTarget),
+        );
 
         assert_eq!(state.selector_selected_id.as_deref(), Some("aaaaa-aa"));
         assert_eq!(state.selector_index, 0);

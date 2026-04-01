@@ -76,7 +76,10 @@ pub(crate) fn selector_lines(
     current_default_id: Option<&str>,
 ) -> Vec<(String, SelectorLineKind)> {
     let mut lines = vec![
-        (format!(" {} ", selector_title(context, mode)), SelectorLineKind::Title),
+        (
+            format!(" {} ", selector_title(context, mode)),
+            SelectorLineKind::Title,
+        ),
         (String::new(), SelectorLineKind::Normal),
     ];
 
@@ -212,7 +215,9 @@ fn selector_hint(context: SelectorContext, mode: SelectorMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tui_kit_runtime::{SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot};
+    use tui_kit_runtime::{
+        SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot,
+    };
 
     #[test]
     fn settings_screen_lines_align_value_columns_across_sections() {

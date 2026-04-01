@@ -8,9 +8,8 @@ use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 use tui_kit_runtime::{
-    SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview,
-    SessionSettingsSnapshot, SettingsEntry, SettingsSection, SettingsSnapshot,
-    format_e8s_to_kinic_string_u128,
+    SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview, SessionSettingsSnapshot,
+    SettingsEntry, SettingsSection, SettingsSnapshot, format_e8s_to_kinic_string_u128,
 };
 
 use crate::tui::TuiAuth;
@@ -38,7 +37,7 @@ pub struct PreferencesHealth {
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
     #[cfg(test)]
     {
-        return Ok(UserPreferences::default());
+        Ok(UserPreferences::default())
     }
 
     #[cfg(not(test))]
@@ -71,7 +70,8 @@ pub fn build_settings_snapshot(
     health: &PreferencesHealth,
 ) -> SettingsSnapshot {
     let session = overview.session.clone();
-    let default_memory_display = default_memory_display(preferences, selector_items, selector_labels);
+    let default_memory_display =
+        default_memory_display(preferences, selector_items, selector_labels);
     let saved_tags_display = saved_tags_display(preferences);
 
     SettingsSnapshot {

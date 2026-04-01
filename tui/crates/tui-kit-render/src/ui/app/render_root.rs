@@ -31,11 +31,7 @@ impl<'a> TuiKitUi<'a> {
     }
 
     pub fn cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
-        if self.show_help
-            || self.show_settings
-            || self.show_create_modal
-            || self.selector_open
-        {
+        if self.show_help || self.show_settings || self.show_create_modal || self.selector_open {
             return None;
         }
         match tab_kind(self.current_tab_id.0.as_str()) {

@@ -199,7 +199,7 @@ impl<'a> DefaultMemorySelection<'a> {
     }
 }
 
-fn saved_tag_selection<'a>(preferences: &'a UserPreferences) -> Vec<String> {
+fn saved_tag_selection(preferences: &UserPreferences) -> Vec<String> {
     settings::normalize_saved_tags(preferences.saved_tags.clone())
 }
 
@@ -2115,4 +2115,3 @@ Maintain keyboard-first behavior as baseline.
         ),
     ]
 }
-
