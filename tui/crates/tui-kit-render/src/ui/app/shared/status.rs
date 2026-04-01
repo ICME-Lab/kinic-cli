@@ -15,15 +15,15 @@ impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_status(&self, area: Rect, buf: &mut Buffer) {
         let tab_id = self.current_tab_id.0.as_str();
 
-        let status_line = if !self.status_message.is_empty() {
-            self.generic_status_line()
-        } else if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
+        let status_line = if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
             self.form_status_line(tab_id)
         } else if matches!(
             tab_kind(tab_id),
             TabKind::PlaceholderMarket | TabKind::PlaceholderSettings
         ) {
             self.placeholder_status_line(tab_id)
+        } else if !self.status_message.is_empty() {
+            self.generic_status_line()
         } else if self.show_context_panel && self.in_context_items_view {
             self.context_items_status_line()
         } else if self.show_context_panel {
@@ -111,25 +111,28 @@ impl<'a> TuiKitUi<'a> {
             );
         }
 
-        Line::from(spans)
+        prepend_status_message(self, spans)
     }
 
     fn placeholder_status_line(&self, tab_id: &str) -> Line<'_> {
         if tab_id == KINIC_SETTINGS_TAB_ID && self.focus == Focus::Content {
-            return Line::from(vec![
-                Span::styled("↑/↓", self.theme.style_accent()),
-                Span::styled(" choose row ", self.theme.style_muted()),
-                Span::styled("Enter", self.theme.style_accent()),
-                Span::styled(" open Default memory ", self.theme.style_muted()),
-                Span::styled("Esc", self.theme.style_accent()),
-                Span::styled(" tabs ", self.theme.style_muted()),
-                Span::styled("│ ", self.theme.style_dim()),
-                Span::styled("Shift+D", self.theme.style_accent()),
-                Span::styled(
-                    " saves current memory from Memories",
-                    self.theme.style_muted(),
-                ),
-            ]);
+            return prepend_status_message(
+                self,
+                vec![
+                    Span::styled("↑/↓", self.theme.style_accent()),
+                    Span::styled(" choose row ", self.theme.style_muted()),
+                    Span::styled("Enter", self.theme.style_accent()),
+                    Span::styled(" open Default memory ", self.theme.style_muted()),
+                    Span::styled("Esc", self.theme.style_accent()),
+                    Span::styled(" tabs ", self.theme.style_muted()),
+                    Span::styled("│ ", self.theme.style_dim()),
+                    Span::styled("Shift+D", self.theme.style_accent()),
+                    Span::styled(
+                        " saves current memory from Memories",
+                        self.theme.style_muted(),
+                    ),
+                ],
+            );
         }
 
         let cfg = &self.ui_config.status;
@@ -153,7 +156,7 @@ impl<'a> TuiKitUi<'a> {
             );
         }
 
-        Line::from(spans)
+        prepend_status_message(self, spans)
     }
 
     fn context_items_status_line(&self) -> Line<'_> {
@@ -269,11 +272,38 @@ fn form_enter_hint(tab_id: &str) -> &'static str {
     " submit "
 }
 
+fn prepend_status_message<'a>(ui: &'a TuiKitUi<'a>, mut spans: Vec<Span<'a>>) -> Line<'a> {
+    if ui.status_message.is_empty() {
+        return Line::from(spans);
+    }
+
+    let mut prefixed = vec![
+        Span::styled(format!(" {} ", ui.status_message), ui.theme.style_string()),
+        Span::styled(" │ ", ui.theme.style_muted()),
+    ];
+    prefixed.append(&mut spans);
+    Line::from(prefixed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ui::theme::Theme;
-    use tui_kit_runtime::kinic_tabs::KINIC_CREATE_TAB_ID;
+    use tui_kit_runtime::kinic_tabs::{KINIC_CREATE_TAB_ID, KINIC_SETTINGS_TAB_ID};
+
+    fn render_status_line(ui: &TuiKitUi<'_>) -> String {
+        let area = Rect::new(0, 0, 160, 3);
+        let mut buf = Buffer::empty(area);
+        ui.render_status(area, &mut buf);
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     #[test]
     fn insert_tab_enter_hint_mentions_picker_and_submit() {
@@ -290,76 +320,72 @@ mod tests {
     }
 
     #[test]
-    fn form_tabs_prefer_status_message_over_static_hints() {
+    fn insert_form_status_keeps_hints_when_status_message_exists() {
         let theme = Theme::default();
         let ui = TuiKitUi::new(&theme)
             .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
             .focus(Focus::Form)
             .status_message("Inserted 12 chunks");
-        let area = Rect::new(0, 0, 80, 3);
-        let mut buf = Buffer::empty(area);
-
-        ui.render_status(area, &mut buf);
-
-        let rendered = (0..area.height)
-            .map(|y| {
-                (0..area.width)
-                    .map(|x| buf[(x, y)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let rendered = render_status_line(&ui);
 
         assert!(rendered.contains("Inserted 12 chunks"));
-        assert!(!rendered.contains("cycle/picker/submit"));
+        assert!(rendered.contains("cycle/picker/submit"));
+        assert!(rendered.contains("Tab/Shift+Tab"));
+        assert!(rendered.contains("Esc"));
     }
 
     #[test]
-    fn form_tabs_render_status_message_even_without_prioritization() {
+    fn create_form_status_keeps_hints_when_status_message_exists() {
         let theme = Theme::default();
         let ui = TuiKitUi::new(&theme)
-            .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
+            .current_tab_id(crate::ui::TabId::new(KINIC_CREATE_TAB_ID))
             .focus(Focus::Form)
-            .status_message("Inserted 12 chunks");
-        let area = Rect::new(0, 0, 80, 3);
-        let mut buf = Buffer::empty(area);
+            .status_message("Creating memory...");
+        let rendered = render_status_line(&ui);
 
-        ui.render_status(area, &mut buf);
-
-        let rendered = (0..area.height)
-            .map(|y| {
-                (0..area.width)
-                    .map(|x| buf[(x, y)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(rendered.contains("Inserted 12 chunks"));
-        assert!(!rendered.contains("cycle/picker/submit"));
+        assert!(rendered.contains("Creating memory..."));
+        assert!(rendered.contains("Tab/Shift+Tab"));
+        assert!(rendered.contains("submit"));
+        assert!(rendered.contains("Esc"));
     }
 
     #[test]
-    fn non_form_tabs_render_status_message_without_prioritization() {
+    fn settings_content_status_keeps_settings_hints_when_status_message_exists() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_SETTINGS_TAB_ID))
+            .focus(Focus::Content)
+            .status_message("Review session details");
+        let rendered = render_status_line(&ui);
+
+        assert!(rendered.contains("Review session details"));
+        assert!(rendered.contains("open Default memory"));
+        assert!(rendered.contains("Esc"));
+        assert!(rendered.contains("Shift+D"));
+    }
+
+    #[test]
+    fn non_form_tabs_render_generic_status_message() {
         let theme = Theme::default();
         let ui = TuiKitUi::new(&theme)
             .current_tab_id(crate::ui::TabId::new("tab-1"))
             .focus(Focus::Items)
             .status_message("Loaded memories.");
-        let area = Rect::new(0, 0, 80, 3);
-        let mut buf = Buffer::empty(area);
-
-        ui.render_status(area, &mut buf);
-
-        let rendered = (0..area.height)
-            .map(|y| {
-                (0..area.width)
-                    .map(|x| buf[(x, y)].symbol())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let rendered = render_status_line(&ui);
 
         assert!(rendered.contains("Loaded memories."));
+        assert!(rendered.contains("? help q"));
+    }
+
+    #[test]
+    fn insert_form_without_status_message_still_shows_static_hints() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
+            .focus(Focus::Form);
+        let rendered = render_status_line(&ui);
+
+        assert!(rendered.contains("cycle/picker/submit"));
+        assert!(!rendered.contains("│  │"));
     }
 }
