@@ -52,7 +52,6 @@ fn write_temp_file_with_extension(extension: &str, contents: &str) -> String {
     fs::write(&path, contents).expect("temporary file should be writable");
     path.display().to_string()
 }
-
 fn live_memory(id: &str, title: &str) -> KinicRecord {
     KinicRecord::new(
         id,
@@ -255,7 +254,7 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
 }
 
 #[test]
-fn mock_insert_rejects_invalid_embedding_json() {
+fn mock_insert_rejects_invalid_embedding_json_before_background_submit() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
         insert_mode: InsertMode::ManualEmbedding,
@@ -275,31 +274,6 @@ fn mock_insert_rejects_invalid_embedding_json() {
         CoreEffect::InsertFormError(Some(message))
             if message.contains("Embedding must be a JSON array")
     )));
-}
-
-#[test]
-fn mock_insert_uses_saved_default_memory_when_target_is_blank() {
-    let mut provider = KinicProvider::new(mock_config());
-    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
-    let state = CoreState {
-        saved_default_memory_id: Some("aaaaa-aa".to_string()),
-        insert_memory_id: "aaaaa-aa".to_string(),
-        insert_mode: InsertMode::InlineText,
-        insert_tag: "docs".to_string(),
-        insert_text: "payload".to_string(),
-        ..CoreState::default()
-    };
-
-    let output = provider
-        .handle_action(&CoreAction::InsertSubmit, &state)
-        .expect("insert submit should succeed");
-
-    assert!(output.effects.contains(&CoreEffect::InsertFormError(None)));
-    assert!(
-        output
-            .effects
-            .contains(&CoreEffect::ResetInsertFormForRepeat)
-    );
 }
 
 #[test]
@@ -578,7 +552,7 @@ fn mock_insert_rejects_missing_pdf_path() {
 }
 
 #[test]
-fn mock_insert_accepts_existing_pdf_without_prevalidating_conversion() {
+fn mock_insert_reports_live_mode_requirement_for_existing_pdf_file() {
     let mut provider = KinicProvider::new(mock_config());
     let file_path = write_temp_file_with_extension("pdf", "not really a pdf");
     let state = CoreState {
@@ -593,25 +567,22 @@ fn mock_insert_accepts_existing_pdf_without_prevalidating_conversion() {
         .handle_action(&CoreAction::InsertSubmit, &state)
         .expect("insert submit should succeed");
 
-    assert!(output.effects.contains(&CoreEffect::InsertFormError(None)));
-    assert!(
-        output
-            .effects
-            .contains(&CoreEffect::ResetInsertFormForRepeat)
-    );
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message == "Insert submit is only available in live mode."
+    )));
     fs::remove_file(file_path).expect("temporary file should be removable");
 }
 
 #[test]
-fn mock_insert_accepts_file_without_inline_text() {
+fn mock_insert_rejects_nonexistent_normal_file_path_before_background_submit() {
     let mut provider = KinicProvider::new(mock_config());
-    let file_path = write_temp_markdown_file("# title");
     let state = CoreState {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_text: "   ".to_string(),
-        insert_file_path_input: file_path.clone(),
+        insert_file_path_input: "/path/that/does/not/need/to/exist.md".to_string(),
         ..CoreState::default()
     };
 
@@ -619,17 +590,15 @@ fn mock_insert_accepts_file_without_inline_text() {
         .handle_action(&CoreAction::InsertSubmit, &state)
         .expect("insert submit should succeed");
 
-    assert!(output.effects.contains(&CoreEffect::InsertFormError(None)));
-    assert!(
-        output
-            .effects
-            .contains(&CoreEffect::ResetInsertFormForRepeat)
-    );
-    fs::remove_file(file_path).expect("temporary file should be removable");
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message.contains("File path does not exist")
+    )));
 }
 
 #[test]
-fn mock_insert_accepts_valid_request_only_after_validation() {
+fn mock_insert_rejects_valid_request_after_validation() {
     let mut provider = KinicProvider::new(mock_config());
     let state = CoreState {
         insert_mode: InsertMode::InlineText,
@@ -643,9 +612,13 @@ fn mock_insert_accepts_valid_request_only_after_validation() {
         .handle_action(&CoreAction::InsertSubmit, &state)
         .expect("insert submit should succeed");
 
-    assert!(output.effects.contains(&CoreEffect::InsertFormError(None)));
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message == "Insert submit is only available in live mode."
+    )));
     assert!(
-        output
+        !output
             .effects
             .iter()
             .any(|effect| matches!(effect, CoreEffect::ResetInsertFormForRepeat))

@@ -7,7 +7,9 @@ use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::{
     create_domain::derive_create_cost,
-    insert_service::{InsertRequest, validate_insert_request},
+    insert_service::{
+        InsertRequest, validate_insert_request_fields, validate_insert_request_for_submit,
+    },
     tui::TuiAuth,
 };
 use serde::Deserialize;
@@ -873,7 +875,8 @@ impl KinicProvider {
         }
 
         let request = self.build_insert_request(state);
-        validate_insert_request(&request).map_err(|error| error.to_string())
+        validate_insert_request_fields(&request).map_err(|error| error.to_string())?;
+        validate_insert_request_for_submit(&request).map_err(|error| error.to_string())
     }
 
     fn invalidate_pending_create_cost(&mut self) {
@@ -1548,8 +1551,9 @@ impl DataProvider for KinicProvider {
                     let request = self.build_insert_request(state);
                     effects.push(self.start_insert_submit(request));
                 } else {
-                    effects.push(CoreEffect::InsertFormError(None));
-                    effects.push(CoreEffect::ResetInsertFormForRepeat);
+                    effects.push(CoreEffect::Notify(
+                        "Insert submit is only available in live mode.".to_string(),
+                    ));
                 }
             }
             CoreAction::CreateRefresh => {
