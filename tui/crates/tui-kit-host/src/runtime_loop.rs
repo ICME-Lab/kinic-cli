@@ -6,8 +6,8 @@ use tui_kit_render::theme::Theme;
 use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, apply_snapshot, dispatch_action,
-    PickerContext, PickerState,
+    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, PickerContext, PickerState,
+    apply_snapshot, dispatch_action,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
@@ -437,13 +437,16 @@ fn picker_overlay_action(
             crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitPicker),
             crossterm::event::KeyCode::Down => Some(CoreAction::MovePickerNext),
             crossterm::event::KeyCode::Up => Some(CoreAction::MovePickerPrev),
+            crossterm::event::KeyCode::Char('d') => Some(CoreAction::DeleteSelectedPickerItem),
             _ => None,
         },
         PickerState::Input { .. } => match code {
             crossterm::event::KeyCode::Esc => Some(CoreAction::ClosePicker),
             crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitPicker),
             crossterm::event::KeyCode::Backspace => Some(CoreAction::PickerBackspace),
-            crossterm::event::KeyCode::Char(c) if !c.is_control() => Some(CoreAction::PickerInput(c)),
+            crossterm::event::KeyCode::Char(c) if !c.is_control() => {
+                Some(CoreAction::PickerInput(c))
+            }
             _ => None,
         },
     }
@@ -509,6 +512,7 @@ fn should_clear_persistent_status(action: &CoreAction) -> bool {
             | CoreAction::OpenPicker(_)
             | CoreAction::MovePickerNext
             | CoreAction::MovePickerPrev
+            | CoreAction::DeleteSelectedPickerItem
             | CoreAction::SubmitPicker
             | CoreAction::PickerInput(_)
             | CoreAction::PickerBackspace

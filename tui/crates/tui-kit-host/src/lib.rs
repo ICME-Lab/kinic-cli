@@ -363,6 +363,10 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 }
                 state.insert_error = None;
             }
+            CoreEffect::SetInsertTag(tag) => {
+                state.insert_tag = tag.clone();
+                state.insert_error = None;
+            }
             CoreEffect::Custom { id, payload } => {
                 state.persistent_status_message = None;
                 state.status_message = Some(match payload {

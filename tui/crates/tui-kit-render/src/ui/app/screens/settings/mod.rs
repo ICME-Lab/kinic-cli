@@ -70,7 +70,20 @@ pub(crate) fn picker_lines(
     context: PickerContext,
     items: &[PickerItem],
     selected_index: usize,
+    confirm_delete_id: Option<&str>,
 ) -> Vec<(String, PickerLineKind)> {
+    if let Some(tag) = confirm_delete_id {
+        return vec![
+            (String::new(), PickerLineKind::Normal),
+            (format!(" Delete tag \"{tag}\"?"), PickerLineKind::Selected),
+            (String::new(), PickerLineKind::Normal),
+            (
+                " Enter: confirm  Esc: cancel".to_string(),
+                PickerLineKind::Hint,
+            ),
+        ];
+    }
+
     let mut lines = Vec::new();
 
     if items.is_empty() {
@@ -103,7 +116,14 @@ pub(crate) fn picker_lines(
     lines
 }
 
-pub(crate) fn picker_title(context: PickerContext) -> &'static str {
+pub(crate) fn picker_title(
+    context: PickerContext,
+    confirm_delete_id: Option<&str>,
+) -> &'static str {
+    if confirm_delete_id.is_some() {
+        return "Delete saved tag";
+    }
+
     match context {
         PickerContext::DefaultMemory => "Select default memory",
         PickerContext::InsertTarget => "Select target memory",
@@ -118,7 +138,7 @@ pub(crate) fn picker_hint(context: PickerContext) -> &'static str {
         PickerContext::DefaultMemory => " Enter: save  ↑/↓: move  Esc: close",
         PickerContext::InsertTarget => " Enter: use target  ↑/↓: move  Esc: close",
         PickerContext::InsertTag => " Enter: choose  ↑/↓: move  Esc: close",
-        PickerContext::TagManagement => " Enter: add/select  ↑/↓: move  Esc: close",
+        PickerContext::TagManagement => " Enter: use  d: delete  ↑/↓: browse  Esc: close",
         PickerContext::AddTag => " Enter: save tag  Esc: close",
     }
 }
@@ -134,7 +154,10 @@ pub(crate) fn picker_input_placeholder(context: PickerContext) -> &'static str {
 }
 
 fn show_current_default_marker(context: PickerContext) -> bool {
-    matches!(context, PickerContext::DefaultMemory)
+    matches!(
+        context,
+        PickerContext::DefaultMemory | PickerContext::InsertTag | PickerContext::TagManagement
+    )
 }
 
 fn picker_empty_message(context: PickerContext) -> &'static str {
@@ -239,6 +262,7 @@ mod tests {
                 PickerItem::add_action("+ Add new tag"),
             ],
             1,
+            None,
         );
 
         assert!(lines.iter().any(|(line, _)| line.contains("+ Add new tag")));
@@ -250,14 +274,40 @@ mod tests {
             PickerContext::DefaultMemory,
             &[PickerItem::option("aaaaa-aa", "Alpha Memory", true)],
             0,
+            None,
         );
         let insert_lines = picker_lines(
             PickerContext::InsertTarget,
             &[PickerItem::option("aaaaa-aa", "Alpha Memory", true)],
             0,
+            None,
         );
 
         assert!(default_lines.iter().any(|(line, _)| line.contains('★')));
         assert!(!insert_lines.iter().any(|(line, _)| line.contains('★')));
+    }
+
+    #[test]
+    fn tag_management_hint_describes_add_only_behavior() {
+        assert_eq!(
+            picker_hint(PickerContext::TagManagement),
+            " Enter: use  d: delete  ↑/↓: browse  Esc: close"
+        );
+    }
+
+    #[test]
+    fn tag_management_confirm_lines_show_delete_prompt() {
+        let lines = picker_lines(PickerContext::TagManagement, &[], 0, Some("docs"));
+
+        assert!(
+            lines
+                .iter()
+                .any(|(line, _)| line.contains("Delete tag \"docs\"?"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|(line, _)| line.contains("Enter: confirm  Esc: cancel"))
+        );
     }
 }

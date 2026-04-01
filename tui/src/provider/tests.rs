@@ -183,6 +183,7 @@ fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {
             items: Vec::new(),
             selected_index: 0,
             selected_id: None,
+            confirm_delete_id: None,
         },
         ..CoreState::default()
     });
@@ -197,6 +198,7 @@ fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {
             ],
             selected_index: 0,
             selected_id: Some("aaaaa-aa".to_string()),
+            confirm_delete_id: None,
         }
     );
     assert_eq!(
@@ -221,6 +223,7 @@ fn build_snapshot_prefers_explicit_insert_memory_id_for_insert_selector() {
             items: Vec::new(),
             selected_index: 0,
             selected_id: None,
+            confirm_delete_id: None,
         },
         insert_memory_id: "bbbbb-bb".to_string(),
         ..CoreState::default()
@@ -236,6 +239,7 @@ fn build_snapshot_prefers_explicit_insert_memory_id_for_insert_selector() {
             ],
             selected_index: 1,
             selected_id: Some("bbbbb-bb".to_string()),
+            confirm_delete_id: None,
         }
     );
     assert_eq!(snapshot.insert_memory_placeholder, None);
@@ -254,6 +258,7 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
             ],
             selected_index: 1,
             selected_id: Some("bbbbb-bb".to_string()),
+            confirm_delete_id: None,
         },
         ..CoreState::default()
     };
@@ -274,6 +279,105 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
         effect,
         CoreEffect::Notify(message) if message == "Selected target memory bbbbb-bb"
     )));
+}
+
+#[test]
+fn submit_tag_management_existing_tag_sets_insert_tag_without_switching_tabs() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.saved_tags = vec!["docs".to_string(), "research".to_string()];
+    let state = CoreState {
+        current_tab_id: KINIC_SETTINGS_TAB_ID.to_string(),
+        picker: PickerState::List {
+            context: PickerContext::TagManagement,
+            items: vec![
+                PickerItem::option("docs", "docs", false),
+                PickerItem::option("research", "research", false),
+                PickerItem::add_action("+ Add new tag"),
+            ],
+            selected_index: 0,
+            selected_id: Some("docs".to_string()),
+            confirm_delete_id: None,
+        },
+        insert_tag: "existing-insert-tag".to_string(),
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::SubmitPicker, &state)
+        .expect("tag management submit output");
+
+    assert_eq!(
+        provider.user_preferences.saved_tags,
+        vec!["docs", "research"]
+    );
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::SetInsertTag(tag) if tag == "docs"
+    )));
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Selected tag docs for insert"
+    )));
+    assert_eq!(
+        output.snapshot.expect("snapshot").picker,
+        PickerState::Closed
+    );
+}
+
+#[test]
+fn save_tags_to_preferences_updates_saved_tags_in_tests() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.saved_tags = vec!["docs".to_string()];
+
+    let effect = provider.save_tags_to_preferences("  research  ".to_string());
+
+    assert_eq!(effect, CoreEffect::Notify("Saved tag research".to_string()));
+    assert_eq!(provider.preferences_health, PreferencesHealth::default());
+    assert_eq!(
+        provider.user_preferences.saved_tags,
+        vec!["docs", "research"]
+    );
+}
+
+#[test]
+fn submit_tag_management_delete_confirm_removes_saved_tag_and_keeps_picker_open() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.saved_tags = vec!["docs".to_string(), "research".to_string()];
+
+    let output = provider
+        .handle_action(
+            &CoreAction::SubmitPicker,
+            &CoreState {
+                picker: PickerState::List {
+                    context: PickerContext::TagManagement,
+                    items: vec![
+                        PickerItem::option("docs", "docs", false),
+                        PickerItem::option("research", "research", false),
+                        PickerItem::add_action("+ Add new tag"),
+                    ],
+                    selected_index: 1,
+                    selected_id: Some("research".to_string()),
+                    confirm_delete_id: Some("research".to_string()),
+                },
+                insert_tag: "research".to_string(),
+                ..CoreState::default()
+            },
+        )
+        .expect("delete confirm output");
+
+    assert_eq!(provider.user_preferences.saved_tags, vec!["docs"]);
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Deleted tag research"
+    )));
+    assert!(matches!(
+        output.snapshot.expect("snapshot").picker,
+        PickerState::List {
+            context: PickerContext::TagManagement,
+            confirm_delete_id: None,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -527,6 +631,7 @@ fn build_snapshot_exposes_picker_titles() {
             items: Vec::new(),
             selected_index: 0,
             selected_id: None,
+            confirm_delete_id: None,
         },
         ..CoreState::default()
     });
@@ -541,6 +646,7 @@ fn build_snapshot_exposes_picker_titles() {
             ],
             selected_index: 0,
             selected_id: Some("aaaaa-aa".to_string()),
+            confirm_delete_id: None,
         }
     );
 }
@@ -1173,7 +1279,10 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
     )));
     let snapshot = provider.build_snapshot(&CoreState::default());
     assert_eq!(snapshot.items[1].leading_marker.as_deref(), Some("★"));
-    assert_eq!(snapshot.saved_default_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(
+        snapshot.saved_default_memory_id.as_deref(),
+        Some("bbbbb-bb")
+    );
 }
 
 #[test]
@@ -1370,6 +1479,50 @@ fn apply_reloaded_preferences_updates_health_for_success_and_failure() {
     );
     assert_eq!(
         provider.preferences_health.load_error.as_deref(),
+        Some("No config directory found")
+    );
+}
+
+#[test]
+fn apply_reloaded_preferences_preserves_saved_tags_on_success_and_failure() {
+    let mut user_preferences = UserPreferences {
+        default_memory_id: Some("aaaaa-aa".to_string()),
+        saved_tags: vec!["docs".to_string()],
+    };
+    let mut preferences_health = PreferencesHealth {
+        load_error: Some("invalid YAML".to_string()),
+        save_error: Some("save failed".to_string()),
+    };
+
+    apply_reloaded_preferences(
+        &mut user_preferences,
+        &mut preferences_health,
+        UserPreferences {
+            default_memory_id: Some("bbbbb-bb".to_string()),
+            saved_tags: vec!["docs".to_string(), "research".to_string()],
+        },
+        Ok(UserPreferences {
+            default_memory_id: Some("bbbbb-bb".to_string()),
+            saved_tags: vec!["docs".to_string(), "research".to_string()],
+        }),
+    );
+
+    assert_eq!(preferences_health, PreferencesHealth::default());
+    assert_eq!(user_preferences.saved_tags, vec!["docs", "research"]);
+
+    apply_reloaded_preferences(
+        &mut user_preferences,
+        &mut preferences_health,
+        UserPreferences {
+            default_memory_id: Some("ccccc-cc".to_string()),
+            saved_tags: vec!["ops".to_string()],
+        },
+        Err(tui_kit_host::settings::SettingsError::NoConfigDir),
+    );
+
+    assert_eq!(user_preferences.saved_tags, vec!["ops"]);
+    assert_eq!(
+        preferences_health.load_error.as_deref(),
         Some("No config directory found")
     );
 }

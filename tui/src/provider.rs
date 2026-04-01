@@ -220,9 +220,14 @@ fn picker_items_for_context(
             })
             .collect(),
         PickerContext::InsertTag | PickerContext::TagManagement => {
+            let current_insert_tag = state.insert_tag.trim();
             let mut items = saved_tag_selection(user_preferences)
                 .into_iter()
-                .map(|tag| PickerItem::option(tag.clone(), tag, false))
+                .map(|tag| {
+                    let is_current_insert_tag =
+                        !current_insert_tag.is_empty() && current_insert_tag == tag;
+                    PickerItem::option(tag.clone(), tag, is_current_insert_tag)
+                })
                 .collect::<Vec<_>>();
             items.push(PickerItem::add_action("+ Add new tag"));
             items
@@ -230,7 +235,12 @@ fn picker_items_for_context(
         PickerContext::AddTag => match &state.picker {
             PickerState::Input { origin_context, .. } => origin_context
                 .map(|origin_context| {
-                    picker_items_for_context(origin_context, state, memory_selection, user_preferences)
+                    picker_items_for_context(
+                        origin_context,
+                        state,
+                        memory_selection,
+                        user_preferences,
+                    )
                 })
                 .unwrap_or_default(),
             _ => Vec::new(),
@@ -285,10 +295,7 @@ impl<'a> DefaultMemoryController<'a> {
             .expect("settings io lock should be available");
         match settings::save_user_preferences(&updated_preferences) {
             Ok(()) => {
-                #[cfg(test)]
-                let reloaded_preferences = Ok(updated_preferences.clone());
-                #[cfg(not(test))]
-                let reloaded_preferences = settings::load_user_preferences();
+                let reloaded_preferences = reload_preferences_for_apply(&updated_preferences);
                 self.apply_reloaded_preferences(updated_preferences, reloaded_preferences);
                 CoreEffect::Notify(format!("Default memory set to {memory_id}"))
             }
@@ -337,6 +344,20 @@ fn apply_reloaded_preferences(
             updated_preferences
         }
     };
+}
+
+fn reload_preferences_for_apply(
+    _updated_preferences: &UserPreferences,
+) -> Result<UserPreferences, tui_kit_host::settings::SettingsError> {
+    #[cfg(test)]
+    {
+        Ok(_updated_preferences.clone())
+    }
+
+    #[cfg(not(test))]
+    {
+        settings::load_user_preferences()
+    }
 }
 
 #[cfg(test)]
@@ -670,10 +691,15 @@ impl KinicProvider {
                 context,
                 selected_index,
                 selected_id,
+                confirm_delete_id,
                 ..
             } => {
-                let items =
-                    picker_items_for_context(*context, state, default_memory, &self.user_preferences);
+                let items = picker_items_for_context(
+                    *context,
+                    state,
+                    default_memory,
+                    &self.user_preferences,
+                );
                 let preferred_selected_id = selected_id.clone().or_else(|| match context {
                     PickerContext::DefaultMemory => self.user_preferences.default_memory_id.clone(),
                     PickerContext::InsertTarget => {
@@ -686,18 +712,25 @@ impl KinicProvider {
                     }
                     PickerContext::TagManagement | PickerContext::AddTag => None,
                 });
-                let resolved_index =
-                    picker_selected_index(&items, preferred_selected_id.as_deref(), *selected_index);
+                let resolved_index = picker_selected_index(
+                    &items,
+                    preferred_selected_id.as_deref(),
+                    *selected_index,
+                );
                 let resolved_selected_id =
                     items.get(resolved_index).and_then(|item| match item.kind {
                         PickerItemKind::Option => Some(item.id.clone()),
                         PickerItemKind::AddAction => None,
                     });
+                let resolved_confirm_delete_id = confirm_delete_id
+                    .clone()
+                    .filter(|confirm_id| items.iter().any(|item| item.id == *confirm_id));
                 PickerState::List {
                     context: *context,
                     items,
                     selected_index: resolved_index,
                     selected_id: resolved_selected_id,
+                    confirm_delete_id: resolved_confirm_delete_id,
                 }
             }
         };
@@ -745,7 +778,11 @@ impl KinicProvider {
         }
     }
 
-    fn build_snapshot_with_picker(&self, state: &CoreState, picker: PickerState) -> ProviderSnapshot {
+    fn build_snapshot_with_picker(
+        &self,
+        state: &CoreState,
+        picker: PickerState,
+    ) -> ProviderSnapshot {
         let mut snapshot = self.build_snapshot(state);
         snapshot.picker = picker;
         snapshot
@@ -795,17 +832,53 @@ impl KinicProvider {
             .expect("settings io lock should be available");
         match settings::save_user_preferences(&updated_preferences) {
             Ok(()) => {
+                let reloaded_preferences = reload_preferences_for_apply(&updated_preferences);
                 apply_reloaded_preferences(
                     &mut self.user_preferences,
                     &mut self.preferences_health,
                     updated_preferences,
-                    settings::load_user_preferences(),
+                    reloaded_preferences,
                 );
                 CoreEffect::Notify(format!("Saved tag {normalized_tag}"))
             }
             Err(error) => {
                 self.preferences_health.save_error = Some(error.to_string());
                 CoreEffect::Notify(format!("Tag save failed: {error}"))
+            }
+        }
+    }
+
+    fn delete_tag_from_preferences(&mut self, tag: &str) -> CoreEffect {
+        let normalized_tag = tag.trim().to_string();
+        if normalized_tag.is_empty() {
+            return CoreEffect::Notify("Tag cannot be empty.".to_string());
+        }
+
+        let mut updated_preferences = self.user_preferences.clone();
+        updated_preferences
+            .saved_tags
+            .retain(|saved| saved != &normalized_tag);
+        updated_preferences.saved_tags =
+            settings::normalize_saved_tags(updated_preferences.saved_tags);
+
+        #[cfg(test)]
+        let _settings_io_lock = settings_io_lock()
+            .lock()
+            .expect("settings io lock should be available");
+        match settings::save_user_preferences(&updated_preferences) {
+            Ok(()) => {
+                let reloaded_preferences = reload_preferences_for_apply(&updated_preferences);
+                apply_reloaded_preferences(
+                    &mut self.user_preferences,
+                    &mut self.preferences_health,
+                    updated_preferences,
+                    reloaded_preferences,
+                );
+                CoreEffect::Notify(format!("Deleted tag {normalized_tag}"))
+            }
+            Err(error) => {
+                self.preferences_health.save_error = Some(error.to_string());
+                CoreEffect::Notify(format!("Tag delete failed: {error}"))
             }
         }
     }
@@ -1725,6 +1798,7 @@ impl DataProvider for KinicProvider {
             | CoreAction::ClosePicker
             | CoreAction::MovePickerNext
             | CoreAction::MovePickerPrev
+            | CoreAction::DeleteSelectedPickerItem
             | CoreAction::PickerInput(_)
             | CoreAction::PickerBackspace => {}
             CoreAction::ScrollContentPageDown => {}
@@ -1747,8 +1821,19 @@ impl DataProvider for KinicProvider {
                     context,
                     items,
                     selected_index,
+                    confirm_delete_id,
                     ..
                 } => {
+                    if let Some(tag) = confirm_delete_id {
+                        if *context == PickerContext::TagManagement {
+                            effects.push(self.delete_tag_from_preferences(tag));
+                        }
+                        return Ok(ProviderOutput {
+                            snapshot: Some(self.build_snapshot(state)),
+                            effects,
+                        });
+                    }
+
                     let Some(item) = items.get(*selected_index) else {
                         effects.push(CoreEffect::Notify("No options available yet.".to_string()));
                         return Ok(ProviderOutput {
@@ -1776,7 +1861,14 @@ impl DataProvider for KinicProvider {
                                 item.id
                             )));
                         }
-                        PickerContext::InsertTag | PickerContext::TagManagement => {}
+                        PickerContext::InsertTag => {}
+                        PickerContext::TagManagement => {
+                            effects.push(CoreEffect::SetInsertTag(item.id.clone()));
+                            effects.push(CoreEffect::Notify(format!(
+                                "Selected tag {} for insert",
+                                item.id
+                            )));
+                        }
                         PickerContext::AddTag => {}
                     }
                 }
@@ -1817,7 +1909,14 @@ impl DataProvider for KinicProvider {
                             | PickerContext::TagManagement
                     ) =>
             {
-                self.build_snapshot_with_picker(state, PickerState::Closed)
+                match &state.picker {
+                    PickerState::List {
+                        context: PickerContext::TagManagement,
+                        confirm_delete_id: Some(_),
+                        ..
+                    } => self.build_snapshot(state),
+                    _ => self.build_snapshot_with_picker(state, PickerState::Closed),
+                }
             }
             _ => self.build_snapshot(state),
         };

@@ -2,7 +2,9 @@ use super::*;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
 };
-use tui_kit_runtime::{CoreError, CoreResult, PickerContext, PickerState, ProviderOutput, ProviderSnapshot};
+use tui_kit_runtime::{
+    CoreError, CoreResult, PickerContext, PickerState, ProviderOutput, ProviderSnapshot,
+};
 
 struct TestProvider {
     result: CoreResult<ProviderOutput>,
@@ -95,11 +97,26 @@ fn picker_overlay_action_maps_generic_picker_keys() {
                 items: Vec::new(),
                 selected_index: 0,
                 selected_id: None,
+                confirm_delete_id: None,
             },
             crossterm::event::KeyCode::Down,
             crossterm::event::KeyModifiers::NONE
         ),
         Some(CoreAction::MovePickerNext)
+    );
+    assert_eq!(
+        picker_overlay_action(
+            &PickerState::List {
+                context: PickerContext::TagManagement,
+                items: Vec::new(),
+                selected_index: 0,
+                selected_id: None,
+                confirm_delete_id: None,
+            },
+            crossterm::event::KeyCode::Char('d'),
+            crossterm::event::KeyModifiers::NONE
+        ),
+        Some(CoreAction::DeleteSelectedPickerItem)
     );
     assert_eq!(
         picker_overlay_action(
@@ -124,6 +141,7 @@ fn handle_overlay_input_returns_dispatch_error_when_selector_action_fails() {
             items: Vec::new(),
             selected_index: 0,
             selected_id: None,
+            confirm_delete_id: None,
         },
         ..CoreState::default()
     };
@@ -169,6 +187,7 @@ fn handle_overlay_input_consumes_unknown_selector_keys() {
             items: Vec::new(),
             selected_index: 0,
             selected_id: None,
+            confirm_delete_id: None,
         },
         ..CoreState::default()
     };

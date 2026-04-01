@@ -211,9 +211,15 @@ impl<'a> TuiKitUi<'a> {
                 context,
                 items,
                 selected_index,
+                confirm_delete_id,
                 ..
             } => {
-                let lines = picker_lines(*context, items, *selected_index);
+                let lines = picker_lines(
+                    *context,
+                    items,
+                    *selected_index,
+                    confirm_delete_id.as_deref(),
+                );
                 let Some((w, h)) =
                     fit_overlay_rect(area, 58, lines.len().saturating_add(2) as u16, 8)
                 else {
@@ -226,7 +232,20 @@ impl<'a> TuiKitUi<'a> {
                     height: h,
                 };
                 Clear.render(picker_area, buf);
-                let text = visible_picker_lines(lines, h)
+                let mut visible = visible_picker_lines(lines, h);
+                if confirm_delete_id.is_some() {
+                    let content_height = h.saturating_sub(2) as usize;
+                    if content_height > visible.len() {
+                        let top_padding = (content_height - visible.len()) / 2;
+                        let mut padded = Vec::with_capacity(top_padding + visible.len());
+                        padded.extend(
+                            (0..top_padding).map(|_| (String::new(), PickerLineKind::Normal)),
+                        );
+                        padded.append(&mut visible);
+                        visible = padded;
+                    }
+                }
+                let text = visible
                     .into_iter()
                     .map(render_picker_line(self.theme))
                     .collect::<Vec<_>>();
@@ -235,7 +254,10 @@ impl<'a> TuiKitUi<'a> {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(self.theme.style_border_focused())
-                            .title(format!(" {} ", picker_title(*context)))
+                            .title(format!(
+                                " {} ",
+                                picker_title(*context, confirm_delete_id.as_deref())
+                            ))
                             .style(Style::default().bg(self.theme.bg_panel)),
                     )
                     .wrap(Wrap { trim: false })
@@ -273,7 +295,7 @@ impl<'a> TuiKitUi<'a> {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(self.theme.style_border_focused())
-                            .title(format!(" {} ", picker_title(*context)))
+                            .title(format!(" {} ", picker_title(*context, None)))
                             .style(Style::default().bg(self.theme.bg_panel)),
                     )
                     .wrap(Wrap { trim: false })
@@ -439,6 +461,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>(),
             10,
+            None,
         );
         let visible = visible_picker_lines(lines, 8);
         assert!(

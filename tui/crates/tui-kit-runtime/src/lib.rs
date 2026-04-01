@@ -192,6 +192,7 @@ pub enum PickerState {
         items: Vec<PickerItem>,
         selected_index: usize,
         selected_id: Option<String>,
+        confirm_delete_id: Option<String>,
     },
     Input {
         context: PickerContext,
@@ -470,6 +471,7 @@ pub enum CoreAction {
     ClosePicker,
     MovePickerNext,
     MovePickerPrev,
+    DeleteSelectedPickerItem,
     SubmitPicker,
     PickerInput(char),
     PickerBackspace,
@@ -564,6 +566,8 @@ pub enum CoreEffect {
     ResetInsertFormForRepeat,
     /// Apply a selector-picked insert target without routing it through text input.
     SetInsertMemoryId(String),
+    /// Apply a selector-picked insert tag without routing it through text input.
+    SetInsertTag(String),
     /// Escape hatch for domain-specific integrations (examples, experiments).
     Custom {
         id: String,
@@ -753,6 +757,9 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         CoreAction::MovePickerPrev => {
             move_picker_prev(state);
+        }
+        CoreAction::DeleteSelectedPickerItem => {
+            begin_picker_delete_confirm(state);
         }
         CoreAction::SubmitPicker => {
             submit_picker(state);
@@ -1317,6 +1324,7 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
             items,
             selected_index,
             selected_id,
+            confirm_delete_id,
         } => {
             let previous_index = match &state.picker {
                 PickerState::List {
@@ -1334,6 +1342,14 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
                 } if *previous_context == context => selected_id.clone(),
                 _ => selected_id.clone(),
             };
+            let previous_confirm_delete_id = match &state.picker {
+                PickerState::List {
+                    context: previous_context,
+                    confirm_delete_id,
+                    ..
+                } if *previous_context == context => confirm_delete_id.clone(),
+                _ => confirm_delete_id.clone(),
+            };
             if previous_selected_id.is_none()
                 && previous_index < items.len()
                 && items[previous_index].kind == PickerItemKind::AddAction
@@ -1343,6 +1359,7 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
                     items,
                     selected_index: previous_index,
                     selected_id: None,
+                    confirm_delete_id: None,
                 };
             }
             let resolved_selected_id = previous_selected_id.or(selected_id);
@@ -1353,18 +1370,19 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
                 previous_index,
                 state,
             );
-            let resolved_selected_id = items
-                .get(resolved_index)
-                .and_then(|item| match item.kind {
-                    PickerItemKind::Option => Some(item.id.clone()),
-                    PickerItemKind::AddAction => None,
-                });
+            let resolved_selected_id = items.get(resolved_index).and_then(|item| match item.kind {
+                PickerItemKind::Option => Some(item.id.clone()),
+                PickerItemKind::AddAction => None,
+            });
+            let resolved_confirm_delete_id = previous_confirm_delete_id
+                .filter(|confirm_id| items.iter().any(|item| item.id == *confirm_id));
 
             PickerState::List {
                 context,
                 items,
                 selected_index: resolved_index,
                 selected_id: resolved_selected_id,
+                confirm_delete_id: resolved_confirm_delete_id,
             }
         }
     }
@@ -1381,24 +1399,25 @@ fn picker_selected_index(
         return 0;
     }
 
-    let preferred_selected_id = preferred_selected_id
-        .map(str::to_string)
-        .or_else(|| match context {
-            PickerContext::DefaultMemory => state.saved_default_memory_id.clone(),
-            PickerContext::InsertTarget => {
-                let insert_memory_id = state.insert_memory_id.trim();
-                if insert_memory_id.is_empty() {
-                    state.saved_default_memory_id.clone()
-                } else {
-                    Some(insert_memory_id.to_string())
+    let preferred_selected_id =
+        preferred_selected_id
+            .map(str::to_string)
+            .or_else(|| match context {
+                PickerContext::DefaultMemory => state.saved_default_memory_id.clone(),
+                PickerContext::InsertTarget => {
+                    let insert_memory_id = state.insert_memory_id.trim();
+                    if insert_memory_id.is_empty() {
+                        state.saved_default_memory_id.clone()
+                    } else {
+                        Some(insert_memory_id.to_string())
+                    }
                 }
-            }
-            PickerContext::InsertTag => {
-                let insert_tag = state.insert_tag.trim();
-                (!insert_tag.is_empty()).then(|| insert_tag.to_string())
-            }
-            PickerContext::TagManagement | PickerContext::AddTag => None,
-        });
+                PickerContext::InsertTag => {
+                    let insert_tag = state.insert_tag.trim();
+                    (!insert_tag.is_empty()).then(|| insert_tag.to_string())
+                }
+                PickerContext::TagManagement | PickerContext::AddTag => None,
+            });
 
     if let Some(selected_id) = preferred_selected_id
         && let Some(index) = items.iter().position(|item| item.id == selected_id)
@@ -1415,11 +1434,21 @@ fn open_picker(state: &mut CoreState, context: PickerContext) {
         items: Vec::new(),
         selected_index: 0,
         selected_id: None,
+        confirm_delete_id: None,
     };
 }
 
 fn close_picker(state: &mut CoreState) {
-    state.picker = PickerState::Closed;
+    match &mut state.picker {
+        PickerState::List {
+            confirm_delete_id, ..
+        } if confirm_delete_id.is_some() => {
+            *confirm_delete_id = None;
+        }
+        _ => {
+            state.picker = PickerState::Closed;
+        }
+    }
 }
 
 fn move_picker_next(state: &mut CoreState) {
@@ -1427,11 +1456,16 @@ fn move_picker_next(state: &mut CoreState) {
         items,
         selected_index,
         selected_id,
+        confirm_delete_id,
         ..
     } = &mut state.picker
     else {
         return;
     };
+
+    if confirm_delete_id.is_some() {
+        return;
+    }
 
     if items.is_empty() {
         *selected_index = 0;
@@ -1451,11 +1485,16 @@ fn move_picker_prev(state: &mut CoreState) {
         items,
         selected_index,
         selected_id,
+        confirm_delete_id,
         ..
     } = &mut state.picker
     else {
         return;
     };
+
+    if confirm_delete_id.is_some() {
+        return;
+    }
 
     *selected_index = selected_index.saturating_sub(1);
     *selected_id = items.get(*selected_index).and_then(|item| match item.kind {
@@ -1464,13 +1503,43 @@ fn move_picker_prev(state: &mut CoreState) {
     });
 }
 
+fn begin_picker_delete_confirm(state: &mut CoreState) {
+    let PickerState::List {
+        context,
+        items,
+        selected_index,
+        confirm_delete_id,
+        ..
+    } = &mut state.picker
+    else {
+        return;
+    };
+
+    if *context != PickerContext::TagManagement || confirm_delete_id.is_some() {
+        return;
+    }
+
+    let Some(item) = items.get(*selected_index) else {
+        return;
+    };
+    if item.kind != PickerItemKind::Option {
+        return;
+    }
+
+    *confirm_delete_id = Some(item.id.clone());
+}
+
 fn submit_picker(state: &mut CoreState) {
     match &mut state.picker {
         PickerState::Closed => {}
-        PickerState::Input { context, value, .. } => {
+        PickerState::Input {
+            context,
+            origin_context,
+            value,
+        } => {
             if *context == PickerContext::AddTag {
                 let tag = value.trim().to_string();
-                if !tag.is_empty() {
+                if !tag.is_empty() && *origin_context == Some(PickerContext::InsertTag) {
                     state.insert_tag = tag;
                 }
             }
@@ -1480,7 +1549,11 @@ fn submit_picker(state: &mut CoreState) {
             items,
             selected_index,
             selected_id,
+            confirm_delete_id,
         } => {
+            if confirm_delete_id.is_some() {
+                return;
+            }
             let Some(item) = items.get(*selected_index).cloned() else {
                 return;
             };
@@ -1901,11 +1974,15 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("bbbbb-bb".to_string()),
+                confirm_delete_id: None,
             },
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::OpenPicker(PickerContext::InsertTarget));
+        apply_core_action(
+            &mut state,
+            &CoreAction::OpenPicker(PickerContext::InsertTarget),
+        );
 
         assert_eq!(
             state.picker,
@@ -1914,6 +1991,7 @@ mod tests {
                 items: Vec::new(),
                 selected_index: 0,
                 selected_id: None,
+                confirm_delete_id: None,
             }
         );
     }
@@ -1928,7 +2006,10 @@ mod tests {
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::OpenPicker(PickerContext::InsertTarget));
+        apply_core_action(
+            &mut state,
+            &CoreAction::OpenPicker(PickerContext::InsertTarget),
+        );
         apply_snapshot(
             &mut state,
             ProviderSnapshot {
@@ -1940,6 +2021,7 @@ mod tests {
                     ],
                     selected_index: 0,
                     selected_id: None,
+                    confirm_delete_id: None,
                 },
                 ..ProviderSnapshot::default()
             },
@@ -1955,6 +2037,7 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("aaaaa-aa".to_string()),
+                confirm_delete_id: None,
             }
         );
     }
@@ -2198,6 +2281,7 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
+                confirm_delete_id: None,
             },
             ..CoreState::default()
         };
@@ -2214,6 +2298,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: None,
+                confirm_delete_id: None,
             }
         );
     }
@@ -2229,6 +2314,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: None,
+                confirm_delete_id: None,
             },
             ..CoreState::default()
         };
@@ -2256,6 +2342,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: None,
+                confirm_delete_id: None,
             },
             ..CoreState::default()
         };
@@ -2268,6 +2355,7 @@ mod tests {
                 ],
                 selected_index: 0,
                 selected_id: Some("docs".to_string()),
+                confirm_delete_id: None,
             },
             ..ProviderSnapshot::default()
         };
@@ -2284,6 +2372,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: None,
+                confirm_delete_id: None,
             }
         );
     }
@@ -2294,7 +2383,10 @@ mod tests {
             saved_default_memory_id: Some("bbbbb-bb".to_string()),
             ..CoreState::default()
         };
-        apply_core_action(&mut state, &CoreAction::OpenPicker(PickerContext::DefaultMemory));
+        apply_core_action(
+            &mut state,
+            &CoreAction::OpenPicker(PickerContext::DefaultMemory),
+        );
         apply_snapshot(
             &mut state,
             ProviderSnapshot {
@@ -2306,6 +2398,7 @@ mod tests {
                     ],
                     selected_index: 0,
                     selected_id: None,
+                    confirm_delete_id: None,
                 },
                 ..ProviderSnapshot::default()
             },
@@ -2321,6 +2414,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: Some("bbbbb-bb".to_string()),
+                confirm_delete_id: None,
             }
         );
     }
@@ -2332,7 +2426,10 @@ mod tests {
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::OpenPicker(PickerContext::InsertTarget));
+        apply_core_action(
+            &mut state,
+            &CoreAction::OpenPicker(PickerContext::InsertTarget),
+        );
         apply_snapshot(
             &mut state,
             ProviderSnapshot {
@@ -2344,6 +2441,7 @@ mod tests {
                     ],
                     selected_index: 0,
                     selected_id: None,
+                    confirm_delete_id: None,
                 },
                 ..ProviderSnapshot::default()
             },
@@ -2359,6 +2457,7 @@ mod tests {
                 ],
                 selected_index: 1,
                 selected_id: Some("bbbbb-bb".to_string()),
+                confirm_delete_id: None,
             }
         );
     }
@@ -2371,6 +2470,7 @@ mod tests {
                 items: vec![PickerItem::option("docs", "docs", false)],
                 selected_index: 0,
                 selected_id: None,
+                confirm_delete_id: None,
             },
             ..CoreState::default()
         };
@@ -2394,6 +2494,133 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::SubmitPicker);
 
         assert_eq!(state.insert_tag, "research");
+    }
+
+    #[test]
+    fn picker_delete_key_enters_confirm_mode_for_tag_management_option() {
+        let mut state = CoreState {
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+                confirm_delete_id: None,
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::DeleteSelectedPickerItem);
+
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::add_action("+ Add new tag"),
+                ],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+                confirm_delete_id: Some("docs".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn picker_delete_confirm_blocks_navigation_until_canceled() {
+        let mut state = CoreState {
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::option("research", "research", false),
+                ],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+                confirm_delete_id: Some("docs".to_string()),
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::MovePickerNext);
+
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![
+                    PickerItem::option("docs", "docs", false),
+                    PickerItem::option("research", "research", false),
+                ],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+                confirm_delete_id: Some("docs".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn close_picker_cancels_delete_confirm_before_closing() {
+        let mut state = CoreState {
+            picker: PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![PickerItem::option("docs", "docs", false)],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+                confirm_delete_id: Some("docs".to_string()),
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ClosePicker);
+
+        assert_eq!(
+            state.picker,
+            PickerState::List {
+                context: PickerContext::TagManagement,
+                items: vec![PickerItem::option("docs", "docs", false)],
+                selected_index: 0,
+                selected_id: Some("docs".to_string()),
+                confirm_delete_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn picker_input_submit_from_tag_management_does_not_touch_insert_tag() {
+        let mut state = CoreState {
+            insert_tag: "docs".to_string(),
+            picker: PickerState::Input {
+                context: PickerContext::AddTag,
+                origin_context: Some(PickerContext::TagManagement),
+                value: "research".to_string(),
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::SubmitPicker);
+
+        assert_eq!(state.insert_tag, "docs");
+    }
+
+    #[test]
+    fn picker_input_submit_without_origin_does_not_touch_insert_tag() {
+        let mut state = CoreState {
+            insert_tag: "docs".to_string(),
+            picker: PickerState::Input {
+                context: PickerContext::AddTag,
+                origin_context: None,
+                value: "research".to_string(),
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::SubmitPicker);
+
+        assert_eq!(state.insert_tag, "docs");
     }
 
     #[test]

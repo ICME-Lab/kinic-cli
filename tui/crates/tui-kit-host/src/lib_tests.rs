@@ -143,6 +143,23 @@ mod effect_application {
         assert_eq!(state.insert_memory_placeholder, None);
         assert_eq!(state.insert_error, None);
     }
+
+    #[test]
+    fn set_insert_tag_effect_updates_insert_tag() {
+        let mut state = CoreState {
+            insert_tag: "docs".to_string(),
+            insert_error: Some("boom".to_string()),
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(
+            &mut state,
+            vec![CoreEffect::SetInsertTag("research".to_string())],
+        );
+
+        assert_eq!(state.insert_tag, "research");
+        assert_eq!(state.insert_error, None);
+    }
 }
 
 mod global_commands {
