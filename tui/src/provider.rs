@@ -1830,7 +1830,7 @@ let ui = TuiKitUi::new(&theme);
 3. Open content with `Enter`
 
 ### Notes
-- Keep tabs at the end of the focus cycle
+- Keep tabs at the end of the focus order
 - Prioritize consistency over shortcuts
 "#,
         ),
@@ -1860,7 +1860,7 @@ let ui = TuiKitUi::new(&theme);
 - Add one polished domain sample
 
 ### Changelog Snippet
-- `feat`: tabs focus cycle
+- `feat`: tabs focus order
 - `fix`: list scrollbar behavior
 "#,
         ),
@@ -1925,14 +1925,14 @@ Patch quickly, then add snapshot tests.
             "kinic-12",
             "Theme Study",
             "memories",
-            "Compared contrast ratios across dark presets and pink variant.",
+            "Captured notes on the current accent palette and contrast balance.",
             r#"## Theme Study
-- Nord: calm, high legibility
-- Dracula: vivid syntax emphasis
-- Pink: branded accent direction
+- Accent color should remain prominent without reducing text contrast
+- Active tabs need stronger contrast than passive borders
+- Status and syntax colors should stay readable on the dark background
 
 ### Follow-up
-Add high-contrast accessibility preset.
+Revisit accessibility contrast if the palette changes.
 "#,
         ),
         KinicRecord::new(
