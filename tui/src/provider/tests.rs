@@ -3,6 +3,7 @@ use crate::create_domain::derive_create_cost;
 use candid::Nat;
 use std::{
     env, fs,
+    path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tui_kit_runtime::{
@@ -382,7 +383,7 @@ fn validate_insert_state_rejects_missing_file() {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: env::temp_dir()
+        insert_file_path_input: env::temp_dir()
             .join("kinic-missing-file.md")
             .display()
             .to_string(),
@@ -403,7 +404,7 @@ fn validate_insert_state_accepts_existing_non_pdf_file() {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: file_path.clone(),
+        insert_file_path_input: file_path.clone(),
         ..CoreState::default()
     };
 
@@ -419,7 +420,7 @@ fn validate_insert_state_accepts_uppercase_pdf_extension() {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: file_path.clone(),
+        insert_file_path_input: file_path.clone(),
         ..CoreState::default()
     };
 
@@ -435,7 +436,7 @@ fn validate_insert_state_rejects_unsupported_file_extension() {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: file_path.clone(),
+        insert_file_path_input: file_path.clone(),
         ..CoreState::default()
     };
 
@@ -561,7 +562,7 @@ fn mock_insert_rejects_missing_pdf_path() {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: String::new(),
+        insert_file_path_input: String::new(),
         ..CoreState::default()
     };
 
@@ -584,7 +585,7 @@ fn mock_insert_accepts_existing_pdf_without_prevalidating_conversion() {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: file_path.clone(),
+        insert_file_path_input: file_path.clone(),
         ..CoreState::default()
     };
 
@@ -610,7 +611,7 @@ fn mock_insert_accepts_file_without_inline_text() {
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "   ".to_string(),
-        insert_file_path: file_path.clone(),
+        insert_file_path_input: file_path.clone(),
         ..CoreState::default()
     };
 
@@ -659,7 +660,7 @@ fn build_insert_request_uses_inline_text_mode_without_file_path() {
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "hello".to_string(),
-        insert_file_path: "/tmp/ignored.md".to_string(),
+        insert_file_path_input: "/tmp/ignored.md".to_string(),
         ..CoreState::default()
     };
 
@@ -725,7 +726,7 @@ fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "ignored".to_string(),
-        insert_file_path: "/tmp/doc.md".to_string(),
+        insert_file_path_input: "/tmp/doc.md".to_string(),
         ..CoreState::default()
     };
 
@@ -741,13 +742,35 @@ fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
 }
 
 #[test]
+fn build_insert_request_prefers_selected_file_path_over_manual_input() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_file_path_input: "/tmp/manual.md".to_string(),
+        insert_selected_file_path: Some(PathBuf::from("/tmp/dialog.pdf")),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.build_insert_request(&state),
+        InsertRequest::Pdf {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            file_path: PathBuf::from("/tmp/dialog.pdf"),
+        }
+    );
+}
+
+#[test]
 fn build_insert_request_uses_file_mode_for_pdf_paths() {
     let provider = KinicProvider::new(mock_config());
     let state = CoreState {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: "/tmp/doc.PDF".to_string(),
+        insert_file_path_input: "/tmp/doc.PDF".to_string(),
         ..CoreState::default()
     };
 
@@ -757,6 +780,44 @@ fn build_insert_request_uses_file_mode_for_pdf_paths() {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             file_path: std::path::PathBuf::from("/tmp/doc.PDF"),
+        }
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn build_insert_request_preserves_non_utf8_selected_file_path() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let provider = KinicProvider::new(mock_config());
+    let selected_path = PathBuf::from(OsString::from_vec(vec![
+        b'/',
+        b't',
+        b'm',
+        b'p',
+        b'/',
+        0xf0,
+        0x80,
+        b'.',
+        b'm',
+        b'd',
+    ]));
+    let state = CoreState {
+        insert_mode: InsertMode::File,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_tag: "docs".to_string(),
+        insert_selected_file_path: Some(selected_path.clone()),
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider.build_insert_request(&state),
+        InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: None,
+            file_path: Some(selected_path),
         }
     );
 }

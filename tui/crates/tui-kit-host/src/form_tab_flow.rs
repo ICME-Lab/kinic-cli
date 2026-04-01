@@ -75,7 +75,8 @@ pub fn reset_form_state_for_tab(state: &mut CoreState, tab_id: &str) {
         state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
         state.insert_tag.clear();
         state.insert_text.clear();
-        state.insert_file_path.clear();
+        state.insert_file_path_input.clear();
+        state.insert_selected_file_path = None;
         state.insert_embedding.clear();
         state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
         state.insert_spinner_frame = 0;

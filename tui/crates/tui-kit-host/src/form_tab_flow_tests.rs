@@ -146,7 +146,8 @@ fn reset_insert_form_state_clears_insert_fields() {
         insert_mode: InsertMode::File,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
-        insert_file_path: "/tmp/doc.pdf".to_string(),
+        insert_file_path_input: "/tmp/doc.pdf".to_string(),
+        insert_selected_file_path: Some(std::path::PathBuf::from("/tmp/doc.pdf")),
         insert_submit_state: tui_kit_runtime::CreateSubmitState::Submitting,
         insert_error: Some("boom".to_string()),
         insert_focus: InsertFormFocus::Submit,
@@ -158,7 +159,8 @@ fn reset_insert_form_state_clears_insert_fields() {
     assert_eq!(state.insert_mode, InsertMode::File);
     assert_eq!(state.insert_memory_id, "bbbbb-bb");
     assert_eq!(state.insert_tag, "");
-    assert_eq!(state.insert_file_path, "");
+    assert_eq!(state.insert_file_path_input, "");
+    assert_eq!(state.insert_selected_file_path, None);
     assert_eq!(state.insert_error, None);
     assert_eq!(state.insert_focus, InsertFormFocus::Mode);
 }

@@ -1,7 +1,10 @@
 mod provider;
 
 use provider::TaskProvider;
-use tui_kit_host::runtime_loop::{run_provider_app, RuntimeLoopConfig};
+use tui_kit_host::{
+    runtime_loop::{RuntimeLoopConfig, run_provider_app},
+    terminal::rfd_file_picker,
+};
 use tui_kit_render::ui::{BrandingText, HeaderText, TabId, TabSpec, UiConfig};
 use tui_kit_runtime::PaneFocus;
 
@@ -24,6 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ],
             initial_focus: PaneFocus::Items,
             ui_config: task_ui_config,
+            file_picker: Some(rfd_file_picker),
         },
     )
 }

@@ -6,9 +6,13 @@
 pub mod kinic_tabs;
 
 use candid::Nat;
+use std::path::PathBuf;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
 
 pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
+pub const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
+    "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
+];
 
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -337,7 +341,8 @@ pub struct CoreState {
     pub insert_memory_placeholder: Option<String>,
     pub insert_tag: String,
     pub insert_text: String,
-    pub insert_file_path: String,
+    pub insert_file_path_input: String,
+    pub insert_selected_file_path: Option<PathBuf>,
     pub insert_embedding: String,
     pub insert_submit_state: CreateSubmitState,
     pub insert_spinner_frame: usize,
@@ -382,7 +387,8 @@ impl Default for CoreState {
             insert_memory_placeholder: None,
             insert_tag: String::new(),
             insert_text: String::new(),
-            insert_file_path: String::new(),
+            insert_file_path_input: String::new(),
+            insert_selected_file_path: None,
             insert_embedding: String::new(),
             insert_submit_state: CreateSubmitState::default(),
             insert_spinner_frame: 0,
@@ -632,7 +638,10 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 InsertFormFocus::Mode | InsertFormFocus::MemoryId | InsertFormFocus::Submit => {}
                 InsertFormFocus::Tag => state.insert_tag.push(*c),
                 InsertFormFocus::Text => state.insert_text.push(*c),
-                InsertFormFocus::FilePath => state.insert_file_path.push(*c),
+                InsertFormFocus::FilePath => {
+                    state.insert_selected_file_path = None;
+                    state.insert_file_path_input.push(*c);
+                }
                 InsertFormFocus::Embedding => state.insert_embedding.push(*c),
             }
             state.insert_error = None;
@@ -653,7 +662,8 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                     state.insert_text.pop();
                 }
                 InsertFormFocus::FilePath => {
-                    state.insert_file_path.pop();
+                    state.insert_selected_file_path = None;
+                    state.insert_file_path_input.pop();
                 }
                 InsertFormFocus::Embedding => {
                     state.insert_embedding.pop();
@@ -1956,6 +1966,36 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertBackspace);
 
         assert_eq!(state.insert_memory_id, "aaaaa-aa");
+    }
+
+    #[test]
+    fn insert_file_path_backspace_edits_selected_path_buffer() {
+        let mut state = CoreState {
+            insert_focus: InsertFormFocus::FilePath,
+            insert_file_path_input: "/tmp/doc.pdf".to_string(),
+            insert_selected_file_path: Some(PathBuf::from("/tmp/doc.pdf")),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertBackspace);
+
+        assert_eq!(state.insert_selected_file_path, None);
+        assert_eq!(state.insert_file_path_input, "/tmp/doc.pd");
+    }
+
+    #[test]
+    fn insert_file_path_input_appends_to_selected_path_buffer() {
+        let mut state = CoreState {
+            insert_focus: InsertFormFocus::FilePath,
+            insert_file_path_input: "/tmp/doc.pdf".to_string(),
+            insert_selected_file_path: Some(PathBuf::from("/tmp/doc.pdf")),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertInput('x'));
+
+        assert_eq!(state.insert_selected_file_path, None);
+        assert_eq!(state.insert_file_path_input, "/tmp/doc.pdfx");
     }
 
     #[test]

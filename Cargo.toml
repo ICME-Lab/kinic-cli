@@ -36,7 +36,7 @@ ring = "0.17.14"
 der = "0.7.10"
 pkcs8 = "0.10.2"
 ic-ed25519 = "0.2.0"
-tui-kit-host = { path = "tui/crates/tui-kit-host" }
+tui-kit-host = { path = "tui/crates/tui-kit-host", features = ["rfd-file-picker"] }
 tui-kit-runtime = { path = "tui/crates/tui-kit-runtime" }
 tui-kit-model = { path = "tui/crates/tui-kit-model" }
 tui-kit-render = { path = "tui/crates/tui-kit-render" }

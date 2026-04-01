@@ -13,9 +13,10 @@ use crate::{
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, InsertMode,
-    LoadedCreateCost, MemorySelectorContext, MemorySelectorItem, PaneFocus, ProviderOutput,
-    ProviderSnapshot, SessionAccountOverview, SessionSettingsSnapshot,
+    CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider,
+    FILE_MODE_ALLOWED_EXTENSIONS, InsertMode, LoadedCreateCost, MemorySelectorContext,
+    MemorySelectorItem, PaneFocus, ProviderOutput, ProviderSnapshot, SessionAccountOverview,
+    SessionSettingsSnapshot,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -762,9 +763,7 @@ impl KinicProvider {
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
         let memory_id = state.insert_memory_id.trim().to_string();
         let tag = state.insert_tag.trim().to_string();
-        let normalized_file_path = normalize_insert_file_path_input(state.insert_file_path.trim());
-        let file_path = (!normalized_file_path.is_empty())
-            .then(|| std::path::PathBuf::from(normalized_file_path));
+        let file_path = resolved_insert_file_path(state);
 
         match state.insert_mode {
             InsertMode::File => match file_path {
@@ -861,9 +860,9 @@ impl KinicProvider {
     fn validate_insert_state(&self, state: &CoreState) -> Result<(), String> {
         match state.insert_mode {
             InsertMode::File => {
-                validate_supported_file_mode_path(normalize_insert_file_path_input(
-                    state.insert_file_path.trim(),
-                ))?;
+                let file_path = resolved_insert_file_path(state)
+                    .ok_or_else(|| "File path is required for file insert.".to_string())?;
+                validate_supported_file_mode_path(file_path.as_path())?;
             }
             InsertMode::InlineText => {
                 if state.insert_text.trim().is_empty() {
@@ -1357,16 +1356,15 @@ impl KinicProvider {
     }
 }
 
-fn validate_existing_insert_file_path(path: &str, mode_label: &str) -> Result<(), String> {
-    if path.is_empty() {
+fn validate_existing_insert_file_path(path: &Path, mode_label: &str) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
         return Err(format!("File path is required for {mode_label} insert."));
     }
 
-    let file_path = Path::new(path);
-    if !file_path.exists() {
+    if !path.exists() {
         return Err(format!("File path does not exist for {mode_label} insert."));
     }
-    if !file_path.is_file() {
+    if !path.is_file() {
         return Err(format!(
             "File path must point to a file for {mode_label} insert."
         ));
@@ -1392,15 +1390,10 @@ fn normalize_insert_file_path_input(path: &str) -> &str {
     trimmed
 }
 
-const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
-    "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
-];
-
-fn validate_supported_file_mode_path(path: &str) -> Result<(), String> {
+fn validate_supported_file_mode_path(path: &Path) -> Result<(), String> {
     validate_existing_insert_file_path(path, "file")?;
-    let file_path = Path::new(path);
 
-    let Some(extension) = file_path
+    let Some(extension) = path
         .extension()
         .and_then(|extension| extension.to_str())
     else {
@@ -1435,6 +1428,13 @@ fn insert_file_path_is_pdf(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+}
+
+fn resolved_insert_file_path(state: &CoreState) -> Option<std::path::PathBuf> {
+    state.insert_selected_file_path.clone().or_else(|| {
+        let normalized = normalize_insert_file_path_input(state.insert_file_path_input.trim());
+        (!normalized.is_empty()).then(|| std::path::PathBuf::from(normalized))
+    })
 }
 
 impl DataProvider for KinicProvider {

@@ -1,7 +1,7 @@
 #[path = "form_tab_flow.rs"]
 mod form_tab_flow;
 
-use std::time::Duration;
+use std::{io, time::Duration};
 use tui_kit_render::theme::Theme;
 use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
@@ -16,7 +16,7 @@ use tui_kit_runtime::{
 use crate::{
     HostGlobalCommand, HostInputEvent, action_from_keycode, execute_effects_to_status,
     global_command_for_key, poll_host_input, resolve_tab_action_with_current,
-    terminal::{pick_file_path, with_terminal},
+    terminal::{FilePickerFn, PickFilePathError, pick_file_path, with_terminal},
 };
 use form_tab_flow::{form_tab_action_from_key, reset_form_focus, reset_form_state_for_tab};
 
@@ -25,6 +25,7 @@ pub struct RuntimeLoopConfig {
     pub tab_ids: &'static [&'static str],
     pub initial_focus: PaneFocus,
     pub ui_config: fn() -> UiConfig,
+    pub file_picker: Option<FilePickerFn>,
 }
 
 pub trait RuntimeLoopHooks<P: DataProvider> {
@@ -114,6 +115,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 
             terminal.draw(|frame| {
                 let focus = ui_focus_from_pane(state.focus);
+                let insert_file_path_display = insert_file_path_display(&state);
                 let ui = TuiKitUi::new(&theme)
                     .ui_config((cfg.ui_config)())
                     .ui_summaries(&state.list_items)
@@ -148,7 +150,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())
                     .insert_tag(&state.insert_tag)
                     .insert_text(&state.insert_text)
-                    .insert_file_path(&state.insert_file_path)
+                    .insert_file_path(insert_file_path_display.as_str())
                     .insert_embedding(&state.insert_embedding)
                     .insert_submit_state(state.insert_submit_state.clone())
                     .insert_spinner_frame(state.insert_spinner_frame)
@@ -354,9 +356,20 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::OpenSelected
                 );
                 if should_open_insert_file_dialog(&action, &state) {
-                    match open_insert_file_dialog(&mut state, terminal) {
-                        Ok(()) => {}
-                        Err(error) => state.status_message = Some(error),
+                    match open_insert_file_dialog(&mut state, terminal, cfg.file_picker) {
+                        Ok(effects) => {
+                            hooks.on_effects(provider, &mut state, &effects);
+                            execute_effects_to_status(&mut state, effects);
+                        }
+                        Err(PickFilePathError::Picker(error)) => {
+                            execute_effects_to_status(
+                                &mut state,
+                                vec![CoreEffect::Notify(error)],
+                            );
+                        }
+                        Err(PickFilePathError::TerminalState(error)) => {
+                            return Err(Box::new(io::Error::other(error)));
+                        }
                     }
                     continue;
                 }
@@ -390,27 +403,41 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 fn open_insert_file_dialog(
     state: &mut CoreState,
     terminal: &mut crate::terminal::HostTerminal,
-) -> Result<(), String> {
-    let selection = pick_file_path(terminal, state.insert_mode)?;
-    apply_insert_file_dialog_selection(state, selection);
-    Ok(())
+    file_picker: Option<FilePickerFn>,
+) -> Result<Vec<CoreEffect>, PickFilePathError> {
+    let Some(file_picker) = file_picker else {
+        return Ok(vec![CoreEffect::Notify(
+            "File picker is unavailable in this build.".to_string(),
+        )]);
+    };
+    let selection = pick_file_path(terminal, file_picker, state.insert_mode)?;
+    Ok(apply_insert_file_dialog_selection(state, selection))
 }
 
 fn apply_insert_file_dialog_selection(
     state: &mut CoreState,
     selection: Option<std::path::PathBuf>,
-) {
+) -> Vec<CoreEffect> {
     let Some(path) = selection else {
-        state.status_message = Some("File selection canceled.".to_string());
-        return;
+        return vec![CoreEffect::Notify("File selection canceled.".to_string())];
     };
 
-    state.insert_file_path = path.to_string_lossy().into_owned();
+    let display_path = path.display().to_string();
+    state.insert_file_path_input = display_path.clone();
+    state.insert_selected_file_path = Some(path);
     state.insert_error = None;
     if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
         state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
     }
-    state.status_message = Some(format!("Selected file: {}", path.display()));
+    vec![CoreEffect::Notify(format!("Selected file: {display_path}"))]
+}
+
+fn insert_file_path_display(state: &CoreState) -> String {
+    state
+        .insert_selected_file_path
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| state.insert_file_path_input.clone())
 }
 
 fn should_open_insert_file_dialog(action: &CoreAction, state: &CoreState) -> bool {
