@@ -16,7 +16,7 @@ use tui_kit_runtime::{
 use crate::{
     HostGlobalCommand, HostInputEvent, action_from_keycode, execute_effects_to_status,
     global_command_for_key, poll_host_input, resolve_tab_action_with_current,
-    terminal::with_terminal,
+    terminal::{pick_file_path, with_terminal},
 };
 use form_tab_flow::{form_tab_action_from_key, reset_form_focus, reset_form_state_for_tab};
 
@@ -353,6 +353,13 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::MovePageUp
                         | CoreAction::OpenSelected
                 );
+                if matches!(action, CoreAction::InsertOpenFileDialog) {
+                    match open_insert_file_dialog(&mut state, terminal) {
+                        Ok(()) => {}
+                        Err(error) => state.status_message = Some(error),
+                    }
+                    continue;
+                }
                 match dispatch_action_with_persistent_clear(provider, &mut state, &action) {
                     Ok(effects) => {
                         if matches!(&action, CoreAction::SetTab(_)) {
@@ -378,6 +385,32 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             }
         }
     })
+}
+
+fn open_insert_file_dialog(
+    state: &mut CoreState,
+    terminal: &mut crate::terminal::HostTerminal,
+) -> Result<(), String> {
+    let selection = pick_file_path(terminal, state.insert_mode)?;
+    apply_insert_file_dialog_selection(state, selection);
+    Ok(())
+}
+
+fn apply_insert_file_dialog_selection(
+    state: &mut CoreState,
+    selection: Option<std::path::PathBuf>,
+) {
+    let Some(path) = selection else {
+        state.status_message = Some("File selection canceled.".to_string());
+        return;
+    };
+
+    state.insert_file_path = path.to_string_lossy().into_owned();
+    state.insert_error = None;
+    if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
+        state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+    }
+    state.status_message = Some(format!("Selected file: {}", path.display()));
 }
 
 fn normalize_focus_after_set_tab(state: &mut CoreState) {

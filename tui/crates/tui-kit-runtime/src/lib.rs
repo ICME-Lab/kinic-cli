@@ -439,6 +439,7 @@ pub enum CoreAction {
     CreateSubmit,
     InsertInput(char),
     InsertBackspace,
+    InsertOpenFileDialog,
     InsertNextField,
     InsertPrevField,
     InsertCycleModePrev,
@@ -657,6 +658,11 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 InsertFormFocus::Embedding => {
                     state.insert_embedding.pop();
                 }
+            }
+        }
+        CoreAction::InsertOpenFileDialog => {
+            if insert_form_locked(state) {
+                return;
             }
         }
         CoreAction::InsertNextField => {

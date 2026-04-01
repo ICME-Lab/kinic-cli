@@ -17,5 +17,6 @@ dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 ratatui = "0.29"
+rfd = "0.15"
 tui-kit-render = { path = "../tui-kit-render" }
 tui-kit-runtime = { path = "../tui-kit-runtime" }

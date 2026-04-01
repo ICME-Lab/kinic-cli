@@ -1557,6 +1557,7 @@ impl DataProvider for KinicProvider {
                     effects.push(effect);
                 }
             }
+            CoreAction::InsertOpenFileDialog => {}
             CoreAction::RefreshCurrentView => {
                 effects.extend(self.refresh_current_view());
             }

@@ -126,6 +126,20 @@ fn insert_submit_focus_uses_enter_to_submit() {
 }
 
 #[test]
+fn insert_file_path_focus_uses_enter_to_open_file_dialog() {
+    let mut state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_focus: InsertFormFocus::FilePath,
+        ..CoreState::default()
+    };
+
+    let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+    assert_eq!(action, Some(CoreAction::InsertOpenFileDialog));
+}
+
+#[test]
 fn reset_insert_form_state_clears_insert_fields() {
     let mut state = CoreState {
         saved_default_memory_id: Some("bbbbb-bb".to_string()),

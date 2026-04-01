@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
 };
@@ -350,4 +351,43 @@ fn dispatch_action_with_persistent_clear_keeps_for_navigation_actions() {
     assert!(effects.is_empty());
     assert_eq!(state.persistent_status_message.as_deref(), Some("done"));
     assert_eq!(state.status_message.as_deref(), Some("done"));
+}
+
+#[test]
+fn apply_insert_file_dialog_selection_updates_file_path_and_clears_insert_error() {
+    let mut state = CoreState {
+        insert_file_path: "stale".into(),
+        insert_error: Some("bad path".into()),
+        insert_submit_state: tui_kit_runtime::CreateSubmitState::Error,
+        ..CoreState::default()
+    };
+
+    apply_insert_file_dialog_selection(&mut state, Some(PathBuf::from("/tmp/doc.pdf")));
+
+    assert_eq!(state.insert_file_path, "/tmp/doc.pdf");
+    assert_eq!(state.insert_error, None);
+    assert_eq!(
+        state.insert_submit_state,
+        tui_kit_runtime::CreateSubmitState::Idle
+    );
+    assert_eq!(
+        state.status_message.as_deref(),
+        Some("Selected file: /tmp/doc.pdf")
+    );
+}
+
+#[test]
+fn apply_insert_file_dialog_selection_keeps_existing_path_on_cancel() {
+    let mut state = CoreState {
+        insert_file_path: "/tmp/existing.md".into(),
+        ..CoreState::default()
+    };
+
+    apply_insert_file_dialog_selection(&mut state, None);
+
+    assert_eq!(state.insert_file_path, "/tmp/existing.md");
+    assert_eq!(
+        state.status_message.as_deref(),
+        Some("File selection canceled.")
+    );
 }
