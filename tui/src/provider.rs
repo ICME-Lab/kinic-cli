@@ -199,6 +199,28 @@ fn saved_tag_selection(preferences: &UserPreferences) -> Vec<String> {
     settings::normalize_saved_tags(preferences.saved_tags.clone())
 }
 
+fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> {
+    match context {
+        PickerContext::InsertTag | PickerContext::TagManagement => Some("+ Add new tag"),
+        PickerContext::DefaultMemory | PickerContext::InsertTarget | PickerContext::AddTag => None,
+    }
+}
+
+fn picker_selected_id_for_context(context: PickerContext, state: &CoreState) -> Option<String> {
+    match context {
+        PickerContext::DefaultMemory => state.saved_default_memory_id.clone(),
+        PickerContext::InsertTarget => {
+            let insert_memory_id = state.insert_memory_id.trim();
+            (!insert_memory_id.is_empty()).then(|| insert_memory_id.to_string())
+        }
+        PickerContext::InsertTag => {
+            let insert_tag = state.insert_tag.trim();
+            (!insert_tag.is_empty()).then(|| insert_tag.to_string())
+        }
+        PickerContext::TagManagement | PickerContext::AddTag => None,
+    }
+}
+
 fn picker_items_for_context(
     context: PickerContext,
     state: &CoreState,
@@ -229,7 +251,9 @@ fn picker_items_for_context(
                     PickerItem::option(tag.clone(), tag, is_current_insert_tag)
                 })
                 .collect::<Vec<_>>();
-            items.push(PickerItem::add_action("+ Add new tag"));
+            if let Some(label) = add_action_label_for_context(context) {
+                items.push(PickerItem::add_action(label));
+            }
             items
         }
         PickerContext::AddTag => match &state.picker {
@@ -700,18 +724,9 @@ impl KinicProvider {
                     default_memory,
                     &self.user_preferences,
                 );
-                let preferred_selected_id = selected_id.clone().or_else(|| match context {
-                    PickerContext::DefaultMemory => self.user_preferences.default_memory_id.clone(),
-                    PickerContext::InsertTarget => {
-                        let insert_memory_id = state.insert_memory_id.trim();
-                        (!insert_memory_id.is_empty()).then(|| insert_memory_id.to_string())
-                    }
-                    PickerContext::InsertTag => {
-                        let insert_tag = state.insert_tag.trim();
-                        (!insert_tag.is_empty()).then(|| insert_tag.to_string())
-                    }
-                    PickerContext::TagManagement | PickerContext::AddTag => None,
-                });
+                let preferred_selected_id = selected_id
+                    .clone()
+                    .or_else(|| picker_selected_id_for_context(*context, state));
                 let resolved_index = picker_selected_index(
                     &items,
                     preferred_selected_id.as_deref(),
@@ -880,6 +895,41 @@ impl KinicProvider {
                 self.preferences_health.save_error = Some(error.to_string());
                 CoreEffect::Notify(format!("Tag delete failed: {error}"))
             }
+        }
+    }
+
+    fn picker_confirm_delete_effect(
+        &mut self,
+        context: PickerContext,
+        tag: &str,
+    ) -> Option<CoreEffect> {
+        if context == PickerContext::TagManagement {
+            return Some(self.delete_tag_from_preferences(tag));
+        }
+
+        None
+    }
+
+    fn picker_option_submit_effects(
+        &mut self,
+        context: PickerContext,
+        item: &PickerItem,
+    ) -> Vec<CoreEffect> {
+        match context {
+            PickerContext::DefaultMemory => vec![
+                self.default_memory_controller()
+                    .set_default_memory_preference(item.id.clone()),
+            ],
+            PickerContext::InsertTarget => vec![
+                CoreEffect::SetInsertMemoryId(item.id.clone()),
+                CoreEffect::Notify(format!("Selected target memory {}", item.id)),
+            ],
+            PickerContext::InsertTag => Vec::new(),
+            PickerContext::TagManagement => vec![
+                CoreEffect::SetInsertTag(item.id.clone()),
+                CoreEffect::Notify(format!("Selected tag {} for insert", item.id)),
+            ],
+            PickerContext::AddTag => Vec::new(),
         }
     }
 
@@ -1825,8 +1875,8 @@ impl DataProvider for KinicProvider {
                     ..
                 } => {
                     if let Some(tag) = confirm_delete_id {
-                        if *context == PickerContext::TagManagement {
-                            effects.push(self.delete_tag_from_preferences(tag));
+                        if let Some(effect) = self.picker_confirm_delete_effect(*context, tag) {
+                            effects.push(effect);
                         }
                         return Ok(ProviderOutput {
                             snapshot: Some(self.build_snapshot(state)),
@@ -1849,28 +1899,7 @@ impl DataProvider for KinicProvider {
                         });
                     }
 
-                    match context {
-                        PickerContext::DefaultMemory => effects.push(
-                            self.default_memory_controller()
-                                .set_default_memory_preference(item.id.clone()),
-                        ),
-                        PickerContext::InsertTarget => {
-                            effects.push(CoreEffect::SetInsertMemoryId(item.id.clone()));
-                            effects.push(CoreEffect::Notify(format!(
-                                "Selected target memory {}",
-                                item.id
-                            )));
-                        }
-                        PickerContext::InsertTag => {}
-                        PickerContext::TagManagement => {
-                            effects.push(CoreEffect::SetInsertTag(item.id.clone()));
-                            effects.push(CoreEffect::Notify(format!(
-                                "Selected tag {} for insert",
-                                item.id
-                            )));
-                        }
-                        PickerContext::AddTag => {}
-                    }
+                    effects.extend(self.picker_option_submit_effects(*context, item));
                 }
             },
             CoreAction::SetDefaultMemoryFromSelection => {
@@ -1911,10 +1940,10 @@ impl DataProvider for KinicProvider {
             {
                 match &state.picker {
                     PickerState::List {
-                        context: PickerContext::TagManagement,
+                        context,
                         confirm_delete_id: Some(_),
                         ..
-                    } => self.build_snapshot(state),
+                    } if *context == PickerContext::TagManagement => self.build_snapshot(state),
                     _ => self.build_snapshot_with_picker(state, PickerState::Closed),
                 }
             }

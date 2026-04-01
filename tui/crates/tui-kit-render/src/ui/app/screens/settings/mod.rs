@@ -296,6 +296,18 @@ mod tests {
     }
 
     #[test]
+    fn tag_picker_titles_differ_by_context() {
+        assert_eq!(
+            picker_title(PickerContext::InsertTag, None),
+            "Select insert tag"
+        );
+        assert_eq!(
+            picker_title(PickerContext::TagManagement, None),
+            "Saved tags"
+        );
+    }
+
+    #[test]
     fn tag_management_confirm_lines_show_delete_prompt() {
         let lines = picker_lines(PickerContext::TagManagement, &[], 0, Some("docs"));
 
