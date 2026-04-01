@@ -10,7 +10,7 @@ use ic_agent::identity::AnonymousIdentity;
 
 use crate::agent::load_identity_from_keyring;
 use crate::cli::GlobalOpts;
-use crate::resolve_tui_identity;
+use crate::{TUI_IDENTITY_REQUIRED_MESSAGE, resolve_tui_identity};
 
 #[path = "../../tui/src/adapter.rs"]
 mod adapter;
@@ -169,7 +169,7 @@ impl RuntimeLoopHooks<provider::KinicProvider> for KinicRuntimeHooks {
 
 fn resolve_auth(identity: String) -> Result<TuiAuth> {
     if identity.trim().is_empty() {
-        return Err(anyhow!("--identity is required for the Kinic TUI"));
+        return Err(anyhow!(TUI_IDENTITY_REQUIRED_MESSAGE));
     }
 
     Ok(TuiAuth::DeferredIdentity {
@@ -188,7 +188,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "--identity is required for the Kinic TUI"
+            TUI_IDENTITY_REQUIRED_MESSAGE
         );
     }
 
@@ -214,7 +214,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "--identity is required for the Kinic TUI"
+            TUI_IDENTITY_REQUIRED_MESSAGE
         );
     }
 

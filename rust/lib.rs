@@ -34,6 +34,10 @@ use pyo3::{
 #[cfg(feature = "python-bindings")]
 use tokio::runtime::Runtime;
 
+pub(crate) const TUI_IDENTITY_REQUIRED_MESSAGE: &str = "--identity is required for the Kinic TUI";
+pub(crate) const TUI_II_UNSUPPORTED_MESSAGE: &str =
+    "Internet Identity is not supported for the Kinic TUI yet";
+
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     validate_tui_cli_args(&cli)?;
@@ -81,16 +85,15 @@ pub async fn run() -> Result<()> {
 }
 
 fn validate_tui_cli_args(cli: &Cli) -> Result<()> {
-    if matches!(&cli.command, cli::Command::Tui(_)) && cli.global.identity.is_none() && !cli.global.ii
+    if matches!(&cli.command, cli::Command::Tui(_))
+        && cli.global.identity.is_none()
+        && !cli.global.ii
     {
         let mut command = Cli::command();
-        let error = command
-            .error(
-                ErrorKind::MissingRequiredArgument,
-                "--identity is required for the Kinic TUI",
-            )
+        let clap_error = command
+            .error(ErrorKind::MissingRequiredArgument, TUI_IDENTITY_REQUIRED_MESSAGE)
             .with_cmd(&command);
-        return Err(error.into());
+        return Err(clap_error.into());
     }
 
     Ok(())
@@ -116,14 +119,12 @@ pub(crate) fn build_keyring_agent_factory(use_mainnet: bool, identity: &str) -> 
 
 pub(crate) fn resolve_tui_identity(global: &cli::GlobalOpts) -> Result<String> {
     if global.ii {
-        return Err(anyhow!(
-            "Internet Identity is not supported for the Kinic TUI yet"
-        ));
+        return Err(anyhow!(TUI_II_UNSUPPORTED_MESSAGE));
     }
     global
         .identity
         .clone()
-        .ok_or_else(|| anyhow!("--identity is required for the Kinic TUI"))
+        .ok_or_else(|| anyhow!(TUI_IDENTITY_REQUIRED_MESSAGE))
 }
 
 fn resolve_required_identity(global: &cli::GlobalOpts) -> Result<String> {
@@ -175,8 +176,17 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "--identity is required for the Kinic TUI"
+            TUI_IDENTITY_REQUIRED_MESSAGE
         );
+    }
+
+    #[test]
+    fn resolve_tui_identity_rejects_internet_identity_for_tui() {
+        let global = global_opts(None, true, None);
+
+        let error = resolve_tui_identity(&global).unwrap_err();
+
+        assert_eq!(error.to_string(), TUI_II_UNSUPPORTED_MESSAGE);
     }
 
     #[test]
@@ -194,6 +204,15 @@ mod tests {
             .expect("cli parsing should succeed");
 
         validate_tui_cli_args(&cli).expect("validation should accept tui with identity");
+    }
+
+    #[test]
+    fn validate_tui_cli_args_allows_ii_for_tui_runtime_handling() {
+        let cli =
+            Cli::try_parse_from(["kinic-cli", "--ii", "tui"]).expect("cli parsing should succeed");
+
+        validate_tui_cli_args(&cli)
+            .expect("validation should defer unsupported ii handling to runtime");
     }
 
     #[test]

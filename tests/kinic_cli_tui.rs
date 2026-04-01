@@ -25,3 +25,16 @@ fn tui_without_identity_returns_clap_missing_required_argument() {
     assert!(stderr.contains("--identity is required for the Kinic TUI"));
     assert!(stderr.contains("Usage: kinic-cli [OPTIONS] <COMMAND>"));
 }
+
+#[test]
+fn tui_with_ii_returns_runtime_unsupported_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
+        .args(["--ii", "tui"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Internet Identity is not supported for the Kinic TUI yet"));
+    assert!(!stderr.contains("Usage: kinic-cli [OPTIONS] <COMMAND>"));
+}
