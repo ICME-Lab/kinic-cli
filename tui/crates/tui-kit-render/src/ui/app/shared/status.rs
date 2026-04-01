@@ -97,7 +97,11 @@ impl<'a> TuiKitUi<'a> {
             Span::styled(format!(" {}", label), self.theme.style_dim()),
         ]);
         if self.focus == Focus::Form {
-            let insert_at = if show_form_mode_shortcut(tab_id) { 8 } else { 4 };
+            let insert_at = if show_form_mode_shortcut(tab_id) {
+                8
+            } else {
+                4
+            };
             spans.splice(
                 insert_at..insert_at,
                 [
@@ -268,8 +272,8 @@ fn form_enter_hint(tab_id: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tui_kit_runtime::kinic_tabs::KINIC_CREATE_TAB_ID;
     use crate::ui::theme::Theme;
+    use tui_kit_runtime::kinic_tabs::KINIC_CREATE_TAB_ID;
 
     #[test]
     fn insert_tab_enter_hint_mentions_picker_and_submit() {

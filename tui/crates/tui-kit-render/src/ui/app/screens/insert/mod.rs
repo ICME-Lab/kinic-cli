@@ -155,9 +155,13 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         max_width,
     );
     lines.push(Line::from(""));
-    lines.extend(ui.ui_config.insert.close_hint.lines().map(|line| {
-        Line::from(Span::styled(line.to_string(), ui.theme.style_muted()))
-    }));
+    lines.extend(
+        ui.ui_config
+            .insert
+            .mode_help
+            .lines()
+            .map(|line| Line::from(Span::styled(line.to_string(), ui.theme.style_muted()))),
+    );
     if let Some(error) = ui.insert_error {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(

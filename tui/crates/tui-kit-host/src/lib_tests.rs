@@ -1,8 +1,8 @@
 use super::*;
-use tui_kit_runtime::{CoreState, ProviderSnapshot, apply_snapshot};
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
 };
+use tui_kit_runtime::{CoreState, ProviderSnapshot, apply_snapshot};
 
 mod key_mapping {
     use super::*;

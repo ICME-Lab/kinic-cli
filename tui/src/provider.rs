@@ -1544,14 +1544,12 @@ impl DataProvider for KinicProvider {
                 if let Err(error) = self.validate_insert_state(state) {
                     effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if self.insert_submit_in_flight {
+                } else if self.is_live() {
+                    let request = self.build_insert_request(state);
+                    effects.push(self.start_insert_submit(request));
                 } else {
-                    if self.is_live() {
-                        let request = self.build_insert_request(state);
-                        effects.push(self.start_insert_submit(request));
-                    } else {
-                        effects.push(CoreEffect::InsertFormError(None));
-                        effects.push(CoreEffect::ResetInsertFormForRepeat);
-                    }
+                    effects.push(CoreEffect::InsertFormError(None));
+                    effects.push(CoreEffect::ResetInsertFormForRepeat);
                 }
             }
             CoreAction::CreateRefresh => {

@@ -2016,5 +2016,4 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertCycleMode);
         assert_eq!(state.insert_mode, InsertMode::File);
     }
-
 }

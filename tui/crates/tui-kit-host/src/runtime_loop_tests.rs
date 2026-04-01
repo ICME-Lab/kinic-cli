@@ -320,9 +320,12 @@ fn dispatch_action_with_persistent_clear_clears_for_edit_actions() {
         ..CoreState::default()
     };
 
-    let effects =
-        dispatch_action_with_persistent_clear(&mut provider, &mut state, &CoreAction::InsertInput('x'))
-            .expect("dispatch should succeed");
+    let effects = dispatch_action_with_persistent_clear(
+        &mut provider,
+        &mut state,
+        &CoreAction::InsertInput('x'),
+    )
+    .expect("dispatch should succeed");
 
     assert!(effects.is_empty());
     assert_eq!(state.persistent_status_message, None);

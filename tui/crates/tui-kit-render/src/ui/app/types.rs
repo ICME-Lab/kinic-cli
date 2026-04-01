@@ -96,7 +96,7 @@ pub struct InsertScreenText {
     pub embedding_label: String,
     pub submit_label: String,
     pub submit_pending_label: String,
-    pub close_hint: String,
+    pub mode_help: String,
 }
 
 /// Settings overlay text configuration.
@@ -124,15 +124,14 @@ pub struct StatusText {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct InsertFormCopy {
-    pub close_hint: &'static str,
+    pub mode_help: &'static str,
     pub help_line: &'static str,
     pub status_enter_hint: &'static str,
 }
 
 pub(crate) fn insert_form_copy() -> InsertFormCopy {
     InsertFormCopy {
-        close_hint:
-            "File: .md/.markdown/.mdx/.txt/.json/.yaml/.yml/.csv/.log/.pdf\nInline Text: plain text\nManual Embedding: text + embedding JSON",
+        mode_help: "File: .md/.markdown/.mdx/.txt/.json/.yaml/.yml/.csv/.log/.pdf\nInline Text: plain text\nManual Embedding: text + embedding JSON",
         help_line: "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits",
         status_enter_hint: " cycle/picker/submit ",
     }
@@ -173,7 +172,7 @@ impl Default for UiConfig {
                 embedding_label: "Embedding JSON".to_string(),
                 submit_label: "Insert".to_string(),
                 submit_pending_label: "Inserting...".to_string(),
-                close_hint: insert_form_copy.close_hint.to_string(),
+                mode_help: insert_form_copy.mode_help.to_string(),
             },
             create: CreateOverlayText {
                 title: "Create Memory".to_string(),
@@ -331,7 +330,7 @@ mod tests {
         let config = UiConfig::default();
         let copy = insert_form_copy();
 
-        assert_eq!(config.insert.close_hint, copy.close_hint);
+        assert_eq!(config.insert.mode_help, copy.mode_help);
         assert!(config.help.lines.iter().any(|line| line == copy.help_line));
     }
 }

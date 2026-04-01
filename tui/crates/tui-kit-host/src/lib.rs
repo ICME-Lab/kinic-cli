@@ -303,7 +303,7 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                     };
                 }
                 state.create_error = message.clone();
-            },
+            }
             CoreEffect::InsertFormError(message) => {
                 state.insert_submit_state = if message.is_some() {
                     CreateSubmitState::Error
