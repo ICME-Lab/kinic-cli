@@ -1,6 +1,6 @@
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
-use std::{sync::mpsc, thread};
+use std::{path::Path, sync::mpsc, thread};
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
@@ -255,6 +255,13 @@ struct InsertSubmitTaskOutput {
     request_id: u64,
     result: Result<bridge::InsertMemorySuccess, bridge::InsertMemoryError>,
 }
+
+fn insert_success_status(success: &bridge::InsertMemorySuccess) -> String {
+    format!(
+        "Inserted {} chunks (tag: {}) into {}",
+        success.inserted_count, success.tag, success.memory_id
+    )
+}
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
         #[cfg(test)]
@@ -335,9 +342,7 @@ impl KinicProvider {
         }
 
         if self.initial_memories_in_flight {
-            return Some(CoreEffect::Notify(
-                "Memories are already loading.".to_string(),
-            ));
+            return None;
         }
 
         self.memories_mode = MemoriesMode::Browser;
@@ -379,11 +384,9 @@ impl KinicProvider {
     fn refresh_current_view(&mut self) -> Vec<CoreEffect> {
         match self.tab_id.as_str() {
             KINIC_CREATE_TAB_ID => self.start_create_cost_refresh().into_iter().collect(),
-            KINIC_INSERT_TAB_ID => vec![CoreEffect::Notify(
-                "Insert tab is ready. Submit to write into a memory.".to_string(),
-            )],
+            KINIC_INSERT_TAB_ID => Vec::new(),
             KINIC_MEMORIES_TAB_ID => self
-                .start_live_memories_load(Some("Refreshing memories..."), true)
+                .start_live_memories_load(None, true)
                 .into_iter()
                 .collect(),
             _ => Vec::new(),
@@ -679,9 +682,7 @@ impl KinicProvider {
             });
         });
 
-        Some(CoreEffect::Notify(
-            "Refreshing session settings...".to_string(),
-        ))
+        None
     }
 
     fn start_create_cost_refresh(&mut self) -> Option<CoreEffect> {
@@ -692,9 +693,7 @@ impl KinicProvider {
             ));
         }
         if self.create_cost_in_flight {
-            return Some(CoreEffect::Notify(
-                "Account info refresh already running.".to_string(),
-            ));
+            return None;
         }
 
         let request_id = self.next_create_request_id;
@@ -718,7 +717,7 @@ impl KinicProvider {
             });
         });
 
-        Some(CoreEffect::Notify("Refreshing account info...".to_string()))
+        None
     }
 
     fn start_create_submit(&mut self, name: String, description: String) -> CoreEffect {
@@ -763,51 +762,74 @@ impl KinicProvider {
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
         let memory_id = state.insert_memory_id.trim().to_string();
         let tag = state.insert_tag.trim().to_string();
+        let normalized_file_path = normalize_insert_file_path_input(state.insert_file_path.trim());
+        let file_path = (!normalized_file_path.is_empty())
+            .then(|| std::path::PathBuf::from(normalized_file_path));
 
         match state.insert_mode {
-            InsertMode::Normal => InsertRequest::Normal {
+            InsertMode::File => match file_path {
+                Some(path) if insert_file_path_is_pdf(path.as_path()) => InsertRequest::Pdf {
+                    memory_id,
+                    tag,
+                    file_path: path,
+                },
+                Some(path) => InsertRequest::Normal {
+                    memory_id,
+                    tag,
+                    text: None,
+                    file_path: Some(path),
+                },
+                None => InsertRequest::Normal {
+                    memory_id,
+                    tag,
+                    text: None,
+                    file_path: None,
+                },
+            },
+            InsertMode::InlineText => InsertRequest::Normal {
                 memory_id,
                 tag,
                 text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
-                file_path: (!state.insert_file_path.trim().is_empty())
-                    .then(|| std::path::PathBuf::from(state.insert_file_path.trim())),
+                file_path: None,
             },
-            InsertMode::Raw => InsertRequest::Raw {
+            InsertMode::ManualEmbedding => InsertRequest::Raw {
                 memory_id,
                 tag,
                 text: state.insert_text.clone(),
                 embedding_json: state.insert_embedding.clone(),
-            },
-            InsertMode::Pdf => InsertRequest::Pdf {
-                memory_id,
-                tag,
-                file_path: std::path::PathBuf::from(state.insert_file_path.trim()),
             },
         }
     }
 
     fn status_message(&self, visible_count: usize) -> String {
         if self.tab_id == KINIC_INSERT_TAB_ID {
-            return "kinic(insert): choose mode, target memory, and payload, then press Enter on submit.".to_string();
+            return "Choose mode, target memory, and payload, then press Enter to submit."
+                .to_string();
+        }
+        if self.tab_id == KINIC_CREATE_TAB_ID {
+            return "Create a new memory canister from this form.".to_string();
+        }
+        if self.tab_id == KINIC_SETTINGS_TAB_ID {
+            return "Review session details and default memory settings here.".to_string();
+        }
+        if self.tab_id == KINIC_MARKET_TAB_ID {
+            return "Market is not implemented yet.".to_string();
         }
         let base = if !self.is_live() {
-            format!(
-                "kinic(mock): {visible_count} filtered / {} total",
-                self.all.len()
-            )
+            format!("{visible_count} filtered / {} total", self.all.len())
         } else {
             match self.memories_mode {
                 MemoriesMode::Browser => match self.active_memory_id.as_deref() {
                     Some(memory_id) => format!(
-                        "kinic(live): target {memory_id} | Enter in search runs remote search | Shift+D saves default"
+                        "Target {memory_id} | Enter runs remote search | Shift+D saves default"
                     ),
-                    None => "kinic(live): no memory selected".to_string(),
+                    None => "No memory selected".to_string(),
                 },
                 MemoriesMode::Results => match self.active_memory_id.as_deref() {
                     Some(memory_id) => format!(
-                        "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
+                        "{visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
                     ),
-                    None => format!("kinic(live): {visible_count} search results"),
+                    None => format!("{visible_count} search results"),
                 },
             }
         };
@@ -817,10 +839,10 @@ impl KinicProvider {
         }
 
         if self.initial_memories_in_flight {
-            return "kinic(live): loading memories...".to_string();
+            return "Loading memories...".to_string();
         }
         if self.is_memories_load_error_visible() {
-            return "kinic(live): memories unavailable | F5 retries loading".to_string();
+            return "Memories unavailable | Ctrl-R retries loading".to_string();
         }
 
         if let Some(error) = &self.preferences_health.save_error {
@@ -834,6 +856,25 @@ impl KinicProvider {
 
     fn invalidate_pending_search(&mut self) {
         self.pending_search_context = None;
+    }
+
+    fn validate_insert_state(&self, state: &CoreState) -> Result<(), String> {
+        match state.insert_mode {
+            InsertMode::File => {
+                validate_supported_file_mode_path(normalize_insert_file_path_input(
+                    state.insert_file_path.trim(),
+                ))?;
+            }
+            InsertMode::InlineText => {
+                if state.insert_text.trim().is_empty() {
+                    return Err("Text is required for inline text insert.".to_string());
+                }
+            }
+            InsertMode::ManualEmbedding => {}
+        }
+
+        let request = self.build_insert_request(state);
+        validate_insert_request(&request).map_err(|error| error.to_string())
     }
 
     fn invalidate_pending_create_cost(&mut self) {
@@ -891,9 +932,7 @@ impl KinicProvider {
             return None;
         }
         if self.search_in_flight {
-            return Some(CoreEffect::Notify(
-                "Search already running. Wait for the current request to finish.".to_string(),
-            ));
+            return None;
         }
         let Some(memory_id) = self.live_search_target_id() else {
             return Some(CoreEffect::Notify(
@@ -1040,7 +1079,7 @@ impl KinicProvider {
                     .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
                 Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
-                    effects: vec![CoreEffect::Notify("Loaded memories.".to_string())],
+                    effects: Vec::new(),
                 })
             }
             Err(error) => {
@@ -1222,12 +1261,14 @@ impl KinicProvider {
             });
         }
 
-        let notify_message = output
-            .overview
-            .session_settings_refresh_failure_message()
-            .unwrap_or_else(|| output.overview.session_settings_refresh_notify_message());
+        let failure_message = output.overview.session_settings_refresh_failure_message();
+        let notify_message = output.overview.session_settings_refresh_notify_message();
         self.apply_session_overview(output.overview);
-        let effects = vec![CoreEffect::Notify(notify_message)];
+        let effects = failure_message
+            .or_else(|| (notify_message != "Session settings refreshed.").then_some(notify_message))
+            .map(CoreEffect::Notify)
+            .into_iter()
+            .collect();
 
         Some(ProviderOutput {
             snapshot: Some(self.build_snapshot(state)),
@@ -1268,10 +1309,7 @@ impl KinicProvider {
             Ok(success) => vec![
                 CoreEffect::InsertFormError(None),
                 CoreEffect::ResetInsertFormForRepeat,
-                CoreEffect::Notify(format!(
-                    "Inserted {} item(s) via {} into {} [{}]",
-                    success.inserted_count, success.mode, success.memory_id, success.tag
-                )),
+                CoreEffect::NotifyPersistent(insert_success_status(&success)),
             ],
             Err(error) => vec![CoreEffect::InsertFormError(Some(
                 format_insert_submit_error(&error),
@@ -1298,15 +1336,11 @@ impl KinicProvider {
         match tab_id {
             KINIC_MEMORIES_TAB_ID => {
                 self.reset_memories_browser();
-                vec![CoreEffect::Notify("Switched to memories.".to_string())]
+                Vec::new()
             }
-            KINIC_INSERT_TAB_ID => {
-                vec![CoreEffect::Notify(
-                    "Insert text, embeddings, or PDFs into an existing memory.".to_string(),
-                )]
-            }
+            KINIC_INSERT_TAB_ID => Vec::new(),
             KINIC_CREATE_TAB_ID => {
-                let mut effects = vec![CoreEffect::Notify("Create a new memory.".to_string())];
+                let mut effects = Vec::new();
                 if let Some(effect) = self.start_create_cost_refresh() {
                     effects.push(effect);
                 }
@@ -1321,6 +1355,86 @@ impl KinicProvider {
             _ => vec![CoreEffect::Notify(format!("Switched kinic tab: {tab_id}"))],
         }
     }
+}
+
+fn validate_existing_insert_file_path(path: &str, mode_label: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err(format!("File path is required for {mode_label} insert."));
+    }
+
+    let file_path = Path::new(path);
+    if !file_path.exists() {
+        return Err(format!("File path does not exist for {mode_label} insert."));
+    }
+    if !file_path.is_file() {
+        return Err(format!(
+            "File path must point to a file for {mode_label} insert."
+        ));
+    }
+
+    Ok(())
+}
+
+fn normalize_insert_file_path_input(path: &str) -> &str {
+    let trimmed = path.trim();
+    if let Some(inner) = trimmed
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+    {
+        return inner;
+    }
+    if let Some(inner) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return inner;
+    }
+    trimmed
+}
+
+const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
+    "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
+];
+
+fn validate_supported_file_mode_path(path: &str) -> Result<(), String> {
+    validate_existing_insert_file_path(path, "file")?;
+    let file_path = Path::new(path);
+
+    let Some(extension) = file_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+    else {
+        return Err(format!(
+            "File path must use a supported {} extension.",
+            allowed_extension_list(FILE_MODE_ALLOWED_EXTENSIONS)
+        ));
+    };
+
+    if FILE_MODE_ALLOWED_EXTENSIONS
+        .iter()
+        .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+    {
+        return Ok(());
+    }
+
+    Err(format!(
+        "File path must use a supported {} extension.",
+        allowed_extension_list(FILE_MODE_ALLOWED_EXTENSIONS)
+    ))
+}
+
+fn allowed_extension_list(allowed_extensions: &[&str]) -> String {
+    allowed_extensions
+        .iter()
+        .map(|extension| format!(".{extension}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn insert_file_path_is_pdf(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
 impl DataProvider for KinicProvider {
@@ -1401,9 +1515,6 @@ impl DataProvider for KinicProvider {
                         "Name and description are required.".to_string(),
                     )));
                 } else if self.create_submit_in_flight {
-                    effects.push(CoreEffect::Notify(
-                        "Create request already running.".to_string(),
-                    ));
                 } else if self.is_live() {
                     effects.push(self.start_create_submit(name, description));
                 } else {
@@ -1430,24 +1541,15 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::InsertSubmit => {
-                let request = self.build_insert_request(state);
-                if let Err(error) = validate_insert_request(&request) {
-                    effects.push(CoreEffect::InsertFormError(Some(error.to_string())));
+                if let Err(error) = self.validate_insert_state(state) {
+                    effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if self.insert_submit_in_flight {
-                    effects.push(CoreEffect::Notify(
-                        "Insert request already running.".to_string(),
-                    ));
                 } else if self.is_live() {
+                    let request = self.build_insert_request(state);
                     effects.push(self.start_insert_submit(request));
                 } else {
-                    let target_memory_id = request.memory_id().to_string();
                     effects.push(CoreEffect::InsertFormError(None));
                     effects.push(CoreEffect::ResetInsertFormForRepeat);
-                    effects.push(CoreEffect::Notify(format!(
-                        "Mock insert accepted for {} [{}]",
-                        target_memory_id,
-                        state.insert_tag.trim()
-                    )));
                 }
             }
             CoreAction::CreateRefresh => {
@@ -1463,7 +1565,6 @@ impl DataProvider for KinicProvider {
                     effects.push(effect);
                 }
             }
-            CoreAction::OpenDefaultMemoryPicker => {}
             CoreAction::CloseDefaultMemoryPicker => {}
             CoreAction::MoveDefaultMemoryPickerNext => {}
             CoreAction::MoveDefaultMemoryPickerPrev => {}

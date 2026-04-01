@@ -243,9 +243,6 @@ impl<'a> TuiKitUi<'a> {
                 DefaultMemorySelectorLineKind::Normal => {
                     Line::from(Span::styled(line, self.theme.style_normal()))
                 }
-                DefaultMemorySelectorLineKind::Title => {
-                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
-                }
             })
             .collect::<Vec<_>>();
 
@@ -287,7 +284,7 @@ fn visible_default_memory_selector_lines(
     lines: Vec<(String, DefaultMemorySelectorLineKind)>,
     overlay_height: u16,
 ) -> Vec<(String, DefaultMemorySelectorLineKind)> {
-    let fixed_prefix_len = 2usize;
+    let fixed_prefix_len = 0usize;
     let fixed_suffix_len = 2usize;
     if lines.len() <= fixed_prefix_len + fixed_suffix_len {
         return lines;
@@ -303,7 +300,12 @@ fn visible_default_memory_selector_lines(
     let body_end = lines.len().saturating_sub(fixed_suffix_len);
     let body = &lines[body_start..body_end];
     if body.len() <= visible_body_len {
-        return lines;
+        return center_default_memory_selector_body(
+            &lines[..fixed_prefix_len],
+            body,
+            &lines[body_end..],
+            visible_body_len,
+        );
     }
 
     let selected_in_body = body
@@ -320,6 +322,28 @@ fn visible_default_memory_selector_lines(
     visible.extend_from_slice(&lines[..fixed_prefix_len]);
     visible.extend_from_slice(&body[start..end]);
     visible.extend_from_slice(&lines[body_end..]);
+    visible
+}
+
+fn center_default_memory_selector_body(
+    prefix: &[(String, DefaultMemorySelectorLineKind)],
+    body: &[(String, DefaultMemorySelectorLineKind)],
+    suffix: &[(String, DefaultMemorySelectorLineKind)],
+    visible_body_len: usize,
+) -> Vec<(String, DefaultMemorySelectorLineKind)> {
+    let extra_space = visible_body_len.saturating_sub(body.len());
+    let top_padding = extra_space / 2;
+    let bottom_padding = extra_space.saturating_sub(top_padding);
+
+    let mut visible = Vec::with_capacity(prefix.len() + visible_body_len + suffix.len());
+    visible.extend_from_slice(prefix);
+    visible
+        .extend((0..top_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)));
+    visible.extend_from_slice(body);
+    visible.extend(
+        (0..bottom_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)),
+    );
+    visible.extend_from_slice(suffix);
     visible
 }
 
@@ -504,7 +528,7 @@ mod tests {
 
         assert!(near_start_joined.contains("Memory 1"));
         assert!(!near_start_joined.contains("Memory 10"));
-        assert!(near_start_joined.contains("Select Default Memory"));
+        assert!(!near_start_joined.contains("Select Default Memory"));
     }
 
     #[test]
@@ -526,7 +550,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(joined.contains("Select Target Memory"));
+        assert!(!joined.contains("Select Target Memory"));
         assert!(joined.contains("Enter: use target"));
         assert!(!joined.contains('★'));
     }

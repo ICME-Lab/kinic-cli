@@ -177,7 +177,7 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     let mut state = CoreState {
         current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Content,
-        insert_mode: tui_kit_runtime::InsertMode::Pdf,
+        insert_mode: tui_kit_runtime::InsertMode::File,
         insert_memory_id: "aaaaa-aa".into(),
         insert_tag: "docs".into(),
         insert_file_path: "/tmp/doc.pdf".into(),
@@ -195,7 +195,7 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     );
 
     assert_eq!(state.focus, PaneFocus::Content);
-    assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::Pdf);
+    assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::File);
     assert_eq!(state.insert_memory_id, "aaaaa-aa");
     assert_eq!(state.insert_tag, "docs");
     assert_eq!(state.insert_file_path, "/tmp/doc.pdf");
@@ -306,4 +306,48 @@ fn content_scroll_helper_handles_scroll_end_only() {
         &mut inspector_scroll
     ));
     assert_eq!(inspector_scroll, 10002);
+}
+
+#[test]
+fn dispatch_action_with_persistent_clear_clears_for_edit_actions() {
+    let mut provider = TestProvider {
+        result: Ok(ProviderOutput::default()),
+    };
+    let mut state = CoreState {
+        persistent_status_message: Some("done".into()),
+        status_message: Some("done".into()),
+        insert_focus: tui_kit_runtime::InsertFormFocus::Text,
+        ..CoreState::default()
+    };
+
+    let effects = dispatch_action_with_persistent_clear(
+        &mut provider,
+        &mut state,
+        &CoreAction::InsertInput('x'),
+    )
+    .expect("dispatch should succeed");
+
+    assert!(effects.is_empty());
+    assert_eq!(state.persistent_status_message, None);
+    assert_eq!(state.status_message, None);
+}
+
+#[test]
+fn dispatch_action_with_persistent_clear_keeps_for_navigation_actions() {
+    let mut provider = TestProvider {
+        result: Ok(ProviderOutput::default()),
+    };
+    let mut state = CoreState {
+        persistent_status_message: Some("done".into()),
+        status_message: Some("done".into()),
+        ..CoreState::default()
+    };
+
+    let effects =
+        dispatch_action_with_persistent_clear(&mut provider, &mut state, &CoreAction::MoveNext)
+            .expect("dispatch should succeed");
+
+    assert!(effects.is_empty());
+    assert_eq!(state.persistent_status_message.as_deref(), Some("done"));
+    assert_eq!(state.status_message.as_deref(), Some("done"));
 }

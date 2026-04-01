@@ -113,9 +113,9 @@ pub enum CreateModalFocus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InsertMode {
     #[default]
-    Normal,
-    Raw,
-    Pdf,
+    File,
+    InlineText,
+    ManualEmbedding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -312,6 +312,7 @@ pub struct CoreState {
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
+    pub persistent_status_message: Option<String>,
     pub chat_open: bool,
     pub chat_messages: Vec<(String, String)>,
     pub chat_input: String,
@@ -356,6 +357,7 @@ impl Default for CoreState {
             selected_context: None,
             total_count: 0,
             status_message: None,
+            persistent_status_message: None,
             chat_open: false,
             chat_messages: Vec::new(),
             chat_input: String::new(),
@@ -500,6 +502,7 @@ impl CustomAction {
 pub enum CoreEffect {
     OpenExternal(String),
     Notify(String),
+    NotifyPersistent(String),
     RequestRefresh,
     /// Validation or async error for the create form (clears submitting state).
     CreateFormError(Option<String>),
@@ -962,27 +965,26 @@ fn normalize_focus_for_tab(state: &mut CoreState, previous_focus: PaneFocus) {
 
 fn insert_focus_order(mode: InsertMode) -> &'static [InsertFormFocus] {
     match mode {
-        InsertMode::Normal => &[
+        InsertMode::File => &[
+            InsertFormFocus::Mode,
+            InsertFormFocus::MemoryId,
+            InsertFormFocus::Tag,
+            InsertFormFocus::FilePath,
+            InsertFormFocus::Submit,
+        ],
+        InsertMode::InlineText => &[
             InsertFormFocus::Mode,
             InsertFormFocus::MemoryId,
             InsertFormFocus::Tag,
             InsertFormFocus::Text,
-            InsertFormFocus::FilePath,
             InsertFormFocus::Submit,
         ],
-        InsertMode::Raw => &[
+        InsertMode::ManualEmbedding => &[
             InsertFormFocus::Mode,
             InsertFormFocus::MemoryId,
             InsertFormFocus::Tag,
             InsertFormFocus::Text,
             InsertFormFocus::Embedding,
-            InsertFormFocus::Submit,
-        ],
-        InsertMode::Pdf => &[
-            InsertFormFocus::Mode,
-            InsertFormFocus::MemoryId,
-            InsertFormFocus::Tag,
-            InsertFormFocus::FilePath,
             InsertFormFocus::Submit,
         ],
     }
@@ -1008,17 +1010,17 @@ fn prev_insert_focus(mode: InsertMode, focus: InsertFormFocus) -> InsertFormFocu
 
 fn next_insert_mode(mode: InsertMode) -> InsertMode {
     match mode {
-        InsertMode::Normal => InsertMode::Raw,
-        InsertMode::Raw => InsertMode::Pdf,
-        InsertMode::Pdf => InsertMode::Normal,
+        InsertMode::File => InsertMode::InlineText,
+        InsertMode::InlineText => InsertMode::ManualEmbedding,
+        InsertMode::ManualEmbedding => InsertMode::File,
     }
 }
 
 fn prev_insert_mode(mode: InsertMode) -> InsertMode {
     match mode {
-        InsertMode::Normal => InsertMode::Pdf,
-        InsertMode::Raw => InsertMode::Normal,
-        InsertMode::Pdf => InsertMode::Raw,
+        InsertMode::File => InsertMode::ManualEmbedding,
+        InsertMode::InlineText => InsertMode::File,
+        InsertMode::ManualEmbedding => InsertMode::InlineText,
     }
 }
 
@@ -1169,7 +1171,9 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.selected_content = snapshot.selected_content;
     state.selected_context = snapshot.selected_context;
     state.total_count = snapshot.total_count;
-    state.status_message = snapshot.status_message;
+    if state.persistent_status_message.is_none() {
+        state.status_message = snapshot.status_message;
+    }
     state.create_cost_state = snapshot.create_cost_state;
     state.create_submit_state = snapshot.create_submit_state;
     state.settings = snapshot.settings;
@@ -1178,7 +1182,8 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.saved_default_memory_id = snapshot.saved_default_memory_id;
     state.default_memory_selector_context = snapshot.default_memory_selector_context;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
-    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty() {
+    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty()
+    {
         state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
     }
     if state.default_memory_selector_items.is_empty() {
@@ -1932,7 +1937,7 @@ mod tests {
     #[test]
     fn insert_navigation_is_ignored_while_submit_is_running() {
         let mut state = CoreState {
-            insert_mode: InsertMode::Normal,
+            insert_mode: InsertMode::InlineText,
             insert_focus: InsertFormFocus::Text,
             insert_submit_state: CreateSubmitState::Submitting,
             ..CoreState::default()
@@ -1942,13 +1947,13 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertCycleMode);
 
         assert_eq!(state.insert_focus, InsertFormFocus::Text);
-        assert_eq!(state.insert_mode, InsertMode::Normal);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
     }
 
     #[test]
-    fn insert_cycle_mode_prev_moves_backwards_and_resets_focus() {
+    fn insert_cycle_mode_prev_moves_to_inline_text_and_resets_focus() {
         let mut state = CoreState {
-            insert_mode: InsertMode::Raw,
+            insert_mode: InsertMode::ManualEmbedding,
             insert_focus: InsertFormFocus::Embedding,
             insert_error: Some("boom".to_string()),
             insert_submit_state: CreateSubmitState::Error,
@@ -1957,7 +1962,7 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
 
-        assert_eq!(state.insert_mode, InsertMode::Normal);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
         assert_eq!(state.insert_error, None);
         assert_eq!(state.insert_submit_state, CreateSubmitState::Idle);
@@ -1966,16 +1971,49 @@ mod tests {
     #[test]
     fn insert_cycle_mode_wraps_between_first_and_last_modes() {
         let mut state = CoreState {
-            insert_mode: InsertMode::Normal,
+            insert_mode: InsertMode::File,
             insert_focus: InsertFormFocus::Mode,
             ..CoreState::default()
         };
 
         apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
-        assert_eq!(state.insert_mode, InsertMode::Pdf);
+        assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
 
         apply_core_action(&mut state, &CoreAction::InsertCycleMode);
-        assert_eq!(state.insert_mode, InsertMode::Normal);
+        assert_eq!(state.insert_mode, InsertMode::File);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
+    }
+
+    #[test]
+    fn insert_file_mode_skips_text_and_embedding_fields() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::File,
+            insert_focus: InsertFormFocus::Tag,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertNextField);
+        assert_eq!(state.insert_focus, InsertFormFocus::FilePath);
+
+        apply_core_action(&mut state, &CoreAction::InsertNextField);
+        assert_eq!(state.insert_focus, InsertFormFocus::Submit);
+    }
+
+    #[test]
+    fn insert_cycle_mode_visits_file_then_inline_text_before_raw() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::File,
+            insert_focus: InsertFormFocus::Mode,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
+
+        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        assert_eq!(state.insert_mode, InsertMode::File);
     }
 }

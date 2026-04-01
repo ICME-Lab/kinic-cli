@@ -15,7 +15,6 @@ use crate::ui::app::{Focus, TuiKitUi};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DefaultMemorySelectorLineKind {
-    Title,
     Selected,
     CurrentDefault,
     Normal,
@@ -83,13 +82,7 @@ pub(crate) fn default_memory_selector_lines(
     current_default_id: Option<&str>,
     copy: DefaultMemorySelectorCopy<'_>,
 ) -> Vec<(String, DefaultMemorySelectorLineKind)> {
-    let mut lines = vec![
-        (
-            format!(" {} ", copy.title),
-            DefaultMemorySelectorLineKind::Title,
-        ),
-        (String::new(), DefaultMemorySelectorLineKind::Normal),
-    ];
+    let mut lines = Vec::new();
 
     if items.is_empty() {
         lines.push((
@@ -99,7 +92,8 @@ pub(crate) fn default_memory_selector_lines(
     } else {
         for (index, item) in items.iter().enumerate() {
             let is_selected = index == selected_index;
-            let is_default = copy.show_current_default_marker && current_default_id == Some(item.id.as_str());
+            let is_default =
+                copy.show_current_default_marker && current_default_id == Some(item.id.as_str());
             let prefix = if is_selected { "›" } else { " " };
             let suffix = if is_default { "  ★" } else { "" };
             let kind = if is_selected {
@@ -331,7 +325,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(joined.contains("Select Target Memory"));
+        assert!(!joined.contains("Select Target Memory"));
         assert!(joined.contains("Enter: use target"));
         assert!(!joined.contains('★'));
     }

@@ -353,7 +353,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::MovePageUp
                         | CoreAction::OpenSelected
                 );
-                match dispatch_action(provider, &mut state, &action) {
+                match dispatch_action_with_persistent_clear(provider, &mut state, &action) {
                     Ok(effects) => {
                         if matches!(&action, CoreAction::SetTab(_)) {
                             normalize_focus_after_set_tab(&mut state);
@@ -412,7 +412,7 @@ fn handle_overlay_input<P: DataProvider>(
         let Some(action) = selector_overlay_action(code, modifiers) else {
             return OverlayInputResult::Consumed;
         };
-        return match dispatch_action(provider, state, &action) {
+        return match dispatch_action_with_persistent_clear(provider, state, &action) {
             Ok(effects) => OverlayInputResult::ApplyEffects(effects),
             Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
         };
@@ -465,7 +465,7 @@ fn dispatch_with_effects<P: DataProvider, H: RuntimeLoopHooks<P>>(
     hooks: &mut H,
     action: &CoreAction,
 ) -> Result<(), String> {
-    match dispatch_action(provider, state, action) {
+    match dispatch_action_with_persistent_clear(provider, state, action) {
         Ok(effects) => {
             hooks.on_effects(provider, state, &effects);
             execute_effects_to_status(state, effects);
@@ -473,6 +473,39 @@ fn dispatch_with_effects<P: DataProvider, H: RuntimeLoopHooks<P>>(
         }
         Err(error) => Err(dispatch_error_message(&error)),
     }
+}
+
+fn dispatch_action_with_persistent_clear(
+    provider: &mut impl DataProvider,
+    state: &mut CoreState,
+    action: &CoreAction,
+) -> tui_kit_runtime::CoreResult<Vec<CoreEffect>> {
+    if should_clear_persistent_status(action) {
+        state.persistent_status_message = None;
+        state.status_message = None;
+    }
+    dispatch_action(provider, state, action)
+}
+
+fn should_clear_persistent_status(action: &CoreAction) -> bool {
+    matches!(
+        action,
+        CoreAction::InsertInput(_)
+            | CoreAction::InsertBackspace
+            | CoreAction::InsertCycleModePrev
+            | CoreAction::InsertCycleMode
+            | CoreAction::InsertSubmit
+            | CoreAction::OpenDefaultMemoryPicker
+            | CoreAction::SubmitDefaultMemoryPicker
+            | CoreAction::CreateInput(_)
+            | CoreAction::CreateBackspace
+            | CoreAction::CreateSubmit
+            | CoreAction::SearchInput(_)
+            | CoreAction::SearchBackspace
+            | CoreAction::SetQuery(_)
+            | CoreAction::SearchSubmit
+            | CoreAction::SetTab(_)
+    )
 }
 
 fn switch_to_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
