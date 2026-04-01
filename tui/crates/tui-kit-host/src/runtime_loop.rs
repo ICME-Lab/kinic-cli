@@ -7,7 +7,7 @@ use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, apply_snapshot, dispatch_action,
-    kinic_tabs::{
+    is_insert_form_locked, kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
     should_open_default_memory_picker,
@@ -353,7 +353,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::MovePageUp
                         | CoreAction::OpenSelected
                 );
-                if matches!(action, CoreAction::InsertOpenFileDialog) {
+                if should_open_insert_file_dialog(&action, &state) {
                     match open_insert_file_dialog(&mut state, terminal) {
                         Ok(()) => {}
                         Err(error) => state.status_message = Some(error),
@@ -411,6 +411,10 @@ fn apply_insert_file_dialog_selection(
         state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
     }
     state.status_message = Some(format!("Selected file: {}", path.display()));
+}
+
+fn should_open_insert_file_dialog(action: &CoreAction, state: &CoreState) -> bool {
+    matches!(action, CoreAction::InsertOpenFileDialog) && !is_insert_form_locked(state)
 }
 
 fn normalize_focus_after_set_tab(state: &mut CoreState) {

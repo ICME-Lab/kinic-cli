@@ -625,7 +625,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     let previous_focus = state.focus;
     match action {
         CoreAction::InsertInput(c) => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             match state.insert_focus {
@@ -641,7 +641,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::InsertBackspace => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             match state.insert_focus {
@@ -661,24 +661,24 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::InsertOpenFileDialog => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
         }
         CoreAction::InsertNextField => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             state.insert_focus = next_insert_focus(state.insert_mode, state.insert_focus);
         }
         CoreAction::InsertPrevField => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             state.insert_focus = prev_insert_focus(state.insert_mode, state.insert_focus);
         }
         CoreAction::InsertCycleModePrev => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             state.insert_mode = prev_insert_mode(state.insert_mode);
@@ -689,7 +689,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::InsertCycleMode => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             state.insert_mode = next_insert_mode(state.insert_mode);
@@ -1030,7 +1030,7 @@ fn prev_insert_mode(mode: InsertMode) -> InsertMode {
     }
 }
 
-fn insert_form_locked(state: &CoreState) -> bool {
+pub fn is_insert_form_locked(state: &CoreState) -> bool {
     state.insert_submit_state == CreateSubmitState::Submitting
 }
 
@@ -1924,6 +1924,24 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertInput('x'));
 
         assert_eq!(state.insert_text, "draft");
+    }
+
+    #[test]
+    fn is_insert_form_locked_only_while_submit_is_running() {
+        let idle = CoreState::default();
+        assert!(!is_insert_form_locked(&idle));
+
+        let submitting = CoreState {
+            insert_submit_state: CreateSubmitState::Submitting,
+            ..CoreState::default()
+        };
+        assert!(is_insert_form_locked(&submitting));
+
+        let error = CoreState {
+            insert_submit_state: CreateSubmitState::Error,
+            ..CoreState::default()
+        };
+        assert!(!is_insert_form_locked(&error));
     }
 
     #[test]

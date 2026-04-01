@@ -391,3 +391,22 @@ fn apply_insert_file_dialog_selection_keeps_existing_path_on_cancel() {
         Some("File selection canceled.")
     );
 }
+
+#[test]
+fn should_open_insert_file_dialog_is_false_while_insert_submit_is_in_flight() {
+    let state = CoreState {
+        insert_submit_state: tui_kit_runtime::CreateSubmitState::Submitting,
+        insert_file_path: "/tmp/existing.md".into(),
+        insert_error: Some("keep".into()),
+        status_message: Some("ready".into()),
+        ..CoreState::default()
+    };
+
+    assert!(!should_open_insert_file_dialog(
+        &CoreAction::InsertOpenFileDialog,
+        &state
+    ));
+    assert_eq!(state.insert_file_path, "/tmp/existing.md");
+    assert_eq!(state.insert_error.as_deref(), Some("keep"));
+    assert_eq!(state.status_message.as_deref(), Some("ready"));
+}
