@@ -195,6 +195,21 @@ mod tests {
 
         validate_tui_cli_args(&cli).expect("validation should accept tui with identity");
     }
+
+    #[test]
+    fn cli_rejects_empty_identity_for_tui_command() {
+        let error = Cli::try_parse_from(["kinic-cli", "--identity", "", "tui"]).unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn cli_rejects_whitespace_only_identity_for_tui_command() {
+        let error =
+            Cli::try_parse_from(["kinic-cli", "--identity", "   ", "tui"]).unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
 }
 
 #[cfg(feature = "python-bindings")]
