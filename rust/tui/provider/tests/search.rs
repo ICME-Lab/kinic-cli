@@ -277,10 +277,6 @@ fn sync_active_memory_tracks_visible_records_and_restores_after_query_clears() {
 
     provider.sync_active_memory_to_visible_records();
     assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
-    assert_eq!(
-        provider.live_search_target_id().as_deref(),
-        Some("bbbbb-bb")
-    );
 
     provider.query = "gamma".to_string();
     provider.sync_active_memory_to_visible_records();

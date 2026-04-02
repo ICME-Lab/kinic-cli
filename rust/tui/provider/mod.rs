@@ -688,29 +688,6 @@ impl KinicProvider {
         self.invalidate_pending_search();
     }
 
-    fn live_search_target_id(&self) -> Option<String> {
-        if self.memories_mode != MemoriesMode::Browser {
-            return self.active_memory_id.clone();
-        }
-
-        if self.query.is_empty() {
-            return self.active_memory_id.clone();
-        }
-
-        let visible_records = self.visible_memory_records();
-        if visible_records.is_empty() {
-            return None;
-        }
-
-        if let Some(active_id) = self.active_memory_id.as_ref()
-            && visible_records.iter().any(|record| &record.id == active_id)
-        {
-            return Some(active_id.clone());
-        }
-
-        visible_records.first().map(|record| record.id.clone())
-    }
-
     fn active_visible_memory_record(&self) -> Option<&KinicRecord> {
         let active_id = self.active_memory_id.as_deref()?;
         self.visible_memory_records()
