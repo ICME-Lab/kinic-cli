@@ -10,7 +10,7 @@ use ic_agent::identity::AnonymousIdentity;
 
 use crate::agent::load_identity_from_keyring;
 use crate::cli::GlobalOpts;
-use crate::resolve_tui_identity;
+use crate::{TUI_IDENTITY_REQUIRED_MESSAGE, resolve_tui_identity};
 
 #[path = "../../tui/src/adapter.rs"]
 mod adapter;
@@ -37,7 +37,6 @@ pub use provider::TuiConfig;
 
 #[derive(Clone)]
 pub enum TuiAuth {
-    Mock,
     DeferredIdentity {
         identity_name: String,
         cached_identity: Arc<Mutex<Option<Arc<dyn Identity>>>>,
@@ -48,7 +47,6 @@ pub enum TuiAuth {
 impl fmt::Debug for TuiAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Mock => f.write_str("Mock"),
             Self::DeferredIdentity { identity_name, .. } => {
                 write!(f, "DeferredIdentity({identity_name})")
             }
@@ -58,13 +56,8 @@ impl fmt::Debug for TuiAuth {
 }
 
 impl TuiAuth {
-    pub fn is_live(&self) -> bool {
-        !matches!(self, Self::Mock)
-    }
-
     fn resolved_identity(&self) -> Result<Arc<dyn Identity>> {
         match self {
-            Self::Mock => anyhow::bail!("mock auth cannot be used for live TUI operations"),
             Self::DeferredIdentity {
                 identity_name,
                 cached_identity,
@@ -118,7 +111,7 @@ pub fn run(global: &GlobalOpts) -> Result<()> {
     run_with_config(build_launch_config_from_global(global)?)
 }
 
-pub fn build_launch_config(identity: Option<String>, use_mainnet: bool) -> Result<TuiLaunchConfig> {
+pub fn build_launch_config(identity: String, use_mainnet: bool) -> Result<TuiLaunchConfig> {
     Ok(TuiLaunchConfig {
         auth: resolve_auth(identity)?,
         use_mainnet,
@@ -176,14 +169,15 @@ impl RuntimeLoopHooks<provider::KinicProvider> for KinicRuntimeHooks {
     }
 }
 
-fn resolve_auth(identity: Option<String>) -> Result<TuiAuth> {
-    match identity {
-        Some(identity) => Ok(TuiAuth::DeferredIdentity {
-            identity_name: identity,
-            cached_identity: Arc::new(Mutex::new(None)),
-        }),
-        None => Ok(TuiAuth::Mock),
+fn resolve_auth(identity: String) -> Result<TuiAuth> {
+    if identity.trim().is_empty() {
+        return Err(anyhow!(TUI_IDENTITY_REQUIRED_MESSAGE));
     }
+
+    Ok(TuiAuth::DeferredIdentity {
+        identity_name: identity,
+        cached_identity: Arc::new(Mutex::new(None)),
+    })
 }
 
 #[cfg(test)]
@@ -191,29 +185,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolved_auth_is_live() {
-        let auth = TuiAuth::resolved_for_tests();
+    fn resolve_auth_requires_identity() {
+        let error = resolve_auth(String::new()).unwrap_err();
 
-        assert!(auth.is_live());
-    }
-
-    #[test]
-    fn resolve_auth_falls_back_to_mock_without_credentials() {
-        let auth = resolve_auth(None).unwrap();
-
-        assert!(matches!(auth, TuiAuth::Mock));
+        assert_eq!(
+            error.to_string(),
+            TUI_IDENTITY_REQUIRED_MESSAGE
+        );
     }
 
     #[test]
     fn build_launch_config_sets_use_mainnet_and_resolved_auth() {
-        let config = build_launch_config(Some("alice".to_string()), true).unwrap();
+        let config = build_launch_config("alice".to_string(), true).unwrap();
 
-        assert!(config.auth.is_live());
+        assert!(matches!(config.auth, TuiAuth::DeferredIdentity { .. }));
         assert!(config.use_mainnet);
     }
 
     #[test]
-    fn build_launch_config_from_global_uses_mock_without_identity() {
+    fn build_launch_config_from_global_requires_identity() {
         let global = GlobalOpts {
             verbose: 0,
             ic: false,
@@ -222,10 +212,12 @@ mod tests {
             identity_path: None,
         };
 
-        let config = build_launch_config_from_global(&global).unwrap();
+        let error = build_launch_config_from_global(&global).unwrap_err();
 
-        assert!(matches!(config.auth, TuiAuth::Mock));
-        assert!(!config.use_mainnet);
+        assert_eq!(
+            error.to_string(),
+            TUI_IDENTITY_REQUIRED_MESSAGE
+        );
     }
 
     #[test]

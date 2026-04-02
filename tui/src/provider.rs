@@ -188,7 +188,6 @@ impl<'a> DefaultMemorySelection<'a> {
 }
 
 struct DefaultMemoryController<'a> {
-    is_live: bool,
     user_preferences: &'a mut UserPreferences,
     preferences_health: &'a mut PreferencesHealth,
 }
@@ -215,11 +214,6 @@ impl<'a> DefaultMemoryController<'a> {
     }
 
     fn set_default_memory_preference(&mut self, memory_id: String) -> CoreEffect {
-        if !self.is_live {
-            return CoreEffect::Notify(
-                "Default memory is only available in live mode.".to_string(),
-            );
-        }
         if self.user_preferences.default_memory_id.as_deref() == Some(memory_id.as_str()) {
             return CoreEffect::Notify(format!("Default memory already set to {memory_id}"));
         }
@@ -289,7 +283,7 @@ impl KinicProvider {
         ));
 
         Self {
-            all: sample_records(),
+            all: Vec::new(),
             query: String::new(),
             tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
             config,
@@ -326,10 +320,6 @@ impl KinicProvider {
     }
 
     fn initialize_live_memories(&mut self) {
-        if !self.is_live() {
-            return;
-        }
-
         let _ = self.start_live_memories_load(None, false);
     }
 
@@ -338,12 +328,6 @@ impl KinicProvider {
         notify_message: Option<&str>,
         preserve_query: bool,
     ) -> Option<CoreEffect> {
-        if !self.is_live() {
-            return Some(CoreEffect::Notify(
-                "Live memories unavailable in mock mode.".to_string(),
-            ));
-        }
-
         if self.initial_memories_in_flight {
             return None;
         }
@@ -396,24 +380,14 @@ impl KinicProvider {
         }
     }
 
-    fn is_live(&self) -> bool {
-        self.config.auth.is_live()
-    }
-
     fn current_records(&self) -> Vec<&KinicRecord> {
-        if self.is_live()
-            && self.memories_mode == MemoriesMode::Browser
-            && self.memory_records.is_empty()
-        {
+        if self.memories_mode == MemoriesMode::Browser && self.memory_records.is_empty() {
             return self.all.iter().collect();
         }
-        let base = if self.is_live() {
-            match self.memories_mode {
-                MemoriesMode::Browser => &self.memory_records,
-                MemoriesMode::Results => &self.result_records,
-            }
-        } else {
-            &self.all
+
+        let base = match self.memories_mode {
+            MemoriesMode::Browser => &self.memory_records,
+            MemoriesMode::Results => &self.result_records,
         };
 
         if self.memories_mode == MemoriesMode::Results || self.query.is_empty() {
@@ -432,7 +406,7 @@ impl KinicProvider {
     }
 
     fn visible_memory_records(&self) -> Vec<&KinicRecord> {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+        if self.memories_mode != MemoriesMode::Browser {
             return Vec::new();
         }
         if self.memory_records.is_empty() {
@@ -442,7 +416,7 @@ impl KinicProvider {
     }
 
     fn sync_active_memory_to_visible_records(&mut self) {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+        if self.memories_mode != MemoriesMode::Browser {
             return;
         }
 
@@ -484,7 +458,7 @@ impl KinicProvider {
     }
 
     fn live_search_target_id(&self) -> Option<String> {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+        if self.memories_mode != MemoriesMode::Browser {
             return self.active_memory_id.clone();
         }
 
@@ -525,10 +499,7 @@ impl KinicProvider {
     }
 
     fn move_active_memory(&mut self, delta: isize) {
-        if !self.is_live()
-            || self.memories_mode != MemoriesMode::Browser
-            || self.visible_memory_count() == 0
-        {
+        if self.memories_mode != MemoriesMode::Browser || self.visible_memory_count() == 0 {
             return;
         }
 
@@ -541,7 +512,7 @@ impl KinicProvider {
     }
 
     fn set_active_memory(&mut self, index: usize) {
-        if !self.is_live() || self.memories_mode != MemoriesMode::Browser {
+        if self.memories_mode != MemoriesMode::Browser {
             return;
         }
         let visible_records = self.visible_memory_records();
@@ -578,7 +549,7 @@ impl KinicProvider {
             .collect::<Vec<_>>();
         let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
-        } else if self.is_live() && self.memories_mode == MemoriesMode::Browser {
+        } else if self.memories_mode == MemoriesMode::Browser {
             if self.memory_records.is_empty() {
                 filtered.first().copied().map(adapter::to_content)
             } else {
@@ -651,16 +622,12 @@ impl KinicProvider {
 
     fn default_memory_controller(&mut self) -> DefaultMemoryController<'_> {
         DefaultMemoryController {
-            is_live: self.is_live(),
             user_preferences: &mut self.user_preferences,
             preferences_health: &mut self.preferences_health,
         }
     }
 
     fn start_session_settings_refresh(&mut self) -> Option<CoreEffect> {
-        if !self.is_live() {
-            return None;
-        }
         if self.session_settings_in_flight {
             return None;
         }
@@ -689,12 +656,6 @@ impl KinicProvider {
     }
 
     fn start_create_cost_refresh(&mut self) -> Option<CoreEffect> {
-        if !self.is_live() {
-            self.create_cost_state = CreateCostState::Unavailable;
-            return Some(CoreEffect::Notify(
-                "Live account info unavailable in mock mode.".to_string(),
-            ));
-        }
         if self.create_cost_in_flight {
             return None;
         }
@@ -816,28 +777,20 @@ impl KinicProvider {
         if self.tab_id == KINIC_MARKET_TAB_ID {
             return "Market is not implemented yet.".to_string();
         }
-        let base = if !self.is_live() {
-            format!("{visible_count} filtered / {} total", self.all.len())
-        } else {
-            match self.memories_mode {
-                MemoriesMode::Browser => match self.active_memory_id.as_deref() {
-                    Some(memory_id) => format!(
-                        "Target {memory_id} | Enter runs remote search | Shift+D saves default"
-                    ),
-                    None => "No memory selected".to_string(),
-                },
-                MemoriesMode::Results => match self.active_memory_id.as_deref() {
-                    Some(memory_id) => format!(
-                        "{visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
-                    ),
-                    None => format!("{visible_count} search results"),
-                },
-            }
+        let base = match self.memories_mode {
+            MemoriesMode::Browser => match self.active_memory_id.as_deref() {
+                Some(memory_id) => format!(
+                    "Target {memory_id} | Enter runs remote search | Shift+D saves default"
+                ),
+                None => "No memory selected".to_string(),
+            },
+            MemoriesMode::Results => match self.active_memory_id.as_deref() {
+                Some(memory_id) => format!(
+                    "{visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
+                ),
+                None => format!("{visible_count} search results"),
+            },
         };
-
-        if !self.is_live() {
-            return base;
-        }
 
         if self.initial_memories_in_flight {
             return "Loading memories...".to_string();
@@ -930,9 +883,6 @@ impl KinicProvider {
 
     fn run_live_search(&mut self) -> Option<CoreEffect> {
         let auth = self.config.auth.clone();
-        if !auth.is_live() {
-            return None;
-        }
         if self.search_in_flight {
             return None;
         }
@@ -1325,11 +1275,9 @@ impl KinicProvider {
     }
 
     fn reset_memories_browser(&mut self) {
-        if self.is_live() {
-            self.memories_mode = MemoriesMode::Browser;
-            self.result_records.clear();
-            self.invalidate_pending_search();
-        }
+        self.memories_mode = MemoriesMode::Browser;
+        self.result_records.clear();
+        self.invalidate_pending_search();
     }
 
     fn set_tab(&mut self, tab_id: &str) -> Vec<CoreEffect> {
@@ -1475,9 +1423,7 @@ impl DataProvider for KinicProvider {
                 self.sync_active_memory_to_visible_records();
             }
             CoreAction::SearchSubmit => {
-                if self.is_live()
-                    && let Some(effect) = self.run_live_search()
-                {
+                if let Some(effect) = self.run_live_search() {
                     effects.push(effect);
                 }
             }
@@ -1507,7 +1453,7 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::ChatSubmit => {
                 effects.push(CoreEffect::Notify(
-                    "Chat is still mock-only; search is live first.".to_string(),
+                    "Chat is not implemented yet; search is available first.".to_string(),
                 ));
             }
             CoreAction::CreateSubmit => {
@@ -1518,42 +1464,23 @@ impl DataProvider for KinicProvider {
                         "Name and description are required.".to_string(),
                     )));
                 } else if self.create_submit_in_flight {
-                } else if self.is_live() {
-                    effects.push(self.start_create_submit(name, description));
+                    effects.push(CoreEffect::Notify(
+                        "Create request already running.".to_string(),
+                    ));
                 } else {
-                    let new_id = format!("mock-memory-{}", self.all.len() + 1);
-                    let record = KinicRecord::new(
-                        new_id.clone(),
-                        name.clone(),
-                        "memories",
-                        "Status: mock".to_string(),
-                        format!(
-                            "## Memory\n\n- Id: `{new_id}`\n- Status: `mock`\n\n### Content\n{}\n",
-                            state.create_description.trim()
-                        ),
-                    );
-                    self.all.insert(0, record);
-                    self.active_memory_id = Some(new_id.clone());
-                    effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
-                    effects.push(CoreEffect::SelectFirstListItem);
-                    effects.push(CoreEffect::ResetCreateFormAndSetTab {
-                        tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
-                    });
-                    effects.push(CoreEffect::FocusPane(PaneFocus::Items));
-                    effects.push(CoreEffect::Notify(format!("Created mock memory {name}")));
+                    effects.push(self.start_create_submit(name, description));
                 }
             }
             CoreAction::InsertSubmit => {
                 if let Err(error) = self.validate_insert_state(state) {
                     effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if self.insert_submit_in_flight {
-                } else if self.is_live() {
+                    effects.push(CoreEffect::Notify(
+                        "Insert request already running.".to_string(),
+                    ));
+                } else {
                     let request = self.build_insert_request(state);
                     effects.push(self.start_insert_submit(request));
-                } else {
-                    effects.push(CoreEffect::Notify(
-                        "Insert submit is only available in live mode.".to_string(),
-                    ));
                 }
             }
             CoreAction::CreateRefresh => {
@@ -1802,284 +1729,6 @@ fn format_insert_submit_error(error: &bridge::InsertMemoryError) -> String {
             format!("Insert failed. Cause: {reason}")
         }
     }
-}
-
-fn sample_records() -> Vec<KinicRecord> {
-    vec![
-        KinicRecord::new(
-            "kinic-1",
-            "Unified TUI Kit",
-            "memories",
-            "Single facade crate with modular host/runtime/render layers.",
-            r#"## Daily Note
-- Split crate structure into `host/runtime/render/model`
-- Added unified facade crate: `tui-kit`
-
-### Why it mattered
-Keeping runtime domain-agnostic made every demo easier to compose.
-
-```rust
-let ui = TuiKitUi::new(&theme);
-```
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-5",
-            "Keyboard Workflow Snapshot",
-            "memories",
-            "Focused on tab-first navigation and predictable pane order.",
-            r#"## Navigation Log
-1. Search for an entry
-2. Move to list with `Tab`
-3. Open content with `Enter`
-
-### Notes
-- Keep tabs at the end of the focus cycle
-- Prioritize consistency over shortcuts
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-6",
-            "UI Polish Memo",
-            "memories",
-            "Captured tweaks around scrollbars, placeholders, and cursor behavior.",
-            r#"## UI Polish
-- Placeholder uses muted/italic style
-- Cursor only appears in active input fields
-- Scrollbar uses a custom track + thumb
-
-### TODO
-- [ ] Mouse wheel support per pane
-- [ ] Unified toast notifications
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-7",
-            "Release Draft 0.1",
-            "memories",
-            "First release draft notes for the reusable tui-kit package.",
-            r#"## Release Draft 0.1
-- Stabilize facade crate exports
-- Freeze keyboard navigation defaults
-- Add one polished domain sample
-
-### Changelog Snippet
-- `feat`: tabs focus cycle
-- `fix`: list scrollbar behavior
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-8",
-            "Design Review: Left Pane",
-            "memories",
-            "Discussed list density and readability under compact terminals.",
-            r#"## Left Pane Review
-- Keep icon + kind prefix
-- Avoid truncating item title too early
-- Prefer subtle divider over heavy borders
-
-```text
-Goal: scanability first, decoration second.
-```
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-9",
-            "Design Review: Right Pane",
-            "memories",
-            "Evaluated section hierarchy and markdown-ish readability.",
-            r#"## Right Pane Review
-1. Strong title
-2. Definition block
-3. Sections with clear heading
-
-### Decision
-Use `◇ Content` naming consistently.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-10",
-            "Keyboard Mapping Matrix",
-            "memories",
-            "Captured focus navigation matrix for Search/List/Content/Tabs/Chat.",
-            r#"## Keyboard Matrix
-- `Tab`: next focus
-- `Shift+Tab`: previous focus
-- Tabs focus: `↑/↓` to switch tab
-
-### Regression Check
-- Ensure `Enter` from Tabs reaches Content.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-11",
-            "Interaction Bug Notes",
-            "memories",
-            "Log of edge cases found during runtime-first migration.",
-            r#"## Bug Notes
-- Chat focus consumed key without sync
-- List scroll anchor drifted on reverse motion
-- Status row index mismatch after layout update
-
-### Action
-Patch quickly, then add snapshot tests.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-12",
-            "Theme Study",
-            "memories",
-            "Compared contrast ratios across dark presets and pink variant.",
-            r#"## Theme Study
-- Nord: calm, high legibility
-- Dracula: vivid syntax emphasis
-- Pink: branded accent direction
-
-### Follow-up
-Add high-contrast accessibility preset.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-13",
-            "Provider Contract Memo",
-            "memories",
-            "Summarized DataProvider boundaries for domain teams.",
-            r#"## Provider Contract
-- Provider owns data shaping
-- Runtime owns local interaction state
-- Render stays domain-agnostic
-
-```rust
-fn handle_action(&mut self, action: &CoreAction, state: &CoreState)
-```
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-14",
-            "Host Boundary Memo",
-            "memories",
-            "Clarified responsibilities of host loop and side-effect execution.",
-            r#"## Host Boundary
-- Poll input
-- Resolve global commands
-- Execute effects (`OpenExternal`, notifications)
-
-### Keep out of runtime
-Anything terminal/platform-specific.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-15",
-            "Render Boundary Memo",
-            "memories",
-            "Defined what belongs in render and what does not.",
-            r#"## Render Boundary
-- Layout and visuals
-- Cursor coordinates
-- No business/domain side effects
-
-### Practical Rule
-If it needs OS I/O, it is not render.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-16",
-            "Migration Checklist",
-            "memories",
-            "Checklist for moving legacy app flows into shared contracts.",
-            r#"## Migration Checklist
-- [x] Split model/runtime/host/render
-- [x] Add facade crate
-- [x] Move common runtime loop
-- [ ] Replace remaining domain loops with hooks
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-17",
-            "UX Copy Candidates",
-            "memories",
-            "Alternatives for generic labels in reusable UI kit.",
-            r#"## Copy Candidates
-- Tabs -> Views / Sections
-- Inspector -> Content
-- Context -> Group
-
-### Principle
-Prefer domain-neutral defaults with app-level overrides.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-18",
-            "Sample Data Expansion Plan",
-            "memories",
-            "Prepared larger datasets for manual scrolling and search QA.",
-            r#"## Expansion Plan
-1. Add 20+ memory records
-2. Ensure varied title lengths
-3. Include markdown-like body text
-
-### Why
-Better confidence in viewport + scrollbar behavior.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-19",
-            "Command Palette Idea",
-            "memories",
-            "Rough concept for command palette integration.",
-            r#"## Command Palette Idea
-- Trigger with `:`
-- Fuzzy command search
-- Action dispatch into runtime
-
-### Future
-Could become a separate optional module.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-20",
-            "Copilot-to-Chat Rename",
-            "memories",
-            "Documented terminology cleanup for domain neutrality.",
-            r#"## Terminology Cleanup
-- Remove product-specific terms from shared crates
-- Keep neutral naming in runtime/render/host
-
-### Result
-UI kit can be reused across mail/task/other domains.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-21",
-            "Mouse Support TODO",
-            "memories",
-            "Pending mouse wheel and click interactions for each pane.",
-            r#"## Mouse Support TODO
-- Wheel scroll in List/Content/Chat
-- Click to focus pane
-- Click tabs to switch
-
-### Constraint
-Maintain keyboard-first behavior as baseline.
-"#,
-        ),
-        KinicRecord::new(
-            "kinic-22",
-            "Content Mock Library",
-            "memories",
-            "Centralized mock snippets for demos and screenshots.",
-            r#"## Content Mock Library
-- Keep short and long variants
-- Include bullets, headings, and pseudo code
-- Avoid domain-sensitive terms by default
-
-```md
-## Heading
-- item
-```
-"#,
-        ),
-    ]
 }
 
 #[cfg(test)]

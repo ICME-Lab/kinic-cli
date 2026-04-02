@@ -13,7 +13,7 @@ mod python;
 pub mod tui;
 
 use anyhow::{Result, anyhow};
-use clap::Parser;
+use clap::{CommandFactory, Parser, error::ErrorKind};
 use std::path::PathBuf;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::fmt;
@@ -34,8 +34,13 @@ use pyo3::{
 #[cfg(feature = "python-bindings")]
 use tokio::runtime::Runtime;
 
+pub(crate) const TUI_IDENTITY_REQUIRED_MESSAGE: &str = "--identity is required for the Kinic TUI";
+pub(crate) const TUI_II_UNSUPPORTED_MESSAGE: &str =
+    "Internet Identity is not supported for the Kinic TUI yet";
+
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+    validate_tui_cli_args(&cli)?;
 
     let max = match cli.global.verbose {
         0 => LevelFilter::INFO,
@@ -79,6 +84,21 @@ pub async fn run() -> Result<()> {
     run_command(cli.command, context).await
 }
 
+fn validate_tui_cli_args(cli: &Cli) -> Result<()> {
+    if matches!(&cli.command, cli::Command::Tui(_))
+        && cli.global.identity.is_none()
+        && !cli.global.ii
+    {
+        let mut command = Cli::command();
+        let clap_error = command
+            .error(ErrorKind::MissingRequiredArgument, TUI_IDENTITY_REQUIRED_MESSAGE)
+            .with_cmd(&command);
+        return Err(clap_error.into());
+    }
+
+    Ok(())
+}
+
 fn build_cli_command_context(global: &cli::GlobalOpts) -> Result<(AgentFactory, Option<PathBuf>)> {
     if global.ii {
         let identity_path = resolve_identity_path(global)?;
@@ -97,13 +117,14 @@ pub(crate) fn build_keyring_agent_factory(use_mainnet: bool, identity: &str) -> 
     AgentFactory::new(use_mainnet, identity.to_string())
 }
 
-pub(crate) fn resolve_tui_identity(global: &cli::GlobalOpts) -> Result<Option<String>> {
+pub(crate) fn resolve_tui_identity(global: &cli::GlobalOpts) -> Result<String> {
     if global.ii {
-        return Err(anyhow!(
-            "Internet Identity is not supported for the Kinic TUI yet"
-        ));
+        return Err(anyhow!(TUI_II_UNSUPPORTED_MESSAGE));
     }
-    Ok(global.identity.clone())
+    global
+        .identity
+        .clone()
+        .ok_or_else(|| anyhow!(TUI_IDENTITY_REQUIRED_MESSAGE))
 }
 
 fn resolve_required_identity(global: &cli::GlobalOpts) -> Result<String> {
@@ -144,16 +165,28 @@ mod tests {
 
         let identity = resolve_tui_identity(&global).unwrap();
 
-        assert_eq!(identity.as_deref(), Some("alice"));
+        assert_eq!(identity, "alice");
     }
 
     #[test]
-    fn resolve_tui_identity_returns_none_without_identity() {
+    fn resolve_tui_identity_requires_identity() {
         let global = global_opts(None, false, None);
 
-        let identity = resolve_tui_identity(&global).unwrap();
+        let error = resolve_tui_identity(&global).unwrap_err();
 
-        assert!(identity.is_none());
+        assert_eq!(
+            error.to_string(),
+            TUI_IDENTITY_REQUIRED_MESSAGE
+        );
+    }
+
+    #[test]
+    fn resolve_tui_identity_rejects_internet_identity_for_tui() {
+        let global = global_opts(None, true, None);
+
+        let error = resolve_tui_identity(&global).unwrap_err();
+
+        assert_eq!(error.to_string(), TUI_II_UNSUPPORTED_MESSAGE);
     }
 
     #[test]
@@ -163,6 +196,38 @@ mod tests {
         let path = resolve_identity_path(&global).unwrap();
 
         assert!(path.ends_with(PathBuf::from(".config/kinic/identity.json")));
+    }
+
+    #[test]
+    fn validate_tui_cli_args_accepts_identity_for_tui_command() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--identity", "alice", "tui"])
+            .expect("cli parsing should succeed");
+
+        validate_tui_cli_args(&cli).expect("validation should accept tui with identity");
+    }
+
+    #[test]
+    fn validate_tui_cli_args_allows_ii_for_tui_runtime_handling() {
+        let cli =
+            Cli::try_parse_from(["kinic-cli", "--ii", "tui"]).expect("cli parsing should succeed");
+
+        validate_tui_cli_args(&cli)
+            .expect("validation should defer unsupported ii handling to runtime");
+    }
+
+    #[test]
+    fn cli_rejects_empty_identity_for_tui_command() {
+        let error = Cli::try_parse_from(["kinic-cli", "--identity", "", "tui"]).unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn cli_rejects_whitespace_only_identity_for_tui_command() {
+        let error =
+            Cli::try_parse_from(["kinic-cli", "--identity", "   ", "tui"]).unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }
 }
 
