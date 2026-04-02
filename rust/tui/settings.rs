@@ -35,29 +35,24 @@ pub struct PreferencesHealth {
     pub save_error: Option<String>,
 }
 
+#[cfg(test)]
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
-    #[cfg(test)]
-    {
-        Ok(UserPreferences::default())
-    }
-
-    #[cfg(not(test))]
-    {
-        load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)
-    }
+    Ok(UserPreferences::default())
 }
 
-pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), SettingsError> {
-    #[cfg(test)]
-    {
-        let _ = preferences;
-        Ok(())
-    }
+#[cfg(not(test))]
+pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
+    load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)
+}
 
-    #[cfg(not(test))]
-    {
-        save_yaml(APP_NAMESPACE, SETTINGS_FILE_NAME, preferences)
-    }
+#[cfg(test)]
+pub fn save_user_preferences(_preferences: &UserPreferences) -> Result<(), SettingsError> {
+    Ok(())
+}
+
+#[cfg(not(test))]
+pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), SettingsError> {
+    save_yaml(APP_NAMESPACE, SETTINGS_FILE_NAME, preferences)
 }
 
 pub fn build_settings_snapshot(
