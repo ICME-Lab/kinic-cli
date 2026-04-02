@@ -7,7 +7,10 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
+use tui_kit_runtime::{
+    AccessControlAction, AccessControlFocus, AccessControlMode, AccessControlRole,
+    CreateModalFocus, CreateSubmitState, SettingsSnapshot,
+};
 
 use super::TuiKitUi;
 use super::screens::settings::{
@@ -16,6 +19,20 @@ use super::screens::settings::{
 };
 
 impl<'a> TuiKitUi<'a> {
+    pub(super) fn access_control_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
+        if !self.access_control_open || self.access_control_mode != AccessControlMode::Add {
+            return None;
+        }
+        let rect = access_control_area(area, self.access_control_mode)?;
+        let inner = bordered_inner_area(rect)?;
+        let principal_prefix = "  ";
+        let x = inner.x
+            + principal_prefix.len() as u16
+            + visible_width(self.access_control_principal_id.to_string());
+        let y = inner.y + 2;
+        Some((x.min(inner.right().saturating_sub(1)), y))
+    }
+
     pub(super) fn render_create_overlay(&self, area: Rect, buf: &mut Buffer) {
         if !self.show_create_modal {
             return;
@@ -247,6 +264,296 @@ impl<'a> TuiKitUi<'a> {
             .wrap(Wrap { trim: false })
             .render(picker_area, buf);
     }
+
+    pub(super) fn render_access_control_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.access_control_open {
+            return;
+        }
+
+        let Some(overlay_area) = access_control_area(area, self.access_control_mode) else {
+            return;
+        };
+        Clear.render(overlay_area, buf);
+
+        let (title, mut lines) = access_overlay_copy(self);
+
+        if let Some(error) = self.access_control_error {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("  {error}"),
+                self.theme.style_error(),
+            )));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Tab: next field  Arrow: cycle selector  Enter: submit  Esc: close",
+            self.theme.style_muted(),
+        )));
+
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(self.theme.style_border_focused())
+                    .title(format!(" {title} "))
+                    .style(Style::default().bg(self.theme.bg_panel)),
+            )
+            .wrap(Wrap { trim: false })
+            .render(overlay_area, buf);
+    }
+}
+
+fn access_control_area(area: Rect, mode: AccessControlMode) -> Option<Rect> {
+    let (desired_width, desired_height, min_height) = match mode {
+        AccessControlMode::Action => (58, 11, 9),
+        AccessControlMode::Add => (56, 13, 10),
+        AccessControlMode::Confirm => (52, 9, 7),
+        AccessControlMode::None => (48, 8, 6),
+    };
+    let (width, height) = fit_overlay_rect(area, desired_width, desired_height, min_height)?;
+    Some(Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + (area.height - height) / 2,
+        width,
+        height,
+    })
+}
+
+fn access_principal_value(ui: &TuiKitUi<'_>) -> String {
+    if ui.access_control_principal_id.is_empty() {
+        "<principal or anonymous>".to_string()
+    } else if ui.access_control_mode == AccessControlMode::Add {
+        ui.access_control_principal_id.to_string()
+    } else {
+        shorten_principal(ui.access_control_principal_id)
+    }
+}
+
+fn access_principal_span(ui: &TuiKitUi<'_>) -> Span<'static> {
+    if ui.access_control_principal_id.is_empty() {
+        Span::styled(access_principal_value(ui), ui.theme.style_muted())
+    } else {
+        Span::styled(
+            access_principal_value(ui),
+            access_field_style(ui, AccessControlFocus::Principal),
+        )
+    }
+}
+
+fn access_role_value(ui: &TuiKitUi<'_>) -> String {
+    match ui.access_control_role {
+        AccessControlRole::Admin => "[admin] / writer / reader".to_string(),
+        AccessControlRole::Writer => " admin / [writer] / reader".to_string(),
+        AccessControlRole::Reader => " admin / writer / [reader]".to_string(),
+    }
+}
+
+fn access_field_style(ui: &TuiKitUi<'_>, focus: AccessControlFocus) -> ratatui::style::Style {
+    if ui.access_control_focus == focus {
+        ui.theme.style_accent_bold()
+    } else {
+        ui.theme.style_normal()
+    }
+}
+
+fn access_overlay_copy(ui: &TuiKitUi<'_>) -> (&'static str, Vec<Line<'static>>) {
+    match ui.access_control_mode {
+        AccessControlMode::Action => (
+            "Access Action",
+            vec![
+                Line::from(""),
+                Line::from(Span::styled("Selected User", ui.theme.style_dim())),
+                Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(access_principal_value(ui), ui.theme.style_muted()),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled("Role / Remove", ui.theme.style_dim())),
+                access_action_line(ui),
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!(
+                        "Current role: {}",
+                        role_label(ui.access_control_current_role)
+                    ),
+                    ui.theme.style_muted(),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Enter: confirm  Esc: close",
+                    ui.theme.style_muted(),
+                )),
+            ],
+        ),
+        AccessControlMode::Add => (
+            "Add User",
+            vec![
+                Line::from(""),
+                Line::from(Span::styled("Principal ID", ui.theme.style_dim())),
+                add_user_principal_line(ui),
+                Line::from(""),
+                Line::from(Span::styled("Role", ui.theme.style_dim())),
+                Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(access_role_value(ui), ui.theme.style_accent_bold()),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Enter: confirm  Esc: close",
+                    ui.theme.style_muted(),
+                )),
+            ],
+        ),
+        AccessControlMode::Confirm => (
+            "Confirm Access",
+            vec![
+                Line::from(Span::styled(
+                    confirm_message(ui),
+                    ui.theme.style_accent_bold(),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(confirm_value(ui), ui.theme.style_accent_bold()),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(confirm_hint(ui), ui.theme.style_muted())),
+            ],
+        ),
+        AccessControlMode::None => ("Access", vec![]),
+    }
+}
+
+fn add_user_principal_line(ui: &TuiKitUi<'_>) -> Line<'static> {
+    let mut spans = vec![Span::raw("  "), access_principal_span(ui)];
+    if ui.access_control_principal_id.is_empty() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(r#"type "anonymous""#, ui.theme.style_muted()));
+    }
+    Line::from(spans)
+}
+
+fn access_action_line(ui: &TuiKitUi<'_>) -> Line<'static> {
+    let mut spans = vec![Span::raw("  ")];
+    let mut first = true;
+    for role in [
+        AccessControlRole::Admin,
+        AccessControlRole::Writer,
+        AccessControlRole::Reader,
+    ] {
+        if !first {
+            spans.push(Span::raw(" / "));
+        }
+        first = false;
+        let label = role_label(role);
+        let style = if role == ui.access_control_current_role {
+            ui.theme.style_muted()
+        } else if ui.access_control_action == AccessControlAction::Change
+            && ui.access_control_role == role
+        {
+            ui.theme.style_accent_bold()
+        } else {
+            ui.theme.style_normal()
+        };
+        let text = if role == ui.access_control_current_role {
+            label.to_string()
+        } else if ui.access_control_action == AccessControlAction::Change
+            && ui.access_control_role == role
+        {
+            format!("[{label}]")
+        } else {
+            label.to_string()
+        };
+        spans.push(Span::styled(text, style));
+    }
+    spans.push(Span::raw(" / "));
+    let remove_text = if ui.access_control_action == AccessControlAction::Remove {
+        "[remove]".to_string()
+    } else {
+        "remove".to_string()
+    };
+    let remove_style = if ui.access_control_action == AccessControlAction::Remove {
+        ui.theme.style_accent_bold()
+    } else {
+        ui.theme.style_normal()
+    };
+    spans.push(Span::styled(remove_text, remove_style));
+    Line::from(spans)
+}
+
+fn confirm_message(ui: &TuiKitUi<'_>) -> String {
+    match ui.access_control_action {
+        AccessControlAction::Remove => {
+            format!("Remove access for {}?", access_principal_value(ui))
+        }
+        AccessControlAction::Change => {
+            format!(
+                "Change role for {} to {}?",
+                access_principal_value(ui),
+                role_label(ui.access_control_role)
+            )
+        }
+        AccessControlAction::Add => {
+            format!(
+                "Add {} as {}?",
+                access_principal_value(ui),
+                role_label(ui.access_control_role)
+            )
+        }
+    }
+}
+
+fn confirm_value(ui: &TuiKitUi<'_>) -> String {
+    if ui.access_control_confirm_yes {
+        "[yes] / no".to_string()
+    } else {
+        " yes / [no]".to_string()
+    }
+}
+
+fn confirm_hint(ui: &TuiKitUi<'_>) -> &'static str {
+    match ui.access_control_submit_state {
+        CreateSubmitState::Submitting => "Applying access change...",
+        CreateSubmitState::Idle | CreateSubmitState::Error => "Enter: continue  Esc: close",
+    }
+}
+
+fn role_label(role: AccessControlRole) -> &'static str {
+    match role {
+        AccessControlRole::Admin => "admin",
+        AccessControlRole::Writer => "writer",
+        AccessControlRole::Reader => "reader",
+    }
+}
+
+fn shorten_principal(value: &str) -> String {
+    const EDGE_CHARS: usize = 5;
+    const MAX_CHARS: usize = EDGE_CHARS * 2 + 5;
+
+    let char_count = value.chars().count();
+    if char_count <= MAX_CHARS {
+        return value.to_string();
+    }
+
+    let prefix_end = nth_char_boundary(value, EDGE_CHARS);
+    let suffix_start = nth_char_boundary(value, char_count - EDGE_CHARS);
+    format!("{}...{}", &value[..prefix_end], &value[suffix_start..])
+}
+
+fn nth_char_boundary(value: &str, char_index: usize) -> usize {
+    if char_index == 0 {
+        return 0;
+    }
+
+    value
+        .char_indices()
+        .nth(char_index)
+        .map(|(index, _)| index)
+        .unwrap_or(value.len())
+}
+
+fn visible_width(value: String) -> u16 {
+    unicode_width::UnicodeWidthStr::width(value.as_str()) as u16
 }
 
 fn render_picker_line<'a>(
@@ -279,6 +586,16 @@ fn fit_overlay_rect(
     };
 
     Some((width, height))
+}
+
+fn bordered_inner_area(area: Rect) -> Option<Rect> {
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+    (inner.width > 0 && inner.height > 0).then_some(inner)
 }
 
 fn visible_picker_lines(

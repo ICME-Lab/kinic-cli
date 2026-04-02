@@ -53,6 +53,13 @@ fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
         status: "running".to_string(),
         detail: detail.to_string(),
         searchable_memory_id: Some(id.to_string()),
+        name: "unknown".to_string(),
+        version: "unknown".to_string(),
+        dim: None,
+        owners: None,
+        stable_memory_size: None,
+        cycle_amount: None,
+        users: None,
     }
 }
 

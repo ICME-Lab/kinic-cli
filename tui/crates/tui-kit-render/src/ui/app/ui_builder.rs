@@ -4,8 +4,9 @@ use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
-    CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode, PickerState,
-    SearchScope, SettingsSnapshot,
+    AccessControlAction, AccessControlFocus, AccessControlMode, AccessControlRole, CreateCostState,
+    CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode, PickerState, SearchScope,
+    SettingsSnapshot,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -241,6 +242,30 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn insert_expected_dim(mut self, value: Option<u64>) -> Self {
+        self.insert_expected_dim = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_expected_dim_loading(mut self, value: bool) -> Self {
+        self.insert_expected_dim_loading = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_current_dim(mut self, value: Option<&'a str>) -> Self {
+        self.insert_current_dim = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_validation_message(mut self, value: Option<&'a str>) -> Self {
+        self.insert_validation_message = value;
+        self
+    }
+
+    #[must_use]
     pub fn insert_tag(mut self, value: &'a str) -> Self {
         self.insert_tag = value;
         self
@@ -285,6 +310,72 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn insert_focus(mut self, value: InsertFormFocus) -> Self {
         self.insert_focus = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_open(mut self, value: bool) -> Self {
+        self.access_control_open = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_mode(mut self, value: AccessControlMode) -> Self {
+        self.access_control_mode = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_memory_id(mut self, value: &'a str) -> Self {
+        self.access_control_memory_id = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_action(mut self, value: AccessControlAction) -> Self {
+        self.access_control_action = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_role(mut self, value: AccessControlRole) -> Self {
+        self.access_control_role = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_current_role(mut self, value: AccessControlRole) -> Self {
+        self.access_control_current_role = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_principal_id(mut self, value: &'a str) -> Self {
+        self.access_control_principal_id = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_confirm_yes(mut self, value: bool) -> Self {
+        self.access_control_confirm_yes = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_submit_state(mut self, value: CreateSubmitState) -> Self {
+        self.access_control_submit_state = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_error(mut self, value: Option<&'a str>) -> Self {
+        self.access_control_error = value;
+        self
+    }
+
+    #[must_use]
+    pub fn access_control_focus(mut self, value: AccessControlFocus) -> Self {
+        self.access_control_focus = value;
         self
     }
 

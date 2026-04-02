@@ -163,6 +163,50 @@ impl Default for PickerContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AccessControlAction {
+    #[default]
+    Add,
+    Remove,
+    Change,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AccessControlRole {
+    Admin,
+    Writer,
+    #[default]
+    Reader,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AccessControlFocus {
+    #[default]
+    Principal,
+    Role,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AccessControlMode {
+    #[default]
+    None,
+    Action,
+    Add,
+    Confirm,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MemorySelectorItem {
+    pub id: String,
+    pub title: Option<String>,
+}
+
+impl MemorySelectorItem {
+    pub fn display_title(&self) -> &str {
+        self.title.as_deref().unwrap_or(self.id.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerItemKind {
     Option,
@@ -415,6 +459,10 @@ pub struct CoreState {
     pub insert_mode: InsertMode,
     pub insert_memory_id: String,
     pub insert_memory_placeholder: Option<String>,
+    pub insert_expected_dim: Option<u64>,
+    pub insert_expected_dim_loading: bool,
+    pub insert_current_dim: Option<String>,
+    pub insert_validation_message: Option<String>,
     pub insert_tag: String,
     pub insert_text: String,
     pub insert_file_path_input: String,
@@ -424,6 +472,18 @@ pub struct CoreState {
     pub insert_spinner_frame: usize,
     pub insert_error: Option<String>,
     pub insert_focus: InsertFormFocus,
+    pub access_list_index: usize,
+    pub access_control_open: bool,
+    pub access_control_mode: AccessControlMode,
+    pub access_control_memory_id: String,
+    pub access_control_action: AccessControlAction,
+    pub access_control_role: AccessControlRole,
+    pub access_control_current_role: AccessControlRole,
+    pub access_control_principal_id: String,
+    pub access_control_confirm_yes: bool,
+    pub access_control_submit_state: CreateSubmitState,
+    pub access_control_error: Option<String>,
+    pub access_control_focus: AccessControlFocus,
 }
 
 impl Default for CoreState {
@@ -458,6 +518,10 @@ impl Default for CoreState {
             insert_mode: InsertMode::default(),
             insert_memory_id: String::new(),
             insert_memory_placeholder: None,
+            insert_expected_dim: None,
+            insert_expected_dim_loading: false,
+            insert_current_dim: None,
+            insert_validation_message: None,
             insert_tag: String::new(),
             insert_text: String::new(),
             insert_file_path_input: String::new(),
@@ -467,6 +531,18 @@ impl Default for CoreState {
             insert_spinner_frame: 0,
             insert_error: None,
             insert_focus: InsertFormFocus::default(),
+            access_list_index: 0,
+            access_control_open: false,
+            access_control_mode: AccessControlMode::default(),
+            access_control_memory_id: String::new(),
+            access_control_action: AccessControlAction::default(),
+            access_control_role: AccessControlRole::default(),
+            access_control_current_role: AccessControlRole::default(),
+            access_control_principal_id: String::new(),
+            access_control_confirm_yes: true,
+            access_control_submit_state: CreateSubmitState::default(),
+            access_control_error: None,
+            access_control_focus: AccessControlFocus::default(),
         }
     }
 }
@@ -514,6 +590,19 @@ pub enum CoreAction {
     PickerInput(char),
     PickerBackspace,
     SetDefaultMemoryFromSelection,
+    AccessMoveNext,
+    AccessMovePrev,
+    AccessOpenSelected,
+    CloseAccessControl,
+    AccessNextField,
+    AccessPrevField,
+    AccessInput(char),
+    AccessBackspace,
+    AccessCycleAction,
+    AccessCycleActionPrev,
+    AccessCycleRole,
+    AccessCycleRolePrev,
+    AccessSubmit,
     CreateInput(char),
     CreateBackspace,
     CreateNextField,
@@ -607,6 +696,25 @@ pub enum CoreEffect {
     SetInsertMemoryId(String),
     /// Apply a selector-picked insert tag without routing it through text input.
     SetInsertTag(String),
+    SetAccessListIndex(usize),
+    OpenAccessAction {
+        memory_id: String,
+        principal_id: String,
+        role: AccessControlRole,
+    },
+    OpenAccessAdd {
+        memory_id: String,
+    },
+    OpenAccessConfirm {
+        memory_id: String,
+        principal_id: String,
+        action: AccessControlAction,
+        role: AccessControlRole,
+    },
+    /// Close the access control overlay and reset ephemeral errors.
+    CloseAccessControl,
+    /// Validation or async error for the access control form.
+    AccessFormError(Option<String>),
     /// Escape hatch for domain-specific integrations (examples, experiments).
     Custom {
         id: String,
@@ -628,6 +736,10 @@ pub struct ProviderSnapshot {
     pub picker: PickerState,
     pub saved_default_memory_id: Option<String>,
     pub insert_memory_placeholder: Option<String>,
+    pub insert_expected_dim: Option<u64>,
+    pub insert_expected_dim_loading: bool,
+    pub insert_current_dim: Option<String>,
+    pub insert_validation_message: Option<String>,
 }
 
 /// Provider response to one action.
@@ -739,6 +851,144 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 value.pop();
             }
         }
+        CoreAction::AccessInput(c) => {
+            if access_control_locked(state)
+                || state.access_control_mode != AccessControlMode::Add
+                || state.access_control_focus != AccessControlFocus::Principal
+            {
+                return;
+            }
+            state.access_control_principal_id.push(*c);
+            clear_access_control_error(state);
+        }
+        CoreAction::AccessBackspace => {
+            if access_control_locked(state)
+                || state.access_control_mode != AccessControlMode::Add
+                || state.access_control_focus != AccessControlFocus::Principal
+            {
+                return;
+            }
+            state.access_control_principal_id.pop();
+        }
+        CoreAction::AccessNextField => {
+            if access_control_locked(state) || state.access_control_mode != AccessControlMode::Add {
+                return;
+            }
+            state.access_control_focus = next_access_control_focus(state.access_control_focus);
+        }
+        CoreAction::AccessPrevField => {
+            if access_control_locked(state) || state.access_control_mode != AccessControlMode::Add {
+                return;
+            }
+            state.access_control_focus = prev_access_control_focus(state.access_control_focus);
+        }
+        CoreAction::AccessCycleAction => {
+            if access_control_locked(state) {
+                return;
+            }
+            match state.access_control_mode {
+                AccessControlMode::Action => {
+                    let (action, role) = next_access_control_selection(
+                        state.access_control_current_role,
+                        state.access_control_action,
+                        state.access_control_role,
+                    );
+                    state.access_control_action = action;
+                    state.access_control_role = role;
+                }
+                AccessControlMode::Confirm => {
+                    state.access_control_confirm_yes = !state.access_control_confirm_yes;
+                }
+                _ => return,
+            }
+            clear_access_control_error(state);
+        }
+        CoreAction::AccessCycleActionPrev => {
+            if access_control_locked(state) {
+                return;
+            }
+            match state.access_control_mode {
+                AccessControlMode::Action => {
+                    let (action, role) = prev_access_control_selection(
+                        state.access_control_current_role,
+                        state.access_control_action,
+                        state.access_control_role,
+                    );
+                    state.access_control_action = action;
+                    state.access_control_role = role;
+                }
+                AccessControlMode::Confirm => {
+                    state.access_control_confirm_yes = !state.access_control_confirm_yes;
+                }
+                _ => return,
+            }
+            clear_access_control_error(state);
+        }
+        CoreAction::AccessCycleRole => {
+            if access_control_locked(state)
+                || !matches!(state.access_control_mode, AccessControlMode::Add)
+                || (state.access_control_mode == AccessControlMode::Add
+                    && state.access_control_focus != AccessControlFocus::Role)
+            {
+                return;
+            }
+            state.access_control_role = next_access_control_role(state.access_control_role);
+            clear_access_control_error(state);
+        }
+        CoreAction::AccessCycleRolePrev => {
+            if access_control_locked(state)
+                || !matches!(state.access_control_mode, AccessControlMode::Add)
+                || (state.access_control_mode == AccessControlMode::Add
+                    && state.access_control_focus != AccessControlFocus::Role)
+            {
+                return;
+            }
+            state.access_control_role = prev_access_control_role(state.access_control_role);
+            clear_access_control_error(state);
+        }
+        CoreAction::AccessSubmit => {
+            if matches!(
+                state.access_control_mode,
+                AccessControlMode::Add | AccessControlMode::Confirm
+            ) {
+                state.access_control_submit_state = CreateSubmitState::Submitting;
+                state.access_control_error = None;
+            }
+        }
+        CoreAction::CreateInput(c) => {
+            match state.create_focus {
+                CreateModalFocus::Name => state.create_name.push(*c),
+                CreateModalFocus::Description => state.create_description.push(*c),
+                CreateModalFocus::Submit => {}
+            }
+            state.create_error = None;
+            if state.create_submit_state == CreateSubmitState::Error {
+                state.create_submit_state = CreateSubmitState::Idle;
+            }
+        }
+        CoreAction::CreateBackspace => match state.create_focus {
+            CreateModalFocus::Name => {
+                state.create_name.pop();
+            }
+            CreateModalFocus::Description => {
+                state.create_description.pop();
+            }
+            CreateModalFocus::Submit => {}
+        },
+        CoreAction::CreateNextField => {
+            state.create_focus = match state.create_focus {
+                CreateModalFocus::Name => CreateModalFocus::Description,
+                CreateModalFocus::Description => CreateModalFocus::Submit,
+                CreateModalFocus::Submit => CreateModalFocus::Name,
+            };
+        }
+        CoreAction::CreatePrevField => {
+            state.create_focus = match state.create_focus {
+                CreateModalFocus::Name => CreateModalFocus::Submit,
+                CreateModalFocus::Description => CreateModalFocus::Name,
+                CreateModalFocus::Submit => CreateModalFocus::Description,
+            };
+        }
         CoreAction::CreateRefresh => {
             state.create_cost_state = CreateCostState::Loading;
             state.create_spinner_frame = 0;
@@ -769,6 +1019,9 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             state.current_tab_id = tab_id.0.clone();
             state.selected_index = Some(0);
             close_picker(state);
+            state.access_control_open = false;
+            state.access_control_mode = AccessControlMode::None;
+            state.access_list_index = 0;
         }
         CoreAction::SelectTabIndex(index) => {
             state.current_tab_id = format!("tab-{}", index + 1);
@@ -852,6 +1105,16 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             } else if state.focus == PaneFocus::Extra {
                 state.focus = focus_after_chat_close(state.current_tab_id.as_str());
             }
+        }
+        CoreAction::AccessMoveNext => {}
+        CoreAction::AccessMovePrev => {}
+        CoreAction::AccessOpenSelected => {}
+        CoreAction::CloseAccessControl => {
+            state.access_control_open = false;
+            state.access_control_mode = AccessControlMode::None;
+            state.access_control_confirm_yes = true;
+            state.access_control_submit_state = CreateSubmitState::Idle;
+            state.access_control_error = None;
         }
         CoreAction::ChatInput(c) => {
             state.chat_input.push(*c);
@@ -1163,6 +1426,103 @@ fn prev_search_scope(scope: SearchScope) -> SearchScope {
     next_search_scope(scope)
 }
 
+fn clear_access_control_error(state: &mut CoreState) {
+    state.access_control_error = None;
+    if state.access_control_submit_state == CreateSubmitState::Error {
+        state.access_control_submit_state = CreateSubmitState::Idle;
+    }
+}
+
+fn access_control_locked(state: &CoreState) -> bool {
+    state.access_control_submit_state == CreateSubmitState::Submitting
+}
+
+fn access_control_focus_order() -> &'static [AccessControlFocus] {
+    &[AccessControlFocus::Principal, AccessControlFocus::Role]
+}
+
+fn next_access_control_focus(focus: AccessControlFocus) -> AccessControlFocus {
+    let order = access_control_focus_order();
+    let current = order
+        .iter()
+        .position(|candidate| *candidate == focus)
+        .unwrap_or(0);
+    order[(current + 1) % order.len()]
+}
+
+fn prev_access_control_focus(focus: AccessControlFocus) -> AccessControlFocus {
+    let order = access_control_focus_order();
+    let current = order
+        .iter()
+        .position(|candidate| *candidate == focus)
+        .unwrap_or(0);
+    order[(current + order.len() - 1) % order.len()]
+}
+
+fn next_access_control_selection(
+    current_role: AccessControlRole,
+    action: AccessControlAction,
+    role: AccessControlRole,
+) -> (AccessControlAction, AccessControlRole) {
+    let options = access_control_options(current_role);
+    let current = options
+        .iter()
+        .position(|candidate| *candidate == (action, role))
+        .unwrap_or(0);
+    options[(current + 1) % options.len()]
+}
+
+fn prev_access_control_selection(
+    current_role: AccessControlRole,
+    action: AccessControlAction,
+    role: AccessControlRole,
+) -> (AccessControlAction, AccessControlRole) {
+    let options = access_control_options(current_role);
+    let current = options
+        .iter()
+        .position(|candidate| *candidate == (action, role))
+        .unwrap_or(0);
+    options[(current + options.len() - 1) % options.len()]
+}
+
+fn access_control_options(
+    current_role: AccessControlRole,
+) -> &'static [(AccessControlAction, AccessControlRole)] {
+    match current_role {
+        AccessControlRole::Admin => &[
+            (AccessControlAction::Change, AccessControlRole::Writer),
+            (AccessControlAction::Change, AccessControlRole::Reader),
+            (AccessControlAction::Remove, AccessControlRole::Admin),
+        ],
+        AccessControlRole::Writer => &[
+            (AccessControlAction::Change, AccessControlRole::Admin),
+            (AccessControlAction::Change, AccessControlRole::Reader),
+            (AccessControlAction::Remove, AccessControlRole::Writer),
+        ],
+        AccessControlRole::Reader => &[
+            (AccessControlAction::Change, AccessControlRole::Admin),
+            (AccessControlAction::Change, AccessControlRole::Writer),
+            (AccessControlAction::Remove, AccessControlRole::Reader),
+        ],
+    }
+}
+
+fn next_access_control_role(role: AccessControlRole) -> AccessControlRole {
+    match role {
+        AccessControlRole::Admin => AccessControlRole::Writer,
+        AccessControlRole::Writer => AccessControlRole::Reader,
+        AccessControlRole::Reader => AccessControlRole::Admin,
+    }
+}
+
+fn prev_access_control_role(role: AccessControlRole) -> AccessControlRole {
+    match role {
+        AccessControlRole::Admin => AccessControlRole::Reader,
+        AccessControlRole::Writer => AccessControlRole::Admin,
+        AccessControlRole::Reader => AccessControlRole::Writer,
+    }
+}
+
 pub fn is_insert_form_locked(state: &CoreState) -> bool {
     state.insert_submit_state == CreateSubmitState::Submitting
 }
@@ -1280,6 +1640,15 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             PaneFocus::Tabs => None,
             PaneFocus::Content => match key {
                 CoreKey::Enter if is_settings_content(current_tab_id, PaneFocus::Content) => None,
+                CoreKey::Enter if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
+                    Some(CoreAction::AccessOpenSelected)
+                }
+                CoreKey::Down if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
+                    Some(CoreAction::AccessMoveNext)
+                }
+                CoreKey::Up if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
+                    Some(CoreAction::AccessMovePrev)
+                }
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
                 _ if is_settings_content(current_tab_id, PaneFocus::Content) => {
                     settings_content_action_for_key(key)
@@ -1324,6 +1693,10 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.picker = reconcile_picker_state(state, snapshot.picker);
     state.saved_default_memory_id = snapshot.saved_default_memory_id;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
+    state.insert_expected_dim = snapshot.insert_expected_dim;
+    state.insert_expected_dim_loading = snapshot.insert_expected_dim_loading;
+    state.insert_current_dim = snapshot.insert_current_dim;
+    state.insert_validation_message = snapshot.insert_validation_message;
     if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty()
     {
         state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();

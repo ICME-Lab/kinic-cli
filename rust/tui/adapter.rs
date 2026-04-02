@@ -35,6 +35,7 @@ fn generic_content(record: &KinicRecord) -> UiItemContent {
     UiItemContent {
         id: record.id.clone(),
         title: record.title.clone(),
+        subtitle: None,
         kind: summary_kind(record),
         definition: format!("kinic::{}::{}", record.group, record.id),
         location: None,
@@ -60,11 +61,14 @@ fn generic_content(record: &KinicRecord) -> UiItemContent {
 
 fn memory_content(record: &KinicRecord) -> UiItemContent {
     let content_text = section_body(&record.content_md, "### Content");
-    let guidance = section_body(&record.content_md, "### Search");
+    let user_lines = memory_user_lines(&section_body(&record.content_md, "### Users"));
+    let name = metadata_value(record, "- Name:");
+    let description = row_value(&record.content_md, "- Description:");
 
     UiItemContent {
         id: record.id.clone(),
-        title: format!("Memory {}", short_id(&record.id)),
+        title: name,
+        subtitle: description,
         kind: summary_kind(record),
         definition: String::new(),
         location: None,
@@ -75,17 +79,28 @@ fn memory_content(record: &KinicRecord) -> UiItemContent {
                 heading: "Overview".to_string(),
                 rows: vec![
                     UiRow {
-                        label: "Canister".to_string(),
-                        value: record.id.clone(),
-                    },
-                    UiRow {
                         label: "Status".to_string(),
                         value: summary_value(&record.summary),
                     },
+                    UiRow {
+                        label: "Version".to_string(),
+                        value: metadata_value(record, "- Version:"),
+                    },
                 ],
-                body_lines: vec![
-                    "Selected memory canister for remote semantic search.".to_string(),
-                ],
+                body_lines: vec![],
+            },
+            UiSection {
+                heading: "Access".to_string(),
+                rows: vec![],
+                body_lines: if user_lines.is_empty() {
+                    vec![
+                        "unavailable".to_string(),
+                        String::new(),
+                        "  + Add User".to_string(),
+                    ]
+                } else {
+                    user_lines
+                },
             },
             UiSection {
                 heading: "Content".to_string(),
@@ -96,19 +111,18 @@ fn memory_content(record: &KinicRecord) -> UiItemContent {
                     content_text
                 },
             },
-            UiSection {
-                heading: "Search".to_string(),
-                rows: vec![],
-                body_lines: if guidance.is_empty() {
-                    vec![
-                        "Type a query in Search and press Enter to fetch matching chunks."
-                            .to_string(),
-                    ]
-                } else {
-                    guidance
-                },
-            },
-            metadata_section(record, &[("Kind", "memory".to_string())]),
+            metadata_section(
+                record,
+                &[
+                    ("Owners", metadata_value(record, "- Owners:")),
+                    ("Dimension", metadata_value(record, "- Dimension:")),
+                    (
+                        "Stable Memory Size",
+                        metadata_value(record, "- Stable Memory Size:"),
+                    ),
+                    ("Cycle Amount", metadata_value(record, "- Cycle Amount:")),
+                ],
+            ),
         ],
     }
 }
@@ -124,6 +138,7 @@ fn search_result_content(record: &KinicRecord) -> UiItemContent {
     UiItemContent {
         id: record.id.clone(),
         title: record.title.clone(),
+        subtitle: None,
         kind: summary_kind(record),
         definition: String::new(),
         location: None,
@@ -159,31 +174,68 @@ fn search_result_content(record: &KinicRecord) -> UiItemContent {
                     .map(|line| line.to_string())
                     .collect(),
             },
-            metadata_section(record, &[("Kind", "search hit".to_string())]),
+            metadata_section(record, &[]),
         ],
     }
 }
 
-fn metadata_section(record: &KinicRecord, extra_rows: &[(&str, String)]) -> UiSection {
-    let mut rows = vec![
-        UiRow {
-            label: "Group".to_string(),
-            value: record.group.clone(),
-        },
-        UiRow {
-            label: "Id".to_string(),
-            value: record.id.clone(),
-        },
-    ];
-    rows.extend(extra_rows.iter().map(|(label, value)| UiRow {
-        label: (*label).to_string(),
-        value: value.clone(),
-    }));
+fn metadata_section(_record: &KinicRecord, extra_rows: &[(&str, String)]) -> UiSection {
+    let rows = extra_rows
+        .iter()
+        .map(|(label, value)| UiRow {
+            label: (*label).to_string(),
+            value: value.clone(),
+        })
+        .collect();
     UiSection {
         heading: "Metadata".to_string(),
         rows,
         body_lines: vec![],
     }
+}
+
+fn memory_user_lines(lines: &[String]) -> Vec<String> {
+    if lines
+        .first()
+        .is_some_and(|line| line.trim() == "No users found.")
+    {
+        return vec![
+            "none".to_string(),
+            String::new(),
+            "> + Add User".to_string(),
+        ];
+    } else if lines
+        .first()
+        .is_some_and(|line| line.trim() == "Users unavailable.")
+    {
+        return vec![
+            "unavailable".to_string(),
+            String::new(),
+            "> + Add User".to_string(),
+        ];
+    }
+
+    let mut formatted = lines
+        .iter()
+        .filter_map(|line| {
+            let body = line.trim().strip_prefix("- User:")?.trim();
+            let (principal, role) = body.split_once('|')?;
+            let principal = principal.trim().trim_matches('`');
+            let role = role.trim();
+            Some(format!("  {}   {role}", short_id(principal)))
+        })
+        .collect::<Vec<_>>();
+
+    if !formatted.is_empty() {
+        formatted[0].replace_range(..1, ">");
+        formatted.push(String::new());
+    }
+    formatted.push("  + Add User".to_string());
+    formatted
+}
+
+fn metadata_value(record: &KinicRecord, prefix: &str) -> String {
+    row_value(&record.content_md, prefix).unwrap_or_else(|| "unknown".to_string())
 }
 
 fn row_value(body: &str, prefix: &str) -> Option<String> {
@@ -243,7 +295,7 @@ fn summary_value(summary: &str) -> String {
         .to_string()
 }
 
-fn short_id(id: &str) -> String {
+pub(crate) fn short_id(id: &str) -> String {
     const EDGE_CHARS: usize = 5;
     const MAX_CHARS: usize = EDGE_CHARS * 2 + 5;
 
@@ -278,7 +330,8 @@ fn optional_row(label: &str, value: Option<String>) -> Option<UiRow> {
 
 #[cfg(test)]
 mod tests {
-    use super::short_id;
+    use super::{memory_content, memory_user_lines, short_id};
+    use crate::tui::provider::KinicRecord;
 
     #[test]
     fn short_id_keeps_short_values() {
@@ -295,6 +348,128 @@ mod tests {
         assert_eq!(
             short_id("あいうえおかきくけこさしすせそた"),
             "あいうえお...しすせそた"
+        );
+    }
+
+    #[test]
+    fn memory_user_lines_formats_principal_and_role() {
+        let lines = vec!["- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer".to_string()];
+
+        let formatted = memory_user_lines(&lines);
+
+        assert_eq!(
+            formatted,
+            vec![
+                "> 2chl6...aaa-c   writer".to_string(),
+                String::new(),
+                "  + Add User".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn memory_user_lines_maps_empty_state_to_none() {
+        let formatted = memory_user_lines(&["No users found.".to_string()]);
+
+        assert_eq!(
+            formatted,
+            vec![
+                "none".to_string(),
+                String::new(),
+                "> + Add User".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn memory_user_lines_maps_unavailable_state() {
+        let formatted = memory_user_lines(&["Users unavailable.".to_string()]);
+
+        assert_eq!(
+            formatted,
+            vec![
+                "unavailable".to_string(),
+                String::new(),
+                "> + Add User".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn memory_content_overview_includes_memory_details() {
+        let record = KinicRecord::new(
+            "2chl6-4hpzw-vqaaa-aaaaa-c",
+            "2chl6-4hpzw-vqaaa-aaaaa-c",
+            "memories",
+            "Status: running",
+            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description: `Project notes`\n- Version: `1.0.0`\n- Owners: `aaaaa-aa, bbbbb-bb`\n- Dimension: `768`\n- Stable Memory Size: `2,048`\n- Cycle Amount: `1.235T`\n\n### Content\nready\n\n### Search\nsearch help\n\n### Users\n- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer\n".to_string(),
+        );
+
+        let content = memory_content(&record);
+        let overview = content
+            .sections
+            .iter()
+            .find(|section| section.heading == "Overview")
+            .expect("overview section");
+        let metadata = content
+            .sections
+            .iter()
+            .find(|section| section.heading == "Metadata")
+            .expect("metadata section");
+        let access = content
+            .sections
+            .iter()
+            .find(|section| section.heading == "Access")
+            .expect("access section");
+        assert!(
+            content
+                .sections
+                .iter()
+                .all(|section| section.heading != "Search")
+        );
+
+        assert_eq!(content.title, "Alpha");
+        assert_eq!(content.subtitle.as_deref(), Some("Project notes"));
+        assert!(
+            overview
+                .rows
+                .iter()
+                .any(|row| row.label == "Version" && row.value == "1.0.0")
+        );
+        assert!(overview.rows.iter().all(|row| row.label != "Owners"));
+        assert!(overview.rows.iter().all(|row| row.label != "Dimension"));
+        assert!(
+            metadata
+                .rows
+                .iter()
+                .any(|row| row.label == "Owners" && row.value == "aaaaa-aa, bbbbb-bb")
+        );
+        assert!(
+            metadata
+                .rows
+                .iter()
+                .any(|row| row.label == "Dimension" && row.value == "768")
+        );
+        assert!(
+            metadata
+                .rows
+                .iter()
+                .any(|row| row.label == "Stable Memory Size" && row.value == "2,048")
+        );
+        assert!(
+            metadata
+                .rows
+                .iter()
+                .any(|row| row.label == "Cycle Amount" && row.value == "1.235T")
+        );
+        assert!(metadata.rows.iter().all(|row| row.label != "Group"));
+        assert!(metadata.rows.iter().all(|row| row.label != "Kind"));
+        assert!(overview.body_lines.is_empty());
+        assert!(
+            access
+                .body_lines
+                .iter()
+                .any(|line| line == "> 2chl6...aaa-c   writer")
         );
     }
 }

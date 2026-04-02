@@ -145,6 +145,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .insert_mode(state.insert_mode)
                     .insert_memory_id(&state.insert_memory_id)
                     .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())
+                    .insert_expected_dim(state.insert_expected_dim)
+                    .insert_expected_dim_loading(state.insert_expected_dim_loading)
+                    .insert_current_dim(state.insert_current_dim.as_deref())
+                    .insert_validation_message(state.insert_validation_message.as_deref())
                     .insert_tag(&state.insert_tag)
                     .insert_text(&state.insert_text)
                     .insert_file_path(insert_file_path_display.as_str())
@@ -153,6 +157,17 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .insert_spinner_frame(state.insert_spinner_frame)
                     .insert_error(state.insert_error.as_deref())
                     .insert_focus(state.insert_focus)
+                    .access_control_open(state.access_control_open)
+                    .access_control_mode(state.access_control_mode)
+                    .access_control_memory_id(&state.access_control_memory_id)
+                    .access_control_action(state.access_control_action)
+                    .access_control_role(state.access_control_role)
+                    .access_control_current_role(state.access_control_current_role)
+                    .access_control_principal_id(&state.access_control_principal_id)
+                    .access_control_confirm_yes(state.access_control_confirm_yes)
+                    .access_control_submit_state(state.access_control_submit_state.clone())
+                    .access_control_error(state.access_control_error.as_deref())
+                    .access_control_focus(state.access_control_focus)
                     .show_completion(false)
                     .context_details_loading(false)
                     .context_details_failed(false)
@@ -458,6 +473,86 @@ fn ui_focus_from_pane(focus: PaneFocus) -> Focus {
     }
 }
 
+#[cfg(test)]
+fn build_ui<'a>(
+    theme: &'a Theme,
+    cfg: &RuntimeLoopConfig,
+    state: &'a CoreState,
+    list_scroll_offset: usize,
+    inspector_scroll: usize,
+    show_help: bool,
+    show_settings: bool,
+    animation: &'a AnimationState,
+) -> TuiKitUi<'a> {
+    let focus = ui_focus_from_pane(state.focus);
+    TuiKitUi::new(theme)
+        .ui_config((cfg.ui_config)())
+        .ui_summaries(&state.list_items)
+        .ui_selected_content(state.selected_content.as_ref())
+        .ui_total_count(state.total_count)
+        .list_selected(state.selected_index)
+        .list_scroll(list_scroll_offset)
+        .search_input(&state.query)
+        .search_scope(state.search_scope)
+        .current_tab_id(TabId::new(state.current_tab_id.clone()))
+        .focus(focus)
+        .status_message(state.status_message.as_deref().unwrap_or("ready"))
+        .show_help(show_help)
+        .show_settings(show_settings)
+        .show_create_modal(false)
+        .create_name(&state.create_name)
+        .create_description(&state.create_description)
+        .create_submit_state(state.create_submit_state.clone())
+        .create_spinner_frame(state.create_spinner_frame)
+        .create_error(state.create_error.as_deref())
+        .create_focus(state.create_focus)
+        .create_cost_state(&state.create_cost_state)
+        .settings_snapshot(Some(&state.settings))
+        .picker(&state.picker)
+        .saved_default_memory_id(state.saved_default_memory_id.as_deref())
+        .insert_mode(state.insert_mode)
+        .insert_memory_id(&state.insert_memory_id)
+        .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())
+        .insert_expected_dim(state.insert_expected_dim)
+        .insert_expected_dim_loading(state.insert_expected_dim_loading)
+        .insert_current_dim(state.insert_current_dim.as_deref())
+        .insert_validation_message(state.insert_validation_message.as_deref())
+        .insert_tag(&state.insert_tag)
+        .insert_text(&state.insert_text)
+        .insert_file_path(&state.insert_file_path_input)
+        .insert_embedding(&state.insert_embedding)
+        .insert_submit_state(state.insert_submit_state.clone())
+        .insert_spinner_frame(state.insert_spinner_frame)
+        .insert_error(state.insert_error.as_deref())
+        .insert_focus(state.insert_focus)
+        .access_control_open(state.access_control_open)
+        .access_control_mode(state.access_control_mode)
+        .access_control_memory_id(&state.access_control_memory_id)
+        .access_control_action(state.access_control_action)
+        .access_control_role(state.access_control_role)
+        .access_control_current_role(state.access_control_current_role)
+        .access_control_principal_id(&state.access_control_principal_id)
+        .access_control_confirm_yes(state.access_control_confirm_yes)
+        .access_control_submit_state(state.access_control_submit_state.clone())
+        .access_control_error(state.access_control_error.as_deref())
+        .access_control_focus(state.access_control_focus)
+        .show_completion(false)
+        .context_details_loading(false)
+        .context_details_failed(false)
+        .context_tree(&[])
+        .filtered_context_indices(&[])
+        .candidates(&[])
+        .chat_messages(&state.chat_messages)
+        .chat_input(&state.chat_input)
+        .chat_loading(state.chat_loading)
+        .chat_scroll(state.chat_scroll)
+        .completion_selected(0)
+        .inspector_scroll(inspector_scroll)
+        .animation_state(animation)
+        .show_chat(state.chat_open)
+        .in_context_items_view(false)
+}
+
 fn handle_overlay_input<P: DataProvider>(
     provider: &mut P,
     state: &mut CoreState,
@@ -465,6 +560,16 @@ fn handle_overlay_input<P: DataProvider>(
     code: crossterm::event::KeyCode,
     modifiers: crossterm::event::KeyModifiers,
 ) -> OverlayInputResult {
+    if state.access_control_open {
+        let Some(action) = access_control_overlay_action(code, modifiers, state) else {
+            return OverlayInputResult::Consumed;
+        };
+        return match dispatch_action(provider, state, &action) {
+            Ok(effects) => OverlayInputResult::ApplyEffects(effects),
+            Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
+        };
+    }
+
     if !matches!(state.picker, PickerState::Closed) {
         let Some(action) = picker_overlay_action(&state.picker, code, modifiers) else {
             return OverlayInputResult::Consumed;
@@ -480,6 +585,64 @@ fn handle_overlay_input<P: DataProvider>(
     }
 
     OverlayInputResult::NotHandled
+}
+
+fn access_control_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    state: &CoreState,
+) -> Option<CoreAction> {
+    use tui_kit_runtime::{AccessControlFocus, AccessControlMode};
+
+    match code {
+        crossterm::event::KeyCode::Esc => Some(CoreAction::CloseAccessControl),
+        crossterm::event::KeyCode::Tab if state.access_control_mode == AccessControlMode::Add => {
+            Some(CoreAction::AccessNextField)
+        }
+        crossterm::event::KeyCode::BackTab
+            if state.access_control_mode == AccessControlMode::Add =>
+        {
+            Some(CoreAction::AccessPrevField)
+        }
+        crossterm::event::KeyCode::Backspace
+            if state.access_control_mode == AccessControlMode::Add =>
+        {
+            Some(CoreAction::AccessBackspace)
+        }
+        crossterm::event::KeyCode::Left | crossterm::event::KeyCode::Up => {
+            match state.access_control_mode {
+                AccessControlMode::Action => Some(CoreAction::AccessCycleActionPrev),
+                AccessControlMode::Confirm => Some(CoreAction::AccessCycleActionPrev),
+                AccessControlMode::Add
+                    if state.access_control_focus == AccessControlFocus::Role =>
+                {
+                    Some(CoreAction::AccessCycleRolePrev)
+                }
+                _ => None,
+            }
+        }
+        crossterm::event::KeyCode::Right | crossterm::event::KeyCode::Down => {
+            match state.access_control_mode {
+                AccessControlMode::Action => Some(CoreAction::AccessCycleAction),
+                AccessControlMode::Confirm => Some(CoreAction::AccessCycleAction),
+                AccessControlMode::Add
+                    if state.access_control_focus == AccessControlFocus::Role =>
+                {
+                    Some(CoreAction::AccessCycleRole)
+                }
+                _ => None,
+            }
+        }
+        crossterm::event::KeyCode::Enter => Some(CoreAction::AccessSubmit),
+        crossterm::event::KeyCode::Char(c)
+            if !c.is_control()
+                && state.access_control_mode == AccessControlMode::Add
+                && state.access_control_focus == AccessControlFocus::Principal =>
+        {
+            Some(CoreAction::AccessInput(c))
+        }
+        _ => None,
+    }
 }
 
 fn picker_overlay_action(
