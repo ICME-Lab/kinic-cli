@@ -134,8 +134,8 @@ pub(crate) fn insert_form_copy() -> InsertFormCopy {
     InsertFormCopy {
         close_hint: "Tab: cycle fields, Enter: cycle mode / open target picker / submit, Esc: back to tab focus",
         mode_help: "File: .md/.markdown/.mdx/.txt/.json/.yaml/.yml/.csv/.log/.pdf\nInline Text: plain text\nManual Embedding: text + embedding JSON",
-        help_line: "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / submits",
-        status_enter_hint: " cycle/picker/submit ",
+        help_line: "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / browses file / submits",
+        status_enter_hint: " cycle/picker/file/submit ",
     }
 }
 
@@ -202,7 +202,8 @@ impl Default for UiConfig {
                 status_label: "Status".to_string(),
                 status_ready_label: "Ready to create".to_string(),
                 status_insufficient_label: "Insufficient balance".to_string(),
-                unavailable_message: "Live account info unavailable in mock mode.".to_string(),
+                unavailable_message: "Live account info is currently unavailable."
+                    .to_string(),
                 error_prefix: "Account info error".to_string(),
             },
             settings: SettingsOverlayText {

@@ -81,15 +81,6 @@ fn user_preferences_rejects_missing_saved_tags() {
 fn session_snapshot_labels_match_auth_state() {
     let cases = [
         (
-            TuiAuth::Mock,
-            false,
-            None,
-            "mock",
-            "mock",
-            UNAVAILABLE,
-            "local",
-        ),
-        (
             TuiAuth::DeferredIdentity {
                 identity_name: "alice".to_string(),
                 cached_identity: Default::default(),

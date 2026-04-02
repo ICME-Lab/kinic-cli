@@ -6,9 +6,13 @@
 pub mod kinic_tabs;
 
 use candid::Nat;
+use std::path::PathBuf;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
 
 pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
+pub const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
+    "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
+];
 
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -398,7 +402,8 @@ pub struct CoreState {
     pub insert_memory_placeholder: Option<String>,
     pub insert_tag: String,
     pub insert_text: String,
-    pub insert_file_path: String,
+    pub insert_file_path_input: String,
+    pub insert_selected_file_path: Option<PathBuf>,
     pub insert_embedding: String,
     pub insert_submit_state: CreateSubmitState,
     pub insert_spinner_frame: usize,
@@ -439,7 +444,8 @@ impl Default for CoreState {
             insert_memory_placeholder: None,
             insert_tag: String::new(),
             insert_text: String::new(),
-            insert_file_path: String::new(),
+            insert_file_path_input: String::new(),
+            insert_selected_file_path: None,
             insert_embedding: String::new(),
             insert_submit_state: CreateSubmitState::default(),
             insert_spinner_frame: 0,
@@ -499,6 +505,7 @@ pub enum CoreAction {
     CreateSubmit,
     InsertInput(char),
     InsertBackspace,
+    InsertOpenFileDialog,
     InsertNextField,
     InsertPrevField,
     InsertCycleModePrev,
@@ -684,7 +691,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     let previous_focus = state.focus;
     match action {
         CoreAction::InsertInput(c) => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             match state.insert_focus {
@@ -692,7 +699,10 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 InsertFormFocus::MemoryId => {}
                 InsertFormFocus::Tag => {}
                 InsertFormFocus::Text => state.insert_text.push(*c),
-                InsertFormFocus::FilePath => state.insert_file_path.push(*c),
+                InsertFormFocus::FilePath => {
+                    state.insert_selected_file_path = None;
+                    state.insert_file_path_input.push(*c);
+                }
                 InsertFormFocus::Embedding => state.insert_embedding.push(*c),
             }
             state.insert_error = None;
@@ -701,7 +711,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::InsertBackspace => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             match state.insert_focus {
@@ -712,27 +722,33 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                     state.insert_text.pop();
                 }
                 InsertFormFocus::FilePath => {
-                    state.insert_file_path.pop();
+                    state.insert_selected_file_path = None;
+                    state.insert_file_path_input.pop();
                 }
                 InsertFormFocus::Embedding => {
                     state.insert_embedding.pop();
                 }
             }
         }
+        CoreAction::InsertOpenFileDialog => {
+            if is_insert_form_locked(state) {
+                return;
+            }
+        }
         CoreAction::InsertNextField => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             state.insert_focus = next_insert_focus(state.insert_mode, state.insert_focus);
         }
         CoreAction::InsertPrevField => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             state.insert_focus = prev_insert_focus(state.insert_mode, state.insert_focus);
         }
         CoreAction::InsertCycleModePrev => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             state.insert_mode = prev_insert_mode(state.insert_mode);
@@ -743,7 +759,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::InsertCycleMode => {
-            if insert_form_locked(state) {
+            if is_insert_form_locked(state) {
                 return;
             }
             state.insert_mode = next_insert_mode(state.insert_mode);
@@ -1078,7 +1094,7 @@ fn prev_insert_mode(mode: InsertMode) -> InsertMode {
     }
 }
 
-fn insert_form_locked(state: &CoreState) -> bool {
+pub fn is_insert_form_locked(state: &CoreState) -> bool {
     state.insert_submit_state == CreateSubmitState::Submitting
 }
 
@@ -2262,6 +2278,24 @@ mod tests {
     }
 
     #[test]
+    fn is_insert_form_locked_only_while_submit_is_running() {
+        let idle = CoreState::default();
+        assert!(!is_insert_form_locked(&idle));
+
+        let submitting = CoreState {
+            insert_submit_state: CreateSubmitState::Submitting,
+            ..CoreState::default()
+        };
+        assert!(is_insert_form_locked(&submitting));
+
+        let error = CoreState {
+            insert_submit_state: CreateSubmitState::Error,
+            ..CoreState::default()
+        };
+        assert!(!is_insert_form_locked(&error));
+    }
+
+    #[test]
     fn insert_memory_id_ignores_direct_text_editing() {
         let mut state = CoreState {
             insert_focus: InsertFormFocus::MemoryId,
@@ -2275,6 +2309,36 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertBackspace);
 
         assert_eq!(state.insert_memory_id, "aaaaa-aa");
+    }
+
+    #[test]
+    fn insert_file_path_backspace_edits_selected_path_buffer() {
+        let mut state = CoreState {
+            insert_focus: InsertFormFocus::FilePath,
+            insert_file_path_input: "/tmp/doc.pdf".to_string(),
+            insert_selected_file_path: Some(PathBuf::from("/tmp/doc.pdf")),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertBackspace);
+
+        assert_eq!(state.insert_selected_file_path, None);
+        assert_eq!(state.insert_file_path_input, "/tmp/doc.pd");
+    }
+
+    #[test]
+    fn insert_file_path_input_appends_to_selected_path_buffer() {
+        let mut state = CoreState {
+            insert_focus: InsertFormFocus::FilePath,
+            insert_file_path_input: "/tmp/doc.pdf".to_string(),
+            insert_selected_file_path: Some(PathBuf::from("/tmp/doc.pdf")),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertInput('x'));
+
+        assert_eq!(state.insert_selected_file_path, None);
+        assert_eq!(state.insert_file_path_input, "/tmp/doc.pdfx");
     }
 
     #[test]

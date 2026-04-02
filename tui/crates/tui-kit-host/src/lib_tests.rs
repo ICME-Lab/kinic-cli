@@ -6,6 +6,7 @@ use tui_kit_runtime::{CoreState, ProviderSnapshot, apply_snapshot};
 
 mod key_mapping {
     use super::*;
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState};
 
     #[test]
     fn action_from_keycode_maps_search_input() {
@@ -13,6 +14,36 @@ mod key_mapping {
             action_from_keycode(KeyCode::Char('x'), PaneFocus::Search, KINIC_MEMORIES_TAB_ID),
             Some(CoreAction::SearchInput('x'))
         );
+    }
+
+    #[test]
+    fn normalize_host_input_event_maps_key_press_only() {
+        let key_event = Event::Key(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::SHIFT,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        });
+
+        assert_eq!(
+            normalize_host_input_event(key_event),
+            Some(HostInputEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::SHIFT,
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_host_input_event_ignores_non_press_key_events() {
+        let key_event = Event::Key(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        });
+
+        assert_eq!(normalize_host_input_event(key_event), None);
     }
 }
 

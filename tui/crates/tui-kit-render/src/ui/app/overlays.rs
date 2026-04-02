@@ -417,6 +417,100 @@ mod tests {
     }
 
     #[test]
+    fn settings_overlay_lines_align_quick_entry_columns() {
+        let cfg = UiConfig::default().settings;
+        let snapshot = SettingsSnapshot {
+            quick_entries: vec![
+                SettingsEntry {
+                    id: "auth".to_string(),
+                    label: "Auth".to_string(),
+                    value: "mock".to_string(),
+                    note: None,
+                },
+                SettingsEntry {
+                    id: "embedding_api_endpoint".to_string(),
+                    label: "Embedding".to_string(),
+                    value: "https://api.kinic.io".to_string(),
+                    note: None,
+                },
+            ],
+            sections: vec![SettingsSection::default()],
+        };
+
+        let lines = settings_overlay_lines(Some(&snapshot), &cfg);
+        let auth_line = lines
+            .iter()
+            .find(|line| line.contains("Auth"))
+            .expect("auth line");
+        let embedding_line = lines
+            .iter()
+            .find(|line| line.contains("Embedding"))
+            .expect("embedding line");
+
+        assert_eq!(auth_line.find(':'), embedding_line.find(':'));
+    }
+
+    #[test]
+    fn help_overlay_insert_line_mentions_target_picker() {
+        let cfg = UiConfig::default().help;
+
+        assert!(cfg.lines.iter().any(|line| {
+            line
+                == "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / browses file / submits"
+        }));
+    }
+
+    #[test]
+    fn fit_overlay_rect_uses_available_height_when_terminal_is_short() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 11,
+        };
+
+        let rect = fit_overlay_rect(area, 56, 12, 8);
+
+        assert_eq!(rect, Some((56, 7)));
+    }
+
+    #[test]
+    fn fit_overlay_rect_returns_none_when_inner_area_is_unavailable() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 3,
+        };
+
+        let rect = fit_overlay_rect(area, 56, 12, 8);
+
+        assert_eq!(rect, None);
+    }
+
+    #[test]
+    fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
+        let lines = default_memory_selector_lines(
+            &(0..12)
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
+                .collect::<Vec<_>>(),
+            10,
+            Some("id-2"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
+        );
+
+        let visible = visible_default_memory_selector_lines(lines, 8);
+        let visible_lines = visible
+            .iter()
+            .map(|(line, _)| line.as_str())
+            .collect::<Vec<_>>();
+        assert!(visible_lines.iter().any(|line| line.contains("Memory 10")));
+    }
+
+    #[test]
     fn picker_input_placeholder_is_available_for_add_tag() {
         assert_eq!(
             picker_input_placeholder(PickerContext::AddTag),

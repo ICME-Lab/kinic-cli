@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
 };
@@ -214,7 +215,7 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
         insert_mode: tui_kit_runtime::InsertMode::File,
         insert_memory_id: "aaaaa-aa".into(),
         insert_tag: "docs".into(),
-        insert_file_path: "/tmp/doc.pdf".into(),
+        insert_file_path_input: "/tmp/doc.pdf".into(),
         insert_focus: tui_kit_runtime::InsertFormFocus::Submit,
         status_message: Some("ready".into()),
         ..CoreState::default()
@@ -232,7 +233,7 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::File);
     assert_eq!(state.insert_memory_id, "aaaaa-aa");
     assert_eq!(state.insert_tag, "docs");
-    assert_eq!(state.insert_file_path, "/tmp/doc.pdf");
+    assert_eq!(state.insert_file_path_input, "/tmp/doc.pdf");
     assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Submit);
     assert_eq!(
         state.status_message.as_deref(),
@@ -384,4 +385,72 @@ fn dispatch_action_with_persistent_clear_keeps_for_navigation_actions() {
     assert!(effects.is_empty());
     assert_eq!(state.persistent_status_message.as_deref(), Some("done"));
     assert_eq!(state.status_message.as_deref(), Some("done"));
+}
+
+#[test]
+fn apply_insert_file_dialog_selection_updates_file_path_and_clears_insert_error() {
+    let mut state = CoreState {
+        insert_file_path_input: "stale".into(),
+        insert_error: Some("bad path".into()),
+        insert_submit_state: tui_kit_runtime::CreateSubmitState::Error,
+        ..CoreState::default()
+    };
+
+    let effects =
+        apply_insert_file_dialog_selection(&mut state, Some(PathBuf::from("/tmp/doc.pdf")));
+
+    assert_eq!(state.insert_file_path_input, "/tmp/doc.pdf");
+    assert_eq!(
+        state.insert_selected_file_path,
+        Some(PathBuf::from("/tmp/doc.pdf"))
+    );
+    assert_eq!(state.insert_error, None);
+    assert_eq!(
+        state.insert_submit_state,
+        tui_kit_runtime::CreateSubmitState::Idle
+    );
+    assert_eq!(
+        effects,
+        vec![CoreEffect::Notify(
+            "Selected file: /tmp/doc.pdf".to_string()
+        )]
+    );
+}
+
+#[test]
+fn apply_insert_file_dialog_selection_keeps_existing_path_on_cancel() {
+    let mut state = CoreState {
+        insert_selected_file_path: Some(PathBuf::from("/tmp/existing.md")),
+        ..CoreState::default()
+    };
+
+    let effects = apply_insert_file_dialog_selection(&mut state, None);
+
+    assert_eq!(
+        state.insert_selected_file_path,
+        Some(PathBuf::from("/tmp/existing.md"))
+    );
+    assert_eq!(
+        effects,
+        vec![CoreEffect::Notify("File selection canceled.".to_string())]
+    );
+}
+
+#[test]
+fn should_open_insert_file_dialog_is_false_while_insert_submit_is_in_flight() {
+    let state = CoreState {
+        insert_submit_state: tui_kit_runtime::CreateSubmitState::Submitting,
+        insert_file_path_input: "/tmp/existing.md".into(),
+        insert_error: Some("keep".into()),
+        status_message: Some("ready".into()),
+        ..CoreState::default()
+    };
+
+    assert!(!should_open_insert_file_dialog(
+        &CoreAction::InsertOpenFileDialog,
+        &state
+    ));
+    assert_eq!(state.insert_file_path_input, "/tmp/existing.md");
+    assert_eq!(state.insert_error.as_deref(), Some("keep"));
+    assert_eq!(state.status_message.as_deref(), Some("ready"));
 }

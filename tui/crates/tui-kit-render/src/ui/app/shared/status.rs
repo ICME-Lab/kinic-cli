@@ -315,7 +315,7 @@ mod tests {
     fn insert_tab_enter_hint_mentions_picker_and_submit() {
         assert_eq!(
             form_enter_hint(KINIC_INSERT_TAB_ID),
-            " cycle/picker/submit "
+            " cycle/picker/file/submit "
         );
     }
 
@@ -335,7 +335,7 @@ mod tests {
         let rendered = render_status_line(&ui);
 
         assert!(rendered.contains("Inserted 12 chunks"));
-        assert!(rendered.contains("cycle/picker/submit"));
+        assert!(rendered.contains("cycle/picker/file/submit"));
         assert!(rendered.contains("Tab/Shift+Tab"));
         assert!(rendered.contains("Esc"));
     }
@@ -427,7 +427,7 @@ mod tests {
             .focus(Focus::Form);
         let rendered = render_status_line(&ui);
 
-        assert!(rendered.contains("cycle/picker/submit"));
+        assert!(rendered.contains("cycle/picker/file/submit"));
         assert!(!rendered.contains("│  │"));
     }
 }

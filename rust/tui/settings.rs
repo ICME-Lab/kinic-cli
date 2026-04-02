@@ -34,32 +34,26 @@ pub struct PreferencesHealth {
     pub save_error: Option<String>,
 }
 
+#[cfg(test)]
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
-    #[cfg(test)]
-    {
-        Ok(UserPreferences::default())
-    }
-
-    #[cfg(not(test))]
-    {
-        let mut preferences: UserPreferences =
-            load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)?;
-        preferences.saved_tags = normalize_saved_tags(preferences.saved_tags);
-        Ok(preferences)
-    }
+    Ok(UserPreferences::default())
 }
 
-pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), SettingsError> {
-    #[cfg(test)]
-    {
-        let _ = preferences;
-        Ok(())
-    }
+#[cfg(not(test))]
+pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
+    let mut preferences: UserPreferences = load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)?;
+    preferences.saved_tags = normalize_saved_tags(preferences.saved_tags);
+    Ok(preferences)
+}
 
-    #[cfg(not(test))]
-    {
-        save_yaml(APP_NAMESPACE, SETTINGS_FILE_NAME, preferences)
-    }
+#[cfg(test)]
+pub fn save_user_preferences(_preferences: &UserPreferences) -> Result<(), SettingsError> {
+    Ok(())
+}
+
+#[cfg(not(test))]
+pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), SettingsError> {
+    save_yaml(APP_NAMESPACE, SETTINGS_FILE_NAME, preferences)
 }
 
 pub fn build_settings_snapshot(
@@ -188,7 +182,6 @@ pub fn session_settings_snapshot(
 
 fn auth_mode_label(auth: &TuiAuth) -> String {
     match auth {
-        TuiAuth::Mock => "mock".to_string(),
         TuiAuth::DeferredIdentity { .. } => "keyring identity".to_string(),
         TuiAuth::ResolvedIdentity(_) => "live identity".to_string(),
     }
@@ -196,7 +189,6 @@ fn auth_mode_label(auth: &TuiAuth) -> String {
 
 fn identity_name_label(auth: &TuiAuth) -> String {
     match auth {
-        TuiAuth::Mock => "mock".to_string(),
         TuiAuth::DeferredIdentity { identity_name, .. } => identity_name.clone(),
         TuiAuth::ResolvedIdentity(_) => "provided".to_string(),
     }
