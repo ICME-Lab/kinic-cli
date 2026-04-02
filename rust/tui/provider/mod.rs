@@ -1856,13 +1856,11 @@ impl DataProvider for KinicProvider {
                     value,
                     ..
                 } => {
-                    if !value.trim().is_empty() {
-                        let outcome = self.save_tags_to_preferences(value.clone());
-                        if outcome.result == SaveTagResult::Saved {
-                            close_picker_after_submit = true;
-                        }
-                        effects.push(outcome.effect);
+                    let outcome = self.save_tags_to_preferences(value.clone());
+                    if outcome.result == SaveTagResult::Saved {
+                        close_picker_after_submit = true;
                     }
+                    effects.push(outcome.effect);
                 }
                 PickerState::Input { .. } => {}
                 PickerState::List {
