@@ -50,6 +50,13 @@ fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
         id: id.to_string(),
         status: "running".to_string(),
         detail: detail.to_string(),
+        name: "Alpha".to_string(),
+        version: "1.0.0".to_string(),
+        dim: Some(768),
+        owners: Some(vec!["aaaaa-aa".to_string()]),
+        stable_memory_size: Some(2_048),
+        cycle_amount: Some(123),
+        users: Some(Vec::new()),
     }
 }
 
@@ -122,6 +129,75 @@ fn quick_entry_value<'a>(snapshot: &'a ProviderSnapshot, id: &str) -> &'a str {
         .find(|entry| entry.id == id)
         .map(|entry| entry.value.as_str())
         .expect("quick entry should exist")
+}
+
+#[test]
+fn record_from_memory_summary_embeds_metadata_lines() {
+    let record = record_from_memory_summary(running_memory_summary("aaaaa-aa", "ready"));
+
+    assert!(record.content_md.contains("- Name: `Alpha`"));
+    assert!(record.content_md.contains("- Version: `1.0.0`"));
+    assert!(record.content_md.contains("- Owners: `aaaaa-aa`"));
+    assert!(record.content_md.contains("- Dimension: `768`"));
+    assert!(record.content_md.contains("- Stable Memory Size: `2,048`"));
+    assert!(record.content_md.contains("- Cycle Amount: `0.000T`"));
+}
+
+#[test]
+fn record_from_memory_summary_marks_user_unavailable() {
+    let mut summary = running_memory_summary("aaaaa-aa", "ready");
+    summary.users = None;
+
+    let record = record_from_memory_summary(summary);
+
+    assert!(record.content_md.contains("Users unavailable."));
+}
+
+#[test]
+fn record_from_memory_summary_keeps_full_principal_ids() {
+    let mut summary = running_memory_summary("2chl6-4hpzw-vqaaa-aaaaa-c", "ready");
+    summary.owners = Some(vec![
+        "aaaaa-aa".to_string(),
+        "2chl6-4hpzw-vqaaa-aaaaa-c".to_string(),
+    ]);
+    summary.users = Some(vec![bridge::MemoryUser {
+        principal_id: "2chl6-4hpzw-vqaaa-aaaaa-c".to_string(),
+        role: "writer".to_string(),
+    }]);
+
+    let record = record_from_memory_summary(summary);
+    let content = crate::tui::adapter::to_content(&record);
+    let overview = content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Overview")
+        .expect("overview section");
+    let access = content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Access")
+        .expect("access section");
+
+    let metadata = content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Metadata")
+        .expect("metadata section");
+
+    assert!(overview.rows.iter().all(|row| row.label != "Owners"));
+    assert!(overview.rows.iter().all(|row| row.label != "Dimension"));
+    assert!(
+        metadata
+            .rows
+            .iter()
+            .any(|row| row.label == "Owners" && row.value == "aaaaa-aa, 2chl6-4hpzw-vqaaa-aaaaa-c")
+    );
+    assert!(
+        access
+            .body_lines
+            .iter()
+            .any(|line| line == "> 2chl6...aaa-c   writer")
+    );
 }
 
 fn section_entry_value<'a>(snapshot: &'a ProviderSnapshot, section: &str, id: &str) -> &'a str {
@@ -359,7 +435,8 @@ fn mock_insert_rejects_blank_raw_text() {
 #[test]
 fn mock_insert_rejects_raw_embedding_dim_mismatch_when_expected_dim_known() {
     let mut provider = KinicProvider::new(mock_config());
-    provider.insert_expected_dims.insert("aaaaa-aa".to_string(), 1024);
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(1024);
     let state = CoreState {
         insert_mode: InsertMode::Raw,
         insert_memory_id: "aaaaa-aa".to_string(),
@@ -384,7 +461,8 @@ fn mock_insert_rejects_raw_embedding_dim_mismatch_when_expected_dim_known() {
 #[test]
 fn mock_insert_allows_raw_embedding_when_expected_dim_matches() {
     let mut provider = KinicProvider::new(mock_config());
-    provider.insert_expected_dims.insert("aaaaa-aa".to_string(), 4);
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(4);
     let state = CoreState {
         insert_mode: InsertMode::Raw,
         insert_memory_id: "aaaaa-aa".to_string(),
@@ -521,7 +599,8 @@ fn poll_initial_memories_background_applies_loaded_memories_and_prefers_saved_de
     assert!(!provider.initial_memories_in_flight);
     assert_eq!(provider.memory_records.len(), 2);
     assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
-    assert_eq!(provider.pending_insert_dim_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert!(provider.insert_expected_dim_loading);
+    assert!(provider.pending_insert_dim.is_some());
     assert!(output.snapshot.is_some());
 }
 
@@ -550,7 +629,8 @@ fn poll_initial_memories_background_falls_back_to_first_when_default_missing() {
 #[test]
 fn build_snapshot_exposes_insert_expected_dim_for_selected_target() {
     let mut provider = KinicProvider::new(mock_config());
-    provider.insert_expected_dims.insert("aaaaa-aa".to_string(), 768);
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(768);
     let state = CoreState {
         insert_memory_id: "aaaaa-aa".to_string(),
         ..CoreState::default()
@@ -563,9 +643,28 @@ fn build_snapshot_exposes_insert_expected_dim_for_selected_target() {
 }
 
 #[test]
+fn build_snapshot_hides_validation_message_for_empty_raw_embedding() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(768);
+    let state = CoreState {
+        insert_mode: InsertMode::Raw,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_embedding: "   ".to_string(),
+        ..CoreState::default()
+    };
+
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(snapshot.insert_current_dim, None);
+    assert_eq!(snapshot.insert_validation_message, None);
+}
+
+#[test]
 fn build_snapshot_marks_insert_expected_dim_loading_for_selected_target() {
     let mut provider = KinicProvider::new(mock_config());
-    provider.pending_insert_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim_loading = true;
     let state = CoreState {
         insert_memory_id: "aaaaa-aa".to_string(),
         ..CoreState::default()
@@ -575,6 +674,330 @@ fn build_snapshot_marks_insert_expected_dim_loading_for_selected_target() {
 
     assert_eq!(snapshot.insert_expected_dim, None);
     assert!(snapshot.insert_expected_dim_loading);
+}
+
+#[test]
+fn build_snapshot_hides_validation_message_while_dim_is_loading() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(768);
+    provider.insert_expected_dim_loading = true;
+    let state = CoreState {
+        insert_mode: InsertMode::Raw,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_embedding: "[0.1, 0.2]".to_string(),
+        ..CoreState::default()
+    };
+
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(snapshot.insert_validation_message, None);
+}
+
+#[test]
+fn build_snapshot_hides_validation_message_without_expected_dim() {
+    let provider = KinicProvider::new(mock_config());
+    let state = CoreState {
+        insert_mode: InsertMode::Raw,
+        insert_embedding: "[0.1, 0.2]".to_string(),
+        ..CoreState::default()
+    };
+
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(snapshot.insert_validation_message, None);
+}
+
+#[test]
+fn build_snapshot_shows_validation_message_for_invalid_raw_embedding_json() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(768);
+    let state = CoreState {
+        insert_mode: InsertMode::Raw,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_embedding: "not-json".to_string(),
+        ..CoreState::default()
+    };
+
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(snapshot.insert_current_dim.as_deref(), Some("invalid"));
+    assert_eq!(
+        snapshot.insert_validation_message.as_deref(),
+        Some("Embedding must be a JSON array of floats, e.g. [0.1, 0.2]")
+    );
+}
+
+#[test]
+fn build_snapshot_shows_validation_message_for_dim_mismatch() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(4);
+    let state = CoreState {
+        insert_mode: InsertMode::Raw,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_embedding: "[0.1, 0.2]".to_string(),
+        ..CoreState::default()
+    };
+
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(snapshot.insert_current_dim.as_deref(), Some("2"));
+    assert_eq!(
+        snapshot.insert_validation_message.as_deref(),
+        Some("Embedding dimension mismatch. Received 2 values, expected 4.")
+    );
+}
+
+#[test]
+fn build_snapshot_clears_validation_message_for_matching_dim() {
+    let mut provider = KinicProvider::new(mock_config());
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(2);
+    let state = CoreState {
+        insert_mode: InsertMode::Raw,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_embedding: "[0.1, 0.2]".to_string(),
+        ..CoreState::default()
+    };
+
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(snapshot.insert_current_dim.as_deref(), Some("2"));
+    assert_eq!(snapshot.insert_validation_message, None);
+}
+
+#[test]
+fn insert_target_change_restarts_dim_loading_for_new_memory() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![live_memory("bbbbb-bb", "Beta")];
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(1024);
+    let state = CoreState {
+        default_memory_selector_context: MemorySelectorContext::InsertTarget,
+        default_memory_selector_items: vec![selector_item("bbbbb-bb", Some("Beta"))],
+        default_memory_selector_index: 0,
+        ..CoreState::default()
+    };
+
+    let output = provider
+        .handle_action(&CoreAction::SubmitDefaultMemoryPicker, &state)
+        .expect("selector submit should succeed");
+
+    assert_eq!(
+        provider.insert_expected_dim_memory_id.as_deref(),
+        Some("bbbbb-bb")
+    );
+    assert!(provider.insert_expected_dim.is_none());
+    assert!(provider.insert_expected_dim_loading);
+    assert!(provider.pending_insert_dim.is_some());
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::SetInsertMemoryId(memory_id) if memory_id == "bbbbb-bb"
+    )));
+}
+
+#[test]
+fn entering_insert_tab_retries_dim_load_when_missing() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+
+    let output = provider
+        .handle_action(
+            &CoreAction::SetTab(tui_kit_runtime::CoreTabId::new(KINIC_INSERT_TAB_ID)),
+            &CoreState::default(),
+        )
+        .expect("set tab should succeed");
+
+    assert!(provider.insert_expected_dim_loading);
+    assert!(provider.pending_insert_dim.is_some());
+    assert!(output.snapshot.is_some());
+}
+
+#[test]
+fn entering_insert_tab_does_not_reload_dim_when_already_known() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = Some(1024);
+
+    provider
+        .handle_action(
+            &CoreAction::SetTab(tui_kit_runtime::CoreTabId::new(KINIC_INSERT_TAB_ID)),
+            &CoreState::default(),
+        )
+        .expect("set tab should succeed");
+
+    assert!(!provider.insert_expected_dim_loading);
+    assert!(provider.pending_insert_dim.is_none());
+}
+
+#[test]
+fn entering_insert_tab_retries_dim_load_after_previous_failure() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+    let (tx, rx) = mpsc::channel::<InsertDimTaskOutput>();
+    provider.pending_insert_dim = Some(rx);
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim_loading = true;
+    drop(tx);
+
+    let output = provider
+        .poll_insert_dim_background(&CoreState::default())
+        .expect("disconnect output");
+
+    assert!(!provider.insert_expected_dim_loading);
+    assert!(provider.pending_insert_dim.is_none());
+    assert!(output.snapshot.is_some());
+
+    provider
+        .handle_action(
+            &CoreAction::SetTab(tui_kit_runtime::CoreTabId::new(KINIC_INSERT_TAB_ID)),
+            &CoreState::default(),
+        )
+        .expect("set tab should succeed");
+
+    assert!(provider.insert_expected_dim_loading);
+    assert!(provider.pending_insert_dim.is_some());
+}
+
+#[test]
+fn poll_memory_detail_background_updates_selected_memory_record() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![MemorySummary {
+        id: "aaaaa-aa".to_string(),
+        status: "running".to_string(),
+        detail: "ready".to_string(),
+        name: "unknown".to_string(),
+        version: "unknown".to_string(),
+        dim: None,
+        owners: None,
+        stable_memory_size: None,
+        cycle_amount: None,
+        users: None,
+    }];
+    provider.refresh_memory_records_from_summaries();
+    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    let (tx, rx) = mpsc::channel();
+    provider.pending_memory_detail = Some(rx);
+    provider.pending_memory_detail_memory_id = Some("aaaaa-aa".to_string());
+    tx.send(MemoryDetailTaskOutput {
+        memory_id: "aaaaa-aa".to_string(),
+        result: Ok(bridge::MemoryDetails {
+            name: "Alpha".to_string(),
+            version: "1.0.0".to_string(),
+            dim: Some(768),
+            owners: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            stable_memory_size: Some(2_048),
+            cycle_amount: Some(42),
+            users: vec![bridge::MemoryUser {
+                principal_id: "ccccc-cc".to_string(),
+                role: "reader".to_string(),
+            }],
+            content_preview: "Previewing 1 of 1 chunks.\n\n1. First chunk".to_string(),
+        }),
+    })
+    .expect("detail payload should send");
+
+    let output = provider
+        .poll_memory_detail_background(&CoreState::default())
+        .expect("memory detail output");
+
+    assert!(output.snapshot.is_some());
+    assert!(provider.loaded_memory_details.contains("aaaaa-aa"));
+    assert!(
+        provider.memory_records[0]
+            .content_md
+            .contains("- Name: `Alpha`")
+    );
+    assert!(
+        provider.memory_records[0]
+            .content_md
+            .contains("- User: `ccccc-cc` | reader")
+    );
+    assert!(
+        provider.memory_records[0]
+            .content_md
+            .contains("1. First chunk")
+    );
+}
+
+#[test]
+fn record_from_memory_summary_formats_cycle_amount_in_trillions() {
+    let mut summary = running_memory_summary("aaaaa-aa", "ready");
+    summary.cycle_amount = Some(1_234_567_890_123);
+
+    let record = record_from_memory_summary(summary);
+
+    assert!(record.content_md.contains("- Cycle Amount: `1.235T`"));
+}
+
+#[test]
+fn record_from_memory_summary_extracts_structured_detail() {
+    let mut summary = running_memory_summary(
+        "aaaaa-aa",
+        r#"{"name":"Alpha from detail","description":"Structured detail"}"#,
+    );
+    summary.name = "unknown".to_string();
+
+    let record = record_from_memory_summary(summary);
+    let content = crate::tui::adapter::to_content(&record);
+
+    assert!(record.content_md.contains("- Name: `Alpha from detail`"));
+    assert!(record.content_md.contains("- Description: `Structured detail`"));
+    assert!(content.sections.iter().any(|section| {
+        section.heading == "Content"
+            && section.body_lines == vec!["No additional content available.".to_string()]
+    }));
+}
+
+#[test]
+fn record_from_memory_summary_keeps_plain_json_detail_as_content() {
+    let summary = running_memory_summary("aaaaa-aa", r#"{"foo":"bar"}"#);
+
+    let record = record_from_memory_summary(summary);
+    let content = crate::tui::adapter::to_content(&record);
+
+    assert!(!record.content_md.contains("- Description:"));
+    assert!(record.content_md.contains("### Content\n{\"foo\":\"bar\"}"));
+    assert!(content.sections.iter().any(|section| {
+        section.heading == "Content" && section.body_lines == vec![r#"{"foo":"bar"}"#.to_string()]
+    }));
+}
+
+#[test]
+fn record_from_memory_summary_extracts_broken_jsonish_detail() {
+    let mut summary = running_memory_summary(
+        "aaaaa-aa",
+        r#"{description":"Broken detail","name":"Alpha from broken json","}"#,
+    );
+    summary.name = "unknown".to_string();
+
+    let record = record_from_memory_summary(summary);
+    let content = crate::tui::adapter::to_content(&record);
+
+    assert!(record.content_md.contains("- Name: `Alpha from broken json`"));
+    assert!(record.content_md.contains("- Description: `Broken detail`"));
+    assert_eq!(content.title, "Alpha from broken json");
+    assert_eq!(content.subtitle.as_deref(), Some("Broken detail"));
+}
+
+#[test]
+fn record_from_memory_summary_extracts_structured_name_field() {
+    let mut summary = running_memory_summary("aaaaa-aa", "ready");
+    summary.name = r#"{"name":"Alpha from metadata","description":"Metadata description"}"#.to_string();
+
+    let record = record_from_memory_summary(summary);
+    let content = crate::tui::adapter::to_content(&record);
+
+    assert!(record.content_md.contains("- Name: `Alpha from metadata`"));
+    assert!(record.content_md.contains("- Description: `Metadata description`"));
+    assert_eq!(content.title, "Alpha from metadata");
+    assert_eq!(content.subtitle.as_deref(), Some("Metadata description"));
 }
 
 #[test]

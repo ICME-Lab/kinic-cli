@@ -2,7 +2,9 @@ use std::cmp::Ordering;
 
 use anyhow::{Context, Result};
 use ic_agent::export::Principal;
-use tui_kit_runtime::{SessionAccountOverview, format_e8s_to_kinic_string_nat};
+use tui_kit_runtime::{
+    AccessControlAction, AccessControlRole, SessionAccountOverview, format_e8s_to_kinic_string_nat,
+};
 
 use crate::{
     clients::{
@@ -22,12 +24,37 @@ pub struct MemorySummary {
     pub id: String,
     pub status: String,
     pub detail: String,
+    pub name: String,
+    pub version: String,
+    pub dim: Option<u64>,
+    pub owners: Option<Vec<String>>,
+    pub stable_memory_size: Option<u32>,
+    pub cycle_amount: Option<u64>,
+    pub users: Option<Vec<MemoryUser>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchResultItem {
     pub score: f32,
     pub payload: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryUser {
+    pub principal_id: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryDetails {
+    pub name: String,
+    pub version: String,
+    pub dim: Option<u64>,
+    pub owners: Vec<String>,
+    pub stable_memory_size: Option<u32>,
+    pub cycle_amount: Option<u64>,
+    pub users: Vec<MemoryUser>,
+    pub content_preview: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +95,13 @@ pub enum InsertMemoryError {
     Execute(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AccessControlRequest {
+    principal: Principal,
+    action: AccessControlAction,
+    role_code: Option<u8>,
+}
+
 fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<crate::agent::AgentFactory> {
     auth.agent_factory(use_mainnet)
 }
@@ -77,7 +111,6 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     let agent = factory.build().await?;
     let client = LauncherClient::new(agent);
     let states = client.list_memories().await?;
-
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
@@ -218,20 +251,117 @@ pub async fn load_memory_dim(
     auth: TuiAuth,
     memory_id: String,
 ) -> Result<u64, InsertMemoryError> {
+    let memory = Principal::from_text(&memory_id)
+        .map_err(|error| InsertMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let factory = resolve_agent_factory(use_mainnet, &auth)
         .map_err(|error| InsertMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
     let agent = factory
         .build()
         .await
         .map_err(|error| InsertMemoryError::BuildAgent(short_error(&error.to_string())))?;
-    let memory = Principal::from_text(&memory_id)
-        .map_err(|error| InsertMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let client = MemoryClient::new(agent, memory);
 
     client
         .get_dim()
         .await
         .map_err(|error| InsertMemoryError::Execute(short_error(&error.to_string())))
+}
+
+pub async fn load_memory_details(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+) -> Result<MemoryDetails> {
+    let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
+    let client = MemoryClient::new(agent, memory);
+    let metadata = client.get_metadata().await?;
+    let (dim, users, exported_chunks) =
+        tokio::join!(client.get_dim(), client.get_users(), client.export_all(),);
+    let content_preview = render_content_preview(
+        exported_chunks
+            .unwrap_or_default()
+            .into_iter()
+            .map(|chunk| chunk.text)
+            .collect(),
+    );
+
+    Ok(MemoryDetails {
+        name: metadata.name,
+        version: metadata.version,
+        dim: dim.ok(),
+        owners: metadata.owners,
+        stable_memory_size: Some(metadata.stable_memory_size),
+        cycle_amount: Some(metadata.cycle_amount),
+        users: decode_memory_users(users, &launcher_id),
+        content_preview,
+    })
+}
+
+fn render_content_preview(chunks: Vec<String>) -> String {
+    const MAX_CHUNKS: usize = 3;
+    const MAX_CHARS: usize = 300;
+
+    if chunks.is_empty() {
+        return "No additional content available.".to_string();
+    }
+
+    let total = chunks.len();
+    let mut lines = vec![format!("Previewing {} of {total} chunks.", total.min(MAX_CHUNKS))];
+    for (index, chunk) in chunks.into_iter().take(MAX_CHUNKS).enumerate() {
+        lines.push(String::new());
+        lines.push(format!("{}. {}", index + 1, truncate_chars(chunk.trim(), MAX_CHARS)));
+    }
+    lines.join("\n")
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count <= max_chars {
+        return value.to_string();
+    }
+
+    let truncated = value.chars().take(max_chars).collect::<String>();
+    format!("{truncated}...")
+}
+
+pub async fn manage_memory_access(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+    action: AccessControlAction,
+    principal_id: String,
+    role: AccessControlRole,
+) -> Result<()> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
+    let request = build_access_control_request(action, &principal_id, role, &launcher_id)?;
+    let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
+    let client = MemoryClient::new(agent, memory);
+
+    match request.action {
+        AccessControlAction::Add => {
+            client
+                .add_new_user(
+                    request.principal,
+                    request.role_code.expect("role code should exist for add"),
+                )
+                .await
+        }
+        AccessControlAction::Remove => client.remove_user(request.principal).await,
+        AccessControlAction::Change => {
+            client.remove_user(request.principal).await?;
+            client
+                .add_new_user(
+                    request.principal,
+                    request.role_code.expect("role code should exist for change"),
+                )
+                .await
+        }
+    }
 }
 
 pub async fn run_insert(
@@ -250,7 +380,9 @@ pub async fn run_insert(
     let client = MemoryClient::new(agent, memory);
     let result = execute_insert_request(&client, &request)
         .await
-        .map_err(|error| InsertMemoryError::Execute(format_insert_execute_error(&error.to_string())))?;
+        .map_err(|error| {
+            InsertMemoryError::Execute(format_insert_execute_error(&error.to_string()))
+        })?;
 
     Ok(insert_success_from_result(result))
 }
@@ -261,33 +393,140 @@ fn memory_summary_from_state(state: State) -> MemorySummary {
             id: format!("empty:{message}"),
             status: "empty".to_string(),
             detail: message,
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::Pending(message) => MemorySummary {
             id: format!("pending:{message}"),
             status: "pending".to_string(),
             detail: message,
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::Creation(message) => MemorySummary {
             id: format!("creation:{message}"),
             status: "creation".to_string(),
             detail: message,
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::Installation(principal, message) => MemorySummary {
             id: principal.to_text(),
             status: "installation".to_string(),
             detail: message,
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::SettingUp(principal) => MemorySummary {
             id: principal.to_text(),
             status: "setting_up".to_string(),
             detail: "Launcher is setting up this memory.".to_string(),
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::Running(principal) => MemorySummary {
             id: principal.to_text(),
             status: "running".to_string(),
             detail: "Memory is ready for search and writes.".to_string(),
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
     }
+}
+
+fn role_name(role_code: u8) -> String {
+    match role_code {
+        1 => "admin".to_string(),
+        2 => "writer".to_string(),
+        3 => "reader".to_string(),
+        other => format!("unknown({other})"),
+    }
+}
+
+fn decode_memory_users(
+    users: Result<Vec<(String, u8)>, anyhow::Error>,
+    launcher_id: &str,
+) -> Vec<MemoryUser> {
+    users
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(principal_id, _)| principal_id != launcher_id)
+        .map(|(principal_id, role_code)| MemoryUser {
+            principal_id,
+            role: role_name(role_code),
+        })
+        .collect()
+}
+
+fn build_access_control_request(
+    action: AccessControlAction,
+    principal_id: &str,
+    role: AccessControlRole,
+    launcher_id: &str,
+) -> Result<AccessControlRequest> {
+    let principal = parse_access_control_principal(principal_id)?;
+    if principal.to_text() == launcher_id {
+        anyhow::bail!("launcher canister access cannot be modified");
+    }
+    let role_code = match action {
+        AccessControlAction::Remove => None,
+        AccessControlAction::Add | AccessControlAction::Change => Some(role_code(role, principal_id)?),
+    };
+
+    Ok(AccessControlRequest {
+        principal,
+        action,
+        role_code,
+    })
+}
+
+fn parse_access_control_principal(principal_id: &str) -> Result<Principal> {
+    if principal_id == "anonymous" {
+        return Ok(Principal::anonymous());
+    }
+    Principal::from_text(principal_id)
+        .with_context(|| format!("invalid principal text: {principal_id}"))
+}
+
+fn role_code(role: AccessControlRole, principal_id: &str) -> Result<u8> {
+    if role == AccessControlRole::Admin && principal_id == "anonymous" {
+        anyhow::bail!("cannot grant admin role to anonymous");
+    }
+    Ok(match role {
+        AccessControlRole::Admin => 1,
+        AccessControlRole::Writer => 2,
+        AccessControlRole::Reader => 3,
+    })
 }
 
 fn short_error(message: &str) -> String {
@@ -295,28 +534,7 @@ fn short_error(message: &str) -> String {
 }
 
 fn format_insert_execute_error(message: &str) -> String {
-    parse_embedding_dimension_mismatch(message).unwrap_or_else(|| short_error(message))
-}
-
-fn parse_embedding_dimension_mismatch(message: &str) -> Option<String> {
-    if !message.contains("left == right") {
-        return None;
-    }
-
-    let provided = message
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("left:"))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    let expected = message
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("right:"))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-
-    Some(format!(
-        "Embedding dimension mismatch. Received {provided} values, expected {expected}."
-    ))
+    short_error(message)
 }
 
 fn insert_success_from_result(result: InsertExecutionResult) -> InsertMemorySuccess {
@@ -357,6 +575,13 @@ mod tests {
                 id: "aaaaa-aa".to_string(),
                 status: "running".to_string(),
                 detail: "ready".to_string(),
+                name: "Alpha".to_string(),
+                version: "1.0.0".to_string(),
+                dim: Some(768),
+                owners: Some(vec!["aaaaa-aa".to_string()]),
+                stable_memory_size: Some(2_048),
+                cycle_amount: Some(42),
+                users: Some(Vec::new()),
             }]),
             refresh_warning: None,
         };
@@ -412,12 +637,12 @@ mod tests {
     }
 
     #[test]
-    fn format_insert_execute_error_rewrites_embedding_dimension_mismatch() {
+    fn format_insert_execute_error_falls_back_to_first_line_for_assertion_traps() {
         let message = "update call failed: Canister trapped: assertion `left == right` failed\n  left: 4\n right: 1024";
 
         assert_eq!(
             format_insert_execute_error(message),
-            "Embedding dimension mismatch. Received 4 values, expected 1024."
+            "update call failed: Canister trapped: assertion `left == right` failed"
         );
     }
 
@@ -426,6 +651,39 @@ mod tests {
         let message = "insert failed\nmore detail";
 
         assert_eq!(format_insert_execute_error(message), "insert failed");
+    }
+
+    #[test]
+    fn decode_memory_users_excludes_launcher_canister() {
+        let users = Ok(vec![
+            ("launcher-aa".to_string(), 0),
+            ("writer-aa".to_string(), 2),
+        ]);
+
+        let decoded = decode_memory_users(users, "launcher-aa");
+
+        assert_eq!(
+            decoded,
+            vec![MemoryUser {
+                principal_id: "writer-aa".to_string(),
+                role: "writer".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn decode_memory_users_keeps_unknown_roles_for_non_launcher_entries() {
+        let users = Ok(vec![("other-aa".to_string(), 9)]);
+
+        let decoded = decode_memory_users(users, "launcher-aa");
+
+        assert_eq!(
+            decoded,
+            vec![MemoryUser {
+                principal_id: "other-aa".to_string(),
+                role: "unknown(9)".to_string(),
+            }]
+        );
     }
 
     #[test]
