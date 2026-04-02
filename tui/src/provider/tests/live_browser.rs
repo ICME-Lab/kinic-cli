@@ -95,8 +95,5 @@ fn refresh_current_view_restarts_live_memories_load() {
     assert!(provider.pending_initial_memories.is_some());
     assert_eq!(provider.all[0].id, "kinic-live-loading");
     assert_eq!(provider.query, "alpha");
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message) if message == "Refreshing memories..."
-    )));
+    assert!(output.effects.is_empty());
 }

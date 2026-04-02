@@ -60,11 +60,7 @@ fn set_tab_create_starts_account_refresh() {
     assert_eq!(provider.create_cost_state, CreateCostState::Loading);
     assert!(provider.create_cost_in_flight);
     assert!(provider.pending_create_cost.is_some());
-    assert!(
-        effects
-            .iter()
-            .any(|effect| matches!(effect, CoreEffect::Notify(_)))
-    );
+    assert!(effects.is_empty());
 }
 
 #[test]
@@ -73,10 +69,7 @@ fn poll_background_applies_refreshed_session_settings() {
 
     assert!(!provider.session_settings_in_flight);
     assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message) if message == "Session settings refreshed."
-    )));
+    assert!(output.effects.is_empty());
 }
 
 #[test]
