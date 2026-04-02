@@ -38,6 +38,9 @@ impl<'a> TuiKitUi<'a> {
         {
             return None;
         }
+        if self.access_control_open {
+            return self.access_control_cursor_position_for_area(area);
+        }
         match tab_kind(self.current_tab_id.0.as_str()) {
             TabKind::CreateForm => return self.create_cursor_position_for_area(area),
             TabKind::InsertForm => return self.insert_cursor_position_for_area(area),
@@ -93,6 +96,7 @@ impl Widget for TuiKitUi<'_> {
         self.render_status(chunks[3], buf);
         self.render_create_overlay(area, buf);
         self.render_settings_overlay(area, buf);
+        self.render_access_control_overlay(area, buf);
         self.render_default_memory_selector_overlay(area, buf);
         self.render_help_overlay(area, buf);
     }

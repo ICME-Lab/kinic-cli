@@ -60,6 +60,7 @@ pub fn item_to_content(item: &AnalyzedItem) -> UiItemContent {
     UiItemContent {
         id: item.qualified_name(),
         title: item.name().to_string(),
+        subtitle: None,
         kind: map_item_kind(item),
         definition: item.definition(),
         location: item.source_location().map(map_source_location),

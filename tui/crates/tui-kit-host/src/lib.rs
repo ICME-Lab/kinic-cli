@@ -345,6 +345,81 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.default_memory_selector_selected_id = Some(memory_id);
                 state.insert_error = None;
             }
+            CoreEffect::SetAccessListIndex(index) => {
+                state.access_list_index = index;
+            }
+            CoreEffect::OpenAccessAction {
+                memory_id,
+                principal_id,
+                role,
+            } => {
+                state.access_control_open = true;
+                state.access_control_memory_id = memory_id;
+                state.access_control_mode = tui_kit_runtime::AccessControlMode::Action;
+                state.access_control_action = tui_kit_runtime::AccessControlAction::Change;
+                state.access_control_role = match role {
+                    tui_kit_runtime::AccessControlRole::Admin => {
+                        tui_kit_runtime::AccessControlRole::Writer
+                    }
+                    tui_kit_runtime::AccessControlRole::Writer => {
+                        tui_kit_runtime::AccessControlRole::Admin
+                    }
+                    tui_kit_runtime::AccessControlRole::Reader => {
+                        tui_kit_runtime::AccessControlRole::Admin
+                    }
+                };
+                state.access_control_current_role = role;
+                state.access_control_principal_id = principal_id;
+                state.access_control_confirm_yes = true;
+                state.access_control_submit_state = CreateSubmitState::Idle;
+                state.access_control_error = None;
+                state.access_control_focus = tui_kit_runtime::AccessControlFocus::Principal;
+            }
+            CoreEffect::OpenAccessConfirm {
+                memory_id,
+                principal_id,
+                action,
+                role,
+            } => {
+                state.access_control_open = true;
+                state.access_control_mode = tui_kit_runtime::AccessControlMode::Confirm;
+                state.access_control_memory_id = memory_id;
+                state.access_control_action = action;
+                state.access_control_principal_id = principal_id;
+                state.access_control_role = role;
+                state.access_control_confirm_yes = true;
+                state.access_control_submit_state = CreateSubmitState::Idle;
+                state.access_control_error = None;
+                state.access_control_focus = tui_kit_runtime::AccessControlFocus::Principal;
+            }
+            CoreEffect::OpenAccessAdd { memory_id } => {
+                state.access_control_open = true;
+                state.access_control_mode = tui_kit_runtime::AccessControlMode::Add;
+                state.access_control_memory_id = memory_id;
+                state.access_control_action = tui_kit_runtime::AccessControlAction::Add;
+                state.access_control_role = tui_kit_runtime::AccessControlRole::Reader;
+                state.access_control_current_role = tui_kit_runtime::AccessControlRole::Reader;
+                state.access_control_principal_id.clear();
+                state.access_control_confirm_yes = true;
+                state.access_control_submit_state = CreateSubmitState::Idle;
+                state.access_control_error = None;
+                state.access_control_focus = tui_kit_runtime::AccessControlFocus::Principal;
+            }
+            CoreEffect::CloseAccessControl => {
+                state.access_control_open = false;
+                state.access_control_mode = tui_kit_runtime::AccessControlMode::None;
+                state.access_control_confirm_yes = true;
+                state.access_control_submit_state = CreateSubmitState::Idle;
+                state.access_control_error = None;
+            }
+            CoreEffect::AccessFormError(message) => {
+                state.access_control_submit_state = if message.is_some() {
+                    CreateSubmitState::Error
+                } else {
+                    CreateSubmitState::Idle
+                };
+                state.access_control_error = message;
+            }
             CoreEffect::Custom { id, payload } => {
                 state.status_message = Some(match payload {
                     Some(p) => format!("Custom effect: {id} ({p})"),

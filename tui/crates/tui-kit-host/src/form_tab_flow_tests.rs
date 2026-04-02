@@ -1,7 +1,7 @@
 use super::*;
 use tui_kit_runtime::{
-    InsertMode,
     kinic_tabs::{KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID},
+    InsertMode,
 };
 
 #[test]

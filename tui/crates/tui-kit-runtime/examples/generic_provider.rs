@@ -73,6 +73,7 @@ impl DemoProvider {
         let selected_content = filtered.get(sel).map(|r| UiItemContent {
             id: r.id.clone(),
             title: r.title.clone(),
+            subtitle: None,
             kind: UiItemKind::Custom("record".to_string()),
             definition: format!("Owner: {}", r.owner),
             location: None,

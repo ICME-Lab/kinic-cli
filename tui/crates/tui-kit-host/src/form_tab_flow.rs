@@ -2,8 +2,8 @@
 
 use crossterm::event::KeyCode;
 use tui_kit_runtime::{
-    CoreAction, CoreState, CreateModalFocus, InsertFormFocus, PaneFocus,
     kinic_tabs::{is_form_tab, is_kinic_create_tab, is_kinic_insert_tab},
+    CoreAction, CoreState, CreateModalFocus, InsertFormFocus, PaneFocus,
 };
 
 pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<CoreAction> {

@@ -142,6 +142,12 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         if let Some(value) = expected_dim_value(ui) {
             push_readonly_field(&mut lines, ui, "Expected Dim", value);
         }
+        if let Some(value) = ui.insert_current_dim {
+            push_readonly_field(&mut lines, ui, "Current Dim", value.to_string());
+        }
+        if let Some(message) = ui.insert_validation_message {
+            push_validation_message(&mut lines, ui, message);
+        }
     }
     push_field(
         &mut lines,
@@ -202,6 +208,14 @@ fn push_readonly_field(lines: &mut Vec<Line<'_>>, ui: &TuiKitUi<'_>, label: &str
         Span::raw("  "),
         Span::styled(value, ui.theme.style_muted()),
     ]));
+    lines.push(Line::from(""));
+}
+
+fn push_validation_message(lines: &mut Vec<Line<'_>>, ui: &TuiKitUi<'_>, message: &str) {
+    lines.push(Line::from(Span::styled(
+        format!("  {message}"),
+        ui.theme.style_error(),
+    )));
     lines.push(Line::from(""));
 }
 
@@ -321,5 +335,64 @@ mod tests {
 
         assert!(rendered.contains("Expected Dim"));
         assert!(rendered.contains("1024"));
+    }
+
+    #[test]
+    fn insert_form_shows_current_dim_for_raw_embedding() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_mode(InsertMode::Raw)
+            .insert_current_dim(Some("3"));
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Current Dim"));
+        assert!(rendered.contains("3"));
+    }
+
+    #[test]
+    fn insert_form_shows_invalid_current_dim_and_validation_message() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_mode(InsertMode::Raw)
+            .insert_current_dim(Some("invalid"))
+            .insert_validation_message(Some("Embedding must be a JSON array of floats."));
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Current Dim"));
+        assert!(rendered.contains("invalid"));
+        assert!(rendered.contains("Embedding must be a JSON array of floats."));
+    }
+
+    #[test]
+    fn insert_form_keeps_validation_message_and_submit_error_separate() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_mode(InsertMode::Raw)
+            .insert_current_dim(Some("1"))
+            .insert_validation_message(Some(
+                "Embedding dimension mismatch. Received 1 values, expected 1024.",
+            ))
+            .insert_error(Some("Insert failed."));
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("Embedding dimension mismatch. Received 1 values, expected 1024.")
+        );
+        assert!(rendered.contains("Insert failed."));
     }
 }

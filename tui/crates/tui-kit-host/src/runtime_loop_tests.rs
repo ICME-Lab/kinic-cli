@@ -1,8 +1,12 @@
 use super::*;
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use tui_kit_render::ui::UiConfig;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
 };
-use tui_kit_runtime::{CoreError, CoreResult, ProviderOutput, ProviderSnapshot};
+use tui_kit_runtime::{
+    CoreError, CoreResult, InsertMode, PaneFocus, ProviderOutput, ProviderSnapshot,
+};
 
 struct TestProvider {
     result: CoreResult<ProviderOutput>,
@@ -27,6 +31,24 @@ impl DataProvider for TestProvider {
         _state: &CoreState,
     ) -> CoreResult<ProviderOutput> {
         self.result.clone()
+    }
+}
+
+fn test_ui_config() -> UiConfig {
+    UiConfig::default()
+}
+
+fn test_runtime_config() -> RuntimeLoopConfig {
+    RuntimeLoopConfig {
+        initial_tab_id: KINIC_INSERT_TAB_ID,
+        tab_ids: &[
+            KINIC_MEMORIES_TAB_ID,
+            KINIC_CREATE_TAB_ID,
+            KINIC_INSERT_TAB_ID,
+            KINIC_MARKET_TAB_ID,
+        ],
+        initial_focus: PaneFocus::Form,
+        ui_config: test_ui_config,
     }
 }
 
@@ -255,6 +277,51 @@ fn switch_to_tab_failure_keeps_existing_focus_when_target_tab_allows_it() {
 
     assert_eq!(result, Err("Dispatch error: tab failed".into()));
     assert_eq!(state.focus, PaneFocus::Content);
+}
+
+#[test]
+fn build_ui_forwards_insert_validation_fields_to_render_tree() {
+    let theme = Theme::default();
+    let animation = AnimationState::new();
+    let state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: InsertMode::Raw,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_embedding: "[0.1, 0.2]".to_string(),
+        insert_current_dim: Some("2".to_string()),
+        insert_validation_message: Some(
+            "Embedding dimension mismatch. Received 2 values, expected 4.".to_string(),
+        ),
+        ..CoreState::default()
+    };
+
+    let ui = build_ui(
+        &theme,
+        &test_runtime_config(),
+        &state,
+        0,
+        0,
+        false,
+        false,
+        &animation,
+    );
+    let area = Rect::new(0, 0, 120, 40);
+    let mut buf = Buffer::empty(area);
+    ui.render(area, &mut buf);
+
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol()))
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("Current Dim"));
+    assert!(rendered.contains("2"));
+    assert!(rendered.contains("Embedding dimension mismatch. Received 2 values, expected 4."));
 }
 
 #[test]
