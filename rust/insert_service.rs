@@ -573,10 +573,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(
-            err.to_string()
-                .contains(&format!("File path is not valid UTF-8 text: {}", path.display()))
-        );
+        assert!(err.to_string().contains(&format!(
+            "File path is not valid UTF-8 text: {}",
+            path.display()
+        )));
 
         fs::remove_file(path).expect("temporary bytes file should be removable");
     }
