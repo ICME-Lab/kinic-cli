@@ -207,7 +207,7 @@ fn create_cursor_uses_visible_suffix_for_long_name() {
 
     assert_eq!(
         cursor.0,
-        (screen.layout.field_x() + screen.form_lines.name_display_width)
+        (screen.layout.field_x() + screen.form_lines.focus_display_width(CreateModalFocus::Name))
             .min(screen.layout.max_field_x())
     );
     assert!(fit_single_line(long_name, screen.layout.input_width(0), true) != long_name);
@@ -229,7 +229,10 @@ fn create_cursor_uses_visible_suffix_for_long_description() {
 
     assert_eq!(
         cursor.0,
-        (screen.layout.field_x() + screen.form_lines.description_display_width)
+        (screen.layout.field_x()
+            + screen
+                .form_lines
+                .focus_display_width(CreateModalFocus::Description))
             .min(screen.layout.max_field_x())
     );
     assert!(

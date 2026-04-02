@@ -12,7 +12,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::{Focus, TuiKitUi, shared};
 
-use super::submit_button_text;
+use super::{FormRows, submit_button_text};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_insert_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -59,29 +59,22 @@ fn insert_layout(area: Rect, has_tabs: bool) -> InsertLayout {
 
 struct InsertForm<'a> {
     lines: Vec<Line<'a>>,
-    rows: Vec<(InsertFormFocus, u16, u16)>,
+    rows: FormRows<InsertFormFocus>,
 }
 
 impl InsertForm<'_> {
     fn focus_row(&self, focus: InsertFormFocus) -> Option<u16> {
-        self.rows
-            .iter()
-            .find(|(field, _, _)| *field == focus)
-            .map(|(_, row, _)| *row)
+        self.rows.focus_row(focus)
     }
 
     fn focus_width(&self, focus: InsertFormFocus) -> u16 {
-        self.rows
-            .iter()
-            .find(|(field, _, _)| *field == focus)
-            .map(|(_, _, width)| *width)
-            .unwrap_or(0)
+        self.rows.focus_width(focus)
     }
 }
 
 fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a> {
     let mut lines = Vec::new();
-    let mut rows = Vec::new();
+    let mut rows = FormRows::default();
     push_field(
         &mut lines,
         &mut rows,
@@ -174,27 +167,36 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
 
 fn push_field(
     lines: &mut Vec<Line<'_>>,
-    rows: &mut Vec<(InsertFormFocus, u16, u16)>,
+    rows: &mut FormRows<InsertFormFocus>,
     ui: &TuiKitUi<'_>,
     focus: InsertFormFocus,
     label: &str,
     value: String,
     max_width: u16,
 ) {
-    if !label.is_empty() {
-        lines.push(Line::from(Span::styled(
-            label.to_string(),
-            ui.theme.style_dim(),
-        )));
-    }
     let display = trim_to_width(&value, max_width);
-    let row = u16::try_from(lines.len()).unwrap_or(0);
-    let width = UnicodeWidthStr::width(display.as_str()) as u16;
-    rows.push((focus, row, width));
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled(display, field_style(ui, focus)),
-    ]));
+    if !label.is_empty() {
+        rows.push_labeled_row(
+            lines,
+            Line::from(Span::styled(label.to_string(), ui.theme.style_dim())),
+            focus,
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(display.clone(), field_style(ui, focus)),
+            ]),
+            display.as_str(),
+        );
+    } else {
+        rows.push_unlabeled_row(
+            lines,
+            focus,
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(display.clone(), field_style(ui, focus)),
+            ]),
+            display.as_str(),
+        );
+    }
     lines.push(Line::from(""));
 }
 

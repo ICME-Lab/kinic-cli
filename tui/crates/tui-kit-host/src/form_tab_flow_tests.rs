@@ -1,6 +1,6 @@
 use super::*;
 use tui_kit_runtime::{
-    InsertMode,
+    CoreAction, CreateModalFocus, InsertFormFocus, InsertMode,
     kinic_tabs::{KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID},
 };
 
@@ -42,6 +42,25 @@ fn reset_create_form_state_resets_focus_to_name() {
 }
 
 #[test]
+fn reset_create_form_state_preserves_insert_transient_state() {
+    let mut state = CoreState {
+        insert_submit_state: tui_kit_runtime::CreateSubmitState::Submitting,
+        insert_spinner_frame: 3,
+        insert_error: Some("stale".to_string()),
+        ..CoreState::default()
+    };
+
+    reset_form_state_for_tab(&mut state, KINIC_CREATE_TAB_ID);
+
+    assert_eq!(
+        state.insert_submit_state,
+        tui_kit_runtime::CreateSubmitState::Submitting
+    );
+    assert_eq!(state.insert_spinner_frame, 3);
+    assert_eq!(state.insert_error.as_deref(), Some("stale"));
+}
+
+#[test]
 fn insert_form_routes_chars_into_active_field() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
@@ -56,7 +75,7 @@ fn insert_form_routes_chars_into_active_field() {
 }
 
 #[test]
-fn insert_mode_focus_uses_enter_to_move_to_next_mode() {
+fn insert_mode_focus_uses_enter_to_move_to_next_field() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
@@ -66,7 +85,7 @@ fn insert_mode_focus_uses_enter_to_move_to_next_mode() {
 
     let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
 
-    assert_eq!(action, Some(CoreAction::InsertNextMode));
+    assert_eq!(action, Some(CoreAction::InsertNextField));
 }
 
 #[test]
@@ -109,6 +128,34 @@ fn insert_mode_focus_uses_right_to_move_to_next_mode() {
     let action = form_tab_action_from_key(KeyCode::Right, &mut state);
 
     assert_eq!(action, Some(CoreAction::InsertNextMode));
+}
+
+#[test]
+fn insert_form_down_moves_to_next_field() {
+    let mut state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_focus: InsertFormFocus::Tag,
+        ..CoreState::default()
+    };
+
+    let action = form_tab_action_from_key(KeyCode::Down, &mut state);
+
+    assert_eq!(action, Some(CoreAction::InsertNextField));
+}
+
+#[test]
+fn create_form_down_moves_to_next_field() {
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: CreateModalFocus::Name,
+        ..CoreState::default()
+    };
+
+    let action = form_tab_action_from_key(KeyCode::Down, &mut state);
+
+    assert_eq!(action, Some(CoreAction::CreateNextField));
 }
 
 #[test]
@@ -164,6 +211,25 @@ fn reset_insert_form_state_clears_insert_fields() {
 }
 
 #[test]
+fn reset_insert_form_state_preserves_create_transient_state() {
+    let mut state = CoreState {
+        create_submit_state: tui_kit_runtime::CreateSubmitState::Submitting,
+        create_spinner_frame: 5,
+        create_error: Some("stale".to_string()),
+        ..CoreState::default()
+    };
+
+    reset_form_state_for_tab(&mut state, KINIC_INSERT_TAB_ID);
+
+    assert_eq!(
+        state.create_submit_state,
+        tui_kit_runtime::CreateSubmitState::Submitting
+    );
+    assert_eq!(state.create_spinner_frame, 5);
+    assert_eq!(state.create_error.as_deref(), Some("stale"));
+}
+
+#[test]
 fn submit_tab_wraps_back_to_name() {
     let mut state = CoreState {
         current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
@@ -207,4 +273,32 @@ fn submit_focus_uses_submit_action_on_enter() {
     let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
 
     assert_eq!(action, Some(CoreAction::CreateSubmit));
+}
+
+#[test]
+fn create_name_focus_uses_enter_to_move_to_next_field() {
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: CreateModalFocus::Name,
+        ..CoreState::default()
+    };
+
+    let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+    assert_eq!(action, Some(CoreAction::CreateNextField));
+}
+
+#[test]
+fn insert_tag_focus_uses_enter_to_move_to_next_field() {
+    let mut state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_focus: InsertFormFocus::Tag,
+        ..CoreState::default()
+    };
+
+    let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+    assert_eq!(action, Some(CoreAction::InsertNextField));
 }
