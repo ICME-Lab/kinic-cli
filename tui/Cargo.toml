@@ -40,7 +40,8 @@ test = false
 [dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
 kinic_core = { package = "kinic-cli", path = ".." }
-tokio = { version = "1.48", features = ["rt-multi-thread"] }
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
+tokio-util = "0.7"
 tui-kit-host = { path = "crates/tui-kit-host" }
 tui-kit-runtime = { path = "crates/tui-kit-runtime" }
 tui-kit-model = { path = "crates/tui-kit-model" }

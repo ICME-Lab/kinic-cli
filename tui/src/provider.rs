@@ -1,6 +1,9 @@
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
-use std::{sync::mpsc, thread};
+use std::{
+    sync::{Arc, mpsc},
+    thread,
+};
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
@@ -13,6 +16,8 @@ use crate::{
 };
 use serde::Deserialize;
 use tokio::runtime::Runtime;
+use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreResult, CoreState, CreateCostState, DataProvider, InsertMode,
     LoadedCreateCost, MemorySelectorContext, MemorySelectorItem, PaneFocus, ProviderOutput,
@@ -36,6 +41,7 @@ pub struct KinicRecord {
     pub group: String,
     pub summary: String,
     pub content_md: String,
+    pub searchable_memory_id: Option<String>,
     pub source_memory_id: Option<String>,
 }
 
@@ -53,8 +59,14 @@ impl KinicRecord {
             group: group.into(),
             summary: summary.into(),
             content_md: content_md.into(),
+            searchable_memory_id: None,
             source_memory_id: None,
         }
+    }
+
+    pub fn with_searchable_memory_id_option(mut self, memory_id: Option<String>) -> Self {
+        self.searchable_memory_id = memory_id;
+        self
     }
 
     pub fn with_source_memory_id(mut self, memory_id: impl Into<String>) -> Self {
@@ -75,6 +87,8 @@ struct SearchPayload {
     tag: Option<String>,
 }
 
+const MAX_CONCURRENT_MEMORY_SEARCHES: usize = 10;
+
 pub struct KinicProvider {
     all: Vec<KinicRecord>,
     query: String,
@@ -89,10 +103,8 @@ pub struct KinicProvider {
     memories_mode: MemoriesMode,
     pending_initial_memories: Option<mpsc::Receiver<InitialMemoriesTaskOutput>>,
     initial_memories_in_flight: bool,
-    pending_search: Option<mpsc::Receiver<SearchTaskOutput>>,
-    pending_search_context: Option<SearchRequestContext>,
+    pending_search: Option<PendingSearch>,
     next_search_request_id: u64,
-    search_in_flight: bool,
     last_search_state: Option<LastSearchState>,
     create_cost_state: CreateCostState,
     pending_create_cost: Option<mpsc::Receiver<CreateCostTaskOutput>>,
@@ -120,6 +132,12 @@ struct SearchRequestContext {
     target_memory_ids: Vec<String>,
 }
 
+struct PendingSearch {
+    receiver: mpsc::Receiver<SearchTaskOutput>,
+    cancellation: CancellationToken,
+    context: SearchRequestContext,
+}
+
 struct SearchTaskOutput {
     request_id: u64,
     query: String,
@@ -127,6 +145,10 @@ struct SearchTaskOutput {
     target_memory_ids: Vec<String>,
     result: Result<SearchBatchResult, String>,
 }
+
+type MemorySearchTaskResult = (String, anyhow::Result<Vec<SearchResultItem>>);
+type MemorySearchJoinResult = Result<MemorySearchTaskResult, tokio::task::JoinError>;
+type NextMemorySearchTask = Option<MemorySearchJoinResult>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LastSearchState {
@@ -316,9 +338,7 @@ impl KinicProvider {
             pending_initial_memories: None,
             initial_memories_in_flight: false,
             pending_search: None,
-            pending_search_context: None,
             next_search_request_id: 0,
-            search_in_flight: false,
             last_search_state: None,
             create_cost_state: CreateCostState::Hidden,
             pending_create_cost: None,
@@ -370,8 +390,6 @@ impl KinicProvider {
         }
         self.result_records.clear();
         self.invalidate_pending_search();
-        self.pending_search = None;
-        self.search_in_flight = false;
 
         self.all = vec![loading_memories_record()];
         self.memory_records.clear();
@@ -814,7 +832,9 @@ impl KinicProvider {
     }
 
     fn invalidate_pending_search(&mut self) {
-        self.pending_search_context = None;
+        if let Some(pending_search) = self.pending_search.take() {
+            pending_search.cancellation.cancel();
+        }
     }
 
     fn invalidate_pending_create_cost(&mut self) {
@@ -865,7 +885,8 @@ impl KinicProvider {
     }
 
     fn matches_pending_search(&self, output: &SearchTaskOutput) -> bool {
-        self.pending_search_context.as_ref().is_some_and(|context| {
+        self.pending_search.as_ref().is_some_and(|pending_search| {
+            let context = &pending_search.context;
             context.request_id == output.request_id
                 && context.query == output.query
                 && context.scope == output.scope
@@ -889,19 +910,31 @@ impl KinicProvider {
                 let targets = self
                     .memory_records
                     .iter()
-                    .map(|record| record.id.clone())
+                    .filter_map(|record| record.searchable_memory_id.clone())
                     .collect::<Vec<_>>();
                 if targets.is_empty() {
-                    Err("No memories available to search yet.".to_string())
+                    Err("No searchable memories are available yet.".to_string())
                 } else {
                     Ok(targets)
                 }
             }
-            SearchScope::Selected => self
-                .active_memory_id
-                .clone()
-                .map(|memory_id| vec![memory_id])
-                .ok_or_else(|| "Select a memory in the list before running search.".to_string()),
+            SearchScope::Selected => {
+                let active_memory_id = self.active_memory_id.as_deref().ok_or_else(|| {
+                    "Select a memory in the list before running search.".to_string()
+                })?;
+                let record = self
+                    .memory_records
+                    .iter()
+                    .find(|record| record.id == active_memory_id)
+                    .ok_or_else(|| {
+                        "Select a memory in the list before running search.".to_string()
+                    })?;
+                let memory_id = record.searchable_memory_id.clone().ok_or_else(|| {
+                    "The selected memory is not searchable yet. Wait until setup finishes."
+                        .to_string()
+                })?;
+                Ok(vec![memory_id])
+            }
         }
     }
 
@@ -909,11 +942,6 @@ impl KinicProvider {
         let auth = self.config.auth.clone();
         if !auth.is_live() {
             return None;
-        }
-        if self.search_in_flight {
-            return Some(CoreEffect::Notify(
-                "Search already running. Wait for the current request to finish.".to_string(),
-            ));
         }
         let target_memory_ids = match self.search_target_memory_ids(scope) {
             Ok(targets) => targets,
@@ -931,102 +959,141 @@ impl KinicProvider {
         }
 
         let use_mainnet = self.config.use_mainnet;
+        self.invalidate_pending_search();
         let request_id = self.next_search_request_id;
         self.next_search_request_id += 1;
-        self.pending_search_context = Some(Self::search_context(
-            request_id,
-            query.clone(),
-            scope,
-            target_memory_ids.clone(),
-        ));
         let (tx, rx) = mpsc::channel();
-        self.pending_search = Some(rx);
-        self.search_in_flight = true;
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        self.pending_search = Some(PendingSearch {
+            receiver: rx,
+            cancellation,
+            context: Self::search_context(
+                request_id,
+                query.clone(),
+                scope,
+                target_memory_ids.clone(),
+            ),
+        });
 
         thread::spawn(move || {
             let runtime = Runtime::new().expect("failed to create tokio runtime for search");
             let output_target_memory_ids = target_memory_ids.clone();
             let output_query = query.clone();
-            let result = runtime
-                .block_on(async move {
-                    let embedding = fetch_embedding(&query)
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    let mut tasks = tokio::task::JoinSet::new();
-                    for memory_id in target_memory_ids.clone() {
-                        let auth = auth.clone();
-                        let embedding = embedding.clone();
-                        tasks.spawn(async move {
-                            let result = bridge::search_memory_with_embedding(
-                                use_mainnet,
-                                auth,
-                                memory_id.clone(),
-                                embedding,
-                            )
-                            .await;
-                            (memory_id, result)
-                        });
-                    }
+            let result = runtime.block_on(async move {
+                if worker_cancellation.is_cancelled() {
+                    return None;
+                }
+                let embedding_result: Result<Vec<f32>, String> = tokio::select! {
+                    _ = worker_cancellation.cancelled() => return None,
+                    result = fetch_embedding(&query) => result.map_err(|error| error.to_string()),
+                };
+                let embedding = match embedding_result {
+                    Ok(embedding) => embedding,
+                    Err(error) => return Some(Err(error)),
+                };
+                if worker_cancellation.is_cancelled() {
+                    return None;
+                }
+                let agent_result = bridge::build_search_agent(use_mainnet, auth.clone())
+                    .await
+                    .map_err(|error| error.to_string());
+                let agent = match agent_result {
+                    Ok(agent) => agent,
+                    Err(error) => return Some(Err(error)),
+                };
+                let concurrency_limit = usize::min(
+                    MAX_CONCURRENT_MEMORY_SEARCHES,
+                    target_memory_ids.len().max(1),
+                );
+                let semaphore = Arc::new(Semaphore::new(concurrency_limit));
+                let mut tasks = tokio::task::JoinSet::new();
+                for memory_id in target_memory_ids.clone() {
+                    let agent = agent.clone();
+                    let embedding = embedding.clone();
+                    let semaphore = semaphore.clone();
+                    tasks.spawn(async move {
+                        let permit = semaphore
+                            .acquire_owned()
+                            .await
+                            .expect("search semaphore should remain open");
+                        let result =
+                            bridge::search_memory_with_agent(agent, memory_id.clone(), embedding)
+                                .await;
+                        drop(permit);
+                        (memory_id, result)
+                    });
+                }
 
-                    let mut items = Vec::new();
-                    let mut failed_memory_ids = Vec::new();
-                    let mut first_error = None;
-                    while let Some(task) = tasks.join_next().await {
-                        match task {
-                            Ok((_, Ok(mut search_items))) => items.append(&mut search_items),
-                            Ok((memory_id, Err(error))) => {
-                                if first_error.is_none() {
-                                    first_error = Some(error.to_string());
-                                }
-                                failed_memory_ids.push(memory_id);
+                let mut items = Vec::new();
+                let mut failed_memory_ids = Vec::new();
+                let mut first_error = None;
+                while !tasks.is_empty() {
+                    let task: NextMemorySearchTask = tokio::select! {
+                            _ = worker_cancellation.cancelled() => {
+                                tasks.abort_all();
+                                while tasks.join_next().await.is_some() {}
+                                return None;
+                        }
+                        task = tasks.join_next() => task,
+                    };
+                    let Some(task) = task else {
+                        break;
+                    };
+                    match task {
+                        Ok((_, Ok(mut search_items))) => items.append(&mut search_items),
+                        Ok((memory_id, Err(error))) => {
+                            if first_error.is_none() {
+                                first_error = Some(error.to_string());
                             }
-                            Err(error) => {
-                                if first_error.is_none() {
-                                    first_error = Some(error.to_string());
-                                }
+                            failed_memory_ids.push(memory_id);
+                        }
+                        Err(error) => {
+                            if first_error.is_none() {
+                                first_error = Some(error.to_string());
                             }
                         }
                     }
+                }
 
-                    items.sort_by(|left, right| {
-                        right
-                            .score
-                            .partial_cmp(&left.score)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    if failed_memory_ids.len() == target_memory_ids.len() {
-                        Err(first_error.unwrap_or_else(|| {
-                            "Search failed before any memory returned results.".to_string()
-                        }))
-                    } else {
-                        Ok(SearchBatchResult {
-                            items,
-                            failed_memory_ids,
-                        })
-                    }
-                })
-                .map_err(|error| error.to_string());
-            let _ = tx.send(SearchTaskOutput {
-                request_id,
-                query: output_query,
-                scope,
-                target_memory_ids: output_target_memory_ids,
-                result,
+                items.sort_by(|left, right| {
+                    right
+                        .score
+                        .partial_cmp(&left.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                if failed_memory_ids.len() == target_memory_ids.len() {
+                    Some(Err(first_error.unwrap_or_else(|| {
+                        "Search failed before any memory returned results.".to_string()
+                    })))
+                } else {
+                    Some(Ok(SearchBatchResult {
+                        items,
+                        failed_memory_ids,
+                    }))
+                }
             });
+            if let Some(result) = result {
+                let _ = tx.send(SearchTaskOutput {
+                    request_id,
+                    query: output_query,
+                    scope,
+                    target_memory_ids: output_target_memory_ids,
+                    result,
+                });
+            }
         });
 
         Some(CoreEffect::Notify("Searching...".to_string()))
     }
 
     fn poll_search_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
-        let receiver = self.pending_search.as_ref()?;
+        let receiver = &self.pending_search.as_mut()?.receiver;
         let output = match receiver.try_recv() {
             Ok(output) => output,
             Err(mpsc::TryRecvError::Empty) => return None,
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.pending_search = None;
-                self.invalidate_pending_search();
-                self.search_in_flight = false;
                 return Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
                     effects: vec![CoreEffect::Notify(
@@ -1036,8 +1103,6 @@ impl KinicProvider {
             }
         };
 
-        self.pending_search = None;
-        self.search_in_flight = false;
         let is_current_search = self.matches_pending_search(&output);
         self.invalidate_pending_search();
 
@@ -1676,6 +1741,7 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
             memory.id, memory.status, memory.detail
         ),
     )
+    .with_searchable_memory_id_option(memory.searchable_memory_id)
 }
 
 fn record_from_search_result(index: usize, item: SearchResultItem) -> KinicRecord {

@@ -14,6 +14,7 @@ use crate::{
     commands::ask_ai::{AskAiResult, ask_ai_flow},
     commands::convert_pdf,
     embedding::{fetch_embedding, late_chunking},
+    memory_client_builder::build_memory_client_from_identity,
 };
 use icrc_ledger_types::icrc1::account::Account;
 
@@ -54,7 +55,7 @@ pub(crate) async fn insert_memory(
     text: Option<String>,
     file_path: Option<PathBuf>,
 ) -> Result<usize> {
-    let client = build_memory_client(use_mainnet, identity, memory_id).await?;
+    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     let content = resolve_insert_content(text, file_path)?;
     let chunks = late_chunking(&content).await?;
     let chunk_count = chunks.len();
@@ -79,7 +80,7 @@ pub(crate) async fn insert_memory_raw(
     text: String,
     embedding: Vec<f32>,
 ) -> Result<usize> {
-    let client = build_memory_client(use_mainnet, identity, memory_id).await?;
+    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     let payload = json!({
         "tag": &tag,
         "sentence": &text
@@ -106,7 +107,7 @@ pub(crate) async fn search_memories(
     memory_id: String,
     query: String,
 ) -> Result<Vec<(f32, String)>> {
-    let client = build_memory_client(use_mainnet, identity, memory_id).await?;
+    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     let embedding = fetch_embedding(&query).await?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
@@ -119,7 +120,7 @@ pub(crate) async fn search_memories_raw(
     memory_id: String,
     embedding: Vec<f32>,
 ) -> Result<Vec<(f32, String)>> {
-    let client = build_memory_client(use_mainnet, identity, memory_id).await?;
+    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
     Ok(results)
@@ -131,7 +132,7 @@ pub(crate) async fn tagged_embeddings(
     memory_id: String,
     tag: String,
 ) -> Result<Vec<Vec<f32>>> {
-    let client = build_memory_client(use_mainnet, identity, memory_id).await?;
+    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     client.tagged_embeddings(tag).await
 }
 
@@ -224,19 +225,8 @@ pub(crate) async fn reset_memory(
     memory_id: String,
     dim: usize,
 ) -> Result<()> {
-    let client = build_memory_client(use_mainnet, identity, memory_id).await?;
+    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     client.reset(dim).await
-}
-
-async fn build_memory_client(
-    use_mainnet: bool,
-    identity: String,
-    memory_id: String,
-) -> Result<MemoryClient> {
-    let factory = AgentFactory::new(use_mainnet, identity);
-    let agent = factory.build().await?;
-    let memory = Principal::from_text(memory_id).context("Failed to parse memory canister id")?;
-    Ok(MemoryClient::new(agent, memory))
 }
 
 fn resolve_insert_content(text: Option<String>, file_path: Option<PathBuf>) -> Result<String> {
