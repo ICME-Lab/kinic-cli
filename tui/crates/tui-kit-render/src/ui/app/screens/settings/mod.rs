@@ -108,7 +108,6 @@ pub(crate) fn picker_presentation(picker: &PickerState) -> Option<PickerPresenta
     }
 }
 
-
 pub(crate) fn picker_lines(presentation: &PickerPresentation<'_>) -> Vec<(String, PickerLineKind)> {
     match presentation {
         PickerPresentation::Confirm { kind } => confirm_lines(kind),

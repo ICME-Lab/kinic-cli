@@ -76,7 +76,10 @@ fn pending_search_context(
         request_id,
         query: query.to_string(),
         scope,
-        target_memory_ids: target_memory_ids.iter().map(|id| (*id).to_string()).collect(),
+        target_memory_ids: target_memory_ids
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect(),
     }
 }
 

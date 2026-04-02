@@ -12,7 +12,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
 
-use super::submit_button_text;
+use super::{FormRows, submit_button_text};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_create_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -109,27 +109,15 @@ fn inner_bordered_area(area: Rect) -> Option<Rect> {
 }
 struct CreateFormLines<'a> {
     lines: Vec<Line<'a>>,
-    name_row: u16,
-    description_row: u16,
-    submit_row: u16,
-    name_display_width: u16,
-    description_display_width: u16,
+    rows: FormRows<CreateModalFocus>,
 }
 impl CreateFormLines<'_> {
     fn focus_row_index(&self, focus: CreateModalFocus) -> Option<u16> {
-        match focus {
-            CreateModalFocus::Name => Some(self.name_row),
-            CreateModalFocus::Description => Some(self.description_row),
-            CreateModalFocus::Submit => Some(self.submit_row),
-        }
+        self.rows.focus_row(focus)
     }
 
     fn focus_display_width(&self, focus: CreateModalFocus) -> u16 {
-        match focus {
-            CreateModalFocus::Name => self.name_display_width,
-            CreateModalFocus::Description => self.description_display_width,
-            CreateModalFocus::Submit => 0,
-        }
+        self.rows.focus_width(focus)
     }
 }
 fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> CreateFormLines<'a> {
@@ -157,35 +145,48 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
         false,
     );
     let mut lines = Vec::with_capacity(if ui.create_error.is_some() { 20 } else { 18 });
+    let mut rows = FormRows::default();
 
-    lines.push(Line::from(Span::styled(
-        ui.ui_config.create.name_label.as_str(),
-        ui.theme.style_dim(),
-    )));
-    let name_row = u16::try_from(lines.len()).expect("name row fits into u16");
-    lines.push(Line::from(vec![
-        create_input_indent(),
-        Span::styled(name_value.clone(), name_style),
-        name_hint,
-    ]));
+    rows.push_labeled_row(
+        &mut lines,
+        Line::from(Span::styled(
+            ui.ui_config.create.name_label.as_str(),
+            ui.theme.style_dim(),
+        )),
+        CreateModalFocus::Name,
+        Line::from(vec![
+            create_input_indent(),
+            Span::styled(name_value.clone(), name_style),
+            name_hint,
+        ]),
+        name_value.as_str(),
+    );
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        ui.ui_config.create.description_label.as_str(),
-        ui.theme.style_dim(),
-    )));
-    let description_row = u16::try_from(lines.len()).expect("description row fits into u16");
-    lines.push(Line::from(vec![
-        create_input_indent(),
-        Span::styled(description_value.clone(), description_style),
-        description_hint,
-    ]));
+    rows.push_labeled_row(
+        &mut lines,
+        Line::from(Span::styled(
+            ui.ui_config.create.description_label.as_str(),
+            ui.theme.style_dim(),
+        )),
+        CreateModalFocus::Description,
+        Line::from(vec![
+            create_input_indent(),
+            Span::styled(description_value.clone(), description_style),
+            description_hint,
+        ]),
+        description_value.as_str(),
+    );
     lines.push(Line::from(""));
-    let submit_row = u16::try_from(lines.len()).expect("submit row fits into u16");
-    lines.push(Line::from(vec![
-        create_input_indent(),
-        Span::styled(submit_value, submit_style),
-        submit_hint,
-    ]));
+    rows.push_unlabeled_row(
+        &mut lines,
+        CreateModalFocus::Submit,
+        Line::from(vec![
+            create_input_indent(),
+            Span::styled(submit_value, submit_style),
+            submit_hint,
+        ]),
+        "",
+    );
     lines.push(Line::from(""));
     lines.extend(create_cost_lines(ui, layout));
     lines.push(Line::from(""));
@@ -199,14 +200,7 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
         )));
     }
 
-    CreateFormLines {
-        lines,
-        name_row,
-        description_row,
-        submit_row,
-        name_display_width: terminal_str_width(name_value.as_str()),
-        description_display_width: terminal_str_width(description_value.as_str()),
-    }
+    CreateFormLines { lines, rows }
 }
 fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<'static>> {
     if matches!(ui.create_cost_state, CreateCostState::Hidden) {

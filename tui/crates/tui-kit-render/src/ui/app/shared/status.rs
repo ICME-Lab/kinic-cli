@@ -7,11 +7,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use tui_kit_runtime::kinic_tabs::{
-    KINIC_INSERT_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
+use tui_kit_runtime::{
+    current_form_focus_for_tab, form_shows_horizontal_change_hint,
+    kinic_tabs::{KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind},
 };
 
-use crate::ui::app::{Focus, TuiKitUi, types::insert_form_copy};
+use crate::ui::app::{Focus, TuiKitUi};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_status(&self, area: Rect, buf: &mut Buffer) {
@@ -80,7 +81,7 @@ impl<'a> TuiKitUi<'a> {
         Line::from(spans)
     }
 
-    fn form_status_line(&self, tab_id: &str) -> Line<'_> {
+    fn form_status_line(&self, _tab_id: &str) -> Line<'_> {
         let cfg = &self.ui_config.status;
         let (icon, label) = self.focus_indicator();
         let tab_label = self
@@ -92,18 +93,20 @@ impl<'a> TuiKitUi<'a> {
         let mut spans = vec![
             Span::styled(tab_label, self.theme.style_accent_bold()),
             Span::styled(" │ ", self.theme.style_dim()),
+            Span::styled("↑/↓", self.theme.style_accent()),
+            Span::styled(" or ", self.theme.style_muted()),
+            Span::styled("Tab/Shift+Tab", self.theme.style_accent()),
+            Span::styled(" fields ", self.theme.style_muted()),
         ];
-        if show_form_mode_shortcut(tab_id) {
+        if show_form_change_shortcut(self) {
             spans.extend([
                 Span::styled("←/→", self.theme.style_accent()),
-                Span::styled(" mode ", self.theme.style_muted()),
+                Span::styled(" change ", self.theme.style_muted()),
             ]);
         }
         spans.extend([
-            Span::styled("Tab/Shift+Tab", self.theme.style_accent()),
-            Span::styled(" fields ", self.theme.style_muted()),
             Span::styled("Enter", self.theme.style_accent()),
-            Span::styled(form_enter_hint(tab_id), self.theme.style_muted()),
+            Span::styled(" action ", self.theme.style_muted()),
             Span::styled("1-5", self.theme.style_accent()),
             Span::styled(format!(" {} ", cfg.tabs_label), self.theme.style_muted()),
             Span::styled("│ ", self.theme.style_dim()),
@@ -111,11 +114,7 @@ impl<'a> TuiKitUi<'a> {
             Span::styled(format!(" {}", label), self.theme.style_dim()),
         ]);
         if self.focus == Focus::Form {
-            let insert_at = if show_form_mode_shortcut(tab_id) {
-                8
-            } else {
-                4
-            };
+            let insert_at = 6;
             spans.splice(
                 insert_at..insert_at,
                 [
@@ -225,9 +224,10 @@ impl<'a> TuiKitUi<'a> {
         let cfg = &self.ui_config.status;
         let selection_info = self.selection_info();
         let tab_id = self.current_tab_id.0.as_str();
-        let mut spans = vec![
-            Span::styled(format!("{}: ", cfg.commands_label), self.theme.style_dim()),
-        ];
+        let mut spans = vec![Span::styled(
+            format!("{}: ", cfg.commands_label),
+            self.theme.style_dim(),
+        )];
         if show_memories_search_scope_hint(tab_id, self.focus) {
             spans.extend([
                 Span::styled("←/→", self.theme.style_accent()),
@@ -291,20 +291,17 @@ impl<'a> TuiKitUi<'a> {
     }
 }
 
-fn show_form_mode_shortcut(tab_id: &str) -> bool {
-    tab_kind(tab_id) == TabKind::InsertForm
-}
-
 fn show_memories_search_scope_hint(tab_id: &str, focus: Focus) -> bool {
     tab_id == KINIC_MEMORIES_TAB_ID && focus == Focus::Search
 }
 
-fn form_enter_hint(tab_id: &str) -> &'static str {
-    if tab_id == KINIC_INSERT_TAB_ID {
-        return insert_form_copy().status_enter_hint;
-    }
-
-    " submit "
+fn show_form_change_shortcut(ui: &TuiKitUi<'_>) -> bool {
+    current_form_focus_for_tab(
+        ui.current_tab_id.0.as_str(),
+        ui.create_focus,
+        ui.insert_focus,
+    )
+    .is_some_and(|focus| form_shows_horizontal_change_hint(ui.focus == Focus::Form, focus))
 }
 
 fn prepend_status_message<'a>(ui: &'a TuiKitUi<'a>, mut spans: Vec<Span<'a>>) -> Line<'a> {
@@ -324,7 +321,10 @@ fn prepend_status_message<'a>(ui: &'a TuiKitUi<'a>, mut spans: Vec<Span<'a>>) ->
 mod tests {
     use super::*;
     use crate::ui::theme::Theme;
-    use tui_kit_runtime::kinic_tabs::{KINIC_CREATE_TAB_ID, KINIC_SETTINGS_TAB_ID};
+    use tui_kit_runtime::InsertFormFocus;
+    use tui_kit_runtime::kinic_tabs::{
+        KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_SETTINGS_TAB_ID,
+    };
 
     fn render_status_line(ui: &TuiKitUi<'_>) -> String {
         let area = Rect::new(0, 0, 160, 3);
@@ -342,16 +342,29 @@ mod tests {
 
     #[test]
     fn insert_tab_enter_hint_mentions_picker_and_submit() {
-        assert_eq!(
-            form_enter_hint(KINIC_INSERT_TAB_ID),
-            " cycle/picker/file/submit "
-        );
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
+            .focus(Focus::Form);
+        let rendered = render_status_line(&ui);
+
+        assert!(rendered.contains("Enter"));
+        assert!(rendered.contains("action"));
     }
 
     #[test]
-    fn mode_shortcut_is_insert_only() {
-        assert!(show_form_mode_shortcut(KINIC_INSERT_TAB_ID));
-        assert!(!show_form_mode_shortcut(KINIC_CREATE_TAB_ID));
+    fn change_shortcut_is_shown_for_insert_mode_only() {
+        let theme = Theme::default();
+        let insert_mode_ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
+            .focus(Focus::Form)
+            .insert_focus(InsertFormFocus::Mode);
+        let create_ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_CREATE_TAB_ID))
+            .focus(Focus::Form);
+
+        assert!(show_form_change_shortcut(&insert_mode_ui));
+        assert!(!show_form_change_shortcut(&create_ui));
     }
 
     #[test]
@@ -380,7 +393,9 @@ mod tests {
         let rendered = render_status_line(&ui);
 
         assert!(rendered.contains("Inserted 12 chunks"));
-        assert!(rendered.contains("cycle/picker/file/submit"));
+        assert!(rendered.contains("Enter"));
+        assert!(rendered.contains("action"));
+        assert!(rendered.contains("change"));
         assert!(rendered.contains("Tab/Shift+Tab"));
         assert!(rendered.contains("Esc"));
     }
@@ -395,8 +410,9 @@ mod tests {
         let rendered = render_status_line(&ui);
 
         assert!(rendered.contains("Creating memory..."));
+        assert!(rendered.contains("↑/↓"));
         assert!(rendered.contains("Tab/Shift+Tab"));
-        assert!(rendered.contains("submit"));
+        assert!(rendered.contains("action"));
         assert!(rendered.contains("Esc"));
     }
 
@@ -472,7 +488,10 @@ mod tests {
             .focus(Focus::Form);
         let rendered = render_status_line(&ui);
 
-        assert!(rendered.contains("cycle/picker/file/submit"));
+        assert!(rendered.contains("↑/↓"));
+        assert!(rendered.contains("Tab/Shift+Tab"));
+        assert!(rendered.contains("Enter"));
+        assert!(rendered.contains("action"));
         assert!(!rendered.contains("│  │"));
     }
 }

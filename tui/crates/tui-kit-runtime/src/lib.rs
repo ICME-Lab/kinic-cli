@@ -3,9 +3,16 @@
 //! This crate defines common actions/effects, shared runtime state, and the
 //! `DataProvider` trait used by the Kinic TUI crates.
 
+mod form_descriptor;
 pub mod kinic_tabs;
 
 use candid::Nat;
+pub use form_descriptor::{
+    FormCommand, FormDescriptor, FormFocus, FormKind, FormResetKind, apply_form_focus,
+    core_action_to_form_command, current_form_focus, current_form_focus_for_tab,
+    form_char_input_command, form_command_to_action, form_descriptor, form_enter_command,
+    form_horizontal_change_command, form_shows_horizontal_change_hint,
+};
 use std::path::PathBuf;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
 
@@ -519,8 +526,8 @@ pub enum CoreAction {
     InsertOpenFileDialog,
     InsertNextField,
     InsertPrevField,
-    InsertCycleModePrev,
-    InsertCycleMode,
+    InsertPrevMode,
+    InsertNextMode,
     InsertSubmit,
     Submit,
     Cancel,
@@ -701,89 +708,8 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     let has_tabs = !state.current_tab_id.is_empty();
     let previous_focus = state.focus;
     match action {
-        CoreAction::InsertInput(c) => {
-            if is_insert_form_locked(state) {
-                return;
-            }
-            match state.insert_focus {
-                InsertFormFocus::Mode | InsertFormFocus::Submit => {}
-                InsertFormFocus::MemoryId => {}
-                InsertFormFocus::Tag => {}
-                InsertFormFocus::Text => state.insert_text.push(*c),
-                InsertFormFocus::FilePath => {
-                    state.insert_selected_file_path = None;
-                    state.insert_file_path_input.push(*c);
-                }
-                InsertFormFocus::Embedding => state.insert_embedding.push(*c),
-            }
-            state.insert_error = None;
-            if state.insert_submit_state == CreateSubmitState::Error {
-                state.insert_submit_state = CreateSubmitState::Idle;
-            }
-        }
-        CoreAction::InsertBackspace => {
-            if is_insert_form_locked(state) {
-                return;
-            }
-            match state.insert_focus {
-                InsertFormFocus::Mode | InsertFormFocus::Submit => {}
-                InsertFormFocus::MemoryId => {}
-                InsertFormFocus::Tag => {}
-                InsertFormFocus::Text => {
-                    state.insert_text.pop();
-                }
-                InsertFormFocus::FilePath => {
-                    state.insert_selected_file_path = None;
-                    state.insert_file_path_input.pop();
-                }
-                InsertFormFocus::Embedding => {
-                    state.insert_embedding.pop();
-                }
-            }
-        }
-        CoreAction::InsertOpenFileDialog => {
-            if is_insert_form_locked(state) {
-                return;
-            }
-        }
-        CoreAction::InsertNextField => {
-            if is_insert_form_locked(state) {
-                return;
-            }
-            state.insert_focus = next_insert_focus(state.insert_mode, state.insert_focus);
-        }
-        CoreAction::InsertPrevField => {
-            if is_insert_form_locked(state) {
-                return;
-            }
-            state.insert_focus = prev_insert_focus(state.insert_mode, state.insert_focus);
-        }
-        CoreAction::InsertCycleModePrev => {
-            if is_insert_form_locked(state) {
-                return;
-            }
-            state.insert_mode = prev_insert_mode(state.insert_mode);
-            state.insert_focus = InsertFormFocus::Mode;
-            state.insert_error = None;
-            if state.insert_submit_state == CreateSubmitState::Error {
-                state.insert_submit_state = CreateSubmitState::Idle;
-            }
-        }
-        CoreAction::InsertCycleMode => {
-            if is_insert_form_locked(state) {
-                return;
-            }
-            state.insert_mode = next_insert_mode(state.insert_mode);
-            state.insert_focus = InsertFormFocus::Mode;
-            state.insert_error = None;
-            if state.insert_submit_state == CreateSubmitState::Error {
-                state.insert_submit_state = CreateSubmitState::Idle;
-            }
-        }
-        CoreAction::InsertSubmit => {
-            state.insert_submit_state = CreateSubmitState::Submitting;
-            state.insert_spinner_frame = 0;
-            state.insert_error = None;
+        action if core_action_to_form_command(action).is_some() => {
+            apply_form_command(state, action)
         }
         CoreAction::OpenPicker(context) => {
             open_picker(state, *context);
@@ -813,48 +739,9 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 value.pop();
             }
         }
-        CoreAction::CreateInput(c) => {
-            match state.create_focus {
-                CreateModalFocus::Name => state.create_name.push(*c),
-                CreateModalFocus::Description => state.create_description.push(*c),
-                CreateModalFocus::Submit => {}
-            }
-            state.create_error = None;
-            if state.create_submit_state == CreateSubmitState::Error {
-                state.create_submit_state = CreateSubmitState::Idle;
-            }
-        }
-        CoreAction::CreateBackspace => match state.create_focus {
-            CreateModalFocus::Name => {
-                state.create_name.pop();
-            }
-            CreateModalFocus::Description => {
-                state.create_description.pop();
-            }
-            CreateModalFocus::Submit => {}
-        },
-        CoreAction::CreateNextField => {
-            state.create_focus = match state.create_focus {
-                CreateModalFocus::Name => CreateModalFocus::Description,
-                CreateModalFocus::Description => CreateModalFocus::Submit,
-                CreateModalFocus::Submit => CreateModalFocus::Name,
-            };
-        }
-        CoreAction::CreatePrevField => {
-            state.create_focus = match state.create_focus {
-                CreateModalFocus::Name => CreateModalFocus::Submit,
-                CreateModalFocus::Description => CreateModalFocus::Name,
-                CreateModalFocus::Submit => CreateModalFocus::Description,
-            };
-        }
         CoreAction::CreateRefresh => {
             state.create_cost_state = CreateCostState::Loading;
             state.create_spinner_frame = 0;
-        }
-        CoreAction::CreateSubmit => {
-            state.create_submit_state = CreateSubmitState::Submitting;
-            state.create_spinner_frame = 0;
-            state.create_error = None;
         }
         CoreAction::SetQuery(q) => {
             state.query = q.clone();
@@ -1081,6 +968,156 @@ fn insert_focus_order(mode: InsertMode) -> &'static [InsertFormFocus] {
     }
 }
 
+fn apply_form_command(state: &mut CoreState, action: &CoreAction) {
+    let Some((kind, command)) = core_action_to_form_command(action) else {
+        return;
+    };
+
+    if kind == FormKind::Insert && is_insert_form_locked(state) {
+        if !matches!(
+            command,
+            FormCommand::OpenPicker(_) | FormCommand::OpenFileDialog
+        ) {
+            return;
+        }
+    }
+
+    match (kind, command) {
+        (FormKind::Insert, FormCommand::Input(c)) => apply_insert_text_input(state, c),
+        (FormKind::Insert, FormCommand::Backspace) => apply_insert_backspace(state),
+        (FormKind::Insert, FormCommand::NextField) => {
+            state.insert_focus = next_insert_focus(state.insert_mode, state.insert_focus);
+        }
+        (FormKind::Insert, FormCommand::PrevField) => {
+            state.insert_focus = prev_insert_focus(state.insert_mode, state.insert_focus);
+        }
+        (FormKind::Insert, FormCommand::Submit) => start_insert_submit(state),
+        (FormKind::Insert, FormCommand::HorizontalChangePrev) => {
+            state.insert_mode = prev_insert_mode(state.insert_mode);
+            state.insert_focus = InsertFormFocus::Mode;
+            clear_insert_error_state(state);
+        }
+        (FormKind::Insert, FormCommand::HorizontalChangeNext) => {
+            state.insert_mode = next_insert_mode(state.insert_mode);
+            state.insert_focus = InsertFormFocus::Mode;
+            clear_insert_error_state(state);
+        }
+        (FormKind::Insert, FormCommand::OpenPicker(context)) => open_picker(state, context),
+        (FormKind::Insert, FormCommand::OpenFileDialog) => {}
+        (FormKind::Create, FormCommand::Input(c)) => apply_create_text_input(state, c),
+        (FormKind::Create, FormCommand::Backspace) => apply_create_backspace(state),
+        (FormKind::Create, FormCommand::NextField) => {
+            state.create_focus = next_create_focus(state.create_focus);
+        }
+        (FormKind::Create, FormCommand::PrevField) => {
+            state.create_focus = prev_create_focus(state.create_focus);
+        }
+        (FormKind::Create, FormCommand::Submit) => start_create_submit(state),
+        (FormKind::Create, FormCommand::HorizontalChangePrev)
+        | (FormKind::Create, FormCommand::HorizontalChangeNext)
+        | (FormKind::Create, FormCommand::OpenPicker(_))
+        | (FormKind::Create, FormCommand::OpenFileDialog) => {}
+    }
+}
+
+fn apply_insert_text_input(state: &mut CoreState, c: char) {
+    match state.insert_focus {
+        InsertFormFocus::Mode
+        | InsertFormFocus::MemoryId
+        | InsertFormFocus::Tag
+        | InsertFormFocus::Submit => {}
+        InsertFormFocus::Text => state.insert_text.push(c),
+        InsertFormFocus::FilePath => {
+            state.insert_selected_file_path = None;
+            state.insert_file_path_input.push(c);
+        }
+        InsertFormFocus::Embedding => state.insert_embedding.push(c),
+    }
+    clear_insert_error_state(state);
+}
+
+fn apply_insert_backspace(state: &mut CoreState) {
+    match state.insert_focus {
+        InsertFormFocus::Mode
+        | InsertFormFocus::MemoryId
+        | InsertFormFocus::Tag
+        | InsertFormFocus::Submit => {}
+        InsertFormFocus::Text => {
+            state.insert_text.pop();
+        }
+        InsertFormFocus::FilePath => {
+            state.insert_selected_file_path = None;
+            state.insert_file_path_input.pop();
+        }
+        InsertFormFocus::Embedding => {
+            state.insert_embedding.pop();
+        }
+    }
+}
+
+fn clear_insert_error_state(state: &mut CoreState) {
+    state.insert_error = None;
+    if state.insert_submit_state == CreateSubmitState::Error {
+        state.insert_submit_state = CreateSubmitState::Idle;
+    }
+}
+
+fn start_insert_submit(state: &mut CoreState) {
+    state.insert_submit_state = CreateSubmitState::Submitting;
+    state.insert_spinner_frame = 0;
+    state.insert_error = None;
+}
+
+fn apply_create_text_input(state: &mut CoreState, c: char) {
+    match state.create_focus {
+        CreateModalFocus::Name => state.create_name.push(c),
+        CreateModalFocus::Description => state.create_description.push(c),
+        CreateModalFocus::Submit => {}
+    }
+    clear_create_error_state(state);
+}
+
+fn apply_create_backspace(state: &mut CoreState) {
+    match state.create_focus {
+        CreateModalFocus::Name => {
+            state.create_name.pop();
+        }
+        CreateModalFocus::Description => {
+            state.create_description.pop();
+        }
+        CreateModalFocus::Submit => {}
+    }
+}
+
+fn clear_create_error_state(state: &mut CoreState) {
+    state.create_error = None;
+    if state.create_submit_state == CreateSubmitState::Error {
+        state.create_submit_state = CreateSubmitState::Idle;
+    }
+}
+
+fn start_create_submit(state: &mut CoreState) {
+    state.create_submit_state = CreateSubmitState::Submitting;
+    state.create_spinner_frame = 0;
+    state.create_error = None;
+}
+
+fn next_create_focus(focus: CreateModalFocus) -> CreateModalFocus {
+    match focus {
+        CreateModalFocus::Name => CreateModalFocus::Description,
+        CreateModalFocus::Description => CreateModalFocus::Submit,
+        CreateModalFocus::Submit => CreateModalFocus::Name,
+    }
+}
+
+fn prev_create_focus(focus: CreateModalFocus) -> CreateModalFocus {
+    match focus {
+        CreateModalFocus::Name => CreateModalFocus::Submit,
+        CreateModalFocus::Description => CreateModalFocus::Name,
+        CreateModalFocus::Submit => CreateModalFocus::Description,
+    }
+}
+
 fn next_insert_focus(mode: InsertMode, focus: InsertFormFocus) -> InsertFormFocus {
     let order = insert_focus_order(mode);
     let current = order
@@ -1185,19 +1222,18 @@ pub fn dispatch_action(
 pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> Option<CoreAction> {
     if focus == PaneFocus::Tabs {
         return match key {
-            CoreKey::Up => Some(CoreAction::SelectPrevTab),
-            CoreKey::Down => Some(CoreAction::SelectNextTab),
-            CoreKey::Left | CoreKey::Char('h') => None,
-            CoreKey::Tab | CoreKey::Right | CoreKey::Char('l') | CoreKey::Enter => {
-                tab_entry_focus(current_tab_id).map(|focus| match focus {
+            CoreKey::Up | CoreKey::Left => Some(CoreAction::SelectPrevTab),
+            CoreKey::Down | CoreKey::Right => Some(CoreAction::SelectNextTab),
+            CoreKey::Char('h') => None,
+            CoreKey::Tab | CoreKey::Char('l') | CoreKey::Enter => tab_entry_focus(current_tab_id)
+                .map(|focus| match focus {
                     PaneFocus::Search => CoreAction::FocusSearch,
                     PaneFocus::Items => CoreAction::FocusItems,
                     PaneFocus::Tabs => CoreAction::FocusNext,
                     PaneFocus::Content => CoreAction::FocusContent,
                     PaneFocus::Form => CoreAction::FocusForm,
                     PaneFocus::Extra => CoreAction::ToggleChat,
-                })
-            }
+                }),
             CoreKey::BackTab => Some(CoreAction::FocusPrev),
             CoreKey::Char(c) if c.is_ascii_digit() && c != '0' => {
                 let idx = (c as u8 - b'1') as usize;
@@ -1804,7 +1840,7 @@ mod tests {
     }
 
     #[test]
-    fn create_next_field_cycles_back_to_name() {
+    fn create_next_field_wraps_back_to_name() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
             focus: PaneFocus::Form,
@@ -1916,7 +1952,7 @@ mod tests {
                 PaneFocus::Tabs,
                 kinic_tabs::KINIC_MEMORIES_TAB_ID
             ),
-            None
+            Some(CoreAction::SelectPrevTab)
         );
         assert_eq!(
             action_for_key(
@@ -1925,6 +1961,18 @@ mod tests {
                 kinic_tabs::KINIC_CREATE_TAB_ID
             ),
             None
+        );
+    }
+
+    #[test]
+    fn tabs_right_switches_to_next_tab() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Right,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::SelectNextTab)
         );
     }
 
@@ -2436,7 +2484,7 @@ mod tests {
         };
 
         apply_core_action(&mut state, &CoreAction::InsertNextField);
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
 
         assert_eq!(state.insert_focus, InsertFormFocus::Text);
         assert_eq!(state.insert_mode, InsertMode::InlineText);
@@ -2935,7 +2983,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_cycle_mode_prev_moves_to_inline_text_and_resets_focus() {
+    fn insert_prev_mode_moves_to_inline_text_and_resets_focus() {
         let mut state = CoreState {
             insert_mode: InsertMode::ManualEmbedding,
             insert_focus: InsertFormFocus::Embedding,
@@ -2944,7 +2992,7 @@ mod tests {
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
+        apply_core_action(&mut state, &CoreAction::InsertPrevMode);
 
         assert_eq!(state.insert_mode, InsertMode::InlineText);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
@@ -2953,17 +3001,17 @@ mod tests {
     }
 
     #[test]
-    fn insert_cycle_mode_wraps_between_first_and_last_modes() {
+    fn insert_mode_wraps_between_first_and_last_modes() {
         let mut state = CoreState {
             insert_mode: InsertMode::File,
             insert_focus: InsertFormFocus::Mode,
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleModePrev);
+        apply_core_action(&mut state, &CoreAction::InsertPrevMode);
         assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
         assert_eq!(state.insert_mode, InsertMode::File);
         assert_eq!(state.insert_focus, InsertFormFocus::Mode);
     }
@@ -2984,20 +3032,47 @@ mod tests {
     }
 
     #[test]
-    fn insert_cycle_mode_visits_file_then_inline_text_before_raw() {
+    fn insert_next_mode_visits_file_then_inline_text_before_raw() {
         let mut state = CoreState {
             insert_mode: InsertMode::File,
             insert_focus: InsertFormFocus::Mode,
             ..CoreState::default()
         };
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
         assert_eq!(state.insert_mode, InsertMode::InlineText);
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
         assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
 
-        apply_core_action(&mut state, &CoreAction::InsertCycleMode);
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
         assert_eq!(state.insert_mode, InsertMode::File);
+    }
+
+    #[test]
+    fn core_action_to_form_command_preserves_insert_picker_and_mode_commands() {
+        assert_eq!(
+            core_action_to_form_command(&CoreAction::OpenPicker(PickerContext::InsertTarget)),
+            Some((
+                FormKind::Insert,
+                FormCommand::OpenPicker(PickerContext::InsertTarget),
+            ))
+        );
+        assert_eq!(
+            core_action_to_form_command(&CoreAction::InsertNextMode),
+            Some((FormKind::Insert, FormCommand::HorizontalChangeNext))
+        );
+    }
+
+    #[test]
+    fn form_command_to_action_preserves_create_and_insert_submit_actions() {
+        assert_eq!(
+            form_command_to_action(FormKind::Create, FormCommand::Submit),
+            Some(CoreAction::CreateSubmit)
+        );
+        assert_eq!(
+            form_command_to_action(FormKind::Insert, FormCommand::Submit),
+            Some(CoreAction::InsertSubmit)
+        );
     }
 }
