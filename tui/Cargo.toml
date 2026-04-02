@@ -1,87 +1,12 @@
 [workspace]
+resolver = "3"
 members = [
-    ".",
     "crates/tui-kit",
     "crates/tui-kit-host",
     "crates/tui-kit-runtime",
     "crates/tui-kit-model",
     "crates/tui-kit-render",
 ]
-
-[package]
-name = "kinic-tui"
-version = "0.1.1"
-edition = "2024"
-rust-version = "1.85"
-autoexamples = false
-description = "Kinic terminal UI"
-license = "MIT"
-authors = ["yashksaini-coder <yashksaini89@gmail.com>"]
-keywords = ["tui", "inspector", "rust", "analyzer", "developer-tools"]
-categories = ["command-line-utilities", "development-tools"]
-repository = "https://github.com/yashksaini-coder/oracle"
-homepage = "https://github.com/yashksaini-coder/oracle"
-documentation = "https://docs.rs/kinic-tui"
-readme = "README.md"
-
-[package.metadata.cargo-machete]
-# reqwest with "blocking" can pull in tokio; we use blocking client only, no direct tokio API
-ignored = ["tokio"]
-
-[lib]
-name = "tui_kit_lib"
-path = "src/lib.rs"
-
-[[example]]
-name = "rust_inspector"
-path = "examples/rust_inspector/main.rs"
-test = false
-
-[dependencies]
-clap = { version = "4.5.51", features = ["derive"] }
-kinic_core = { package = "kinic-cli", path = ".." }
-tokio = { version = "1.48", features = ["rt-multi-thread"] }
-tui-kit-host = { path = "crates/tui-kit-host", features = ["rfd-file-picker"] }
-tui-kit-runtime = { path = "crates/tui-kit-runtime" }
-tui-kit-model = { path = "crates/tui-kit-model" }
-tui-kit-render = { path = "crates/tui-kit-render" }
-
-# TUI Framework
-ratatui = "0.29"
-crossterm = "0.28"
-
-# Code Parsing & Analysis
-syn = { version = "2.0", features = ["full", "extra-traits", "parsing"] }
-quote = "1.0"
-proc-macro2 = { version = "1.0", features = ["span-locations"] }
-
-# Cargo/Crate utilities  
-cargo_metadata = "0.19"
-toml = "0.8"
-
-# HTTP Client for crates.io (blocking for background fetch thread)
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-
-# Configuration & Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
-
-# Error Handling
-anyhow = "1"
-thiserror = "2"
-
-# Fuzzy Finding
-fuzzy-matcher = "0.3"
-
-# Utilities
-unicode-width = "0.2"
-dirs = "6"
-dotenvy = "0.15"
-
-# Dependency graph visualization
-petgraph = "0.8"
-
 [profile.release]
 opt-level = 3
 lto = true
