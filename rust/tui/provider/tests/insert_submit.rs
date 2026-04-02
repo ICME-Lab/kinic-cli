@@ -157,16 +157,7 @@ fn build_insert_request_preserves_non_utf8_selected_file_path() {
 
     let provider = KinicProvider::new(live_config());
     let selected_path = PathBuf::from(OsString::from_vec(vec![
-        b'/',
-        b't',
-        b'm',
-        b'p',
-        b'/',
-        0xf0,
-        0x80,
-        b'.',
-        b'm',
-        b'd',
+        b'/', b't', b'm', b'p', b'/', 0xf0, 0x80, b'.', b'm', b'd',
     ]));
     let request = provider.build_insert_request(&CoreState {
         insert_mode: InsertMode::File,

@@ -110,12 +110,13 @@ fn loaded_create_cost(overview: SessionAccountOverview) -> CreateCostState {
 }
 
 fn mainnet_principal_error_session_overview() -> SessionAccountOverview {
-    let mut overview = SessionAccountOverview::new(crate::tui::settings::session_settings_snapshot(
-        &TuiAuth::resolved_for_tests(),
-        true,
-        None,
-        "https://api.kinic.io".to_string(),
-    ));
+    let mut overview =
+        SessionAccountOverview::new(crate::tui::settings::session_settings_snapshot(
+            &TuiAuth::resolved_for_tests(),
+            true,
+            None,
+            "https://api.kinic.io".to_string(),
+        ));
     overview.principal_error = Some("identity lookup failed".to_string());
     overview.balance_error = Some("ledger unavailable".to_string());
     overview

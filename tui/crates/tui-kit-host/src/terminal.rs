@@ -126,6 +126,18 @@ pub fn pick_file_path(
     }
 }
 
+pub fn default_file_picker() -> Option<FilePickerFn> {
+    #[cfg(feature = "rfd-file-picker")]
+    {
+        Some(rfd_file_picker)
+    }
+
+    #[cfg(not(feature = "rfd-file-picker"))]
+    {
+        None
+    }
+}
+
 #[cfg(feature = "rfd-file-picker")]
 pub fn rfd_file_picker(insert_mode: InsertMode) -> Result<Option<PathBuf>, String> {
     use rfd::FileDialog;

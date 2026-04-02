@@ -779,9 +779,9 @@ impl KinicProvider {
         }
         let base = match self.memories_mode {
             MemoriesMode::Browser => match self.active_memory_id.as_deref() {
-                Some(memory_id) => format!(
-                    "Target {memory_id} | Enter runs remote search | Shift+D saves default"
-                ),
+                Some(memory_id) => {
+                    format!("Target {memory_id} | Enter runs remote search | Shift+D saves default")
+                }
                 None => "No memory selected".to_string(),
             },
             MemoriesMode::Results => match self.active_memory_id.as_deref() {
@@ -1344,10 +1344,7 @@ fn normalize_insert_file_path_input(path: &str) -> &str {
 fn validate_supported_file_mode_path(path: &Path) -> Result<(), String> {
     validate_existing_insert_file_path(path, "file")?;
 
-    let Some(extension) = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-    else {
+    let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
         return Err(format!(
             "File path must use a supported {} extension.",
             allowed_extension_list(FILE_MODE_ALLOWED_EXTENSIONS)
@@ -1732,5 +1729,5 @@ fn format_insert_submit_error(error: &bridge::InsertMemoryError) -> String {
 }
 
 #[cfg(test)]
-#[path = "provider/tests.rs"]
+#[path = "tests.rs"]
 mod tests;

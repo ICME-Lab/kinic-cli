@@ -85,13 +85,25 @@ pub async fn run() -> Result<()> {
 }
 
 fn validate_tui_cli_args(cli: &Cli) -> Result<()> {
-    if matches!(&cli.command, cli::Command::Tui(_))
-        && cli.global.identity.is_none()
-        && !cli.global.ii
-    {
+    if !matches!(&cli.command, cli::Command::Tui(_)) {
+        return Ok(());
+    }
+
+    if cli.global.ii {
         let mut command = Cli::command();
         let clap_error = command
-            .error(ErrorKind::MissingRequiredArgument, TUI_IDENTITY_REQUIRED_MESSAGE)
+            .error(ErrorKind::ArgumentConflict, TUI_II_UNSUPPORTED_MESSAGE)
+            .with_cmd(&command);
+        return Err(clap_error.into());
+    }
+
+    if cli.global.identity.is_none() {
+        let mut command = Cli::command();
+        let clap_error = command
+            .error(
+                ErrorKind::MissingRequiredArgument,
+                TUI_IDENTITY_REQUIRED_MESSAGE,
+            )
             .with_cmd(&command);
         return Err(clap_error.into());
     }
@@ -118,9 +130,6 @@ pub(crate) fn build_keyring_agent_factory(use_mainnet: bool, identity: &str) -> 
 }
 
 pub(crate) fn resolve_tui_identity(global: &cli::GlobalOpts) -> Result<String> {
-    if global.ii {
-        return Err(anyhow!(TUI_II_UNSUPPORTED_MESSAGE));
-    }
     global
         .identity
         .clone()
@@ -174,19 +183,7 @@ mod tests {
 
         let error = resolve_tui_identity(&global).unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            TUI_IDENTITY_REQUIRED_MESSAGE
-        );
-    }
-
-    #[test]
-    fn resolve_tui_identity_rejects_internet_identity_for_tui() {
-        let global = global_opts(None, true, None);
-
-        let error = resolve_tui_identity(&global).unwrap_err();
-
-        assert_eq!(error.to_string(), TUI_II_UNSUPPORTED_MESSAGE);
+        assert_eq!(error.to_string(), TUI_IDENTITY_REQUIRED_MESSAGE);
     }
 
     #[test]
@@ -207,12 +204,15 @@ mod tests {
     }
 
     #[test]
-    fn validate_tui_cli_args_allows_ii_for_tui_runtime_handling() {
+    fn validate_tui_cli_args_rejects_ii_for_tui() {
         let cli =
             Cli::try_parse_from(["kinic-cli", "--ii", "tui"]).expect("cli parsing should succeed");
 
-        validate_tui_cli_args(&cli)
-            .expect("validation should defer unsupported ii handling to runtime");
+        let error = validate_tui_cli_args(&cli).unwrap_err();
+        let clap_error = error.downcast_ref::<clap::Error>().unwrap();
+
+        assert_eq!(clap_error.kind(), ErrorKind::ArgumentConflict);
+        assert!(clap_error.to_string().contains(TUI_II_UNSUPPORTED_MESSAGE));
     }
 
     #[test]
@@ -224,8 +224,7 @@ mod tests {
 
     #[test]
     fn cli_rejects_whitespace_only_identity_for_tui_command() {
-        let error =
-            Cli::try_parse_from(["kinic-cli", "--identity", "   ", "tui"]).unwrap_err();
+        let error = Cli::try_parse_from(["kinic-cli", "--identity", "   ", "tui"]).unwrap_err();
 
         assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }

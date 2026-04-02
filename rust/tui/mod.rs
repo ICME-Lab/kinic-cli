@@ -12,21 +12,16 @@ use crate::agent::load_identity_from_keyring;
 use crate::cli::GlobalOpts;
 use crate::{TUI_IDENTITY_REQUIRED_MESSAGE, resolve_tui_identity};
 
-#[path = "../../tui/src/adapter.rs"]
 mod adapter;
-#[path = "../../tui/src/bridge.rs"]
 mod bridge;
-#[path = "../../tui/src/provider.rs"]
 mod provider;
-#[path = "../../tui/src/settings.rs"]
 mod settings;
-#[path = "../../tui/src/ui_config.rs"]
 mod ui_config;
 
 use tui_kit_host::{
     execute_effects_to_status,
     runtime_loop::{RuntimeLoopConfig, RuntimeLoopHooks, run_provider_app_with_hooks},
-    terminal::rfd_file_picker,
+    terminal::default_file_picker,
 };
 use tui_kit_runtime::{
     CoreState, CreateCostState, CreateSubmitState, DataProvider, PaneFocus, apply_snapshot,
@@ -142,7 +137,7 @@ fn kinic_runtime_loop_config() -> RuntimeLoopConfig {
         tab_ids: &kinic_tabs::KINIC_TAB_IDS,
         initial_focus: PaneFocus::Search,
         ui_config: ui_config::kinic_ui_config,
-        file_picker: Some(rfd_file_picker),
+        file_picker: default_file_picker(),
     }
 }
 
@@ -188,10 +183,7 @@ mod tests {
     fn resolve_auth_requires_identity() {
         let error = resolve_auth(String::new()).unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            TUI_IDENTITY_REQUIRED_MESSAGE
-        );
+        assert_eq!(error.to_string(), TUI_IDENTITY_REQUIRED_MESSAGE);
     }
 
     #[test]
@@ -214,10 +206,7 @@ mod tests {
 
         let error = build_launch_config_from_global(&global).unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            TUI_IDENTITY_REQUIRED_MESSAGE
-        );
+        assert_eq!(error.to_string(), TUI_IDENTITY_REQUIRED_MESSAGE);
     }
 
     #[test]

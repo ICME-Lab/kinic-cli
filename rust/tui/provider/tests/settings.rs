@@ -319,7 +319,10 @@ fn poll_create_cost_background_projects_expected_states() {
 
         assert_eq!(provider.create_cost_state, expected_state);
         if let Some(price_error) = expected_price_error {
-            assert_eq!(provider.session_overview.price_error.as_deref(), Some(price_error));
+            assert_eq!(
+                provider.session_overview.price_error.as_deref(),
+                Some(price_error)
+            );
         }
     }
 }
