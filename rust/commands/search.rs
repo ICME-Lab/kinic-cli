@@ -1,15 +1,16 @@
 use std::cmp::Ordering;
 
-use anyhow::{Context, Result};
-use ic_agent::export::Principal;
+use anyhow::Result;
 use tracing::info;
 
-use crate::{cli::SearchArgs, clients::memory::MemoryClient, embedding::fetch_embedding};
+use crate::{
+    cli::SearchArgs, embedding::fetch_embedding, memory_client_builder::build_memory_client,
+};
 
 use super::CommandContext;
 
 pub async fn handle(args: SearchArgs, ctx: &CommandContext) -> Result<()> {
-    let client = build_memory_client(&args.memory_id, ctx).await?;
+    let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
     let embedding = fetch_embedding(&args.query).await?;
     let mut results = client.search(embedding).await?;
 
@@ -32,11 +33,4 @@ pub async fn handle(args: SearchArgs, ctx: &CommandContext) -> Result<()> {
     }
 
     Ok(())
-}
-
-async fn build_memory_client(id: &str, ctx: &CommandContext) -> Result<MemoryClient> {
-    let agent = ctx.agent_factory.build().await?;
-    let memory =
-        Principal::from_text(id).context("Failed to parse canister id for search command")?;
-    Ok(MemoryClient::new(agent, memory))
 }

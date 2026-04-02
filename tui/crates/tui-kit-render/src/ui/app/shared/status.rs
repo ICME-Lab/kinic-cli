@@ -7,7 +7,9 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use tui_kit_runtime::kinic_tabs::{KINIC_INSERT_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind};
+use tui_kit_runtime::kinic_tabs::{
+    KINIC_INSERT_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
+};
 
 use crate::ui::app::{Focus, TuiKitUi, types::insert_form_copy};
 
@@ -46,13 +48,24 @@ impl<'a> TuiKitUi<'a> {
     fn generic_status_line(&self) -> Line<'_> {
         let cfg = &self.ui_config.status;
         let (icon, label) = self.focus_indicator();
-
-        Line::from(vec![
+        let tab_id = self.current_tab_id.0.as_str();
+        let mut spans = vec![
             Span::styled(
                 format!(" {} ", self.status_message),
                 self.theme.style_string(),
             ),
             Span::styled(" │ ", self.theme.style_muted()),
+        ];
+        if show_memories_search_scope_hint(tab_id, self.focus) {
+            spans.extend([
+                Span::styled("←/→", self.theme.style_accent()),
+                Span::styled(" scope ", self.theme.style_muted()),
+                Span::styled("Enter", self.theme.style_accent()),
+                Span::styled(" search ", self.theme.style_muted()),
+                Span::styled("│ ", self.theme.style_dim()),
+            ]);
+        }
+        spans.extend([
             Span::styled("Tab", self.theme.style_accent()),
             Span::styled(" focus ", self.theme.style_muted()),
             Span::styled("↑/↓ Enter / ", self.theme.style_accent()),
@@ -63,7 +76,8 @@ impl<'a> TuiKitUi<'a> {
             Span::styled("│ ", self.theme.style_dim()),
             Span::styled(icon, self.theme.style_accent()),
             Span::styled(format!(" {}", label), self.theme.style_dim()),
-        ])
+        ]);
+        Line::from(spans)
     }
 
     fn form_status_line(&self, tab_id: &str) -> Line<'_> {
@@ -210,8 +224,19 @@ impl<'a> TuiKitUi<'a> {
     fn default_status_line(&self) -> Line<'_> {
         let cfg = &self.ui_config.status;
         let selection_info = self.selection_info();
+        let tab_id = self.current_tab_id.0.as_str();
         let mut spans = vec![
             Span::styled(format!("{}: ", cfg.commands_label), self.theme.style_dim()),
+        ];
+        if show_memories_search_scope_hint(tab_id, self.focus) {
+            spans.extend([
+                Span::styled("←/→", self.theme.style_accent()),
+                Span::styled(" scope ", self.theme.style_muted()),
+                Span::styled("Enter", self.theme.style_accent()),
+                Span::styled(" search ", self.theme.style_muted()),
+            ]);
+        }
+        spans.extend([
             Span::styled("Tab", self.theme.style_accent()),
             Span::styled(" focus ", self.theme.style_muted()),
             Span::styled("↑/↓", self.theme.style_accent()),
@@ -220,7 +245,7 @@ impl<'a> TuiKitUi<'a> {
             Span::styled(" open ", self.theme.style_muted()),
             Span::styled("/", self.theme.style_accent()),
             Span::styled(" search ", self.theme.style_muted()),
-        ];
+        ]);
         if !self.tab_specs.is_empty() {
             spans.push(Span::styled("1-5", self.theme.style_accent()));
             spans.push(Span::styled(
@@ -268,6 +293,10 @@ impl<'a> TuiKitUi<'a> {
 
 fn show_form_mode_shortcut(tab_id: &str) -> bool {
     tab_kind(tab_id) == TabKind::InsertForm
+}
+
+fn show_memories_search_scope_hint(tab_id: &str, focus: Focus) -> bool {
+    tab_id == KINIC_MEMORIES_TAB_ID && focus == Focus::Search
 }
 
 fn form_enter_hint(tab_id: &str) -> &'static str {
@@ -323,6 +352,22 @@ mod tests {
     fn mode_shortcut_is_insert_only() {
         assert!(show_form_mode_shortcut(KINIC_INSERT_TAB_ID));
         assert!(!show_form_mode_shortcut(KINIC_CREATE_TAB_ID));
+    }
+
+    #[test]
+    fn memories_scope_hint_is_search_focus_only() {
+        assert!(show_memories_search_scope_hint(
+            KINIC_MEMORIES_TAB_ID,
+            Focus::Search
+        ));
+        assert!(!show_memories_search_scope_hint(
+            KINIC_MEMORIES_TAB_ID,
+            Focus::Items
+        ));
+        assert!(!show_memories_search_scope_hint(
+            KINIC_INSERT_TAB_ID,
+            Focus::Search
+        ));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use anyhow::{Context, Result};
-use ic_agent::export::Principal;
+use ic_agent::{Agent, export::Principal};
 use tui_kit_runtime::{SessionAccountOverview, format_e8s_to_kinic_string_nat};
 
 use crate::{
@@ -22,6 +22,7 @@ pub struct MemorySummary {
     pub id: String,
     pub status: String,
     pub detail: String,
+    pub searchable_memory_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +71,11 @@ pub enum InsertMemoryError {
 
 fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<crate::agent::AgentFactory> {
     auth.agent_factory(use_mainnet)
+}
+
+pub async fn build_search_agent(use_mainnet: bool, auth: TuiAuth) -> Result<Agent> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    factory.build().await
 }
 
 pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<MemorySummary>> {
@@ -193,14 +199,11 @@ pub async fn load_session_account_overview(
     overview
 }
 
-pub async fn search_memory_with_embedding(
-    use_mainnet: bool,
-    auth: TuiAuth,
+pub async fn search_memory_with_agent(
+    agent: Agent,
     memory_id: String,
     embedding: Vec<f32>,
 ) -> Result<Vec<SearchResultItem>> {
-    let factory = resolve_agent_factory(use_mainnet, &auth)?;
-    let agent = factory.build().await?;
     let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
     let client = MemoryClient::new(agent, memory);
     let mut results = client.search(embedding).await?;
@@ -247,31 +250,37 @@ fn memory_summary_from_state(state: State) -> MemorySummary {
             id: format!("empty:{message}"),
             status: "empty".to_string(),
             detail: message,
+            searchable_memory_id: None,
         },
         State::Pending(message) => MemorySummary {
             id: format!("pending:{message}"),
             status: "pending".to_string(),
             detail: message,
+            searchable_memory_id: None,
         },
         State::Creation(message) => MemorySummary {
             id: format!("creation:{message}"),
             status: "creation".to_string(),
             detail: message,
+            searchable_memory_id: None,
         },
         State::Installation(principal, message) => MemorySummary {
             id: principal.to_text(),
             status: "installation".to_string(),
             detail: message,
+            searchable_memory_id: Some(principal.to_text()),
         },
         State::SettingUp(principal) => MemorySummary {
             id: principal.to_text(),
             status: "setting_up".to_string(),
             detail: "Launcher is setting up this memory.".to_string(),
+            searchable_memory_id: Some(principal.to_text()),
         },
         State::Running(principal) => MemorySummary {
             id: principal.to_text(),
             status: "running".to_string(),
             detail: "Memory is ready for search and writes.".to_string(),
+            searchable_memory_id: Some(principal.to_text()),
         },
     }
 }
@@ -304,6 +313,7 @@ mod tests {
                 id: "aaaaa-aa".to_string(),
                 status: "running".to_string(),
                 detail: "ready".to_string(),
+                searchable_memory_id: Some("aaaaa-aa".to_string()),
             }]),
             refresh_warning: None,
         };

@@ -45,10 +45,13 @@ fn clearing_query_after_create_resets_memories_browser() {
 #[test]
 fn poll_background_returns_search_results_with_tab_specific_focus() {
     let mut provider = KinicProvider::new(live_config());
-    let (tx, rx) = mpsc::channel();
-    provider.pending_search = Some(rx);
-    provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
-    provider.search_in_flight = true;
+    let tx = install_pending_search(
+        &mut provider,
+        0,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    );
     tx.send(selected_search_output(0, "aaaaa-aa", "alpha", "hello"))
         .unwrap();
 
@@ -74,10 +77,13 @@ fn poll_background_returns_search_results_with_tab_specific_focus() {
     assert_eq!(provider.memories_mode, MemoriesMode::Results);
 
     let mut off_tab_provider = KinicProvider::new(live_config());
-    let (tx, rx) = mpsc::channel();
-    off_tab_provider.pending_search = Some(rx);
-    off_tab_provider.pending_search_context = Some(pending_search_context(1, "aaaaa-aa", "alpha"));
-    off_tab_provider.search_in_flight = true;
+    let tx = install_pending_search(
+        &mut off_tab_provider,
+        1,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    );
     tx.send(selected_search_output(1, "aaaaa-aa", "alpha", "hello"))
         .unwrap();
 
@@ -115,10 +121,19 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
         provider.all = provider.memory_records.clone();
         provider.active_memory_id = Some("aaaaa-aa".to_string());
         provider.query = "alpha".to_string();
-        let (tx, rx) = mpsc::channel();
-        provider.pending_search = Some(rx);
-        provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
-        provider.search_in_flight = true;
+        let tx = install_pending_search(
+            &mut provider,
+            0,
+            "alpha",
+            SearchScope::Selected,
+            &["aaaaa-aa"],
+        );
+        let cancellation = provider
+            .pending_search
+            .as_ref()
+            .expect("pending search should be installed")
+            .cancellation
+            .clone();
 
         match scenario {
             "query_change" => {
@@ -148,25 +163,15 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
             _ => unreachable!(),
         }
 
-        tx.send(selected_search_output(0, "aaaaa-aa", "alpha", "stale"))
-            .unwrap();
-
-        let output = provider
-            .poll_background(&CoreState::default())
-            .expect("stale search should still return a snapshot");
-
-        assert!(output.effects.is_empty(), "scenario: {scenario}");
-        assert_eq!(
-            provider.memories_mode,
-            MemoriesMode::Browser,
+        assert!(
+            tx.send(selected_search_output(0, "aaaaa-aa", "alpha", "stale"))
+                .is_err(),
             "scenario: {scenario}"
         );
-        assert!(provider.result_records.is_empty(), "scenario: {scenario}");
-        assert_eq!(
-            provider.pending_search_context, None,
-            "scenario: {scenario}"
-        );
-        assert!(!provider.search_in_flight, "scenario: {scenario}");
+
+        assert!(provider.poll_background(&CoreState::default()).is_none());
+        assert!(cancellation.is_cancelled(), "scenario: {scenario}");
+        assert!(provider.pending_search.is_none(), "scenario: {scenario}");
     }
 }
 
@@ -185,10 +190,13 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
         },
     )];
     provider.memories_mode = MemoriesMode::Results;
-    let (tx, rx) = mpsc::channel();
-    provider.pending_search = Some(rx);
-    provider.pending_search_context = Some(pending_search_context(1, "aaaaa-aa", "alpha"));
-    provider.search_in_flight = true;
+    let tx = install_pending_search(
+        &mut provider,
+        1,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    );
     tx.send(SearchTaskOutput {
         request_id: 1,
         query: "alpha".to_string(),
@@ -210,15 +218,14 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
             .iter()
             .any(|effect| matches!(effect, CoreEffect::Notify(_)))
     );
-    assert_eq!(provider.pending_search_context, None);
-    assert!(!provider.search_in_flight);
 
     let mut disconnected_provider = KinicProvider::new(live_config());
     let (tx, rx) = mpsc::channel::<SearchTaskOutput>();
-    disconnected_provider.pending_search = Some(rx);
-    disconnected_provider.pending_search_context =
-        Some(pending_search_context(3, "aaaaa-aa", "alpha"));
-    disconnected_provider.search_in_flight = true;
+    disconnected_provider.pending_search = Some(PendingSearch {
+        receiver: rx,
+        cancellation: CancellationToken::new(),
+        context: pending_search_context(3, "alpha", SearchScope::Selected, &["aaaaa-aa"]),
+    });
     drop(tx);
 
     let disconnected_output = disconnected_provider
@@ -226,14 +233,35 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
         .expect("disconnect should produce a provider output");
 
     assert!(disconnected_provider.pending_search.is_none());
-    assert_eq!(disconnected_provider.pending_search_context, None);
-    assert!(!disconnected_provider.search_in_flight);
     assert!(
         disconnected_output
             .effects
             .iter()
             .any(|effect| matches!(effect, CoreEffect::Notify(_)))
     );
+}
+
+#[test]
+fn invalidate_pending_search_cancels_worker_and_clears_receiver() {
+    let mut provider = KinicProvider::new(live_config());
+    let _tx = install_pending_search(
+        &mut provider,
+        7,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    );
+    let cancellation = provider
+        .pending_search
+        .as_ref()
+        .expect("pending search should exist")
+        .cancellation
+        .clone();
+
+    provider.invalidate_pending_search();
+
+    assert!(cancellation.is_cancelled());
+    assert!(provider.pending_search.is_none());
 }
 
 #[test]
@@ -326,5 +354,41 @@ fn memory_navigation_stays_within_visible_filtered_records() {
             .and_then(|snapshot| snapshot.selected_content.as_ref())
             .map(|detail| detail.id.as_str()),
         Some("ccccc-cc")
+    );
+}
+
+#[test]
+fn search_target_memory_ids_all_scope_excludes_non_searchable_memories() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![
+        live_memory("aaaaa-aa", "Alpha Memory"),
+        non_searchable_memory("pending:creating", "Pending Memory", "pending"),
+        non_searchable_memory("creation:building", "Creation Memory", "creation"),
+    ];
+
+    let targets = provider
+        .search_target_memory_ids(SearchScope::All)
+        .expect("all-scope search should keep searchable memories");
+
+    assert_eq!(targets, vec!["aaaaa-aa".to_string()]);
+}
+
+#[test]
+fn search_target_memory_ids_selected_rejects_non_searchable_memory() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![non_searchable_memory(
+        "pending:creating",
+        "Pending Memory",
+        "pending",
+    )];
+    provider.active_memory_id = Some("pending:creating".to_string());
+
+    let error = provider
+        .search_target_memory_ids(SearchScope::Selected)
+        .expect_err("selected non-searchable memory should be rejected");
+
+    assert_eq!(
+        error,
+        "The selected memory is not searchable yet. Wait until setup finishes."
     );
 }

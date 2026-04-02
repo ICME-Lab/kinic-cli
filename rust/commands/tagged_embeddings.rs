@@ -1,14 +1,13 @@
-use anyhow::{Context, Result};
-use ic_agent::export::Principal;
+use anyhow::Result;
 use serde_json::to_string;
 use tracing::info;
 
-use crate::{cli::TaggedEmbeddingsArgs, clients::memory::MemoryClient};
+use crate::{cli::TaggedEmbeddingsArgs, memory_client_builder::build_memory_client};
 
 use super::CommandContext;
 
 pub async fn handle(args: TaggedEmbeddingsArgs, ctx: &CommandContext) -> Result<()> {
-    let client = build_memory_client(&args.memory_id, ctx).await?;
+    let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
     let embeddings = client.tagged_embeddings(args.tag.clone()).await?;
 
     info!(
@@ -20,11 +19,4 @@ pub async fn handle(args: TaggedEmbeddingsArgs, ctx: &CommandContext) -> Result<
 
     println!("{}", to_string(&embeddings)?);
     Ok(())
-}
-
-async fn build_memory_client(id: &str, ctx: &CommandContext) -> Result<MemoryClient> {
-    let agent = ctx.agent_factory.build().await?;
-    let memory = Principal::from_text(id)
-        .context("Failed to parse canister id for tagged-embeddings command")?;
-    Ok(MemoryClient::new(agent, memory))
 }

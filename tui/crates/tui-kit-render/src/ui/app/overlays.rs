@@ -490,19 +490,17 @@ mod tests {
 
     #[test]
     fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
-        let lines = default_memory_selector_lines(
-            &(0..12)
-                .map(|index| MemorySelectorItem {
-                    id: format!("id-{index}"),
-                    title: Some(format!("Memory {index}")),
-                })
-                .collect::<Vec<_>>(),
-            10,
-            Some("id-2"),
-            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
-        );
-
-        let visible = visible_default_memory_selector_lines(lines, 8);
+        let items = (0..12)
+            .map(|index| {
+                PickerItem::option(format!("id-{index}"), format!("Memory {index}"), index == 2)
+            })
+            .collect::<Vec<_>>();
+        let lines = picker_lines(&PickerPresentation::List {
+            context: PickerContext::DefaultMemory,
+            items: &items,
+            selected_index: 10,
+        });
+        let visible = visible_picker_lines(lines, 8);
         let visible_lines = visible
             .iter()
             .map(|(line, _)| line.as_str())

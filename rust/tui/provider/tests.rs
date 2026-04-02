@@ -44,6 +44,7 @@ fn live_memory(id: &str, title: &str) -> KinicRecord {
         "Status: running",
         format!("detail for {id}"),
     )
+    .with_searchable_memory_id_option(Some(id.to_string()))
 }
 
 fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
@@ -51,16 +52,48 @@ fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
         id: id.to_string(),
         status: "running".to_string(),
         detail: detail.to_string(),
+        searchable_memory_id: Some(id.to_string()),
     }
 }
 
-fn pending_search_context(request_id: u64, memory_id: &str, query: &str) -> SearchRequestContext {
+fn non_searchable_memory(id: &str, title: &str, status: &str) -> KinicRecord {
+    KinicRecord::new(
+        id,
+        title,
+        "memories",
+        format!("Status: {status}"),
+        format!("detail for {id}"),
+    )
+}
+
+fn pending_search_context(
+    request_id: u64,
+    query: &str,
+    scope: SearchScope,
+    target_memory_ids: &[&str],
+) -> SearchRequestContext {
     SearchRequestContext {
         request_id,
         query: query.to_string(),
-        scope: SearchScope::Selected,
-        target_memory_ids: vec![memory_id.to_string()],
+        scope,
+        target_memory_ids: target_memory_ids.iter().map(|id| (*id).to_string()).collect(),
     }
+}
+
+fn install_pending_search(
+    provider: &mut KinicProvider,
+    request_id: u64,
+    query: &str,
+    scope: SearchScope,
+    target_memory_ids: &[&str],
+) -> mpsc::Sender<SearchTaskOutput> {
+    let (tx, rx) = mpsc::channel();
+    provider.pending_search = Some(PendingSearch {
+        receiver: rx,
+        cancellation: CancellationToken::new(),
+        context: pending_search_context(request_id, query, scope, target_memory_ids),
+    });
+    tx
 }
 
 fn refreshed_session_overview() -> SessionAccountOverview {
