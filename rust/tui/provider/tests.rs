@@ -57,8 +57,9 @@ fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
 fn pending_search_context(request_id: u64, memory_id: &str, query: &str) -> SearchRequestContext {
     SearchRequestContext {
         request_id,
-        memory_id: memory_id.to_string(),
         query: query.to_string(),
+        scope: SearchScope::Selected,
+        target_memory_ids: vec![memory_id.to_string()],
     }
 }
 

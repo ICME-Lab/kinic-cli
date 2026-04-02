@@ -1,5 +1,27 @@
 use super::*;
 
+fn selected_search_output(
+    request_id: u64,
+    memory_id: &str,
+    query: &str,
+    payload: &str,
+) -> SearchTaskOutput {
+    SearchTaskOutput {
+        request_id,
+        query: query.to_string(),
+        scope: SearchScope::Selected,
+        target_memory_ids: vec![memory_id.to_string()],
+        result: Ok(SearchBatchResult {
+            items: vec![SearchResultItem {
+                memory_id: memory_id.to_string(),
+                score: 0.9,
+                payload: payload.to_string(),
+            }],
+            failed_memory_ids: Vec::new(),
+        }),
+    }
+}
+
 #[test]
 fn clearing_query_after_create_resets_memories_browser() {
     let mut provider = KinicProvider::new(live_config());
@@ -27,16 +49,8 @@ fn poll_background_returns_search_results_with_tab_specific_focus() {
     provider.pending_search = Some(rx);
     provider.pending_search_context = Some(pending_search_context(0, "aaaaa-aa", "alpha"));
     provider.search_in_flight = true;
-    tx.send(SearchTaskOutput {
-        request_id: 0,
-        memory_id: "aaaaa-aa".to_string(),
-        query: "alpha".to_string(),
-        result: Ok(vec![SearchResultItem {
-            score: 0.9,
-            payload: "hello".to_string(),
-        }]),
-    })
-    .unwrap();
+    tx.send(selected_search_output(0, "aaaaa-aa", "alpha", "hello"))
+        .unwrap();
 
     let memories_output = provider
         .poll_background(&CoreState {
@@ -64,16 +78,8 @@ fn poll_background_returns_search_results_with_tab_specific_focus() {
     off_tab_provider.pending_search = Some(rx);
     off_tab_provider.pending_search_context = Some(pending_search_context(1, "aaaaa-aa", "alpha"));
     off_tab_provider.search_in_flight = true;
-    tx.send(SearchTaskOutput {
-        request_id: 1,
-        memory_id: "aaaaa-aa".to_string(),
-        query: "alpha".to_string(),
-        result: Ok(vec![SearchResultItem {
-            score: 0.9,
-            payload: "hello".to_string(),
-        }]),
-    })
-    .unwrap();
+    tx.send(selected_search_output(1, "aaaaa-aa", "alpha", "hello"))
+        .unwrap();
 
     let create_output = off_tab_provider
         .poll_background(&CoreState {
@@ -142,16 +148,8 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
             _ => unreachable!(),
         }
 
-        tx.send(SearchTaskOutput {
-            request_id: 0,
-            memory_id: "aaaaa-aa".to_string(),
-            query: "alpha".to_string(),
-            result: Ok(vec![SearchResultItem {
-                score: 0.9,
-                payload: "stale".to_string(),
-            }]),
-        })
-        .unwrap();
+        tx.send(selected_search_output(0, "aaaaa-aa", "alpha", "stale"))
+            .unwrap();
 
         let output = provider
             .poll_background(&CoreState::default())
@@ -180,8 +178,8 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
     provider.active_memory_id = Some("aaaaa-aa".to_string());
     provider.result_records = vec![record_from_search_result(
         0,
-        "aaaaa-aa",
         SearchResultItem {
+            memory_id: "aaaaa-aa".to_string(),
             score: 0.9,
             payload: "hello".to_string(),
         },
@@ -193,8 +191,9 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
     provider.search_in_flight = true;
     tx.send(SearchTaskOutput {
         request_id: 1,
-        memory_id: "aaaaa-aa".to_string(),
         query: "alpha".to_string(),
+        scope: SearchScope::Selected,
+        target_memory_ids: vec!["aaaaa-aa".to_string()],
         result: Err("boom".to_string()),
     })
     .unwrap();

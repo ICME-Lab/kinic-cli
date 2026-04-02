@@ -334,6 +334,7 @@ mod tests {
         let copy = insert_form_copy();
 
         assert_eq!(config.insert.mode_help, copy.mode_help);
+        assert_eq!(config.insert.mode_help, copy.mode_help);
         assert!(config.help.lines.iter().any(|line| line == copy.help_line));
     }
 }

@@ -194,12 +194,18 @@ fn add_tag_submit_success_closes_picker_input() {
         .handle_action(&CoreAction::SubmitPicker, &state)
         .expect("add tag submit output");
 
-    assert_eq!(provider.user_preferences.saved_tags, vec!["docs", "research"]);
+    assert_eq!(
+        provider.user_preferences.saved_tags,
+        vec!["docs", "research"]
+    );
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::Notify(message) if message == "Saved tag research"
     )));
-    assert_eq!(output.snapshot.expect("snapshot").picker, PickerState::Closed);
+    assert_eq!(
+        output.snapshot.expect("snapshot").picker,
+        PickerState::Closed
+    );
 }
 
 #[test]

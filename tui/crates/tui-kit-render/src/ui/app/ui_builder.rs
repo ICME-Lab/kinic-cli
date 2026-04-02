@@ -5,7 +5,7 @@ use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
     CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode, PickerState,
-    SettingsSnapshot,
+    SearchScope, SettingsSnapshot,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -98,6 +98,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn search_input(mut self, input: &'a str) -> Self {
         self.search_input = input;
+        self
+    }
+
+    #[must_use]
+    pub fn search_scope(mut self, scope: SearchScope) -> Self {
+        self.search_scope = scope;
         self
     }
 

@@ -10,7 +10,7 @@ use crate::{
         memory::MemoryClient,
     },
     create_domain::{BalanceDelta, balance_delta, required_balance},
-    embedding::{embedding_base_url, fetch_embedding},
+    embedding::embedding_base_url,
     insert_service::{InsertRequest, execute_insert_request},
     ledger::fetch_balance,
     tui::TuiAuth,
@@ -26,6 +26,7 @@ pub struct MemorySummary {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchResultItem {
+    pub memory_id: String,
     pub score: f32,
     pub payload: String,
 }
@@ -192,23 +193,26 @@ pub async fn load_session_account_overview(
     overview
 }
 
-pub async fn search_memory(
+pub async fn search_memory_with_embedding(
     use_mainnet: bool,
     auth: TuiAuth,
     memory_id: String,
-    query: String,
+    embedding: Vec<f32>,
 ) -> Result<Vec<SearchResultItem>> {
     let factory = resolve_agent_factory(use_mainnet, &auth)?;
     let agent = factory.build().await?;
-    let memory = Principal::from_text(memory_id).context("Failed to parse memory canister id")?;
+    let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
     let client = MemoryClient::new(agent, memory);
-    let embedding = fetch_embedding(&query).await?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
 
     Ok(results
         .into_iter()
-        .map(|(score, payload)| SearchResultItem { score, payload })
+        .map(|(score, payload)| SearchResultItem {
+            memory_id: memory_id.clone(),
+            score,
+            payload,
+        })
         .collect())
 }
 

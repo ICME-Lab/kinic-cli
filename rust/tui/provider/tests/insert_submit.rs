@@ -257,7 +257,25 @@ fn insert_submit_rejects_nonexistent_normal_file_path_before_background_submit()
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::InsertFormError(Some(message))
-            if message.contains("File path does not exist")
+            if message == "File path does not exist: /path/that/does/not/need/to/exist.md"
+    )));
+}
+
+#[test]
+fn insert_submit_rejects_unsupported_file_extension_before_background_submit() {
+    let mut provider = KinicProvider::new(live_config());
+    let output = provider
+        .handle_action(
+            &CoreAction::InsertSubmit,
+            &file_insert_state("/tmp/unsupported.exe"),
+        )
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message
+                == "File path must use a supported .md, .markdown, .mdx, .txt, .json, .yaml, .yml, .csv, .log, .pdf extension."
     )));
 }
 
