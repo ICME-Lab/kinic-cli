@@ -783,17 +783,15 @@ impl KinicProvider {
                         SearchScope::Selected => "selected memory",
                     };
                     match self.active_memory_id.as_deref() {
-                        Some(memory_id) => format!(
-                            "kinic(live): target {memory_id} | search scope {scope} | Enter runs semantic search | ←/→ changes scope | Shift+D saves default"
-                        ),
-                        None => format!(
-                            "kinic(live): search scope {scope} | Enter runs semantic search | ←/→ changes scope | Shift+D saves default"
-                        ),
+                        Some(memory_id) => {
+                            format!("kinic(live): target {memory_id} | search scope {scope}")
+                        }
+                        None => format!("kinic(live): search scope {scope}"),
                     }
                 }
                 MemoriesMode::Results => match self.last_search_state.as_ref() {
                     Some(last) if last.scope == SearchScope::All => format!(
-                        "kinic(live): {visible_count} search results across {} memories | Esc clears search and returns | Shift+D saves default",
+                        "kinic(live): {visible_count} search results across {} memories",
                         last.target_memory_ids.len()
                     ),
                     Some(last) => {
@@ -803,7 +801,7 @@ impl KinicProvider {
                             .map(String::as_str)
                             .unwrap_or("selected");
                         format!(
-                            "kinic(live): {visible_count} search results in {memory_id} | Esc clears search and returns | Shift+D saves default"
+                            "kinic(live): {visible_count} search results in {memory_id}"
                         )
                     }
                     None => format!("kinic(live): {visible_count} search results"),
