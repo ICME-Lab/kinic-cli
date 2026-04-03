@@ -145,6 +145,18 @@ impl MemoryClient {
         Ok(())
     }
 
+    pub async fn change_name(&self, name: &str) -> Result<()> {
+        let payload = encode_change_name_args(name)?;
+        self.agent
+            .update(&self.canister_id, "change_name")
+            .with_arg(payload)
+            .call_and_wait()
+            .await
+            .context("Failed to call change_name on memory canister")?;
+
+        Ok(())
+    }
+
     pub async fn reset(&self, dim: usize) -> Result<()> {
         let payload = encode_reset_args(dim)?;
         let response = self
@@ -175,6 +187,9 @@ fn encode_add_user_args(principal: Principal, role: u8) -> Result<Vec<u8>> {
 }
 fn encode_remove_user_args(principal: Principal) -> Result<Vec<u8>> {
     Ok(candid::encode_one(principal)?)
+}
+fn encode_change_name_args(name: &str) -> Result<Vec<u8>> {
+    Ok(candid::encode_one(name.to_string())?)
 }
 fn encode_tag_query_args(tag: String) -> Result<Vec<u8>> {
     Ok(candid::encode_one(tag)?)
@@ -212,7 +227,8 @@ fn decode_export_all_response(response: &[u8]) -> Result<Vec<ExportedChunk>> {
 mod tests {
     use super::{
         DbMetadata, ExportedChunk, decode_export_all_response, decode_get_dim_response,
-        decode_get_metadata_response, decode_get_users_response, encode_remove_user_args,
+        decode_get_metadata_response, decode_get_users_response, encode_change_name_args,
+        encode_remove_user_args,
     };
     use candid::Decode;
     use ic_agent::export::Principal;
@@ -248,6 +264,15 @@ mod tests {
         assert_eq!(metadata.version, "1.2.3");
         assert_eq!(metadata.owners.len(), 2);
         assert_eq!(metadata.cycle_amount, 99);
+    }
+
+    #[test]
+    fn encode_change_name_args_round_trips_text_payload() {
+        let payload = encode_change_name_args("Alpha Memory").expect("name payload should encode");
+
+        let decoded = Decode!(&payload, String).expect("name payload should decode");
+
+        assert_eq!(decoded, "Alpha Memory");
     }
 
     #[test]

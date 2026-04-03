@@ -593,9 +593,11 @@ pub enum CoreAction {
     PickerInput(char),
     PickerBackspace,
     SetDefaultMemoryFromSelection,
-    AccessMoveNext,
-    AccessMovePrev,
-    AccessOpenSelected,
+    MemoryContentMoveNext,
+    MemoryContentMovePrev,
+    MemoryContentJumpNext,
+    MemoryContentJumpPrev,
+    MemoryContentOpenSelected,
     CloseAccessControl,
     AccessNextField,
     AccessPrevField,
@@ -857,51 +859,51 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         CoreAction::AccessInput(c) => {
             if access_control_locked(state)
-                || state.access_control_mode != AccessControlMode::Add
-                || state.access_control_focus != AccessControlFocus::Principal
+                || state.access_control.mode != AccessControlMode::Add
+                || state.access_control.focus != AccessControlFocus::Principal
             {
                 return;
             }
-            state.access_control_principal_id.push(*c);
+            state.access_control.principal_id.push(*c);
             clear_access_control_error(state);
         }
         CoreAction::AccessBackspace => {
             if access_control_locked(state)
-                || state.access_control_mode != AccessControlMode::Add
-                || state.access_control_focus != AccessControlFocus::Principal
+                || state.access_control.mode != AccessControlMode::Add
+                || state.access_control.focus != AccessControlFocus::Principal
             {
                 return;
             }
-            state.access_control_principal_id.pop();
+            state.access_control.principal_id.pop();
         }
         CoreAction::AccessNextField => {
-            if access_control_locked(state) || state.access_control_mode != AccessControlMode::Add {
+            if access_control_locked(state) || state.access_control.mode != AccessControlMode::Add {
                 return;
             }
-            state.access_control_focus = next_access_control_focus(state.access_control_focus);
+            state.access_control.focus = next_access_control_focus(state.access_control.focus);
         }
         CoreAction::AccessPrevField => {
-            if access_control_locked(state) || state.access_control_mode != AccessControlMode::Add {
+            if access_control_locked(state) || state.access_control.mode != AccessControlMode::Add {
                 return;
             }
-            state.access_control_focus = prev_access_control_focus(state.access_control_focus);
+            state.access_control.focus = prev_access_control_focus(state.access_control.focus);
         }
         CoreAction::AccessCycleAction => {
             if access_control_locked(state) {
                 return;
             }
-            match state.access_control_mode {
+            match state.access_control.mode {
                 AccessControlMode::Action => {
                     let (action, role) = next_access_control_selection(
-                        state.access_control_current_role,
-                        state.access_control_action,
-                        state.access_control_role,
+                        state.access_control.current_role,
+                        state.access_control.action,
+                        state.access_control.role,
                     );
-                    state.access_control_action = action;
-                    state.access_control_role = role;
+                    state.access_control.action = action;
+                    state.access_control.role = role;
                 }
                 AccessControlMode::Confirm => {
-                    state.access_control_confirm_yes = !state.access_control_confirm_yes;
+                    state.access_control.confirm_yes = !state.access_control.confirm_yes;
                 }
                 _ => return,
             }
@@ -911,18 +913,18 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             if access_control_locked(state) {
                 return;
             }
-            match state.access_control_mode {
+            match state.access_control.mode {
                 AccessControlMode::Action => {
                     let (action, role) = prev_access_control_selection(
-                        state.access_control_current_role,
-                        state.access_control_action,
-                        state.access_control_role,
+                        state.access_control.current_role,
+                        state.access_control.action,
+                        state.access_control.role,
                     );
-                    state.access_control_action = action;
-                    state.access_control_role = role;
+                    state.access_control.action = action;
+                    state.access_control.role = role;
                 }
                 AccessControlMode::Confirm => {
-                    state.access_control_confirm_yes = !state.access_control_confirm_yes;
+                    state.access_control.confirm_yes = !state.access_control.confirm_yes;
                 }
                 _ => return,
             }
@@ -2215,6 +2217,51 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::CreateNextField);
         assert_eq!(state.create_focus, CreateModalFocus::Name);
+    }
+
+    #[test]
+    fn rename_memory_next_field_wraps_back_to_name() {
+        let mut state = CoreState {
+            rename_memory: RenameMemoryModalState {
+                form: TextInputModalState {
+                    open: true,
+                    ..TextInputModalState::default()
+                },
+                focus: RenameModalFocus::Submit,
+                ..RenameMemoryModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::RenameMemoryNextField);
+
+        assert_eq!(state.rename_memory.focus, RenameModalFocus::Name);
+    }
+
+    #[test]
+    fn rename_memory_input_clears_error_state() {
+        let mut state = CoreState {
+            rename_memory: RenameMemoryModalState {
+                form: TextInputModalState {
+                    open: true,
+                    submit_state: CreateSubmitState::Error,
+                    error: Some("boom".to_string()),
+                    ..TextInputModalState::default()
+                },
+                focus: RenameModalFocus::Name,
+                ..RenameMemoryModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::RenameMemoryInput('A'));
+
+        assert_eq!(state.rename_memory.form.value, "A");
+        assert_eq!(
+            state.rename_memory.form.submit_state,
+            CreateSubmitState::Idle
+        );
+        assert_eq!(state.rename_memory.form.error, None);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use tui_kit_runtime::kinic_tabs::{
 };
 use tui_kit_runtime::{
     CoreError, CoreResult, InsertFormFocus, InsertMode, PaneFocus, PickerContext, PickerListMode,
-    PickerState, ProviderOutput, ProviderSnapshot,
+    PickerState, ProviderOutput, ProviderSnapshot, RenameMemoryModalState, TextInputModalState,
 };
 
 struct TestProvider {
@@ -159,6 +159,45 @@ fn picker_overlay_action_maps_generic_picker_keys() {
         ),
         Some(CoreAction::PickerBackspace)
     );
+}
+
+#[test]
+fn build_ui_renders_rename_overlay_contents() {
+    let theme = Theme::default();
+    let cfg = test_runtime_config();
+    let state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Alpha Memory".to_string(),
+                ..TextInputModalState::default()
+            },
+            focus: tui_kit_runtime::RenameModalFocus::Name,
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+    let textareas = FormTextareas::default();
+    let animation = AnimationState::new();
+    let ui = build_ui(
+        &theme, &cfg, &state, &textareas, 0, 0, false, false, &animation,
+    );
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buf = Buffer::empty(area);
+    Widget::render(ui, area, &mut buf);
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("Rename Memory"));
+    assert!(rendered.contains("Alpha Memory"));
 }
 
 #[test]

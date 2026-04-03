@@ -380,6 +380,53 @@ pub async fn manage_memory_access(
     }
 }
 
+pub async fn rename_memory(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+    name: String,
+) -> Result<(), RenameMemoryError> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)
+        .map_err(|error| RenameMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| RenameMemoryError::BuildAgent(short_error(&error.to_string())))?;
+    let memory = Principal::from_text(&memory_id)
+        .map_err(|error| RenameMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
+    let client = MemoryClient::new(agent, memory);
+
+    client
+        .change_name(&name)
+        .await
+        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))
+}
+
+pub async fn validate_manual_memory_access(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+    principal_id: String,
+) -> Result<()> {
+    let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
+    let self_principal =
+        Principal::from_text(&principal_id).context("Failed to parse current principal")?;
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let client = MemoryClient::new(agent, memory);
+    let users = client.get_users().await?;
+
+    if users.iter().any(|(user_principal_id, _)| {
+        Principal::from_text(user_principal_id)
+            .map(|principal| principal == self_principal)
+            .unwrap_or(false)
+    }) {
+        Ok(())
+    } else {
+        anyhow::bail!("Current principal does not have access to this memory")
+    }
+}
+
 pub async fn run_insert(
     use_mainnet: bool,
     auth: TuiAuth,

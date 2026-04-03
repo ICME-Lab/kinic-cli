@@ -372,10 +372,14 @@ fn apply_reloaded_preferences_updates_health_for_success_and_failure() {
             UserPreferences {
                 default_memory_id: Some("bbbbb-bb".to_string()),
                 saved_tags: Vec::new(),
+                manual_memory_ids: Vec::new(),
+                ..UserPreferences::default()
             },
             Ok(UserPreferences {
                 default_memory_id: Some("bbbbb-bb".to_string()),
                 saved_tags: Vec::new(),
+                manual_memory_ids: Vec::new(),
+                ..UserPreferences::default()
             }),
         );
 
@@ -390,6 +394,8 @@ fn apply_reloaded_preferences_updates_health_for_success_and_failure() {
             UserPreferences {
                 default_memory_id: Some("ccccc-cc".to_string()),
                 saved_tags: Vec::new(),
+                manual_memory_ids: Vec::new(),
+                ..UserPreferences::default()
             },
             Err(tui_kit_host::settings::SettingsError::NoConfigDir),
         );

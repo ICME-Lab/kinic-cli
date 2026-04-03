@@ -532,10 +532,115 @@ struct AccessSubmitTaskOutput {
     result: Result<(), String>,
 }
 
+struct AddMemoryValidationTaskOutput {
+    memory_id: String,
+    result: Result<(), String>,
+}
+
+struct RenameSubmitTaskOutput {
+    memory_id: String,
+    next_name: String,
+    result: Result<(), bridge::RenameMemoryError>,
+}
+
+struct RequestTaskState<T> {
+    receiver: Option<mpsc::Receiver<T>>,
+    in_flight: bool,
+    request_id: Option<u64>,
+}
+
+impl<T> Default for RequestTaskState<T> {
+    fn default() -> Self {
+        Self {
+            receiver: None,
+            in_flight: false,
+            request_id: None,
+        }
+    }
+}
+
+struct TaskState<T> {
+    receiver: Option<mpsc::Receiver<T>>,
+    in_flight: bool,
+}
+
+impl<T> Default for TaskState<T> {
+    fn default() -> Self {
+        Self {
+            receiver: None,
+            in_flight: false,
+        }
+    }
+}
+
+enum PendingTaskPoll<T> {
+    Pending,
+    Ready(T),
+    Disconnected,
+}
+
+fn poll_pending_task<T>(receiver: &mpsc::Receiver<T>) -> PendingTaskPoll<T> {
+    match receiver.try_recv() {
+        Ok(output) => PendingTaskPoll::Ready(output),
+        Err(mpsc::TryRecvError::Empty) => PendingTaskPoll::Pending,
+        Err(mpsc::TryRecvError::Disconnected) => PendingTaskPoll::Disconnected,
+    }
+}
+
+fn spawn_request_task<T, F>(
+    next_request_id: &mut u64,
+    task_state: &mut RequestTaskState<T>,
+    worker: F,
+) -> u64
+where
+    T: Send + 'static,
+    F: FnOnce(u64, mpsc::Sender<T>) + Send + 'static,
+{
+    let request_id = *next_request_id;
+    *next_request_id += 1;
+    task_state.request_id = Some(request_id);
+    task_state.in_flight = true;
+    let (tx, rx) = mpsc::channel();
+    task_state.receiver = Some(rx);
+    thread::spawn(move || worker(request_id, tx));
+    request_id
+}
+
+fn finish_request_task<T>(task_state: &mut RequestTaskState<T>, output_request_id: u64) -> bool {
+    task_state.receiver = None;
+    task_state.in_flight = false;
+    let is_current = task_state.request_id == Some(output_request_id);
+    task_state.request_id = None;
+    is_current
+}
+
+fn reset_request_task<T>(task_state: &mut RequestTaskState<T>) {
+    task_state.receiver = None;
+    task_state.in_flight = false;
+    task_state.request_id = None;
+}
+
+fn spawn_task<T, F>(task_state: &mut TaskState<T>, worker: F)
+where
+    T: Send + 'static,
+    F: FnOnce(mpsc::Sender<T>) + Send + 'static,
+{
+    task_state.in_flight = true;
+    let (tx, rx) = mpsc::channel();
+    task_state.receiver = Some(rx);
+    thread::spawn(move || worker(tx));
+}
+
+fn finish_task<T>(task_state: &mut TaskState<T>) {
+    task_state.receiver = None;
+    task_state.in_flight = false;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AccessSelection<'a> {
     User(&'a bridge::MemoryUser),
     AddUser,
+    RemoveManualMemory,
 }
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
@@ -926,6 +1031,21 @@ impl KinicProvider {
         self.all = self.memory_records.clone();
     }
 
+    fn normalize_memory_summaries(&mut self) {
+        let mut seen_ids = HashSet::new();
+        self.memory_summaries
+            .retain(|summary| seen_ids.insert(summary.id.clone()));
+
+        for memory_id in &self.user_preferences.manual_memory_ids {
+            if seen_ids.contains(memory_id) {
+                continue;
+            }
+            self.memory_summaries
+                .push(manual_memory_summary(memory_id.as_str()));
+            seen_ids.insert(memory_id.clone());
+        }
+    }
+
     fn start_active_memory_detail_load(&mut self) {
         if self.memories_mode != MemoriesMode::Browser {
             return;
@@ -964,6 +1084,15 @@ impl KinicProvider {
         state.current_tab_id == KINIC_MEMORIES_TAB_ID
             && self.tab_id == KINIC_MEMORIES_TAB_ID
             && self.memories_mode == MemoriesMode::Browser
+    }
+
+    fn is_add_memory_action_selected(&self, state: &CoreState) -> bool {
+        self.should_show_add_memory_action(state)
+            && state.selected_index == Some(self.current_records().len())
+    }
+
+    fn should_show_add_memory_action(&self, state: &CoreState) -> bool {
+        state.current_tab_id == KINIC_MEMORIES_TAB_ID && self.memories_mode == MemoriesMode::Browser
     }
 
     fn build_snapshot(&self, state: &CoreState) -> ProviderSnapshot {
@@ -1039,8 +1168,13 @@ impl KinicProvider {
                 summary
             })
             .collect::<Vec<_>>();
+        if self.should_show_add_memory_action(state) {
+            items.push(adapter::to_summary(&add_memory_action_record()));
+        }
         let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
+        } else if self.is_add_memory_action_selected(state) {
+            Some(adapter::to_content(&add_memory_action_record()))
         } else if self.memories_mode == MemoriesMode::Browser {
             if self.memory_records.is_empty() {
                 filtered.first().copied().map(adapter::to_content)
@@ -2508,6 +2642,12 @@ impl DataProvider for KinicProvider {
             CoreAction::MovePageUp if self.should_handle_memory_navigation(state) => {
                 self.move_active_memory(-10)
             }
+            CoreAction::OpenSelected => {
+                if self.is_add_memory_action_selected(state) {
+                    effects.push(CoreEffect::OpenAddMemory);
+                    effects.push(CoreEffect::FocusPane(PaneFocus::Items));
+                }
+            }
             CoreAction::SetTab(id) => {
                 effects.extend(self.set_tab(id.0.as_str()));
                 if id.0.as_str() == KINIC_INSERT_TAB_ID {
@@ -2611,6 +2751,9 @@ impl DataProvider for KinicProvider {
                     Some(AccessSelection::AddUser) | None => {
                         effects.push(CoreEffect::OpenAccessAdd { memory_id });
                     }
+                    Some(AccessSelection::RemoveManualMemory) => {
+                        effects.push(CoreEffect::OpenRemoveMemory);
+                    }
                 }
             }
             CoreAction::CloseAccessControl => {
@@ -2630,18 +2773,18 @@ impl DataProvider for KinicProvider {
                         "Access request already running.".to_string(),
                     ));
                 } else {
-                    match state.access_control_mode {
+                    match state.access_control.mode {
                         AccessControlMode::Action => {
                             effects.push(CoreEffect::OpenAccessConfirm {
-                                memory_id: state.access_control_memory_id.clone(),
-                                principal_id: state.access_control_principal_id.clone(),
-                                action: state.access_control_action,
-                                role: state.access_control_role,
+                                memory_id: state.access_control.memory_id.clone(),
+                                principal_id: state.access_control.principal_id.clone(),
+                                action: state.access_control.action,
+                                role: state.access_control.role,
                             });
                         }
                         AccessControlMode::Add | AccessControlMode::Confirm => {
-                            if state.access_control_mode == AccessControlMode::Confirm
-                                && !state.access_control_confirm_yes
+                            if state.access_control.mode == AccessControlMode::Confirm
+                                && !state.access_control.confirm_yes
                             {
                                 effects.push(CoreEffect::CloseAccessControl);
                                 return Ok(ProviderOutput {
@@ -2800,12 +2943,41 @@ fn loading_memories_record() -> KinicRecord {
     )
 }
 
+fn add_memory_action_record() -> KinicRecord {
+    KinicRecord::new(
+        ADD_MEMORY_ACTION_ID,
+        "+ Add Existing Memory Canister",
+        "action",
+        "Add an existing memory canister to this local list.",
+        "## Add Existing Memory Canister\n\nOpen this action to register an existing memory canister by id.\n",
+    )
+}
+
+fn manual_memory_summary(id: &str) -> MemorySummary {
+    MemorySummary {
+        id: id.to_string(),
+        status: "manual".to_string(),
+        detail: "Manual memory. Loading details...".to_string(),
+        searchable_memory_id: Some(id.to_string()),
+        name: "unknown".to_string(),
+        version: "unknown".to_string(),
+        dim: None,
+        owners: None,
+        stable_memory_size: None,
+        cycle_amount: None,
+        users: None,
+    }
+}
+
 fn render_access_lines(
     users: Option<&Vec<bridge::MemoryUser>>,
     selected_index: usize,
+    show_remove_manual_memory: bool,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     let user_list = users.cloned().unwrap_or_default();
+    let add_user_index = user_list.len();
+    let remove_index = add_user_index + usize::from(show_remove_manual_memory);
 
     match users {
         None => lines.push("unavailable".to_string()),
@@ -2835,6 +3007,14 @@ fn render_access_lines(
         lines.push(String::new());
     }
     lines.push(format!("{add_marker} + Add User"));
+    if show_remove_manual_memory {
+        let remove_marker = if selected_index.min(remove_index) == remove_index {
+            ">"
+        } else {
+            " "
+        };
+        lines.push(format!("{remove_marker} Remove from list"));
+    }
     lines
 }
 
@@ -2918,6 +3098,12 @@ fn display_memory_name(name: &str, detail_name: Option<&str>) -> String {
         "" | "unknown" => "unknown".to_string(),
         _ => name.to_string(),
     }
+}
+
+fn resolved_memory_name(name: &str, detail: &str) -> String {
+    let detail_name = parse_memory_detail(detail).name;
+    let metadata_name = parse_detail_object(name).and_then(|(resolved_name, _)| resolved_name);
+    display_memory_name(name, detail_name.as_deref().or(metadata_name.as_deref()))
 }
 
 fn format_cycle_amount(value: u64) -> String {

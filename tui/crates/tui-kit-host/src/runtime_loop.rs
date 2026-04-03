@@ -343,6 +343,17 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     }
                     continue;
                 }
+                HostGlobalCommand::OpenRenameMemory => {
+                    if let Err(error) = dispatch_with_effects(
+                        provider,
+                        &mut state,
+                        hooks,
+                        &CoreAction::OpenRenameMemory,
+                    ) {
+                        state.status_message = Some(error);
+                    }
+                    continue;
+                }
                 HostGlobalCommand::BackFromContent => {
                     state.focus = PaneFocus::Items;
                     continue;
@@ -857,50 +868,60 @@ fn access_control_overlay_action(
 ) -> Option<CoreAction> {
     use tui_kit_runtime::{AccessControlFocus, AccessControlMode};
 
-    match code {
+    if state.access_control.mode == AccessControlMode::Confirm {
+        return confirm_overlay_action(
+            code,
+            CoreAction::CloseAccessControl,
+            CoreAction::AccessSubmit,
+            CoreAction::AccessCycleAction,
+        );
+    }
+
+    if let Some(action) = match code {
         crossterm::event::KeyCode::Esc => Some(CoreAction::CloseAccessControl),
-        crossterm::event::KeyCode::Tab if state.access_control_mode == AccessControlMode::Add => {
+        crossterm::event::KeyCode::Tab if state.access_control.mode == AccessControlMode::Add => {
             Some(CoreAction::AccessNextField)
         }
         crossterm::event::KeyCode::BackTab
-            if state.access_control_mode == AccessControlMode::Add =>
+            if state.access_control.mode == AccessControlMode::Add =>
         {
             Some(CoreAction::AccessPrevField)
         }
+        _ => None,
+    } {
+        return Some(action);
+    }
+
+    let directional_action = match state.access_control.mode {
+        AccessControlMode::Action | AccessControlMode::Confirm => overlay_directional_action(
+            code,
+            CoreAction::AccessCycleActionPrev,
+            CoreAction::AccessCycleAction,
+        ),
+        AccessControlMode::Add if state.access_control.focus == AccessControlFocus::Role => {
+            overlay_directional_action(
+                code,
+                CoreAction::AccessCycleRolePrev,
+                CoreAction::AccessCycleRole,
+            )
+        }
+        _ => None,
+    };
+    if directional_action.is_some() {
+        return directional_action;
+    }
+
+    match code {
         crossterm::event::KeyCode::Backspace
-            if state.access_control_mode == AccessControlMode::Add =>
+            if state.access_control.mode == AccessControlMode::Add =>
         {
             Some(CoreAction::AccessBackspace)
-        }
-        crossterm::event::KeyCode::Left | crossterm::event::KeyCode::Up => {
-            match state.access_control_mode {
-                AccessControlMode::Action => Some(CoreAction::AccessCycleActionPrev),
-                AccessControlMode::Confirm => Some(CoreAction::AccessCycleActionPrev),
-                AccessControlMode::Add
-                    if state.access_control_focus == AccessControlFocus::Role =>
-                {
-                    Some(CoreAction::AccessCycleRolePrev)
-                }
-                _ => None,
-            }
-        }
-        crossterm::event::KeyCode::Right | crossterm::event::KeyCode::Down => {
-            match state.access_control_mode {
-                AccessControlMode::Action => Some(CoreAction::AccessCycleAction),
-                AccessControlMode::Confirm => Some(CoreAction::AccessCycleAction),
-                AccessControlMode::Add
-                    if state.access_control_focus == AccessControlFocus::Role =>
-                {
-                    Some(CoreAction::AccessCycleRole)
-                }
-                _ => None,
-            }
         }
         crossterm::event::KeyCode::Enter => Some(CoreAction::AccessSubmit),
         crossterm::event::KeyCode::Char(c)
             if !c.is_control()
-                && state.access_control_mode == AccessControlMode::Add
-                && state.access_control_focus == AccessControlFocus::Principal =>
+                && state.access_control.mode == AccessControlMode::Add
+                && state.access_control.focus == AccessControlFocus::Principal =>
         {
             Some(CoreAction::AccessInput(c))
         }

@@ -206,6 +206,14 @@ mod global_commands {
                 HostGlobalCommand::RefreshCurrentView,
             ),
             (
+                KeyCode::Char('R'),
+                KeyModifiers::SHIFT,
+                PaneFocus::Content,
+                KINIC_MEMORIES_TAB_ID,
+                true,
+                HostGlobalCommand::OpenRenameMemory,
+            ),
+            (
                 KeyCode::Char('q'),
                 KeyModifiers::NONE,
                 PaneFocus::Items,

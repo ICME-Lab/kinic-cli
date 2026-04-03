@@ -1,4 +1,5 @@
 use super::*;
+use tui_kit_runtime::RemoveMemoryModalState;
 
 #[test]
 fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {

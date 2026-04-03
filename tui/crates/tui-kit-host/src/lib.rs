@@ -143,6 +143,7 @@ pub enum HostGlobalCommand {
     ToggleHelp,
     ToggleSettings,
     SetDefaultFromSelection,
+    OpenRenameMemory,
     BackFromContent,
     RefreshCurrentView,
     ClearQuery,
@@ -235,6 +236,13 @@ pub fn global_command_for_key(
         && matches!(focus, PaneFocus::Items | PaneFocus::Content)
     {
         return HostGlobalCommand::SetDefaultFromSelection;
+    }
+    if code == KeyCode::Char('R')
+        && modifiers.contains(KeyModifiers::SHIFT)
+        && current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
+        && matches!(focus, PaneFocus::Items | PaneFocus::Content)
+    {
+        return HostGlobalCommand::OpenRenameMemory;
     }
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateTab;
@@ -363,16 +371,19 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             CoreEffect::SetAccessListIndex(index) => {
                 state.access_list_index = index;
             }
+            CoreEffect::SetMemoryContentActionIndex(index) => {
+                state.memory_content_action_index = index;
+            }
             CoreEffect::OpenAccessAction {
                 memory_id,
                 principal_id,
                 role,
             } => {
-                state.access_control_open = true;
-                state.access_control_memory_id = memory_id;
-                state.access_control_mode = tui_kit_runtime::AccessControlMode::Action;
-                state.access_control_action = tui_kit_runtime::AccessControlAction::Change;
-                state.access_control_role = match role {
+                open_access_control_modal(state);
+                state.access_control.memory_id = memory_id;
+                state.access_control.mode = tui_kit_runtime::AccessControlMode::Action;
+                state.access_control.action = tui_kit_runtime::AccessControlAction::Change;
+                state.access_control.role = match role {
                     tui_kit_runtime::AccessControlRole::Admin => {
                         tui_kit_runtime::AccessControlRole::Writer
                     }
@@ -383,12 +394,9 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                         tui_kit_runtime::AccessControlRole::Admin
                     }
                 };
-                state.access_control_current_role = role;
-                state.access_control_principal_id = principal_id;
-                state.access_control_confirm_yes = true;
-                state.access_control_submit_state = CreateSubmitState::Idle;
-                state.access_control_error = None;
-                state.access_control_focus = tui_kit_runtime::AccessControlFocus::Principal;
+                state.access_control.current_role = role;
+                state.access_control.principal_id = principal_id;
+                state.access_control.focus = tui_kit_runtime::AccessControlFocus::Principal;
             }
             CoreEffect::OpenAccessConfirm {
                 memory_id,

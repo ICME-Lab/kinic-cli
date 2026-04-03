@@ -61,6 +61,8 @@ fn user_preferences_accepts_unknown_fields() {
 default_memory_id: aaaaa-aa
 saved_tags:
   - docs
+manual_memory_ids:
+  - bbbbb-bb
 future_setting: true
 "#,
     )
@@ -68,6 +70,7 @@ future_setting: true
 
     assert_eq!(with_unknown.default_memory_id.as_deref(), Some("aaaaa-aa"));
     assert_eq!(with_unknown.saved_tags, vec!["docs".to_string()]);
+    assert_eq!(with_unknown.manual_memory_ids, vec!["bbbbb-bb".to_string()]);
 }
 
 #[test]
@@ -136,6 +139,8 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             UserPreferences {
                 default_memory_id: Some("aaaaa-aa".to_string()),
                 saved_tags: vec![],
+                manual_memory_ids: vec![],
+                ..UserPreferences::default()
             },
             vec![selector_pair("bbbbb-bb", Some("Beta Memory"))],
             PreferencesHealth::default(),
@@ -158,6 +163,8 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             UserPreferences {
                 default_memory_id: Some("aaaaa-aa".to_string()),
                 saved_tags: vec![],
+                manual_memory_ids: vec![],
+                ..UserPreferences::default()
             },
             vec![selector_pair("aaaaa-aa", Some("Alpha Memory"))],
             PreferencesHealth {

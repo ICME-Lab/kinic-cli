@@ -319,18 +319,102 @@ fn access_control_area(area: Rect, mode: AccessControlMode) -> Option<Rect> {
     })
 }
 
+fn render_modal_overlay(
+    ui: &TuiKitUi<'_>,
+    overlay_area: Rect,
+    buf: &mut Buffer,
+    title: &str,
+    lines: Vec<Line<'static>>,
+) {
+    Clear.render(overlay_area, buf);
+    Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(ui.theme.style_border_focused())
+                .title(format!(" {title} "))
+                .style(Style::default().bg(ui.theme.bg_panel)),
+        )
+        .wrap(Wrap { trim: false })
+        .render(overlay_area, buf);
+}
+
+fn blank_line() -> Line<'static> {
+    Line::from("")
+}
+
+fn push_error_line(ui: &TuiKitUi<'_>, lines: &mut Vec<Line<'static>>, error: Option<&str>) {
+    let Some(error) = error else {
+        return;
+    };
+    lines.push(blank_line());
+    lines.push(Line::from(Span::styled(
+        format!("  {error}"),
+        ui.theme.style_error(),
+    )));
+}
+
+fn push_hint_line(ui: &TuiKitUi<'_>, lines: &mut Vec<Line<'static>>, hint: &str) {
+    lines.push(blank_line());
+    lines.push(Line::from(Span::styled(
+        hint.to_string(),
+        ui.theme.style_muted(),
+    )));
+}
+
+fn render_confirm_choice_modal(
+    ui: &TuiKitUi<'_>,
+    overlay_area: Rect,
+    buf: &mut Buffer,
+    title: &str,
+    message: &str,
+    summary_lines: Vec<Line<'static>>,
+    confirm_yes: bool,
+    submit_state: CreateSubmitState,
+    error: Option<&str>,
+    submitting_hint: &'static str,
+) {
+    let mut lines = vec![Line::from(Span::styled(
+        message.to_string(),
+        ui.theme.style_accent_bold(),
+    ))];
+    if !summary_lines.is_empty() {
+        lines.push(blank_line());
+        lines.extend(summary_lines);
+    }
+    lines.push(blank_line());
+    lines.push(Line::from(Span::styled(
+        if confirm_yes {
+            "[yes] / no".to_string()
+        } else {
+            " yes / [no]".to_string()
+        },
+        ui.theme.style_accent_bold(),
+    )));
+    lines.push(blank_line());
+    lines.push(Line::from(Span::styled(
+        match submit_state {
+            CreateSubmitState::Submitting => submitting_hint,
+            CreateSubmitState::Idle | CreateSubmitState::Error => "Enter: continue  Esc: close",
+        },
+        ui.theme.style_muted(),
+    )));
+    push_error_line(ui, &mut lines, error);
+    render_modal_overlay(ui, overlay_area, buf, title, lines);
+}
+
 fn access_principal_value(ui: &TuiKitUi<'_>) -> String {
-    if ui.access_control_principal_id.is_empty() {
+    if ui.access_control.principal_id.is_empty() {
         "<principal or anonymous>".to_string()
-    } else if ui.access_control_mode == AccessControlMode::Add {
-        ui.access_control_principal_id.to_string()
+    } else if ui.access_control.mode == AccessControlMode::Add {
+        ui.access_control.principal_id.to_string()
     } else {
-        shorten_principal(ui.access_control_principal_id)
+        shorten_principal(ui.access_control.principal_id.as_str())
     }
 }
 
 fn access_principal_span(ui: &TuiKitUi<'_>) -> Span<'static> {
-    if ui.access_control_principal_id.is_empty() {
+    if ui.access_control.principal_id.is_empty() {
         Span::styled(access_principal_value(ui), ui.theme.style_muted())
     } else {
         Span::styled(
@@ -357,7 +441,7 @@ fn access_field_style(ui: &TuiKitUi<'_>, focus: AccessControlFocus) -> ratatui::
 }
 
 fn access_overlay_copy(ui: &TuiKitUi<'_>) -> (&'static str, Vec<Line<'static>>) {
-    match ui.access_control_mode {
+    match ui.access_control.mode {
         AccessControlMode::Action => (
             "Access Action",
             vec![
@@ -490,31 +574,16 @@ fn confirm_message(ui: &TuiKitUi<'_>) -> String {
             format!(
                 "Change role for {} to {}?",
                 access_principal_value(ui),
-                role_label(ui.access_control_role)
+                role_label(ui.access_control.role)
             )
         }
         AccessControlAction::Add => {
             format!(
                 "Add {} as {}?",
                 access_principal_value(ui),
-                role_label(ui.access_control_role)
+                role_label(ui.access_control.role)
             )
         }
-    }
-}
-
-fn confirm_value(ui: &TuiKitUi<'_>) -> String {
-    if ui.access_control_confirm_yes {
-        "[yes] / no".to_string()
-    } else {
-        " yes / [no]".to_string()
-    }
-}
-
-fn confirm_hint(ui: &TuiKitUi<'_>) -> &'static str {
-    match ui.access_control_submit_state {
-        CreateSubmitState::Submitting => "Applying access change...",
-        CreateSubmitState::Idle | CreateSubmitState::Error => "Enter: continue  Esc: close",
     }
 }
 

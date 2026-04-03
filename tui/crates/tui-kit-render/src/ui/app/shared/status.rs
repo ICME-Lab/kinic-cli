@@ -270,6 +270,12 @@ impl<'a> TuiKitUi<'a> {
             Span::styled("/", self.theme.style_accent()),
             Span::styled(" search ", self.theme.style_muted()),
         ]);
+        if show_memories_rename_hint(tab_id, self.focus) {
+            spans.extend([
+                Span::styled("Shift+R", self.theme.style_accent()),
+                Span::styled(" rename ", self.theme.style_muted()),
+            ]);
+        }
         if !self.tab_specs.is_empty() {
             spans.push(Span::styled("1-5", self.theme.style_accent()));
             spans.push(Span::styled(
@@ -463,6 +469,28 @@ mod tests {
     }
 
     #[test]
+    fn memories_rename_hint_is_shown_for_items_and_content_only() {
+        let theme = Theme::default();
+        let items_ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_MEMORIES_TAB_ID))
+            .focus(Focus::Items);
+        let content_ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_MEMORIES_TAB_ID))
+            .focus(Focus::Content);
+        let search_ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_MEMORIES_TAB_ID))
+            .focus(Focus::Search);
+        let other_tab_ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_INSERT_TAB_ID))
+            .focus(Focus::Items);
+
+        assert!(render_status_line(&items_ui).contains("Shift+R"));
+        assert!(render_status_line(&content_ui).contains("Shift+R"));
+        assert!(!render_status_line(&search_ui).contains("Shift+R"));
+        assert!(!render_status_line(&other_tab_ui).contains("Shift+R"));
+    }
+
+    #[test]
     fn insert_form_status_keeps_hints_when_status_message_exists() {
         let theme = Theme::default();
         let ui = TuiKitUi::new(&theme)
@@ -521,6 +549,22 @@ mod tests {
 
         assert!(rendered.contains("Loaded memories."));
         assert!(rendered.contains("? help q"));
+    }
+
+    #[test]
+    fn generic_status_trims_message_before_hiding_right_side_hints() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new("tab-1"))
+            .focus(Focus::Items)
+            .status_message(
+                "preferences load failed: YAML error: missing field `manual_memory_ids`",
+            );
+        let line = ui.generic_status_line(72).to_string();
+
+        assert!(line.contains("? help q"));
+        assert!(line.contains("Tab focus"));
+        assert!(line.contains("…"));
     }
 
     #[test]

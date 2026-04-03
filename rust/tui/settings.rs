@@ -313,6 +313,21 @@ fn saved_tags_display(preferences: &UserPreferences) -> String {
     preferences.saved_tags.join(", ")
 }
 
+#[cfg_attr(test, allow(dead_code))]
+fn normalize_manual_memory_ids(memory_ids: Vec<String>) -> Vec<String> {
+    let mut unique = Vec::new();
+    for memory_id in memory_ids
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        if !unique.iter().any(|existing| existing == &memory_id) {
+            unique.push(memory_id);
+        }
+    }
+    unique
+}
+
 #[cfg(test)]
 #[path = "settings_tests.rs"]
 mod tests;
