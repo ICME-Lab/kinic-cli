@@ -502,10 +502,16 @@ struct InsertSubmitTaskOutput {
 }
 
 fn insert_success_status(success: &bridge::InsertMemorySuccess) -> String {
-    format!(
-        "Inserted {} chunks (tag: {}) into {}",
-        success.inserted_count, success.tag, success.memory_id
-    )
+    match &success.source_name {
+        Some(source_name) => format!(
+            "Inserted {} chunks from {} (tag: {}) into {}",
+            success.inserted_count, source_name, success.tag, success.memory_id
+        ),
+        None => format!(
+            "Inserted {} chunks (tag: {}) into {}",
+            success.inserted_count, success.tag, success.memory_id
+        ),
+    }
 }
 
 struct InsertDimTaskOutput {
@@ -656,6 +662,7 @@ impl KinicProvider {
                 .start_live_memories_load(None, true)
                 .into_iter()
                 .collect(),
+            KINIC_SETTINGS_TAB_ID => self.start_session_settings_refresh().into_iter().collect(),
             _ => Vec::new(),
         }
     }

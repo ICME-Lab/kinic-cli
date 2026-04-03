@@ -6,8 +6,8 @@ use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
 };
 use tui_kit_runtime::{
-    CoreError, CoreResult, InsertMode, PaneFocus, PickerContext, PickerListMode, PickerState,
-    ProviderOutput, ProviderSnapshot,
+    CoreError, CoreResult, InsertFormFocus, InsertMode, PaneFocus, PickerContext, PickerListMode,
+    PickerState, ProviderOutput, ProviderSnapshot,
 };
 
 struct TestProvider {
@@ -320,7 +320,7 @@ fn build_ui_forwards_insert_validation_fields_to_render_tree() {
     let state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
-        insert_mode: InsertMode::Raw,
+        insert_mode: InsertMode::ManualEmbedding,
         insert_memory_id: "aaaaa-aa".to_string(),
         insert_embedding: "[0.1, 0.2]".to_string(),
         insert_current_dim: Some("2".to_string()),
@@ -475,6 +475,7 @@ fn apply_insert_file_dialog_selection_updates_file_path_and_clears_insert_error(
         state.insert_submit_state,
         tui_kit_runtime::CreateSubmitState::Idle
     );
+    assert_eq!(state.insert_focus, InsertFormFocus::Submit);
     assert_eq!(
         effects,
         vec![CoreEffect::Notify(
@@ -487,6 +488,7 @@ fn apply_insert_file_dialog_selection_updates_file_path_and_clears_insert_error(
 fn apply_insert_file_dialog_selection_keeps_existing_path_on_cancel() {
     let mut state = CoreState {
         insert_selected_file_path: Some(PathBuf::from("/tmp/existing.md")),
+        insert_focus: InsertFormFocus::FilePath,
         ..CoreState::default()
     };
 
@@ -496,6 +498,7 @@ fn apply_insert_file_dialog_selection_keeps_existing_path_on_cancel() {
         state.insert_selected_file_path,
         Some(PathBuf::from("/tmp/existing.md"))
     );
+    assert_eq!(state.insert_focus, InsertFormFocus::FilePath);
     assert_eq!(
         effects,
         vec![CoreEffect::Notify("File selection canceled.".to_string())]

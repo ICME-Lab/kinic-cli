@@ -308,11 +308,27 @@ fn insert_success_status_includes_count_tag_and_memory_id() {
         memory_id: "aaaaa-aa".to_string(),
         tag: "docs".to_string(),
         inserted_count: 12,
+        source_name: None,
     };
 
     assert_eq!(
         insert_success_status(&success),
         "Inserted 12 chunks (tag: docs) into aaaaa-aa"
+    );
+}
+
+#[test]
+fn insert_success_status_includes_source_name_for_file_insert() {
+    let success = bridge::InsertMemorySuccess {
+        memory_id: "aaaaa-aa".to_string(),
+        tag: "docs".to_string(),
+        inserted_count: 12,
+        source_name: Some("doc.md".to_string()),
+    };
+
+    assert_eq!(
+        insert_success_status(&success),
+        "Inserted 12 chunks from doc.md (tag: docs) into aaaaa-aa"
     );
 }
 
@@ -330,6 +346,7 @@ fn poll_insert_submit_background_resets_form_and_notifies_on_success() {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             inserted_count: 12,
+            source_name: None,
         }),
     })
     .expect("background insert result should send");
@@ -361,6 +378,7 @@ fn insert_success_status_emits_persistent_notify() {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             inserted_count: 12,
+            source_name: None,
         }),
     })
     .expect("background insert result should send");

@@ -49,7 +49,6 @@ serde_yaml = "0.9"
 default = []
 python-bindings = ["pyo3"]
 experimental = []
-tui-file-picker = ["tui-kit-host/rfd-file-picker"]
 
 [lib]
 name = "_lib"

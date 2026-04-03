@@ -79,6 +79,7 @@ fn insert_form_routes_chars_into_active_field() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Text,
         ..CoreState::default()
     };
@@ -336,5 +337,8 @@ fn insert_tag_focus_uses_enter_to_move_to_next_field() {
 
     let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
 
-    assert_eq!(action, Some(CoreAction::InsertNextField));
+    assert_eq!(
+        action,
+        Some(CoreAction::OpenPicker(PickerContext::InsertTag))
+    );
 }

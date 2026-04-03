@@ -1,9 +1,12 @@
-//! Terminal enter/leave helpers for host loops and GUI picker suspension.
+//! Terminal enter/leave helpers for host loops and external chooser suspension.
 //!
-//! This module keeps terminal restoration explicit so GUI dialogs cannot leave
-//! the host loop in a half-restored state.
+//! This module keeps terminal restoration explicit so external choosers cannot
+//! leave the host loop in a half-restored state.
 
-use std::{fmt, io, path::PathBuf};
+use std::{
+    fmt, io,
+    path::{Path, PathBuf},
+};
 
 use crossterm::{
     event::DisableMouseCapture,
@@ -13,11 +16,9 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tui_kit_runtime::InsertMode;
 
-#[cfg(feature = "rfd-file-picker")]
-use tui_kit_runtime::FILE_MODE_ALLOWED_EXTENSIONS;
+use crate::picker::PickerBackend;
 
 pub type HostTerminal = Terminal<CrosstermBackend<io::Stdout>>;
-pub type FilePickerFn = fn(InsertMode) -> Result<Option<PathBuf>, String>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PickFilePathError {
@@ -110,11 +111,12 @@ where
 
 pub fn pick_file_path(
     terminal: &mut HostTerminal,
-    picker: FilePickerFn,
+    picker: &mut dyn PickerBackend,
+    cwd: &Path,
     insert_mode: InsertMode,
 ) -> Result<Option<PathBuf>, PickFilePathError> {
     let mut suspended = SuspendedTerminal::new(terminal)?;
-    match picker(insert_mode) {
+    match picker.pick_file(cwd, insert_mode) {
         Ok(selection) => {
             suspended.restore()?;
             Ok(selection)
@@ -124,29 +126,6 @@ pub fn pick_file_path(
             Err(restore_error) => Err(restore_error),
         },
     }
-}
-
-pub fn default_file_picker() -> Option<FilePickerFn> {
-    #[cfg(feature = "rfd-file-picker")]
-    {
-        Some(rfd_file_picker)
-    }
-
-    #[cfg(not(feature = "rfd-file-picker"))]
-    {
-        None
-    }
-}
-
-#[cfg(feature = "rfd-file-picker")]
-pub fn rfd_file_picker(insert_mode: InsertMode) -> Result<Option<PathBuf>, String> {
-    use rfd::FileDialog;
-
-    let mut dialog = FileDialog::new().set_title("Select file");
-    if matches!(insert_mode, InsertMode::File) {
-        dialog = dialog.add_filter("Supported files", FILE_MODE_ALLOWED_EXTENSIONS);
-    }
-    Ok(dialog.pick_file())
 }
 
 #[cfg(test)]
@@ -293,11 +272,5 @@ mod tests {
             error,
             PickFilePathError::TerminalState("enter failed".to_string())
         );
-    }
-
-    #[cfg(not(feature = "rfd-file-picker"))]
-    #[test]
-    fn host_builds_without_rfd_picker_feature() {
-        assert!(!cfg!(feature = "rfd-file-picker"));
     }
 }

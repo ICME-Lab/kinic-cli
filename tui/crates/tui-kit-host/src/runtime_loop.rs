@@ -16,8 +16,10 @@ use tui_kit_runtime::{
 
 use crate::{
     HostGlobalCommand, HostInputEvent, action_from_keycode, execute_effects_to_status,
-    global_command_for_key, poll_host_input, resolve_tab_action_with_current,
-    terminal::{FilePickerFn, PickFilePathError, pick_file_path, with_terminal},
+    global_command_for_key,
+    picker::PickerBackend,
+    poll_host_input, resolve_tab_action_with_current,
+    terminal::{PickFilePathError, pick_file_path, with_terminal},
 };
 use form_tab_flow::{form_tab_action_from_key, reset_form_focus, reset_form_state_for_tab};
 
@@ -26,7 +28,7 @@ pub struct RuntimeLoopConfig {
     pub tab_ids: &'static [&'static str],
     pub initial_focus: PaneFocus,
     pub ui_config: fn() -> UiConfig,
-    pub file_picker: Option<FilePickerFn>,
+    pub file_picker: Option<Box<dyn PickerBackend>>,
 }
 
 pub trait RuntimeLoopHooks<P: DataProvider> {
@@ -70,10 +72,18 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
     hooks: &mut H,
 ) -> Result<(), Box<dyn std::error::Error>> {
     with_terminal(|terminal| {
+        let RuntimeLoopConfig {
+            initial_tab_id,
+            tab_ids,
+            initial_focus,
+            ui_config,
+            file_picker,
+        } = cfg;
+        let mut file_picker = file_picker;
         let theme = Theme::default();
         let mut state = CoreState {
-            current_tab_id: cfg.initial_tab_id.to_string(),
-            focus: cfg.initial_focus,
+            current_tab_id: initial_tab_id.to_string(),
+            focus: initial_focus,
             ..CoreState::default()
         };
         let mut inspector_scroll: usize = 0;
@@ -95,7 +105,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             if let Ok(size) = terminal.size() {
                 let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
                 let visible_height =
-                    list_viewport_height_for_area_with_tabs(area, !cfg.tab_ids.is_empty());
+                    list_viewport_height_for_area_with_tabs(area, !tab_ids.is_empty());
                 list_scroll_offset = keep_selection_visible_scroll(
                     list_scroll_offset,
                     state.selected_index,
@@ -118,7 +128,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 let focus = ui_focus_from_pane(state.focus);
                 let insert_file_path_display = insert_file_path_display(&state);
                 let ui = TuiKitUi::new(&theme)
-                    .ui_config((cfg.ui_config)())
+                    .ui_config(ui_config())
                     .ui_summaries(&state.list_items)
                     .ui_selected_content(state.selected_content.as_ref())
                     .ui_total_count(state.total_count)
@@ -339,7 +349,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     |a| {
                         resolve_tab_action_with_current(
                             a,
-                            cfg.tab_ids,
+                            tab_ids,
                             Some(state.current_tab_id.as_str()),
                         )
                     },
@@ -367,7 +377,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::OpenSelected
                 );
                 if should_open_insert_file_dialog(&action, &state) {
-                    match open_insert_file_dialog(&mut state, terminal, cfg.file_picker) {
+                    match open_insert_file_dialog(&mut state, terminal, &mut file_picker) {
                         Ok(effects) => {
                             hooks.on_effects(provider, &mut state, &effects);
                             execute_effects_to_status(&mut state, effects);
@@ -411,14 +421,16 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 fn open_insert_file_dialog(
     state: &mut CoreState,
     terminal: &mut crate::terminal::HostTerminal,
-    file_picker: Option<FilePickerFn>,
+    file_picker: &mut Option<Box<dyn PickerBackend>>,
 ) -> Result<Vec<CoreEffect>, PickFilePathError> {
-    let Some(file_picker) = file_picker else {
+    let Some(file_picker) = file_picker.as_deref_mut() else {
         return Ok(vec![CoreEffect::Notify(
             "File picker is unavailable in this build.".to_string(),
         )]);
     };
-    let selection = pick_file_path(terminal, file_picker, state.insert_mode)?;
+    let cwd =
+        std::env::current_dir().map_err(|error| PickFilePathError::Picker(error.to_string()))?;
+    let selection = pick_file_path(terminal, file_picker, cwd.as_path(), state.insert_mode)?;
     Ok(apply_insert_file_dialog_selection(state, selection))
 }
 
@@ -433,6 +445,7 @@ fn apply_insert_file_dialog_selection(
     let display_path = path.display().to_string();
     state.insert_file_path_input = display_path.clone();
     state.insert_selected_file_path = Some(path);
+    state.insert_focus = tui_kit_runtime::InsertFormFocus::Submit;
     state.insert_error = None;
     if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
         state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;

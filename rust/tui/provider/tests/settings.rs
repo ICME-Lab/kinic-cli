@@ -64,6 +64,20 @@ fn set_tab_create_starts_account_refresh() {
 }
 
 #[test]
+fn refresh_current_view_restarts_session_settings_refresh_on_settings_tab() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_SETTINGS_TAB_ID.to_string();
+
+    let output = provider
+        .handle_action(&CoreAction::RefreshCurrentView, &CoreState::default())
+        .expect("refresh output");
+
+    assert!(provider.session_settings_in_flight);
+    assert!(provider.pending_session_settings.is_some());
+    assert!(output.effects.is_empty());
+}
+
+#[test]
 fn poll_background_applies_refreshed_session_settings() {
     let (provider, output) = run_session_settings_refresh(4, None, refreshed_session_overview());
 

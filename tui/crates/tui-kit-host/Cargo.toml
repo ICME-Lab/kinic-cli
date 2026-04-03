@@ -10,10 +10,6 @@ description = "Host-side utilities for tui-kit runtime integration"
 name = "tui_kit_host"
 path = "src/lib.rs"
 
-[features]
-default = []
-rfd-file-picker = ["dep:rfd"]
-
 [dependencies]
 crossterm = "0.28"
 webbrowser = "0.8"
@@ -21,6 +17,7 @@ dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 ratatui = "0.29"
-rfd = { version = "0.15", optional = true }
+tempfile = "3"
+tracing = "0.1"
 tui-kit-render = { path = "../tui-kit-render" }
 tui-kit-runtime = { path = "../tui-kit-runtime" }

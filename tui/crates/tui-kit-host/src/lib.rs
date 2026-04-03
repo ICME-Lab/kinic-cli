@@ -1,5 +1,6 @@
 //! Host-side helpers for integrating terminal input/output with `tui-kit-runtime`.
 
+pub mod picker;
 pub mod runtime_loop;
 pub mod settings;
 pub mod terminal;

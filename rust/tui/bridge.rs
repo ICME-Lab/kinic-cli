@@ -71,6 +71,7 @@ pub struct InsertMemorySuccess {
     pub memory_id: String,
     pub tag: String,
     pub inserted_count: usize,
+    pub source_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -403,6 +404,7 @@ pub async fn run_insert(
         memory_id: result.memory_id,
         tag: result.tag,
         inserted_count: result.inserted_count,
+        source_name: result.source_name,
     })
 }
 

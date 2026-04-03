@@ -9,7 +9,8 @@ use ic_agent::export::Principal;
 use serde_json::json;
 
 use crate::{
-    clients::memory::MemoryClient, commands::convert_pdf::pdf_to_markdown, embedding::late_chunking,
+    clients::memory::MemoryClient, commands::convert_pdf::pdf_to_markdown,
+    embedding::late_chunking,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +47,7 @@ pub struct InsertExecutionResult {
     pub memory_id: String,
     pub tag: String,
     pub inserted_count: usize,
+    pub source_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +85,7 @@ pub async fn execute_insert_request(
     let validated = validate_and_transform_insert_request(request)?;
     let prepared = prepare_insert_request(&validated).await?;
     let inserted_count = prepared.len();
+    let source_name = validated.source_name();
 
     for item in prepared {
         client.insert(item.embedding, &item.payload).await?;
@@ -93,6 +96,7 @@ pub async fn execute_insert_request(
         memory_id: validated.memory_id().to_string(),
         tag: validated.tag().to_string(),
         inserted_count,
+        source_name,
     })
 }
 
@@ -366,6 +370,28 @@ impl ValidatedInsertRequest {
             }
         }
     }
+
+    fn source_name(&self) -> Option<String> {
+        match self {
+            Self::Normal {
+                file_path: Some(file_path),
+                ..
+            }
+            | Self::Pdf { file_path, .. } => Some(display_source_name(file_path)),
+            Self::Normal {
+                file_path: None, ..
+            }
+            | Self::Raw { .. } => None,
+        }
+    }
+}
+
+fn display_source_name(file_path: &PathBuf) -> String {
+    file_path
+        .file_name()
+        .unwrap_or(file_path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]
@@ -427,6 +453,30 @@ mod tests {
         let payload = payload_for("docs", "hello");
 
         assert_eq!(payload, "{\"sentence\":\"hello\",\"tag\":\"docs\"}");
+    }
+
+    #[test]
+    fn validated_insert_request_source_name_uses_file_name() {
+        let request = ValidatedInsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: None,
+            file_path: Some(PathBuf::from("/tmp/nested/doc.md")),
+        };
+
+        assert_eq!(request.source_name(), Some("doc.md".to_string()));
+    }
+
+    #[test]
+    fn validated_insert_request_source_name_is_none_for_inline_text() {
+        let request = ValidatedInsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("payload".to_string()),
+            file_path: None,
+        };
+
+        assert_eq!(request.source_name(), None);
     }
 
     #[test]
