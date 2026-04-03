@@ -2,7 +2,7 @@
 name = "tui-kit-host"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.86"
 license = "MIT"
 description = "Host-side utilities for tui-kit runtime integration"
 
@@ -17,6 +17,7 @@ dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 ratatui = "0.29"
+ratatui-textarea = "0.8"
 tempfile = "3"
 tracing = "0.1"
 tui-kit-render = { path = "../tui-kit-render" }
