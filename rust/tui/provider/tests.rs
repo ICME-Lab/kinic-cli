@@ -7,7 +7,8 @@ use std::{
 };
 use tui_kit_runtime::{
     CreateCostState, LoadedCreateCost, PickerConfirmKind, PickerContext, PickerItem,
-    PickerListMode, PickerState, SessionAccountOverview,
+    PickerListMode, PickerState, RenameMemoryModalState, SessionAccountOverview,
+    TextInputModalState, TransferModalState,
 };
 
 fn session_snapshot(principal_id: &str) -> tui_kit_runtime::SessionSettingsSnapshot {
@@ -109,6 +110,7 @@ fn install_pending_search(
 fn refreshed_session_overview() -> SessionAccountOverview {
     let mut overview = SessionAccountOverview::new(session_snapshot("aaaaa-aa"));
     overview.balance_base_units = Some(1_234_000_000u128);
+    overview.fee_base_units = Some(100_000u128);
     overview.price_base_units = Some(Nat::from(150_000_000u128));
     overview
 }
@@ -143,6 +145,7 @@ fn loaded_create_cost(overview: SessionAccountOverview) -> CreateCostState {
         overview.session.principal_id.as_str(),
         overview.balance_base_units,
         overview.price_base_units.as_ref(),
+        overview.fee_base_units,
     );
     CreateCostState::Loaded(Box::new(LoadedCreateCost { overview, details }))
 }

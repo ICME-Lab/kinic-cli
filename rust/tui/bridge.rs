@@ -75,6 +75,11 @@ pub struct InsertMemorySuccess {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferKinicSuccess {
+    pub block_index: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateMemoryError {
     Principal(String),
     Balance(String),
@@ -95,6 +100,23 @@ pub enum InsertMemoryError {
     BuildAgent(String),
     ParseMemoryId(String),
     Execute(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferKinicError {
+    ResolveAgentFactory(String),
+    BuildAgent(String),
+    ParsePrincipal(String),
+    LoadFee(String),
+    Transfer(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenameMemoryError {
+    ResolveAgentFactory(String),
+    BuildAgent(String),
+    ParseMemoryId(String),
+    Rename(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,10 +160,13 @@ pub async fn create_memory(
     let balance =
         balance.map_err(|error| CreateMemoryError::Balance(short_error(&error.to_string())))?;
     let price = price.map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
-    match balance_delta(&price, balance) {
+    let fee = fetch_fee(&agent)
+        .await
+        .map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
+    match balance_delta(&price, balance, fee) {
         BalanceDelta::Surplus(_) => {}
         BalanceDelta::Shortfall(shortfall) => {
-            let required_total = required_balance(&price);
+            let required_total = required_balance(&price, fee);
             return Err(CreateMemoryError::InsufficientBalance {
                 required_total_kinic: format_e8s_to_kinic_string_nat(&required_total),
                 required_total_base_units: required_total.to_string(),
@@ -151,7 +176,7 @@ pub async fn create_memory(
         }
     }
     client
-        .approve_launcher(&price)
+        .approve_launcher(&price, fee)
         .await
         .map_err(|error| CreateMemoryError::Approve(short_error(&error.to_string())))?;
     let id = client
@@ -217,7 +242,11 @@ pub async fn load_session_account_overview(
         }
     }
     let client = LauncherClient::new(agent.clone());
-    let (balance, price) = tokio::join!(fetch_balance(&agent), client.fetch_deployment_price());
+    let (balance, price, fee) = tokio::join!(
+        fetch_balance(&agent),
+        client.fetch_deployment_price(),
+        fetch_fee(&agent)
+    );
 
     if let Err(error) = &balance {
         overview.balance_error = Some(short_error(&error.to_string()));
@@ -229,8 +258,53 @@ pub async fn load_session_account_overview(
     } else if let Ok(price) = &price {
         overview.price_base_units = Some(price.clone());
     }
+    if let Err(error) = &fee {
+        overview.fee_error = Some(short_error(&error.to_string()));
+    } else if let Ok(fee) = &fee {
+        overview.fee_base_units = Some(*fee);
+    }
 
     overview
+}
+
+pub async fn load_transfer_prerequisites(
+    use_mainnet: bool,
+    auth: TuiAuth,
+) -> Result<(u128, u128), TransferKinicError> {
+    let factory = resolve_agent_factory(use_mainnet, &auth).map_err(|error| {
+        TransferKinicError::ResolveAgentFactory(short_error(&error.to_string()))
+    })?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| TransferKinicError::BuildAgent(short_error(&error.to_string())))?;
+    let (balance, fee) = tokio::join!(fetch_balance(&agent), fetch_fee(&agent));
+    let balance =
+        balance.map_err(|error| TransferKinicError::Transfer(short_error(&error.to_string())))?;
+    let fee = fee.map_err(|error| TransferKinicError::LoadFee(short_error(&error.to_string())))?;
+    Ok((balance, fee))
+}
+
+pub async fn transfer_kinic(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    recipient_principal: String,
+    amount_base_units: u128,
+    fee_base_units: u128,
+) -> Result<TransferKinicSuccess, TransferKinicError> {
+    let recipient = Principal::from_text(&recipient_principal)
+        .map_err(|error| TransferKinicError::ParsePrincipal(short_error(&error.to_string())))?;
+    let factory = resolve_agent_factory(use_mainnet, &auth).map_err(|error| {
+        TransferKinicError::ResolveAgentFactory(short_error(&error.to_string()))
+    })?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| TransferKinicError::BuildAgent(short_error(&error.to_string())))?;
+    let block_index = transfer(&agent, recipient, amount_base_units, fee_base_units)
+        .await
+        .map_err(|error| TransferKinicError::Transfer(short_error(&error.to_string())))?;
+    Ok(TransferKinicSuccess { block_index })
 }
 
 pub async fn search_memory_with_agent(
@@ -773,6 +847,7 @@ mod tests {
             "https://api.kinic.io".to_string(),
         ));
         overview.balance_base_units = Some(2_000_000u128);
+        overview.fee_base_units = Some(100_000u128);
         overview.price_base_units = Some(Nat::from(1_500_000u128));
 
         assert!(overview.has_complete_create_cost());
@@ -879,6 +954,7 @@ mod tests {
             "https://api.kinic.io".to_string(),
         ));
         complete.balance_base_units = Some(2_000_000u128);
+        complete.fee_base_units = Some(100_000u128);
         complete.price_base_units = Some(Nat::from(1_500_000u128));
         assert_eq!(
             complete.session_settings_refresh_notify_message(),

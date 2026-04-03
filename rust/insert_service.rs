@@ -2,15 +2,18 @@
 // What: centralizes insert/insert-raw/insert-pdf preparation and execution.
 // Why: keep the actual insert path in one place so UI additions do not duplicate logic.
 
-use std::{fs, fs::File, path::PathBuf};
+use std::{
+    fs,
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
 use ic_agent::export::Principal;
 use serde_json::json;
 
 use crate::{
-    clients::memory::MemoryClient, commands::convert_pdf::pdf_to_markdown,
-    embedding::late_chunking,
+    clients::memory::MemoryClient, commands::convert_pdf::pdf_to_markdown, embedding::late_chunking,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,7 +389,7 @@ impl ValidatedInsertRequest {
     }
 }
 
-fn display_source_name(file_path: &PathBuf) -> String {
+fn display_source_name(file_path: &Path) -> String {
     file_path
         .file_name()
         .unwrap_or(file_path.as_os_str())

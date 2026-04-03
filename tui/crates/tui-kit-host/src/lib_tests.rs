@@ -2,7 +2,7 @@ use super::*;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
 };
-use tui_kit_runtime::{CoreState, ProviderSnapshot, apply_snapshot};
+use tui_kit_runtime::{CoreState, ProviderSnapshot, TransferModalState, apply_snapshot};
 
 mod key_mapping {
     use super::*;
@@ -172,6 +172,60 @@ mod effect_application {
 
         assert_eq!(state.insert_tag, "research");
         assert_eq!(state.insert_error, None);
+    }
+
+    #[test]
+    fn transfer_effects_reset_modal_state_consistently() {
+        let mut state = CoreState {
+            transfer_modal: TransferModalState {
+                open: true,
+                mode: tui_kit_runtime::TransferModalMode::Confirm,
+                prerequisites_loading: true,
+                confirm_yes: false,
+                submit_state: CreateSubmitState::Error,
+                error: Some("boom".to_string()),
+                ..TransferModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(
+            &mut state,
+            vec![CoreEffect::OpenTransferModal {
+                fee_base_units: 100_000,
+                available_balance_base_units: 500_000_000,
+            }],
+        );
+        assert!(state.transfer_modal.open);
+        assert_eq!(
+            state.transfer_modal.mode,
+            tui_kit_runtime::TransferModalMode::Edit
+        );
+        assert!(!state.transfer_modal.prerequisites_loading);
+        assert_eq!(state.transfer_modal.fee_base_units, Some(100_000));
+        assert_eq!(
+            state.transfer_modal.available_balance_base_units,
+            Some(500_000_000)
+        );
+        assert_eq!(state.transfer_modal.submit_state, CreateSubmitState::Idle);
+        assert_eq!(state.transfer_modal.error, None);
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::OpenTransferConfirm]);
+        assert_eq!(
+            state.transfer_modal.mode,
+            tui_kit_runtime::TransferModalMode::Confirm
+        );
+        assert!(state.transfer_modal.confirm_yes);
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::CloseTransferModal]);
+        assert!(!state.transfer_modal.open);
+        assert_eq!(
+            state.transfer_modal.mode,
+            tui_kit_runtime::TransferModalMode::Edit
+        );
+        assert!(!state.transfer_modal.prerequisites_loading);
+        assert_eq!(state.transfer_modal.submit_state, CreateSubmitState::Idle);
+        assert_eq!(state.transfer_modal.error, None);
     }
 }
 

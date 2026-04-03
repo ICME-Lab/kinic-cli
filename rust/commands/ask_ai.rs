@@ -72,7 +72,7 @@ pub async fn ask_ai_flow(
 
     let limit = top_k.max(1);
     let prompt = build_prompt(query, &results, limit, language);
-    let llm_response = call_llm(&prompt).await?;
+    let llm_response = call_chat_endpoint(&prompt).await?;
 
     Ok(AskAiResult {
         prompt,
@@ -82,7 +82,7 @@ pub async fn ask_ai_flow(
     })
 }
 
-async fn call_llm(prompt: &str) -> Result<String> {
+pub(crate) async fn call_chat_endpoint(prompt: &str) -> Result<String> {
     let url = format!("{}{}", embedding_base_url(), CHAT_PATH);
     let response = Client::new()
         .post(url)

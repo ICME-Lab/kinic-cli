@@ -239,8 +239,7 @@ fn account_balance_value(overview: &SessionAccountOverview) -> String {
     overview
         .balance_base_units
         .map(format_e8s_to_kinic_string_u128)
-        .as_deref()
-        .map(format_kinic_value)
+        .map(|value| format_kinic_value(truncate_kinic_fraction_to_three_digits(value).as_str()))
         .unwrap_or_else(|| UNAVAILABLE.to_string())
 }
 

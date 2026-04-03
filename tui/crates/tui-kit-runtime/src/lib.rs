@@ -187,6 +187,29 @@ pub enum AccessControlFocus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransferModalFocus {
+    #[default]
+    Principal,
+    Amount,
+    Max,
+    Submit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenameModalFocus {
+    #[default]
+    Name,
+    Submit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransferModalMode {
+    #[default]
+    Edit,
+    Confirm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AccessControlMode {
     #[default]
     None,
@@ -201,9 +224,163 @@ pub struct MemorySelectorItem {
     pub title: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsRowBehavior {
+    pub enter_action: Option<CoreAction>,
+    pub status_hint: &'static str,
+}
+
+impl SettingsRowBehavior {
+    fn new(enter_action: Option<CoreAction>, status_hint: &'static str) -> Self {
+        Self {
+            enter_action,
+            status_hint,
+        }
+    }
+}
+
 impl MemorySelectorItem {
     pub fn display_title(&self) -> &str {
         self.title.as_deref().unwrap_or(self.id.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TextInputModalState {
+    pub open: bool,
+    pub value: String,
+    pub submit_state: CreateSubmitState,
+    pub error: Option<String>,
+}
+
+impl TextInputModalState {
+    pub fn clear_error(&mut self) {
+        clear_modal_error_state(&mut self.submit_state, &mut self.error);
+    }
+
+    pub fn reset_submission(&mut self) {
+        reset_modal_submission(&mut self.submit_state, &mut self.error);
+    }
+
+    pub fn begin_submit(&mut self) {
+        begin_modal_submit(&mut self.submit_state, &mut self.error);
+    }
+
+    pub fn is_locked(&self) -> bool {
+        modal_locked(self.submit_state.clone())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RenameMemoryModalState {
+    pub form: TextInputModalState,
+    pub memory_id: String,
+    pub focus: RenameModalFocus,
+}
+
+impl RenameMemoryModalState {
+    pub fn open(&mut self) {
+        self.form.open = true;
+        self.focus = RenameModalFocus::Name;
+        self.form.reset_submission();
+    }
+
+    pub fn close(&mut self) {
+        self.form.open = false;
+        self.focus = RenameModalFocus::Name;
+        self.form.reset_submission();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RemoveMemoryModalState {
+    pub open: bool,
+    pub confirm_yes: bool,
+    pub submit_state: CreateSubmitState,
+    pub error: Option<String>,
+}
+
+impl RemoveMemoryModalState {
+    pub fn open(&mut self) {
+        self.open = true;
+        self.confirm_yes = true;
+        reset_modal_submission(&mut self.submit_state, &mut self.error);
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.confirm_yes = true;
+        reset_modal_submission(&mut self.submit_state, &mut self.error);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AccessControlModalState {
+    pub open: bool,
+    pub mode: AccessControlMode,
+    pub memory_id: String,
+    pub action: AccessControlAction,
+    pub role: AccessControlRole,
+    pub current_role: AccessControlRole,
+    pub principal_id: String,
+    pub confirm_yes: bool,
+    pub submit_state: CreateSubmitState,
+    pub error: Option<String>,
+    pub focus: AccessControlFocus,
+}
+
+impl AccessControlModalState {
+    pub fn open(&mut self) {
+        self.open = true;
+        self.confirm_yes = true;
+        reset_modal_submission(&mut self.submit_state, &mut self.error);
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.mode = AccessControlMode::None;
+        self.confirm_yes = true;
+        reset_modal_submission(&mut self.submit_state, &mut self.error);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TransferModalState {
+    pub open: bool,
+    pub mode: TransferModalMode,
+    pub prerequisites_loading: bool,
+    pub principal_id: String,
+    pub amount: String,
+    pub fee_base_units: Option<u128>,
+    pub available_balance_base_units: Option<u128>,
+    pub confirm_yes: bool,
+    pub submit_state: CreateSubmitState,
+    pub error: Option<String>,
+    pub focus: TransferModalFocus,
+}
+
+impl TransferModalState {
+    pub fn open_edit(&mut self) {
+        self.open = true;
+        self.mode = TransferModalMode::Edit;
+        self.prerequisites_loading = false;
+        self.confirm_yes = true;
+        self.focus = TransferModalFocus::Principal;
+        reset_modal_submission(&mut self.submit_state, &mut self.error);
+    }
+
+    pub fn open_confirm(&mut self) {
+        self.open_edit();
+        self.mode = TransferModalMode::Confirm;
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.mode = TransferModalMode::Edit;
+        self.prerequisites_loading = false;
+        self.confirm_yes = true;
+        self.focus = TransferModalFocus::Principal;
+        reset_modal_submission(&mut self.submit_state, &mut self.error);
     }
 }
 
@@ -307,9 +484,11 @@ pub struct SessionSettingsSnapshot {
 pub struct SessionAccountOverview {
     pub session: SessionSettingsSnapshot,
     pub balance_base_units: Option<u128>,
+    pub fee_base_units: Option<u128>,
     pub price_base_units: Option<Nat>,
     pub principal_error: Option<String>,
     pub balance_error: Option<String>,
+    pub fee_error: Option<String>,
     pub price_error: Option<String>,
 }
 
@@ -336,15 +515,19 @@ impl SessionAccountOverview {
         Self {
             session,
             balance_base_units: None,
+            fee_base_units: None,
             price_base_units: None,
             principal_error: None,
             balance_error: None,
+            fee_error: None,
             price_error: None,
         }
     }
 
     pub fn has_complete_create_cost(&self) -> bool {
-        self.balance_base_units.is_some() && self.price_base_units.is_some()
+        self.balance_base_units.is_some()
+            && self.price_base_units.is_some()
+            && self.fee_base_units.is_some()
     }
 
     pub fn account_issue_messages(&self) -> Vec<String> {
@@ -378,6 +561,7 @@ impl SessionAccountOverview {
     pub fn session_settings_refresh_notify_message(&self) -> String {
         let account_incomplete = self.principal_error.is_some()
             || self.balance_error.is_some()
+            || self.fee_error.is_some()
             || self.price_error.is_some()
             || !self.has_complete_create_cost();
         if account_incomplete {
@@ -476,17 +660,12 @@ pub struct CoreState {
     pub insert_error: Option<String>,
     pub insert_focus: InsertFormFocus,
     pub access_list_index: usize,
-    pub access_control_open: bool,
-    pub access_control_mode: AccessControlMode,
-    pub access_control_memory_id: String,
-    pub access_control_action: AccessControlAction,
-    pub access_control_role: AccessControlRole,
-    pub access_control_current_role: AccessControlRole,
-    pub access_control_principal_id: String,
-    pub access_control_confirm_yes: bool,
-    pub access_control_submit_state: CreateSubmitState,
-    pub access_control_error: Option<String>,
-    pub access_control_focus: AccessControlFocus,
+    pub memory_content_action_index: usize,
+    pub access_control: AccessControlModalState,
+    pub add_memory: TextInputModalState,
+    pub remove_memory: RemoveMemoryModalState,
+    pub rename_memory: RenameMemoryModalState,
+    pub transfer_modal: TransferModalState,
 }
 
 impl Default for CoreState {
@@ -535,17 +714,12 @@ impl Default for CoreState {
             insert_error: None,
             insert_focus: InsertFormFocus::default(),
             access_list_index: 0,
-            access_control_open: false,
-            access_control_mode: AccessControlMode::default(),
-            access_control_memory_id: String::new(),
-            access_control_action: AccessControlAction::default(),
-            access_control_role: AccessControlRole::default(),
-            access_control_current_role: AccessControlRole::default(),
-            access_control_principal_id: String::new(),
-            access_control_confirm_yes: true,
-            access_control_submit_state: CreateSubmitState::default(),
-            access_control_error: None,
-            access_control_focus: AccessControlFocus::default(),
+            memory_content_action_index: 0,
+            access_control: AccessControlModalState::default(),
+            add_memory: TextInputModalState::default(),
+            remove_memory: RemoveMemoryModalState::default(),
+            rename_memory: RenameMemoryModalState::default(),
+            transfer_modal: TransferModalState::default(),
         }
     }
 }
@@ -608,6 +782,31 @@ pub enum CoreAction {
     AccessCycleRole,
     AccessCycleRolePrev,
     AccessSubmit,
+    OpenAddMemory,
+    CloseAddMemory,
+    AddMemoryInput(char),
+    AddMemoryBackspace,
+    AddMemorySubmit,
+    OpenRemoveMemory,
+    CloseRemoveMemory,
+    RemoveMemoryToggleConfirm,
+    RemoveMemorySubmit,
+    OpenRenameMemory,
+    CloseRenameMemory,
+    RenameMemoryInput(char),
+    RenameMemoryBackspace,
+    RenameMemoryNextField,
+    RenameMemoryPrevField,
+    RenameMemorySubmit,
+    OpenTransferModal,
+    CloseTransferModal,
+    TransferInput(char),
+    TransferBackspace,
+    TransferNextField,
+    TransferPrevField,
+    TransferApplyMax,
+    TransferSubmit,
+    TransferConfirmToggle,
     CreateInput(char),
     CreateBackspace,
     CreateNextField,
@@ -721,6 +920,25 @@ pub enum CoreEffect {
     CloseAccessControl,
     /// Validation or async error for the access control form.
     AccessFormError(Option<String>),
+    OpenAddMemory,
+    CloseAddMemory,
+    AddMemoryFormError(Option<String>),
+    OpenRemoveMemory,
+    CloseRemoveMemory,
+    RemoveMemoryFormError(Option<String>),
+    OpenRenameMemory {
+        memory_id: String,
+        current_name: String,
+    },
+    CloseRenameMemory,
+    RenameFormError(Option<String>),
+    OpenTransferModal {
+        fee_base_units: u128,
+        available_balance_base_units: u128,
+    },
+    OpenTransferConfirm,
+    CloseTransferModal,
+    TransferFormError(Option<String>),
     /// Escape hatch for domain-specific integrations (examples, experiments).
     Custom {
         id: String,
@@ -932,35 +1150,234 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         CoreAction::AccessCycleRole => {
             if access_control_locked(state)
-                || !matches!(state.access_control_mode, AccessControlMode::Add)
-                || (state.access_control_mode == AccessControlMode::Add
-                    && state.access_control_focus != AccessControlFocus::Role)
+                || !matches!(state.access_control.mode, AccessControlMode::Add)
+                || (state.access_control.mode == AccessControlMode::Add
+                    && state.access_control.focus != AccessControlFocus::Role)
             {
                 return;
             }
-            state.access_control_role = next_access_control_role(state.access_control_role);
+            state.access_control.role = next_access_control_role(state.access_control.role);
             clear_access_control_error(state);
         }
         CoreAction::AccessCycleRolePrev => {
             if access_control_locked(state)
-                || !matches!(state.access_control_mode, AccessControlMode::Add)
-                || (state.access_control_mode == AccessControlMode::Add
-                    && state.access_control_focus != AccessControlFocus::Role)
+                || !matches!(state.access_control.mode, AccessControlMode::Add)
+                || (state.access_control.mode == AccessControlMode::Add
+                    && state.access_control.focus != AccessControlFocus::Role)
             {
                 return;
             }
-            state.access_control_role = prev_access_control_role(state.access_control_role);
+            state.access_control.role = prev_access_control_role(state.access_control.role);
             clear_access_control_error(state);
         }
         CoreAction::AccessSubmit => {
             if matches!(
-                state.access_control_mode,
+                state.access_control.mode,
                 AccessControlMode::Add | AccessControlMode::Confirm
             ) {
-                state.access_control_submit_state = CreateSubmitState::Submitting;
-                state.access_control_error = None;
+                begin_modal_submit(
+                    &mut state.access_control.submit_state,
+                    &mut state.access_control.error,
+                );
             }
         }
+        CoreAction::OpenAddMemory => {
+            open_add_memory_modal(state);
+        }
+        CoreAction::CloseAddMemory => {
+            close_add_memory_modal(state);
+        }
+        CoreAction::AddMemoryInput(c) => {
+            apply_text_input_modal_command(
+                &mut state.add_memory,
+                true,
+                TextInputModalCommand::Input(*c),
+            );
+        }
+        CoreAction::AddMemoryBackspace => {
+            apply_text_input_modal_command(
+                &mut state.add_memory,
+                true,
+                TextInputModalCommand::Backspace,
+            );
+        }
+        CoreAction::AddMemorySubmit => {
+            apply_text_input_modal_command(
+                &mut state.add_memory,
+                false,
+                TextInputModalCommand::Submit,
+            );
+        }
+        CoreAction::OpenRemoveMemory => {
+            open_remove_memory_modal(state);
+        }
+        CoreAction::CloseRemoveMemory => {
+            close_remove_memory_modal(state);
+        }
+        CoreAction::RemoveMemoryToggleConfirm => {
+            toggle_confirm_choice(
+                remove_memory_modal_locked(state),
+                state.remove_memory.open,
+                &mut state.remove_memory.confirm_yes,
+                &mut state.remove_memory.submit_state,
+                &mut state.remove_memory.error,
+            );
+        }
+        CoreAction::RemoveMemorySubmit => {
+            if !state.remove_memory.open {
+                return;
+            }
+            if state.remove_memory.confirm_yes {
+                begin_modal_submit(
+                    &mut state.remove_memory.submit_state,
+                    &mut state.remove_memory.error,
+                );
+            } else {
+                close_remove_memory_modal(state);
+            }
+        }
+        CoreAction::OpenRenameMemory => {}
+        CoreAction::CloseRenameMemory => {
+            close_rename_memory_modal(state);
+        }
+        CoreAction::RenameMemoryInput(c) => {
+            apply_text_input_modal_command(
+                &mut state.rename_memory.form,
+                state.rename_memory.focus == RenameModalFocus::Name,
+                TextInputModalCommand::Input(*c),
+            );
+        }
+        CoreAction::RenameMemoryBackspace => {
+            apply_text_input_modal_command(
+                &mut state.rename_memory.form,
+                state.rename_memory.focus == RenameModalFocus::Name,
+                TextInputModalCommand::Backspace,
+            );
+        }
+        CoreAction::RenameMemoryNextField => {
+            if rename_modal_locked(state) || !state.rename_memory.form.open {
+                return;
+            }
+            state.rename_memory.focus = next_rename_focus(state.rename_memory.focus);
+            clear_rename_error(state);
+        }
+        CoreAction::RenameMemoryPrevField => {
+            if rename_modal_locked(state) || !state.rename_memory.form.open {
+                return;
+            }
+            state.rename_memory.focus = prev_rename_focus(state.rename_memory.focus);
+            clear_rename_error(state);
+        }
+        CoreAction::RenameMemorySubmit => {
+            apply_text_input_modal_command(
+                &mut state.rename_memory.form,
+                false,
+                TextInputModalCommand::Submit,
+            );
+        }
+        CoreAction::OpenTransferModal => {
+            open_transfer_modal(state);
+            state.transfer_modal.prerequisites_loading = true;
+            state.transfer_modal.principal_id.clear();
+            state.transfer_modal.amount.clear();
+            state.transfer_modal.fee_base_units = None;
+            state.transfer_modal.available_balance_base_units = None;
+        }
+        CoreAction::CloseTransferModal => {
+            close_transfer_modal(state);
+        }
+        CoreAction::TransferInput(c) => {
+            if transfer_modal_locked(state) || state.transfer_modal.mode != TransferModalMode::Edit
+            {
+                return;
+            }
+            match state.transfer_modal.focus {
+                TransferModalFocus::Principal => state.transfer_modal.principal_id.push(*c),
+                TransferModalFocus::Amount => state.transfer_modal.amount.push(*c),
+                TransferModalFocus::Max | TransferModalFocus::Submit => {}
+            }
+            clear_transfer_error(state);
+        }
+        CoreAction::TransferBackspace => {
+            if transfer_modal_locked(state) || state.transfer_modal.mode != TransferModalMode::Edit
+            {
+                return;
+            }
+            match state.transfer_modal.focus {
+                TransferModalFocus::Principal => {
+                    state.transfer_modal.principal_id.pop();
+                }
+                TransferModalFocus::Amount => {
+                    state.transfer_modal.amount.pop();
+                }
+                TransferModalFocus::Max | TransferModalFocus::Submit => {}
+            }
+            clear_transfer_error(state);
+        }
+        CoreAction::TransferNextField => {
+            if transfer_modal_locked(state) {
+                return;
+            }
+            match state.transfer_modal.mode {
+                TransferModalMode::Edit => {
+                    state.transfer_modal.focus =
+                        next_transfer_focus(state.transfer_modal.focus, state);
+                }
+                TransferModalMode::Confirm => {
+                    state.transfer_modal.confirm_yes = !state.transfer_modal.confirm_yes;
+                }
+            }
+            clear_transfer_error(state);
+        }
+        CoreAction::TransferPrevField => {
+            if transfer_modal_locked(state) {
+                return;
+            }
+            match state.transfer_modal.mode {
+                TransferModalMode::Edit => {
+                    state.transfer_modal.focus =
+                        prev_transfer_focus(state.transfer_modal.focus, state);
+                }
+                TransferModalMode::Confirm => {
+                    state.transfer_modal.confirm_yes = !state.transfer_modal.confirm_yes;
+                }
+            }
+            clear_transfer_error(state);
+        }
+        CoreAction::TransferApplyMax => {
+            if transfer_modal_locked(state) || state.transfer_modal.mode != TransferModalMode::Edit
+            {
+                return;
+            }
+            let available = state
+                .transfer_modal
+                .available_balance_base_units
+                .unwrap_or(0);
+            let fee = state.transfer_modal.fee_base_units.unwrap_or(0);
+            let max_amount = available.saturating_sub(fee);
+            state.transfer_modal.amount = format_e8s_to_kinic_string_u128(max_amount);
+            state.transfer_modal.focus = TransferModalFocus::Submit;
+            clear_transfer_error(state);
+        }
+        CoreAction::TransferConfirmToggle => {
+            toggle_confirm_choice(
+                transfer_modal_locked(state),
+                state.transfer_modal.mode == TransferModalMode::Confirm,
+                &mut state.transfer_modal.confirm_yes,
+                &mut state.transfer_modal.submit_state,
+                &mut state.transfer_modal.error,
+            );
+        }
+        CoreAction::TransferSubmit => match state.transfer_modal.mode {
+            TransferModalMode::Edit => {}
+            TransferModalMode::Confirm if state.transfer_modal.confirm_yes => {
+                begin_modal_submit(
+                    &mut state.transfer_modal.submit_state,
+                    &mut state.transfer_modal.error,
+                );
+            }
+            TransferModalMode::Confirm => {}
+        },
         CoreAction::CreateInput(c) => {
             match state.create_focus {
                 CreateModalFocus::Name => state.create_name.push(*c),
@@ -1025,9 +1442,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             state.current_tab_id = tab_id.0.clone();
             state.selected_index = Some(0);
             close_picker(state);
-            state.access_control_open = false;
-            state.access_control_mode = AccessControlMode::None;
+            close_access_control_modal(state);
             state.access_list_index = 0;
+            state.memory_content_action_index = 0;
+            close_add_memory_modal(state);
+            close_remove_memory_modal(state);
+            close_rename_memory_modal(state);
+            close_transfer_modal(state);
         }
         CoreAction::SelectTabIndex(index) => {
             state.current_tab_id = format!("tab-{}", index + 1);
@@ -1517,6 +1938,161 @@ fn prev_access_control_role(role: AccessControlRole) -> AccessControlRole {
         AccessControlRole::Writer => AccessControlRole::Admin,
         AccessControlRole::Reader => AccessControlRole::Writer,
     }
+}
+
+fn clear_rename_error(state: &mut CoreState) {
+    clear_modal_error_state(
+        &mut state.rename_memory.form.submit_state,
+        &mut state.rename_memory.form.error,
+    );
+}
+
+fn remove_memory_modal_locked(state: &CoreState) -> bool {
+    modal_locked(state.remove_memory.submit_state.clone())
+}
+
+fn rename_modal_locked(state: &CoreState) -> bool {
+    modal_locked(state.rename_memory.form.submit_state.clone())
+}
+
+fn next_rename_focus(focus: RenameModalFocus) -> RenameModalFocus {
+    next_in_cycle(focus, &[RenameModalFocus::Name, RenameModalFocus::Submit])
+}
+
+fn prev_rename_focus(focus: RenameModalFocus) -> RenameModalFocus {
+    prev_in_cycle(focus, &[RenameModalFocus::Name, RenameModalFocus::Submit])
+}
+
+fn transfer_focus_order(state: &CoreState) -> &'static [TransferModalFocus] {
+    if state.transfer_modal.prerequisites_loading {
+        &[TransferModalFocus::Principal, TransferModalFocus::Amount]
+    } else {
+        &[
+            TransferModalFocus::Principal,
+            TransferModalFocus::Amount,
+            TransferModalFocus::Max,
+            TransferModalFocus::Submit,
+        ]
+    }
+}
+
+fn next_transfer_focus(focus: TransferModalFocus, state: &CoreState) -> TransferModalFocus {
+    next_in_cycle(focus, transfer_focus_order(state))
+}
+
+fn prev_transfer_focus(focus: TransferModalFocus, state: &CoreState) -> TransferModalFocus {
+    prev_in_cycle(focus, transfer_focus_order(state))
+}
+
+fn toggle_confirm_choice(
+    is_locked: bool,
+    is_confirm_mode: bool,
+    confirm_yes: &mut bool,
+    submit_state: &mut CreateSubmitState,
+    error: &mut Option<String>,
+) {
+    if is_locked || !is_confirm_mode {
+        return;
+    }
+    *confirm_yes = !*confirm_yes;
+    clear_modal_error_state(submit_state, error);
+}
+
+fn next_in_cycle<T: Copy + PartialEq>(current: T, order: &[T]) -> T {
+    let index = order
+        .iter()
+        .position(|candidate| *candidate == current)
+        .unwrap_or(0);
+    order[(index + 1) % order.len()]
+}
+
+fn prev_in_cycle<T: Copy + PartialEq>(current: T, order: &[T]) -> T {
+    let index = order
+        .iter()
+        .position(|candidate| *candidate == current)
+        .unwrap_or(0);
+    order[(index + order.len() - 1) % order.len()]
+}
+
+enum TextInputModalCommand {
+    Input(char),
+    Backspace,
+    Submit,
+}
+
+fn apply_text_input_modal_command(
+    modal: &mut TextInputModalState,
+    is_editable: bool,
+    command: TextInputModalCommand,
+) {
+    if !modal.open {
+        return;
+    }
+    match command {
+        TextInputModalCommand::Submit => {
+            begin_modal_submit(&mut modal.submit_state, &mut modal.error);
+        }
+        TextInputModalCommand::Input(c)
+            if is_editable && !modal_locked(modal.submit_state.clone()) =>
+        {
+            modal.value.push(c);
+            clear_modal_error_state(&mut modal.submit_state, &mut modal.error);
+        }
+        TextInputModalCommand::Backspace
+            if is_editable && !modal_locked(modal.submit_state.clone()) =>
+        {
+            modal.value.pop();
+            clear_modal_error_state(&mut modal.submit_state, &mut modal.error);
+        }
+        TextInputModalCommand::Input(_) | TextInputModalCommand::Backspace => {}
+    }
+}
+
+pub fn open_add_memory_modal(state: &mut CoreState) {
+    state.add_memory.open = true;
+    state.add_memory.value.clear();
+    state.add_memory.reset_submission();
+}
+
+pub fn close_add_memory_modal(state: &mut CoreState) {
+    state.add_memory.open = false;
+    state.add_memory.reset_submission();
+}
+
+pub fn open_remove_memory_modal(state: &mut CoreState) {
+    state.remove_memory.open();
+}
+
+pub fn close_remove_memory_modal(state: &mut CoreState) {
+    state.remove_memory.close();
+}
+
+pub fn open_rename_memory_modal(state: &mut CoreState) {
+    state.rename_memory.open();
+}
+
+pub fn close_rename_memory_modal(state: &mut CoreState) {
+    state.rename_memory.close();
+}
+
+pub fn open_transfer_modal(state: &mut CoreState) {
+    state.transfer_modal.open_edit();
+}
+
+pub fn open_transfer_confirm(state: &mut CoreState) {
+    state.transfer_modal.open_confirm();
+}
+
+pub fn close_transfer_modal(state: &mut CoreState) {
+    state.transfer_modal.close();
+}
+
+pub fn open_access_control_modal(state: &mut CoreState) {
+    state.access_control.open();
+}
+
+pub fn close_access_control_modal(state: &mut CoreState) {
+    state.access_control.close();
 }
 
 pub fn is_insert_form_locked(state: &CoreState) -> bool {

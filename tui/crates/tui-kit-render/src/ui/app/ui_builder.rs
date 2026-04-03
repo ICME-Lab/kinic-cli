@@ -326,68 +326,59 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn access_control_open(mut self, value: bool) -> Self {
-        self.access_control_open = value;
+    pub fn access_control_modal(mut self, value: AccessControlModalState) -> Self {
+        self.access_control = value;
         self
     }
 
     #[must_use]
-    pub fn access_control_mode(mut self, value: AccessControlMode) -> Self {
-        self.access_control_mode = value;
+    pub fn add_memory_modal(mut self, value: TextInputModalState) -> Self {
+        self.add_memory = value;
         self
     }
 
     #[must_use]
-    pub fn access_control_memory_id(mut self, value: &'a str) -> Self {
-        self.access_control_memory_id = value;
+    pub fn remove_memory_modal(mut self, value: &'a RemoveMemoryModalState) -> Self {
+        self.remove_memory_open = value.open;
+        self.remove_memory_confirm_yes = value.confirm_yes;
+        self.remove_memory_submit_state = value.submit_state.clone();
+        self.remove_memory_error = value.error.as_deref();
         self
     }
 
     #[must_use]
-    pub fn access_control_action(mut self, value: AccessControlAction) -> Self {
-        self.access_control_action = value;
+    pub fn remove_memory_open(mut self, value: bool) -> Self {
+        self.remove_memory_open = value;
         self
     }
 
     #[must_use]
-    pub fn access_control_role(mut self, value: AccessControlRole) -> Self {
-        self.access_control_role = value;
+    pub fn remove_memory_confirm_yes(mut self, value: bool) -> Self {
+        self.remove_memory_confirm_yes = value;
         self
     }
 
     #[must_use]
-    pub fn access_control_current_role(mut self, value: AccessControlRole) -> Self {
-        self.access_control_current_role = value;
+    pub fn remove_memory_submit_state(mut self, value: CreateSubmitState) -> Self {
+        self.remove_memory_submit_state = value;
         self
     }
 
     #[must_use]
-    pub fn access_control_principal_id(mut self, value: &'a str) -> Self {
-        self.access_control_principal_id = value;
+    pub fn remove_memory_error(mut self, value: Option<&'a str>) -> Self {
+        self.remove_memory_error = value;
         self
     }
 
     #[must_use]
-    pub fn access_control_confirm_yes(mut self, value: bool) -> Self {
-        self.access_control_confirm_yes = value;
+    pub fn rename_memory_modal(mut self, value: RenameMemoryModalState) -> Self {
+        self.rename_memory = value;
         self
     }
 
     #[must_use]
-    pub fn access_control_submit_state(mut self, value: CreateSubmitState) -> Self {
-        self.access_control_submit_state = value;
-        self
-    }
-
-    #[must_use]
-    pub fn access_control_error(mut self, value: Option<&'a str>) -> Self {
-        self.access_control_error = value;
-        self
-    }
-
-    #[must_use]
-    pub fn access_control_focus(mut self, value: AccessControlFocus) -> Self {
-        self.access_control_focus = value;
+    pub fn transfer_modal(mut self, value: TransferModalState) -> Self {
+        self.transfer_modal = value;
         self
     }
 

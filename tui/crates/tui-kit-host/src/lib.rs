@@ -5,11 +5,15 @@ pub mod runtime_loop;
 pub mod settings;
 pub mod terminal;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::time::Duration;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateCostState, CreateModalFocus,
-    CreateSubmitState, PaneFocus, PickerContext, PickerState, action_for_key, tab_focus_policy,
+    CreateSubmitState, PaneFocus, PickerContext, PickerState, action_for_key, apply_modal_error,
+    close_access_control_modal, close_add_memory_modal, close_remove_memory_modal,
+    close_rename_memory_modal, close_transfer_modal, open_access_control_modal,
+    open_add_memory_modal, open_remove_memory_modal, open_rename_memory_modal,
+    open_transfer_confirm, open_transfer_modal, tab_focus_policy,
 };
 
 /// Fallback tab ids used when host does not provide explicit tabs.
@@ -404,44 +408,100 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 action,
                 role,
             } => {
-                state.access_control_open = true;
-                state.access_control_mode = tui_kit_runtime::AccessControlMode::Confirm;
-                state.access_control_memory_id = memory_id;
-                state.access_control_action = action;
-                state.access_control_principal_id = principal_id;
-                state.access_control_role = role;
-                state.access_control_confirm_yes = true;
-                state.access_control_submit_state = CreateSubmitState::Idle;
-                state.access_control_error = None;
-                state.access_control_focus = tui_kit_runtime::AccessControlFocus::Principal;
+                open_access_control_modal(state);
+                state.access_control.mode = tui_kit_runtime::AccessControlMode::Confirm;
+                state.access_control.memory_id = memory_id;
+                state.access_control.action = action;
+                state.access_control.principal_id = principal_id;
+                state.access_control.role = role;
+                state.access_control.focus = tui_kit_runtime::AccessControlFocus::Principal;
             }
             CoreEffect::OpenAccessAdd { memory_id } => {
-                state.access_control_open = true;
-                state.access_control_mode = tui_kit_runtime::AccessControlMode::Add;
-                state.access_control_memory_id = memory_id;
-                state.access_control_action = tui_kit_runtime::AccessControlAction::Add;
-                state.access_control_role = tui_kit_runtime::AccessControlRole::Reader;
-                state.access_control_current_role = tui_kit_runtime::AccessControlRole::Reader;
-                state.access_control_principal_id.clear();
-                state.access_control_confirm_yes = true;
-                state.access_control_submit_state = CreateSubmitState::Idle;
-                state.access_control_error = None;
-                state.access_control_focus = tui_kit_runtime::AccessControlFocus::Principal;
+                open_access_control_modal(state);
+                state.access_control.mode = tui_kit_runtime::AccessControlMode::Add;
+                state.access_control.memory_id = memory_id;
+                state.access_control.action = tui_kit_runtime::AccessControlAction::Add;
+                state.access_control.role = tui_kit_runtime::AccessControlRole::Reader;
+                state.access_control.current_role = tui_kit_runtime::AccessControlRole::Reader;
+                state.access_control.principal_id.clear();
+                state.access_control.focus = tui_kit_runtime::AccessControlFocus::Principal;
             }
             CoreEffect::CloseAccessControl => {
-                state.access_control_open = false;
-                state.access_control_mode = tui_kit_runtime::AccessControlMode::None;
-                state.access_control_confirm_yes = true;
-                state.access_control_submit_state = CreateSubmitState::Idle;
-                state.access_control_error = None;
+                close_access_control_modal(state);
             }
             CoreEffect::AccessFormError(message) => {
-                state.access_control_submit_state = if message.is_some() {
-                    CreateSubmitState::Error
-                } else {
-                    CreateSubmitState::Idle
-                };
-                state.access_control_error = message;
+                apply_modal_error(
+                    &mut state.access_control.submit_state,
+                    &mut state.access_control.error,
+                    message,
+                );
+            }
+            CoreEffect::OpenTransferModal {
+                fee_base_units,
+                available_balance_base_units,
+            } => {
+                open_transfer_modal(state);
+                state.transfer_modal.fee_base_units = Some(fee_base_units);
+                state.transfer_modal.available_balance_base_units =
+                    Some(available_balance_base_units);
+            }
+            CoreEffect::OpenTransferConfirm => {
+                open_transfer_confirm(state);
+            }
+            CoreEffect::CloseTransferModal => {
+                close_transfer_modal(state);
+            }
+            CoreEffect::TransferFormError(message) => {
+                state.transfer_modal.prerequisites_loading = false;
+                apply_modal_error(
+                    &mut state.transfer_modal.submit_state,
+                    &mut state.transfer_modal.error,
+                    message,
+                );
+            }
+            CoreEffect::OpenAddMemory => {
+                open_add_memory_modal(state);
+            }
+            CoreEffect::CloseAddMemory => {
+                close_add_memory_modal(state);
+            }
+            CoreEffect::AddMemoryFormError(message) => {
+                apply_modal_error(
+                    &mut state.add_memory.submit_state,
+                    &mut state.add_memory.error,
+                    message,
+                );
+            }
+            CoreEffect::OpenRemoveMemory => {
+                open_remove_memory_modal(state);
+            }
+            CoreEffect::CloseRemoveMemory => {
+                close_remove_memory_modal(state);
+            }
+            CoreEffect::RemoveMemoryFormError(message) => {
+                apply_modal_error(
+                    &mut state.remove_memory.submit_state,
+                    &mut state.remove_memory.error,
+                    message,
+                );
+            }
+            CoreEffect::OpenRenameMemory {
+                memory_id,
+                current_name,
+            } => {
+                open_rename_memory_modal(state);
+                state.rename_memory.memory_id = memory_id;
+                state.rename_memory.form.value = current_name;
+            }
+            CoreEffect::CloseRenameMemory => {
+                close_rename_memory_modal(state);
+            }
+            CoreEffect::RenameFormError(message) => {
+                apply_modal_error(
+                    &mut state.rename_memory.form.submit_state,
+                    &mut state.rename_memory.form.error,
+                    message,
+                );
             }
             CoreEffect::Custom { id, payload } => {
                 state.persistent_status_message = None;

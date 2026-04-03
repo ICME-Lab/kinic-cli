@@ -190,23 +190,22 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .insert_validation_message(state.insert_validation_message.as_deref())
                     .insert_tag(&state.insert_tag)
                     .insert_text(&state.insert_text)
+                    .insert_text_cursor(textarea_cursor(
+                        active_textarea(&state),
+                        ActiveTextarea::InsertText,
+                        &textareas.insert_text,
+                    ))
                     .insert_file_path(insert_file_path_display.as_str())
                     .insert_embedding(&state.insert_embedding)
                     .insert_submit_state(state.insert_submit_state.clone())
                     .insert_spinner_frame(state.insert_spinner_frame)
                     .insert_error(state.insert_error.as_deref())
                     .insert_focus(state.insert_focus)
-                    .access_control_open(state.access_control_open)
-                    .access_control_mode(state.access_control_mode)
-                    .access_control_memory_id(&state.access_control_memory_id)
-                    .access_control_action(state.access_control_action)
-                    .access_control_role(state.access_control_role)
-                    .access_control_current_role(state.access_control_current_role)
-                    .access_control_principal_id(&state.access_control_principal_id)
-                    .access_control_confirm_yes(state.access_control_confirm_yes)
-                    .access_control_submit_state(state.access_control_submit_state.clone())
-                    .access_control_error(state.access_control_error.as_deref())
-                    .access_control_focus(state.access_control_focus)
+                    .access_control_modal(state.access_control.clone())
+                    .add_memory_modal(state.add_memory.clone())
+                    .remove_memory_modal(&state.remove_memory)
+                    .rename_memory_modal(state.rename_memory.clone())
+                    .transfer_modal(state.transfer_modal.clone())
                     .show_completion(false)
                     .context_details_loading(false)
                     .context_details_failed(false)
@@ -588,23 +587,22 @@ fn build_ui<'a>(
         .insert_validation_message(state.insert_validation_message.as_deref())
         .insert_tag(&state.insert_tag)
         .insert_text(&state.insert_text)
+        .insert_text_cursor(textarea_cursor(
+            active_textarea(state),
+            ActiveTextarea::InsertText,
+            &textareas.insert_text,
+        ))
         .insert_file_path(&state.insert_file_path_input)
         .insert_embedding(&state.insert_embedding)
         .insert_submit_state(state.insert_submit_state.clone())
         .insert_spinner_frame(state.insert_spinner_frame)
         .insert_error(state.insert_error.as_deref())
         .insert_focus(state.insert_focus)
-        .access_control_open(state.access_control_open)
-        .access_control_mode(state.access_control_mode)
-        .access_control_memory_id(&state.access_control_memory_id)
-        .access_control_action(state.access_control_action)
-        .access_control_role(state.access_control_role)
-        .access_control_current_role(state.access_control_current_role)
-        .access_control_principal_id(&state.access_control_principal_id)
-        .access_control_confirm_yes(state.access_control_confirm_yes)
-        .access_control_submit_state(state.access_control_submit_state.clone())
-        .access_control_error(state.access_control_error.as_deref())
-        .access_control_focus(state.access_control_focus)
+        .access_control_modal(state.access_control.clone())
+        .add_memory_modal(state.add_memory.clone())
+        .remove_memory_modal(&state.remove_memory)
+        .rename_memory_modal(state.rename_memory.clone())
+        .transfer_modal(state.transfer_modal.clone())
         .show_completion(false)
         .context_details_loading(false)
         .context_details_failed(false)
@@ -629,24 +627,58 @@ fn handle_overlay_input<P: DataProvider>(
     code: crossterm::event::KeyCode,
     modifiers: crossterm::event::KeyModifiers,
 ) -> OverlayInputResult {
-    if state.access_control_open {
-        let Some(action) = access_control_overlay_action(code, modifiers, state) else {
-            return OverlayInputResult::Consumed;
-        };
-        return match dispatch_action(provider, state, &action) {
-            Ok(effects) => OverlayInputResult::ApplyEffects(effects),
-            Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
-        };
+    if state.access_control.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            access_control_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if state.add_memory.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            add_memory_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if state.remove_memory.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            remove_memory_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if state.rename_memory.form.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            rename_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if state.transfer_modal.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            transfer_overlay_action(code, modifiers, state),
+            false,
+        );
     }
 
     if !matches!(state.picker, PickerState::Closed) {
-        let Some(action) = picker_overlay_action(&state.picker, code, modifiers) else {
-            return OverlayInputResult::Consumed;
-        };
-        return match dispatch_action_with_persistent_clear(provider, state, &action) {
-            Ok(effects) => OverlayInputResult::ApplyEffects(effects),
-            Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
-        };
+        return dispatch_overlay_action(
+            provider,
+            state,
+            picker_overlay_action(&state.picker, code, modifiers),
+            true,
+        );
     }
 
     if show_settings && matches!(code, crossterm::event::KeyCode::Esc) {
@@ -956,6 +988,175 @@ fn picker_overlay_action(
     }
 }
 
+fn simple_text_overlay_action(
+    code: crossterm::event::KeyCode,
+    close_action: CoreAction,
+    submit_action: CoreAction,
+    backspace_action: CoreAction,
+    input_action: impl Fn(char) -> CoreAction,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Esc => Some(close_action),
+        crossterm::event::KeyCode::Enter => Some(submit_action),
+        crossterm::event::KeyCode::Backspace => Some(backspace_action),
+        crossterm::event::KeyCode::Char(c) if !c.is_control() => Some(input_action(c)),
+        _ => None,
+    }
+}
+
+fn focusable_text_overlay_action(
+    code: crossterm::event::KeyCode,
+    editable: bool,
+    close_action: CoreAction,
+    submit_action: CoreAction,
+    next_action: CoreAction,
+    prev_action: CoreAction,
+    backspace_action: CoreAction,
+    input_action: impl Fn(char) -> CoreAction,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Esc => Some(close_action),
+        crossterm::event::KeyCode::Tab => Some(next_action),
+        crossterm::event::KeyCode::BackTab => Some(prev_action),
+        crossterm::event::KeyCode::Left | crossterm::event::KeyCode::Up => Some(prev_action),
+        crossterm::event::KeyCode::Right | crossterm::event::KeyCode::Down => Some(next_action),
+        crossterm::event::KeyCode::Backspace if editable => Some(backspace_action),
+        crossterm::event::KeyCode::Enter if editable => Some(next_action),
+        crossterm::event::KeyCode::Enter => Some(submit_action),
+        crossterm::event::KeyCode::Char(c) if editable && !c.is_control() => Some(input_action(c)),
+        _ => None,
+    }
+}
+
+fn confirm_overlay_action(
+    code: crossterm::event::KeyCode,
+    close_action: CoreAction,
+    submit_action: CoreAction,
+    toggle_action: CoreAction,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Esc => Some(close_action),
+        crossterm::event::KeyCode::Enter => Some(submit_action),
+        crossterm::event::KeyCode::Tab
+        | crossterm::event::KeyCode::BackTab
+        | crossterm::event::KeyCode::Left
+        | crossterm::event::KeyCode::Right
+        | crossterm::event::KeyCode::Up
+        | crossterm::event::KeyCode::Down => Some(toggle_action),
+        _ => None,
+    }
+}
+
+fn overlay_directional_action(
+    code: crossterm::event::KeyCode,
+    prev_action: CoreAction,
+    next_action: CoreAction,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Left | crossterm::event::KeyCode::Up => Some(prev_action),
+        crossterm::event::KeyCode::Right | crossterm::event::KeyCode::Down => Some(next_action),
+        _ => None,
+    }
+}
+
+fn add_memory_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    _state: &CoreState,
+) -> Option<CoreAction> {
+    simple_text_overlay_action(
+        code,
+        CoreAction::CloseAddMemory,
+        CoreAction::AddMemorySubmit,
+        CoreAction::AddMemoryBackspace,
+        CoreAction::AddMemoryInput,
+    )
+}
+
+fn remove_memory_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    _state: &CoreState,
+) -> Option<CoreAction> {
+    confirm_overlay_action(
+        code,
+        CoreAction::CloseRemoveMemory,
+        CoreAction::RemoveMemorySubmit,
+        CoreAction::RemoveMemoryToggleConfirm,
+    )
+}
+
+fn transfer_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    state: &CoreState,
+) -> Option<CoreAction> {
+    use tui_kit_runtime::{TransferModalFocus, TransferModalMode};
+
+    if state.transfer_modal.mode == TransferModalMode::Confirm {
+        return confirm_overlay_action(
+            code,
+            CoreAction::CloseTransferModal,
+            CoreAction::TransferSubmit,
+            CoreAction::TransferConfirmToggle,
+        );
+    }
+
+    if let Some(action) = match code {
+        crossterm::event::KeyCode::Esc => Some(CoreAction::CloseTransferModal),
+        crossterm::event::KeyCode::Tab => Some(CoreAction::TransferNextField),
+        crossterm::event::KeyCode::BackTab => Some(CoreAction::TransferPrevField),
+        _ => None,
+    } {
+        return Some(action);
+    }
+
+    if let Some(action) = overlay_directional_action(
+        code,
+        CoreAction::TransferPrevField,
+        CoreAction::TransferNextField,
+    ) {
+        return Some(action);
+    }
+
+    match code {
+        crossterm::event::KeyCode::Backspace => Some(CoreAction::TransferBackspace),
+        crossterm::event::KeyCode::Enter => match state.transfer_modal.focus {
+            TransferModalFocus::Max => Some(CoreAction::TransferApplyMax),
+            TransferModalFocus::Submit => Some(CoreAction::TransferSubmit),
+            TransferModalFocus::Principal | TransferModalFocus::Amount => {
+                Some(CoreAction::TransferNextField)
+            }
+        },
+        crossterm::event::KeyCode::Char(c) if !c.is_control() => match state.transfer_modal.focus {
+            TransferModalFocus::Principal | TransferModalFocus::Amount => {
+                Some(CoreAction::TransferInput(c))
+            }
+            TransferModalFocus::Max | TransferModalFocus::Submit => None,
+        },
+        _ => None,
+    }
+}
+
+fn rename_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    state: &CoreState,
+) -> Option<CoreAction> {
+    use tui_kit_runtime::RenameModalFocus;
+
+    focusable_text_overlay_action(
+        code,
+        state.rename_memory.focus == RenameModalFocus::Name,
+        CoreAction::CloseRenameMemory,
+        CoreAction::RenameMemorySubmit,
+        CoreAction::RenameMemoryNextField,
+        CoreAction::RenameMemoryPrevField,
+        CoreAction::RenameMemoryBackspace,
+        CoreAction::RenameMemoryInput,
+    )
+}
+
 fn open_form_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
@@ -1023,6 +1224,22 @@ fn should_clear_persistent_status(action: &CoreAction) -> bool {
             | CoreAction::CreateInput(_)
             | CoreAction::CreateBackspace
             | CoreAction::CreateSubmit
+            | CoreAction::OpenRenameMemory
+            | CoreAction::CloseRenameMemory
+            | CoreAction::RenameMemoryInput(_)
+            | CoreAction::RenameMemoryBackspace
+            | CoreAction::RenameMemoryNextField
+            | CoreAction::RenameMemoryPrevField
+            | CoreAction::RenameMemorySubmit
+            | CoreAction::OpenTransferModal
+            | CoreAction::CloseTransferModal
+            | CoreAction::TransferInput(_)
+            | CoreAction::TransferBackspace
+            | CoreAction::TransferNextField
+            | CoreAction::TransferPrevField
+            | CoreAction::TransferApplyMax
+            | CoreAction::TransferSubmit
+            | CoreAction::TransferConfirmToggle
             | CoreAction::SearchInput(_)
             | CoreAction::SearchBackspace
             | CoreAction::SetQuery(_)

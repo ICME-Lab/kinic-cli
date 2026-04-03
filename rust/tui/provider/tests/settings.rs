@@ -72,18 +72,29 @@ fn refresh_current_view_restarts_session_settings_refresh_on_settings_tab() {
         .handle_action(&CoreAction::RefreshCurrentView, &CoreState::default())
         .expect("refresh output");
 
-    assert!(provider.session_settings_in_flight);
-    assert!(provider.pending_session_settings.is_some());
+    assert!(provider.session_settings_task.in_flight);
+    assert!(provider.session_settings_task.receiver.is_some());
     assert!(output.effects.is_empty());
 }
 
 #[test]
-fn poll_background_applies_refreshed_session_settings() {
-    let (provider, output) = run_session_settings_refresh(4, None, refreshed_session_overview());
+fn open_transfer_modal_reuses_cached_session_balance_and_fee() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.session_overview = refreshed_session_overview();
 
-    assert!(!provider.session_settings_in_flight);
-    assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
-    assert!(output.effects.is_empty());
+    let output = provider
+        .handle_action(&CoreAction::OpenTransferModal, &CoreState::default())
+        .expect("open transfer output");
+
+    assert!(!provider.transfer_prerequisites_task.in_flight);
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::OpenTransferModal {
+            fee_base_units,
+            available_balance_base_units,
+        } if *fee_base_units == 100_000u128
+            && *available_balance_base_units == 1_234_000_000u128
+    )));
 }
 
 #[test]

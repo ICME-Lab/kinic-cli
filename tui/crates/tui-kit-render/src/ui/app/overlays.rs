@@ -9,7 +9,8 @@ use ratatui::{
 };
 use tui_kit_runtime::{
     AccessControlAction, AccessControlFocus, AccessControlMode, AccessControlRole,
-    CreateModalFocus, CreateSubmitState, SettingsSnapshot,
+    CreateModalFocus, CreateSubmitState, RenameModalFocus, SettingsSnapshot, TransferModalFocus,
+    TransferModalMode, format_e8s_to_kinic_string_u128,
 };
 
 use super::TuiKitUi;
@@ -19,16 +20,54 @@ use super::screens::settings::{
 };
 
 impl<'a> TuiKitUi<'a> {
-    pub(super) fn access_control_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
-        if !self.access_control_open || self.access_control_mode != AccessControlMode::Add {
+    pub(super) fn transfer_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
+        if !self.transfer_modal.open || self.transfer_modal.mode != TransferModalMode::Edit {
             return None;
         }
-        let rect = access_control_area(area, self.access_control_mode)?;
+        let rect = transfer_modal_area(area, self.transfer_modal.mode)?;
+        let inner = bordered_inner_area(rect)?;
+        let (prefix, value, y_offset) = match self.transfer_modal.focus {
+            TransferModalFocus::Principal => ("  ", self.transfer_modal.principal_id.as_str(), 2),
+            TransferModalFocus::Amount => ("  ", self.transfer_modal.amount.as_str(), 5),
+            TransferModalFocus::Max | TransferModalFocus::Submit => return None,
+        };
+        let x = inner.x + prefix.len() as u16 + visible_width(value.to_string());
+        let y = inner.y + y_offset;
+        Some((x.min(inner.right().saturating_sub(1)), y))
+    }
+
+    pub(super) fn access_control_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
+        if !self.access_control.open || self.access_control.mode != AccessControlMode::Add {
+            return None;
+        }
+        let rect = access_control_area(area, self.access_control.mode)?;
         let inner = bordered_inner_area(rect)?;
         let principal_prefix = "  ";
         let x = inner.x
             + principal_prefix.len() as u16
-            + visible_width(self.access_control_principal_id.to_string());
+            + visible_width(self.access_control.principal_id.to_string());
+        let y = inner.y + 2;
+        Some((x.min(inner.right().saturating_sub(1)), y))
+    }
+
+    pub(super) fn add_memory_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
+        if !self.add_memory.open {
+            return None;
+        }
+        let rect = add_memory_area(area)?;
+        let inner = bordered_inner_area(rect)?;
+        let x = inner.x + 2 + visible_width(self.add_memory.value.to_string());
+        let y = inner.y + 2;
+        Some((x.min(inner.right().saturating_sub(1)), y))
+    }
+
+    pub(super) fn rename_memory_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
+        if !self.rename_memory.form.open || self.rename_memory.focus != RenameModalFocus::Name {
+            return None;
+        }
+        let rect = rename_memory_area(area)?;
+        let inner = bordered_inner_area(rect)?;
+        let x = inner.x + 2 + visible_width(self.rename_memory.form.value.to_string());
         let y = inner.y + 2;
         Some((x.min(inner.right().saturating_sub(1)), y))
     }
@@ -266,41 +305,220 @@ impl<'a> TuiKitUi<'a> {
     }
 
     pub(super) fn render_access_control_overlay(&self, area: Rect, buf: &mut Buffer) {
-        if !self.access_control_open {
+        if !self.access_control.open {
             return;
         }
 
-        let Some(overlay_area) = access_control_area(area, self.access_control_mode) else {
+        let Some(overlay_area) = access_control_area(area, self.access_control.mode) else {
             return;
         };
-        Clear.render(overlay_area, buf);
-
+        if self.access_control.mode == AccessControlMode::Confirm {
+            render_confirm_choice_modal(
+                self,
+                overlay_area,
+                buf,
+                "Confirm Access",
+                confirm_message(self).as_str(),
+                Vec::new(),
+                self.access_control.confirm_yes,
+                self.access_control.submit_state.clone(),
+                self.access_control.error.as_deref(),
+                "Applying access change...",
+            );
+            return;
+        }
         let (title, mut lines) = access_overlay_copy(self);
 
-        if let Some(error) = self.access_control_error {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("  {error}"),
-                self.theme.style_error(),
-            )));
-        }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
+        push_error_line(self, &mut lines, self.access_control.error.as_deref());
+        push_hint_line(
+            self,
+            &mut lines,
             "Tab: next field  Arrow: cycle selector  Enter: submit  Esc: close",
-            self.theme.style_muted(),
-        )));
-
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(self.theme.style_border_focused())
-                    .title(format!(" {title} "))
-                    .style(Style::default().bg(self.theme.bg_panel)),
-            )
-            .wrap(Wrap { trim: false })
-            .render(overlay_area, buf);
+        );
+        render_modal_overlay(self, overlay_area, buf, title, lines);
     }
+
+    pub(super) fn render_transfer_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.transfer_modal.open {
+            return;
+        }
+
+        let Some(overlay_area) = transfer_modal_area(area, self.transfer_modal.mode) else {
+            return;
+        };
+        if self.transfer_modal.mode == TransferModalMode::Confirm {
+            render_confirm_choice_modal(
+                self,
+                overlay_area,
+                buf,
+                "Confirm Transfer",
+                "Send this transfer?",
+                transfer_confirm_summary(self),
+                self.transfer_modal.confirm_yes,
+                self.transfer_modal.submit_state.clone(),
+                self.transfer_modal.error.as_deref(),
+                "Submitting transfer...",
+            );
+            return;
+        }
+        let (title, mut lines) = transfer_overlay_copy(self);
+        push_error_line(self, &mut lines, self.transfer_modal.error.as_deref());
+        render_modal_overlay(self, overlay_area, buf, title, lines);
+    }
+
+    pub(super) fn render_add_memory_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.add_memory.open {
+            return;
+        }
+
+        let Some(overlay_area) = add_memory_area(area) else {
+            return;
+        };
+
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Existing Memory Canister ID",
+                self.theme.style_dim(),
+            )),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    if self.add_memory.value.is_empty() {
+                        "<enter existing memory canister id>".to_string()
+                    } else {
+                        self.add_memory.value.to_string()
+                    },
+                    if self.add_memory.value.is_empty() {
+                        self.theme.style_muted()
+                    } else {
+                        self.theme.style_accent_bold()
+                    },
+                ),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                match self.add_memory.submit_state {
+                    CreateSubmitState::Submitting => {
+                        "Checking access to existing memory via get_users()..."
+                    }
+                    CreateSubmitState::Idle | CreateSubmitState::Error => {
+                        "Enter: submit  Backspace: delete  Esc: close"
+                    }
+                },
+                self.theme.style_muted(),
+            )),
+        ];
+        push_error_line(self, &mut lines, self.add_memory.error.as_deref());
+        render_modal_overlay(
+            self,
+            overlay_area,
+            buf,
+            "Add Existing Memory Canister",
+            lines,
+        );
+    }
+
+    pub(super) fn render_remove_memory_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.remove_memory_open {
+            return;
+        }
+
+        let Some(overlay_area) = remove_memory_area(area) else {
+            return;
+        };
+        render_confirm_choice_modal(
+            self,
+            overlay_area,
+            buf,
+            "Remove Memory",
+            "Remove this manually added memory from the list?",
+            Vec::new(),
+            self.remove_memory_confirm_yes,
+            self.remove_memory_submit_state.clone(),
+            self.remove_memory_error.as_deref(),
+            "Removing memory from local list...",
+        );
+    }
+
+    pub(super) fn render_rename_memory_overlay(&self, area: Rect, buf: &mut Buffer) {
+        if !self.rename_memory.form.open {
+            return;
+        }
+
+        let Some(overlay_area) = rename_memory_area(area) else {
+            return;
+        };
+
+        let name_style = if self.rename_memory.focus == RenameModalFocus::Name {
+            self.theme.style_accent_bold()
+        } else if self.rename_memory.form.value.is_empty() {
+            self.theme.style_muted()
+        } else {
+            self.theme.style_normal()
+        };
+        let submit_style = if self.rename_memory.focus == RenameModalFocus::Submit {
+            self.theme.style_accent_bold()
+        } else {
+            self.theme.style_normal()
+        };
+        let submit_label = match self.rename_memory.form.submit_state {
+            CreateSubmitState::Submitting => "Renaming...",
+            CreateSubmitState::Idle | CreateSubmitState::Error => "Rename",
+        };
+
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(Span::styled("Memory Name", self.theme.style_dim())),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    if self.rename_memory.form.value.is_empty() {
+                        "<enter memory name>".to_string()
+                    } else {
+                        self.rename_memory.form.value.to_string()
+                    },
+                    name_style,
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    if self.rename_memory.focus == RenameModalFocus::Submit {
+                        format!("[{submit_label}]")
+                    } else {
+                        submit_label.to_string()
+                    },
+                    submit_style,
+                ),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                match self.rename_memory.form.submit_state {
+                    CreateSubmitState::Submitting => "Updating memory name...",
+                    CreateSubmitState::Idle | CreateSubmitState::Error => {
+                        "Tab: next field  Shift+Tab: previous field  Enter: action  Esc: close"
+                    }
+                },
+                self.theme.style_muted(),
+            )),
+        ];
+        push_error_line(self, &mut lines, self.rename_memory.form.error.as_deref());
+        render_modal_overlay(self, overlay_area, buf, "Rename Memory", lines);
+    }
+}
+
+fn add_memory_area(area: Rect) -> Option<Rect> {
+    centered_overlay_area(area, 58, 10, 8)
+}
+
+fn remove_memory_area(area: Rect) -> Option<Rect> {
+    centered_overlay_area(area, 62, 11, 9)
+}
+
+fn rename_memory_area(area: Rect) -> Option<Rect> {
+    centered_overlay_area(area, 58, 11, 8)
 }
 
 fn access_control_area(area: Rect, mode: AccessControlMode) -> Option<Rect> {
@@ -310,6 +528,23 @@ fn access_control_area(area: Rect, mode: AccessControlMode) -> Option<Rect> {
         AccessControlMode::Confirm => (52, 9, 7),
         AccessControlMode::None => (48, 8, 6),
     };
+    centered_overlay_area(area, desired_width, desired_height, min_height)
+}
+
+fn transfer_modal_area(area: Rect, mode: TransferModalMode) -> Option<Rect> {
+    let (desired_width, desired_height, min_height) = match mode {
+        TransferModalMode::Edit => (60, 16, 13),
+        TransferModalMode::Confirm => (62, 12, 10),
+    };
+    centered_overlay_area(area, desired_width, desired_height, min_height)
+}
+
+fn centered_overlay_area(
+    area: Rect,
+    desired_width: u16,
+    desired_height: u16,
+    min_height: u16,
+) -> Option<Rect> {
     let (width, height) = fit_overlay_rect(area, desired_width, desired_height, min_height)?;
     Some(Rect {
         x: area.x + (area.width - width) / 2,
@@ -488,29 +723,249 @@ fn access_overlay_copy(ui: &TuiKitUi<'_>) -> (&'static str, Vec<Line<'static>>) 
                 )),
             ],
         ),
-        AccessControlMode::Confirm => (
-            "Confirm Access",
-            vec![
-                Line::from(Span::styled(
-                    confirm_message(ui),
-                    ui.theme.style_accent_bold(),
-                )),
-                Line::from(""),
-                Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(confirm_value(ui), ui.theme.style_accent_bold()),
-                ]),
-                Line::from(""),
-                Line::from(Span::styled(confirm_hint(ui), ui.theme.style_muted())),
-            ],
-        ),
         AccessControlMode::None => ("Access", vec![]),
+        AccessControlMode::Confirm => ("Confirm Access", vec![]),
     }
+}
+
+fn transfer_overlay_copy(ui: &TuiKitUi<'_>) -> (&'static str, Vec<Line<'static>>) {
+    match ui.transfer_modal.mode {
+        TransferModalMode::Edit => {
+            let mut lines = vec![
+                Line::from(""),
+                Line::from(Span::styled("Recipient principal", ui.theme.style_dim())),
+                transfer_value_line(
+                    ui,
+                    ui.transfer_modal.principal_id.as_str(),
+                    "<enter recipient principal>",
+                    TransferModalFocus::Principal,
+                ),
+                Line::from(""),
+                Line::from(Span::styled("Amount (KINIC)", ui.theme.style_dim())),
+                transfer_amount_line(ui),
+                Line::from(""),
+                transfer_submit_line(ui),
+                Line::from(""),
+            ];
+            if ui.transfer_modal.prerequisites_loading {
+                lines.push(Line::from(Span::styled(
+                    "Loading available balance and ledger fee...",
+                    ui.theme.style_muted(),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    transfer_balance_hint(ui),
+                    ui.theme.style_muted(),
+                )));
+            }
+            lines.extend([Line::from(Span::styled(
+                if ui.transfer_modal.prerequisites_loading {
+                    "Tab: next field  Shift+Tab: previous field  Esc: close"
+                } else {
+                    "Tab: next field  Shift+Tab: previous field  Enter: action  Esc: close"
+                },
+                ui.theme.style_muted(),
+            ))]);
+            ("Send KINIC", lines)
+        }
+        TransferModalMode::Confirm => ("Confirm Transfer", vec![]),
+    }
+}
+
+fn transfer_confirm_summary(ui: &TuiKitUi<'_>) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            format!("  To: {}", ui.transfer_modal.principal_id),
+            ui.theme.style_normal(),
+        )),
+        Line::from(Span::styled(
+            format!("  Amount: {}", transfer_amount_display(ui)),
+            ui.theme.style_normal(),
+        )),
+        Line::from(Span::styled(
+            format!("  Fee: {}", transfer_fee_display(ui)),
+            ui.theme.style_normal(),
+        )),
+        Line::from(Span::styled(
+            format!("  Total debit: {}", transfer_total_display(ui)),
+            ui.theme.style_normal(),
+        )),
+    ]
+}
+
+fn transfer_value_line(
+    ui: &TuiKitUi<'_>,
+    value: &str,
+    placeholder: &str,
+    focus: TransferModalFocus,
+) -> Line<'static> {
+    let text = if value.is_empty() { placeholder } else { value };
+    let style = if value.is_empty() {
+        ui.theme.style_muted()
+    } else if ui.transfer_modal.focus == focus {
+        ui.theme.style_accent_bold()
+    } else {
+        ui.theme.style_normal()
+    };
+    Line::from(vec![Span::raw("  "), Span::styled(text.to_string(), style)])
+}
+
+fn transfer_amount_line(ui: &TuiKitUi<'_>) -> Line<'static> {
+    let amount_text = if ui.transfer_modal.amount.is_empty() {
+        "<enter amount>".to_string()
+    } else {
+        ui.transfer_modal.amount.to_string()
+    };
+    let amount_style = if ui.transfer_modal.amount.is_empty() {
+        if ui.transfer_modal.focus == TransferModalFocus::Amount {
+            ui.theme.style_accent_bold()
+        } else {
+            ui.theme.style_muted()
+        }
+    } else if ui.transfer_modal.focus == TransferModalFocus::Amount {
+        ui.theme.style_accent_bold()
+    } else {
+        ui.theme.style_normal()
+    };
+
+    let max_text = if ui.transfer_modal.prerequisites_loading {
+        "Max".to_string()
+    } else if ui.transfer_modal.focus == TransferModalFocus::Max {
+        "[Max]".to_string()
+    } else {
+        "Max".to_string()
+    };
+    let max_style = if ui.transfer_modal.prerequisites_loading {
+        ui.theme.style_muted()
+    } else {
+        transfer_action_style(ui, TransferModalFocus::Max)
+    };
+
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(amount_text, amount_style),
+        Span::raw("   "),
+        Span::styled(max_text, max_style),
+    ])
+}
+
+fn transfer_submit_line(ui: &TuiKitUi<'_>) -> Line<'static> {
+    if ui.transfer_modal.prerequisites_loading {
+        return Line::from(vec![
+            Span::raw("  "),
+            Span::styled("Submit", ui.theme.style_muted()),
+        ]);
+    }
+    let submit_text = if ui.transfer_modal.focus == TransferModalFocus::Submit {
+        if ui.transfer_modal.submit_state == CreateSubmitState::Submitting {
+            "[Submitting...]"
+        } else {
+            "[Submit]"
+        }
+    } else if ui.transfer_modal.submit_state == CreateSubmitState::Submitting {
+        "Submitting..."
+    } else {
+        "Submit"
+    };
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            submit_text.to_string(),
+            transfer_action_style(ui, TransferModalFocus::Submit),
+        ),
+    ])
+}
+
+fn transfer_action_style(ui: &TuiKitUi<'_>, focus: TransferModalFocus) -> ratatui::style::Style {
+    if ui.transfer_modal.focus == focus {
+        ui.theme.style_accent_bold()
+    } else {
+        ui.theme.style_normal()
+    }
+}
+
+fn transfer_balance_hint(ui: &TuiKitUi<'_>) -> String {
+    let balance = ui
+        .transfer_modal
+        .available_balance_base_units
+        .map(format_e8s_to_kinic_string_u128)
+        .map(truncate_kinic_fraction_to_three_digits)
+        .unwrap_or_else(|| "unavailable".to_string());
+    let fee = transfer_fee_display(ui);
+    format!("Balance: {balance} KINIC  |  Fee: {fee}")
+}
+
+fn transfer_fee_display(ui: &TuiKitUi<'_>) -> String {
+    ui.transfer_modal
+        .fee_base_units
+        .map(format_e8s_to_kinic_string_u128)
+        .map(|value| format!("{} KINIC", truncate_kinic_fraction_to_three_digits(value)))
+        .unwrap_or_else(|| "unavailable".to_string())
+}
+
+/// See `rust/tui/settings.rs`: compact display, first three fractional digits only.
+fn truncate_kinic_fraction_to_three_digits(value: String) -> String {
+    match value.split_once('.') {
+        Some((whole, fraction)) => {
+            let limited = &fraction[..fraction.len().min(3)];
+            format!("{whole}.{limited}")
+        }
+        None => value,
+    }
+}
+
+fn transfer_amount_display(ui: &TuiKitUi<'_>) -> String {
+    if ui.transfer_modal.amount.is_empty() {
+        "0.00000000 KINIC".to_string()
+    } else {
+        format!("{} KINIC", ui.transfer_modal.amount)
+    }
+}
+
+fn transfer_total_display(ui: &TuiKitUi<'_>) -> String {
+    let amount_base_units = parse_kinic_display_to_e8s(ui.transfer_modal.amount.as_str());
+    match (amount_base_units, ui.transfer_modal.fee_base_units) {
+        (Some(amount), Some(fee)) => {
+            format!(
+                "{} KINIC",
+                format_e8s_to_kinic_string_u128(amount.saturating_add(fee))
+            )
+        }
+        _ => "unavailable".to_string(),
+    }
+}
+
+fn parse_kinic_display_to_e8s(value: &str) -> Option<u128> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Some(0);
+    }
+    let parts: Vec<&str> = trimmed.split('.').collect();
+    if parts.len() > 2 {
+        return None;
+    }
+    let whole = parts[0];
+    let fraction = if parts.len() == 2 { parts[1] } else { "" };
+    if !whole.chars().all(|char| char.is_ascii_digit())
+        || !fraction.chars().all(|char| char.is_ascii_digit())
+        || fraction.len() > 8
+    {
+        return None;
+    }
+    let whole_value = if whole.is_empty() {
+        0u128
+    } else {
+        whole.parse::<u128>().ok()?
+    };
+    let fractional_value = format!("{fraction:0<8}").parse::<u128>().ok()?;
+    whole_value
+        .checked_mul(100_000_000u128)?
+        .checked_add(fractional_value)
 }
 
 fn add_user_principal_line(ui: &TuiKitUi<'_>) -> Line<'static> {
     let mut spans = vec![Span::raw("  "), access_principal_span(ui)];
-    if ui.access_control_principal_id.is_empty() {
+    if ui.access_control.principal_id.is_empty() {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(r#"type "anonymous""#, ui.theme.style_muted()));
     }
@@ -758,9 +1213,27 @@ mod tests {
     use super::*;
     use crate::ui::app::UiConfig;
     use crate::ui::app::screens::settings::{PickerPresentation, picker_input_placeholder};
+    use crate::ui::theme::Theme;
+    use crate::ui::{TabId, TuiKitUi};
+    use ratatui::{buffer::Buffer, widgets::Widget};
     use tui_kit_runtime::{
+        AccessControlAction, AccessControlModalState, AccessControlMode, CreateSubmitState,
         PickerContext, PickerItem, SettingsEntry, SettingsSection, SettingsSnapshot,
+        TextInputModalState, TransferModalMode, TransferModalState,
     };
+
+    fn render_ui(ui: TuiKitUi<'_>, area: Rect) -> String {
+        let mut buf = Buffer::empty(area);
+        Widget::render(ui, area, &mut buf);
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     #[test]
     fn settings_overlay_lines_show_up_to_seven_entries() {
@@ -900,5 +1373,117 @@ mod tests {
             picker_input_placeholder(PickerContext::AddTag),
             "<enter a new tag>"
         );
+    }
+
+    #[test]
+    fn add_memory_overlay_renders_error_line() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new("tab-1"))
+            .add_memory_modal(TextInputModalState {
+                open: true,
+                submit_state: CreateSubmitState::Error,
+                error: Some("boom".to_string()),
+                ..TextInputModalState::default()
+            });
+
+        let rendered = render_ui(ui, Rect::new(0, 0, 100, 30));
+
+        assert!(rendered.contains("Add Existing Memory Canister"));
+        assert!(rendered.contains("boom"));
+        assert!(rendered.contains("Enter: submit"));
+    }
+
+    #[test]
+    fn access_overlay_renders_hint_line() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new("tab-1"))
+            .access_control_modal(AccessControlModalState {
+                open: true,
+                mode: AccessControlMode::Add,
+                ..AccessControlModalState::default()
+            });
+
+        let rendered = render_ui(ui, Rect::new(0, 0, 100, 30));
+
+        assert!(rendered.contains("Arrow: cycle selector"));
+        assert!(rendered.contains("Esc: close"));
+    }
+
+    #[test]
+    fn transfer_confirm_overlay_renders_summary_lines() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new("tab-1"))
+            .transfer_modal(TransferModalState {
+                open: true,
+                mode: TransferModalMode::Confirm,
+                principal_id: "aaaaa-aa".to_string(),
+                amount: "1.25000000".to_string(),
+                fee_base_units: Some(100_000),
+                confirm_yes: true,
+                ..TransferModalState::default()
+            });
+
+        let rendered = render_ui(ui, Rect::new(0, 0, 100, 30));
+
+        assert!(rendered.contains("Confirm Transfer"));
+        assert!(rendered.contains("Total debit"));
+        assert!(rendered.contains("[yes] / no"));
+    }
+
+    #[test]
+    fn transfer_edit_overlay_renders_inline_max_action() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new("tab-1"))
+            .transfer_modal(TransferModalState {
+                open: true,
+                amount: String::new(),
+                ..TransferModalState::default()
+            });
+
+        let rendered = render_ui(ui, Rect::new(0, 0, 100, 30));
+
+        assert!(rendered.contains("Amount (KINIC)"));
+        assert!(rendered.contains("<enter amount>"));
+        assert!(rendered.contains("Max"));
+    }
+
+    #[test]
+    fn access_confirm_overlay_renders_shared_confirm_copy() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new("tab-1"))
+            .access_control_modal(AccessControlModalState {
+                open: true,
+                mode: AccessControlMode::Confirm,
+                action: AccessControlAction::Remove,
+                principal_id: "aaaaa-aa".to_string(),
+                confirm_yes: false,
+                ..AccessControlModalState::default()
+            });
+
+        let rendered = render_ui(ui, Rect::new(0, 0, 100, 30));
+
+        assert!(rendered.contains("Confirm Access"));
+        assert!(rendered.contains("Remove access"));
+        assert!(rendered.contains("yes / [no]"));
+    }
+
+    #[test]
+    fn remove_memory_overlay_renders_shared_confirm_copy() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new("tab-1"))
+            .remove_memory_open(true)
+            .remove_memory_confirm_yes(false);
+
+        let rendered = render_ui(ui, Rect::new(0, 0, 100, 30));
+
+        assert!(rendered.contains("Remove Memory"));
+        assert!(rendered.contains("Remove this manually added memory from the list?"));
+        assert!(rendered.contains("yes / [no]"));
     }
 }

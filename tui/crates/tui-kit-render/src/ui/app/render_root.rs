@@ -39,7 +39,19 @@ impl<'a> TuiKitUi<'a> {
         {
             return None;
         }
-        if self.access_control_open {
+        if self.transfer_modal.open {
+            return self.transfer_cursor_position_for_area(area);
+        }
+        if self.add_memory.open {
+            return self.add_memory_cursor_position_for_area(area);
+        }
+        if self.remove_memory_open {
+            return None;
+        }
+        if self.rename_memory.form.open {
+            return self.rename_memory_cursor_position_for_area(area);
+        }
+        if self.access_control.open {
             return self.access_control_cursor_position_for_area(area);
         }
         match tab_kind(self.current_tab_id.0.as_str()) {
@@ -99,6 +111,10 @@ impl Widget for TuiKitUi<'_> {
         self.render_settings_overlay(area, buf);
         self.render_picker_overlay(area, buf);
         self.render_access_control_overlay(area, buf);
+        self.render_add_memory_overlay(area, buf);
+        self.render_remove_memory_overlay(area, buf);
+        self.render_rename_memory_overlay(area, buf);
+        self.render_transfer_overlay(area, buf);
         self.render_picker_overlay(area, buf);
         self.render_help_overlay(area, buf);
     }

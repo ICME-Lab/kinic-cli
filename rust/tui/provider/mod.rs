@@ -149,6 +149,11 @@ pub struct KinicProvider {
     pending_insert_dim: Option<mpsc::Receiver<InsertDimTaskOutput>>,
     pending_access_submit: Option<mpsc::Receiver<AccessSubmitTaskOutput>>,
     access_submit_in_flight: bool,
+    add_memory_validation_task: TaskState<AddMemoryValidationTaskOutput>,
+    rename_submit_task: TaskState<RenameSubmitTaskOutput>,
+    transfer_prerequisites_task: TaskState<TransferPrerequisitesTaskOutput>,
+    transfer_submit_task: TaskState<TransferSubmitTaskOutput>,
+    preferred_memory_after_refresh: Option<String>,
     loaded_memory_details: HashSet<String>,
     pending_memory_detail: Option<mpsc::Receiver<MemoryDetailTaskOutput>>,
     pending_memory_detail_memory_id: Option<String>,
@@ -705,6 +710,11 @@ impl KinicProvider {
             pending_insert_dim: None,
             pending_access_submit: None,
             access_submit_in_flight: false,
+            add_memory_validation_task: TaskState::default(),
+            rename_submit_task: TaskState::default(),
+            transfer_prerequisites_task: TaskState::default(),
+            transfer_submit_task: TaskState::default(),
+            preferred_memory_after_refresh: None,
             loaded_memory_details: HashSet::new(),
             pending_memory_detail: None,
             pending_memory_detail_memory_id: None,
@@ -1842,9 +1852,11 @@ impl KinicProvider {
         self.session_overview = SessionAccountOverview {
             session,
             balance_base_units: overview.balance_base_units,
+            fee_base_units: overview.fee_base_units,
             price_base_units: overview.price_base_units,
             principal_error: overview.principal_error,
             balance_error: overview.balance_error,
+            fee_error: overview.fee_error,
             price_error: overview.price_error,
         };
     }
@@ -1901,6 +1913,85 @@ impl KinicProvider {
             principal_id.to_string(),
             role,
         ))
+    }
+
+    fn validate_add_memory_submit(&self, state: &CoreState) -> Result<String, String> {
+        let memory_id = state.add_memory.value.trim();
+        if memory_id.is_empty() {
+            return Err("Memory canister id is required.".to_string());
+        }
+        Principal::from_text(memory_id)
+            .map_err(|_| format!("Invalid principal text: {memory_id}"))?;
+        if self
+            .user_preferences
+            .manual_memory_ids
+            .iter()
+            .any(|existing| existing == memory_id)
+            || self
+                .memory_records
+                .iter()
+                .any(|record| record.id == memory_id)
+        {
+            return Err("Memory is already in the list.".to_string());
+        }
+        Ok(memory_id.to_string())
+    }
+
+    fn validate_rename_submit(&self, state: &CoreState) -> Result<(String, String), String> {
+        let memory_id = state.rename_memory.memory_id.trim();
+        if memory_id.is_empty() {
+            return Err("Select a memory before renaming.".to_string());
+        }
+        Principal::from_text(memory_id)
+            .map_err(|_| format!("Invalid principal text: {memory_id}"))?;
+
+        let next_name = state.rename_memory.form.value.trim();
+        if next_name.is_empty() {
+            return Err("Memory name is required.".to_string());
+        }
+
+        Ok((memory_id.to_string(), next_name.to_string()))
+    }
+
+    fn validate_transfer_submit(&self, state: &CoreState) -> Result<(String, u128, u128), String> {
+        let principal_id = state.transfer_modal.principal_id.trim();
+        if principal_id.is_empty() {
+            return Err("Recipient principal is required.".to_string());
+        }
+        Principal::from_text(principal_id)
+            .map_err(|_| format!("Invalid principal text: {principal_id}"))?;
+
+        let amount_text = state.transfer_modal.amount.trim();
+        if amount_text.is_empty() {
+            return Err("Amount is required.".to_string());
+        }
+        let amount_base_units = parse_kinic_amount_to_e8s(amount_text)?;
+        if amount_base_units == 0 {
+            return Err("Amount must be greater than zero.".to_string());
+        }
+
+        let fee_base_units = state
+            .transfer_modal
+            .fee_base_units
+            .ok_or_else(|| "Transfer fee is unavailable.".to_string())?;
+        let balance_base_units = state
+            .transfer_modal
+            .available_balance_base_units
+            .ok_or_else(|| "Balance is unavailable.".to_string())?;
+        if balance_base_units <= fee_base_units {
+            return Err("Available balance does not cover the transfer fee.".to_string());
+        }
+        let total = amount_base_units
+            .checked_add(fee_base_units)
+            .ok_or_else(|| "Transfer total exceeds supported range.".to_string())?;
+        if total > balance_base_units {
+            return Err(format!(
+                "Amount exceeds spendable balance. Max sendable is {} KINIC.",
+                format_e8s_to_kinic_string_u128(balance_base_units.saturating_sub(fee_base_units))
+            ));
+        }
+
+        Ok((principal_id.to_string(), amount_base_units, fee_base_units))
     }
 
     fn matches_pending_search(&self, output: &SearchTaskOutput) -> bool {
@@ -2282,6 +2373,7 @@ impl KinicProvider {
             output.overview.session.principal_id.as_str(),
             output.overview.balance_base_units,
             output.overview.price_base_units.as_ref(),
+            output.overview.fee_base_units,
         );
         let next_state = if output.overview.principal_error.is_none() {
             CreateCostState::Loaded(Box::new(LoadedCreateCost {
@@ -2427,39 +2519,100 @@ impl KinicProvider {
             .into_iter()
             .collect();
 
-        Some(ProviderOutput {
-            snapshot: Some(self.build_snapshot(state)),
-            effects,
-        })
+        Some(self.snapshot_output(state, effects))
     }
 
-    fn poll_insert_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
-        let receiver = self.pending_insert_submit.as_ref()?;
-        let output = match receiver.try_recv() {
-            Ok(output) => output,
-            Err(mpsc::TryRecvError::Empty) => return None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.pending_insert_submit = None;
-                self.invalidate_pending_insert_submit();
-                self.insert_submit_in_flight = false;
-                return Some(ProviderOutput {
-                    snapshot: Some(self.build_snapshot(state)),
-                    effects: vec![CoreEffect::InsertFormError(Some(
-                        "Insert request failed: background worker disconnected.".to_string(),
-                    ))],
-                });
+    fn poll_transfer_prerequisites_background(
+        &mut self,
+        state: &CoreState,
+    ) -> Option<ProviderOutput> {
+        let receiver = self.transfer_prerequisites_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                finish_task(&mut self.transfer_prerequisites_task);
+                return Some(self.disconnected_task_output(
+                    state,
+                    CoreEffect::TransferFormError(Some(
+                        "Transfer form failed to load unexpectedly.".to_string(),
+                    )),
+                ));
             }
         };
 
-        self.pending_insert_submit = None;
-        self.insert_submit_in_flight = false;
-        let is_current = self.pending_insert_submit_request_id == Some(output.request_id);
-        self.invalidate_pending_insert_submit();
+        finish_task(&mut self.transfer_prerequisites_task);
+        let effects = match output.result {
+            Ok((balance_base_units, fee_base_units)) => vec![CoreEffect::OpenTransferModal {
+                fee_base_units,
+                available_balance_base_units: balance_base_units,
+            }],
+            Err(error) => vec![CoreEffect::TransferFormError(Some(format_transfer_error(
+                &error,
+            )))],
+        };
+
+        Some(self.snapshot_output(state, effects))
+    }
+
+    fn poll_transfer_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.transfer_submit_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                finish_task(&mut self.transfer_submit_task);
+                return Some(self.disconnected_task_output(
+                    state,
+                    CoreEffect::TransferFormError(Some(
+                        "Transfer request failed: background worker disconnected.".to_string(),
+                    )),
+                ));
+            }
+        };
+
+        finish_task(&mut self.transfer_submit_task);
+        let mut effects = Vec::new();
+        match output.result {
+            Ok(success) => {
+                effects.push(CoreEffect::CloseTransferModal);
+                effects.push(CoreEffect::Notify(format!(
+                    "Transferred KINIC successfully. Ledger block {}.",
+                    success.block_index
+                )));
+                if let Some(effect) = self.start_session_settings_refresh() {
+                    effects.push(effect);
+                }
+            }
+            Err(error) => {
+                effects.push(CoreEffect::TransferFormError(Some(format_transfer_error(
+                    &error,
+                ))));
+            }
+        }
+
+        Some(self.snapshot_output(state, effects))
+    }
+
+    fn poll_insert_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.insert_submit_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                reset_request_task(&mut self.insert_submit_task);
+                return Some(self.disconnected_request_output(
+                    state,
+                    CoreEffect::InsertFormError(Some(
+                        "Insert request failed: background worker disconnected.".to_string(),
+                    )),
+                ));
+            }
+        };
+
+        let is_current = finish_request_task(&mut self.insert_submit_task, output.request_id);
         if !is_current {
-            return Some(ProviderOutput {
-                snapshot: Some(self.build_snapshot(state)),
-                effects: Vec::new(),
-            });
+            return Some(self.stale_request_output(state));
         }
 
         let effects = match output.result {
@@ -2930,6 +3083,70 @@ impl DataProvider for KinicProvider {
             .or_else(|| self.poll_create_cost_background(state))
             .or_else(|| self.poll_session_settings_background(state))
             .or_else(|| self.poll_search_background(state))
+    }
+}
+
+fn parse_kinic_amount_to_e8s(value: &str) -> Result<u128, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("Amount is required.".to_string());
+    }
+    let parts: Vec<&str> = trimmed.split('.').collect();
+    if parts.len() > 2 {
+        return Err("Amount must be a decimal number with up to 8 fraction digits.".to_string());
+    }
+    let whole = parts[0];
+    let fraction = if parts.len() == 2 { parts[1] } else { "" };
+    if whole.is_empty() && fraction.is_empty() {
+        return Err("Amount is required.".to_string());
+    }
+    if !whole.chars().all(|char| char.is_ascii_digit())
+        || !fraction.chars().all(|char| char.is_ascii_digit())
+    {
+        return Err("Amount must contain digits only.".to_string());
+    }
+    if fraction.len() > 8 {
+        return Err("Amount supports up to 8 decimal places.".to_string());
+    }
+
+    let whole_value = if whole.is_empty() {
+        0u128
+    } else {
+        whole
+            .parse::<u128>()
+            .map_err(|_| "Amount exceeds supported range.".to_string())?
+    };
+    let fractional_text = format!("{fraction:0<8}");
+    let fractional_value = if fractional_text.is_empty() {
+        0u128
+    } else {
+        fractional_text
+            .parse::<u128>()
+            .map_err(|_| "Amount exceeds supported range.".to_string())?
+    };
+    whole_value
+        .checked_mul(100_000_000u128)
+        .and_then(|value| value.checked_add(fractional_value))
+        .ok_or_else(|| "Amount exceeds supported range.".to_string())
+}
+
+fn format_transfer_error(error: &bridge::TransferKinicError) -> String {
+    match error {
+        bridge::TransferKinicError::ResolveAgentFactory(message) => {
+            format!("Transfer setup failed: {message}")
+        }
+        bridge::TransferKinicError::BuildAgent(message) => {
+            format!("Transfer agent failed: {message}")
+        }
+        bridge::TransferKinicError::ParsePrincipal(message) => {
+            format!("Recipient principal failed: {message}")
+        }
+        bridge::TransferKinicError::LoadFee(message) => {
+            format!("Transfer fee lookup failed: {message}")
+        }
+        bridge::TransferKinicError::Transfer(message) => {
+            format!("Transfer failed: {message}")
+        }
     }
 }
 

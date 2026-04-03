@@ -539,6 +539,58 @@ mod tests {
     }
 
     #[test]
+    fn settings_balance_row_status_mentions_transfer() {
+        let theme = Theme::default();
+        let snapshot = tui_kit_runtime::SettingsSnapshot {
+            quick_entries: vec![],
+            sections: vec![tui_kit_runtime::SettingsSection {
+                title: "Account".to_string(),
+                entries: vec![tui_kit_runtime::SettingsEntry {
+                    id: "kinic_balance".to_string(),
+                    label: "KINIC balance".to_string(),
+                    value: "1.00000000 KINIC".to_string(),
+                    note: None,
+                }],
+                footer: None,
+            }],
+        };
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_SETTINGS_TAB_ID))
+            .focus(Focus::Content)
+            .list_selected(Some(0))
+            .settings_snapshot(Some(&snapshot));
+        let rendered = render_status_line(&ui);
+
+        assert!(rendered.contains("send KINIC"));
+    }
+
+    #[test]
+    fn settings_saved_tags_row_status_mentions_saved_tags() {
+        let theme = Theme::default();
+        let snapshot = tui_kit_runtime::SettingsSnapshot {
+            quick_entries: vec![],
+            sections: vec![tui_kit_runtime::SettingsSection {
+                title: "Saved tags".to_string(),
+                entries: vec![tui_kit_runtime::SettingsEntry {
+                    id: "saved_tags".to_string(),
+                    label: "Saved tags".to_string(),
+                    value: "2".to_string(),
+                    note: None,
+                }],
+                footer: None,
+            }],
+        };
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_SETTINGS_TAB_ID))
+            .focus(Focus::Content)
+            .list_selected(Some(0))
+            .settings_snapshot(Some(&snapshot));
+        let rendered = render_status_line(&ui);
+
+        assert!(rendered.contains("manage saved tags"));
+    }
+
+    #[test]
     fn non_form_tabs_render_generic_status_message() {
         let theme = Theme::default();
         let ui = TuiKitUi::new(&theme)
