@@ -4,9 +4,9 @@ use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
-    AccessControlAction, AccessControlFocus, AccessControlMode, AccessControlRole, CreateCostState,
-    CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode, PickerState, SearchScope,
-    SettingsSnapshot,
+    AccessControlModalState, CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus,
+    InsertMode, PickerState, RemoveMemoryModalState, RenameMemoryModalState, SearchScope,
+    SettingsSnapshot, TextInputModalState, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -427,6 +427,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn chat_scroll(mut self, scroll: usize) -> Self {
         self.chat_scroll = scroll;
+        self
+    }
+
+    #[must_use]
+    pub fn chat_scope(mut self, scope: tui_kit_runtime::ChatScope) -> Self {
+        self.chat_scope = scope;
         self
     }
 }

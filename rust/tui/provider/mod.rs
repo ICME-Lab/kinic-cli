@@ -25,11 +25,12 @@ use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tui_kit_runtime::{
-    AccessControlAction, AccessControlMode, AccessControlRole, CoreAction, CoreEffect, CoreResult,
-    CoreState, CreateCostState, DataProvider, FILE_MODE_ALLOWED_EXTENSIONS, InsertMode,
+    AccessControlAction, AccessControlMode, AccessControlRole, ChatScope, CoreAction, CoreEffect,
+    CoreResult, CoreState, CreateCostState, DataProvider, FILE_MODE_ALLOWED_EXTENSIONS, InsertMode,
     LoadedCreateCost, PaneFocus, PickerConfirmKind, PickerContext, PickerItem, PickerItemKind,
     PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SearchScope,
-    SessionAccountOverview, SessionSettingsSnapshot,
+    SessionAccountOverview, SessionSettingsSnapshot, TransferModalMode,
+    format_e8s_to_kinic_string_u128,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -108,6 +109,8 @@ struct SaveTagOutcome {
 }
 
 const MAX_CONCURRENT_MEMORY_SEARCHES: usize = 10;
+const ADD_MEMORY_ACTION_ID: &str = "kinic-action-add-memory";
+const ALL_MEMORIES_CHAT_THREAD_KEY: &str = "all-memories";
 
 pub struct KinicProvider {
     all: Vec<KinicRecord>,
@@ -128,20 +131,14 @@ pub struct KinicProvider {
     next_search_request_id: u64,
     last_search_state: Option<LastSearchState>,
     create_cost_state: CreateCostState,
-    pending_create_cost: Option<mpsc::Receiver<CreateCostTaskOutput>>,
-    pending_create_cost_request_id: Option<u64>,
-    create_cost_in_flight: bool,
-    pending_create_submit: Option<mpsc::Receiver<CreateSubmitTaskOutput>>,
-    pending_create_submit_request_id: Option<u64>,
-    create_submit_in_flight: bool,
-    pending_session_settings: Option<mpsc::Receiver<SessionSettingsTaskOutput>>,
-    pending_session_settings_request_id: Option<u64>,
-    session_settings_in_flight: bool,
+    create_cost_task: RequestTaskState<CreateCostTaskOutput>,
+    create_submit_task: RequestTaskState<CreateSubmitTaskOutput>,
+    chat_submit_task: RequestTaskState<ChatTaskOutput>,
+    session_settings_task: RequestTaskState<SessionSettingsTaskOutput>,
     next_session_settings_request_id: u64,
     next_create_request_id: u64,
-    pending_insert_submit: Option<mpsc::Receiver<InsertSubmitTaskOutput>>,
-    pending_insert_submit_request_id: Option<u64>,
-    insert_submit_in_flight: bool,
+    next_chat_request_id: u64,
+    insert_submit_task: RequestTaskState<InsertSubmitTaskOutput>,
     next_insert_request_id: u64,
     insert_expected_dim_memory_id: Option<String>,
     insert_expected_dim: Option<u64>,
@@ -214,9 +211,33 @@ struct CreateSubmitTaskOutput {
     result: Result<bridge::CreateMemorySuccess, bridge::CreateMemoryError>,
 }
 
+struct ChatTaskOutput {
+    request_id: u64,
+    history_thread_key: String,
+    result: Result<String, String>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CapturedChatRequest {
+    history_thread_key: String,
+    scope: ChatScope,
+    target_memory_ids: Vec<String>,
+    query: String,
+    history: Vec<(String, String)>,
+}
+
 struct SessionSettingsTaskOutput {
     request_id: u64,
     overview: SessionAccountOverview,
+}
+
+struct TransferPrerequisitesTaskOutput {
+    result: Result<(u128, u128), bridge::TransferKinicError>,
+}
+
+struct TransferSubmitTaskOutput {
+    result: Result<bridge::TransferKinicSuccess, bridge::TransferKinicError>,
 }
 
 #[derive(Clone, Copy)]
@@ -281,11 +302,21 @@ fn saved_tag_selection(preferences: &UserPreferences) -> Vec<String> {
 fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> {
     match context {
         PickerContext::InsertTag | PickerContext::TagManagement => Some("+ Add new tag"),
-        PickerContext::DefaultMemory | PickerContext::InsertTarget | PickerContext::AddTag => None,
+        PickerContext::DefaultMemory
+        | PickerContext::InsertTarget
+        | PickerContext::AddTag
+        | PickerContext::ChatResultLimit
+        | PickerContext::ChatPerMemoryLimit
+        | PickerContext::ChatCandidatePool
+        | PickerContext::ChatDiversity => None,
     }
 }
 
-fn picker_selected_id_for_context(context: PickerContext, state: &CoreState) -> Option<String> {
+fn picker_selected_id_for_context(
+    context: PickerContext,
+    state: &CoreState,
+    user_preferences: &UserPreferences,
+) -> Option<String> {
     match context {
         PickerContext::DefaultMemory => state.saved_default_memory_id.clone(),
         PickerContext::InsertTarget => {
@@ -297,6 +328,12 @@ fn picker_selected_id_for_context(context: PickerContext, state: &CoreState) -> 
             (!insert_tag.is_empty()).then(|| insert_tag.to_string())
         }
         PickerContext::TagManagement | PickerContext::AddTag => None,
+        PickerContext::ChatResultLimit => Some(user_preferences.chat_overall_top_k.to_string()),
+        PickerContext::ChatPerMemoryLimit => Some(user_preferences.chat_per_memory_cap.to_string()),
+        PickerContext::ChatCandidatePool => {
+            Some(user_preferences.chat_candidate_pool_size.to_string())
+        }
+        PickerContext::ChatDiversity => Some(user_preferences.chat_mmr_lambda.to_string()),
     }
 }
 
@@ -348,6 +385,46 @@ fn picker_items_for_context(
                 .unwrap_or_default(),
             _ => Vec::new(),
         },
+        PickerContext::ChatResultLimit => settings::chat_result_limit_options()
+            .iter()
+            .map(|value| {
+                PickerItem::option(
+                    value.to_string(),
+                    settings::chat_result_limit_display(*value),
+                    user_preferences.chat_overall_top_k == *value,
+                )
+            })
+            .collect(),
+        PickerContext::ChatPerMemoryLimit => settings::chat_per_memory_limit_options()
+            .iter()
+            .map(|value| {
+                PickerItem::option(
+                    value.to_string(),
+                    settings::chat_per_memory_limit_display(*value),
+                    user_preferences.chat_per_memory_cap == *value,
+                )
+            })
+            .collect(),
+        PickerContext::ChatCandidatePool => settings::chat_candidate_pool_options()
+            .iter()
+            .map(|value| {
+                PickerItem::option(
+                    value.to_string(),
+                    settings::chat_candidate_pool_display(*value),
+                    user_preferences.chat_candidate_pool_size == *value,
+                )
+            })
+            .collect(),
+        PickerContext::ChatDiversity => settings::chat_diversity_options()
+            .iter()
+            .map(|value| {
+                PickerItem::option(
+                    value.to_string(),
+                    settings::chat_diversity_display(*value),
+                    user_preferences.chat_mmr_lambda == *value,
+                )
+            })
+            .collect(),
     }
 }
 
@@ -385,6 +462,11 @@ impl<'a> DefaultMemoryController<'a> {
         let updated_preferences = UserPreferences {
             default_memory_id: Some(memory_id.clone()),
             saved_tags: self.user_preferences.saved_tags.clone(),
+            manual_memory_ids: self.user_preferences.manual_memory_ids.clone(),
+            chat_overall_top_k: self.user_preferences.chat_overall_top_k,
+            chat_per_memory_cap: self.user_preferences.chat_per_memory_cap,
+            chat_candidate_pool_size: self.user_preferences.chat_candidate_pool_size,
+            chat_mmr_lambda: self.user_preferences.chat_mmr_lambda,
         };
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -502,6 +584,50 @@ fn take_test_settings_save_override() -> Option<()> {
     } else {
         None
     }
+}
+
+#[cfg(test)]
+fn test_chat_submit_override() -> &'static Mutex<Option<Result<String, String>>> {
+    static OVERRIDE: OnceLock<Mutex<Option<Result<String, String>>>> = OnceLock::new();
+    OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+fn set_next_test_chat_submit_result(result: Result<String, String>) {
+    let mut guard = test_chat_submit_override()
+        .lock()
+        .expect("test chat submit override lock should be available");
+    *guard = Some(result);
+}
+
+#[cfg(test)]
+fn take_test_chat_submit_result() -> Option<Result<String, String>> {
+    let mut guard = test_chat_submit_override()
+        .lock()
+        .expect("test chat submit override lock should be available");
+    guard.take()
+}
+
+#[cfg(test)]
+fn test_last_chat_request() -> &'static Mutex<Option<CapturedChatRequest>> {
+    static LAST_REQUEST: OnceLock<Mutex<Option<CapturedChatRequest>>> = OnceLock::new();
+    LAST_REQUEST.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+fn set_last_test_chat_request(request: CapturedChatRequest) {
+    let mut guard = test_last_chat_request()
+        .lock()
+        .expect("last chat request lock should be available");
+    *guard = Some(request);
+}
+
+#[cfg(test)]
+fn take_last_test_chat_request() -> Option<CapturedChatRequest> {
+    let mut guard = test_last_chat_request()
+        .lock()
+        .expect("last chat request lock should be available");
+    guard.take()
 }
 
 struct InsertSubmitTaskOutput {
@@ -689,20 +815,14 @@ impl KinicProvider {
             next_search_request_id: 0,
             last_search_state: None,
             create_cost_state: CreateCostState::Hidden,
-            pending_create_cost: None,
-            pending_create_cost_request_id: None,
-            create_cost_in_flight: false,
-            pending_create_submit: None,
-            pending_create_submit_request_id: None,
-            create_submit_in_flight: false,
-            pending_session_settings: None,
-            pending_session_settings_request_id: None,
-            session_settings_in_flight: false,
+            create_cost_task: RequestTaskState::default(),
+            create_submit_task: RequestTaskState::default(),
+            chat_submit_task: RequestTaskState::default(),
+            session_settings_task: RequestTaskState::default(),
             next_session_settings_request_id: 0,
             next_create_request_id: 0,
-            pending_insert_submit: None,
-            pending_insert_submit_request_id: None,
-            insert_submit_in_flight: false,
+            next_chat_request_id: 0,
+            insert_submit_task: RequestTaskState::default(),
             next_insert_request_id: 0,
             insert_expected_dim_memory_id: None,
             insert_expected_dim: None,
@@ -909,6 +1029,231 @@ impl KinicProvider {
         self.start_active_memory_detail_load();
     }
 
+    fn identity_label(&self) -> &str {
+        self.session_overview.session.identity_name.as_str()
+    }
+
+    fn network_label(&self) -> &str {
+        self.session_overview.session.network.as_str()
+    }
+
+    fn load_chat_history_messages(
+        &self,
+        history_thread_key: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        let network = self.network_label().to_string();
+        let identity = self.identity_label().to_string();
+        self.with_settings_io(move || {
+            settings::load_chat_history(network.as_str(), identity.as_str(), history_thread_key)
+        })
+    }
+
+    fn append_chat_history_message(
+        &self,
+        history_thread_key: &str,
+        role: &str,
+        content: &str,
+    ) -> Result<(), String> {
+        let network = self.network_label().to_string();
+        let identity = self.identity_label().to_string();
+        let saved_at = settings::current_chat_saved_at();
+        self.with_settings_io(move || {
+            settings::append_chat_history_message(
+                network.as_str(),
+                identity.as_str(),
+                history_thread_key,
+                role,
+                content,
+                saved_at,
+            )
+        })
+    }
+
+    fn with_settings_io<T, F>(&self, operation: F) -> Result<T, String>
+    where
+        F: FnOnce() -> Result<T, tui_kit_host::settings::SettingsError>,
+    {
+        #[cfg(test)]
+        let _settings_io_lock = settings_io_lock()
+            .lock()
+            .expect("settings io lock should be available");
+        operation().map_err(|error| error.to_string())
+    }
+
+    fn chat_history_thread_key(&self, state: &CoreState) -> Option<String> {
+        match state.chat_scope {
+            ChatScope::All => Some(ALL_MEMORIES_CHAT_THREAD_KEY.to_string()),
+            ChatScope::Selected => self.active_memory_id.clone(),
+        }
+    }
+
+    fn load_active_chat_history_effects(&self, state: &CoreState) -> Vec<CoreEffect> {
+        let Some(history_thread_key) = self.chat_history_thread_key(state) else {
+            return vec![
+                CoreEffect::ReplaceChatMessages(Vec::new()),
+                CoreEffect::SetChatLoading(false),
+            ];
+        };
+
+        match self.load_chat_history_messages(history_thread_key.as_str()) {
+            Ok(messages) => vec![
+                CoreEffect::ReplaceChatMessages(messages),
+                CoreEffect::SetChatLoading(false),
+            ],
+            Err(error) => vec![
+                CoreEffect::ReplaceChatMessages(Vec::new()),
+                CoreEffect::SetChatLoading(false),
+                CoreEffect::Notify(format!("Chat history load failed: {error}")),
+            ],
+        }
+    }
+
+    fn chat_targets(&self, scope: ChatScope) -> Result<Vec<bridge::ChatTarget>, String> {
+        match scope {
+            ChatScope::All => {
+                let targets =
+                    self.memory_records
+                        .iter()
+                        .filter_map(|record| {
+                            record.searchable_memory_id.as_ref().map(|memory_id| {
+                                bridge::ChatTarget {
+                                    memory_id: memory_id.clone(),
+                                    memory_name: record.title.clone(),
+                                }
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                if targets.is_empty() {
+                    Err("No searchable memories are available yet.".to_string())
+                } else {
+                    Ok(targets)
+                }
+            }
+            ChatScope::Selected => {
+                let active_memory_id = self
+                    .active_memory_id
+                    .as_deref()
+                    .ok_or_else(|| "Select a memory before asking AI.".to_string())?;
+                let record = self
+                    .memory_records
+                    .iter()
+                    .find(|record| record.id == active_memory_id)
+                    .ok_or_else(|| "Select a memory before asking AI.".to_string())?;
+                let memory_id = record
+                    .searchable_memory_id
+                    .as_ref()
+                    .ok_or_else(|| "The selected memory cannot be searched yet.".to_string())?;
+                Ok(vec![bridge::ChatTarget {
+                    memory_id: memory_id.clone(),
+                    memory_name: record.title.clone(),
+                }])
+            }
+        }
+    }
+
+    fn chat_retrieval_config(&self) -> bridge::ChatRetrievalConfig {
+        bridge::ChatRetrievalConfig {
+            overall_top_k: self.user_preferences.chat_overall_top_k,
+            per_memory_cap: self.user_preferences.chat_per_memory_cap,
+            candidate_pool_size: self.user_preferences.chat_candidate_pool_size,
+            mmr_lambda: f32::from(self.user_preferences.chat_mmr_lambda) / 100.0,
+        }
+    }
+
+    fn start_chat_submit(
+        &mut self,
+        scope: ChatScope,
+        history_thread_key: String,
+        targets: Vec<bridge::ChatTarget>,
+        query: String,
+        history: Vec<(String, String)>,
+    ) -> CoreEffect {
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        let retrieval_config = self.chat_retrieval_config();
+
+        #[cfg(test)]
+        set_last_test_chat_request(CapturedChatRequest {
+            history_thread_key: history_thread_key.clone(),
+            scope,
+            target_memory_ids: targets
+                .iter()
+                .map(|target| target.memory_id.clone())
+                .collect(),
+            query: query.clone(),
+            history: history.clone(),
+        });
+
+        spawn_request_task(
+            &mut self.next_chat_request_id,
+            &mut self.chat_submit_task,
+            move |request_id, tx| {
+                #[cfg(test)]
+                if let Some(result) = take_test_chat_submit_result() {
+                    let _ = tx.send(ChatTaskOutput {
+                        request_id,
+                        history_thread_key: history_thread_key.clone(),
+                        result,
+                    });
+                    return;
+                }
+
+                let runtime =
+                    Runtime::new().expect("failed to create tokio runtime for chat submit");
+                let result = runtime
+                    .block_on(bridge::ask_memories(
+                        use_mainnet,
+                        auth,
+                        scope,
+                        targets,
+                        query,
+                        history,
+                        retrieval_config,
+                    ))
+                    .map_err(|error| short_error(&error.to_string()));
+                let _ = tx.send(ChatTaskOutput {
+                    request_id,
+                    history_thread_key,
+                    result,
+                });
+            },
+        );
+
+        CoreEffect::Notify("Asking AI...".to_string())
+    }
+
+    fn prompt_history_messages(&self, state: &CoreState) -> Vec<(String, String)> {
+        let recent = state
+            .chat_messages
+            .iter()
+            .filter(|(role, content)| {
+                matches!(role.as_str(), "user" | "assistant") && !content.trim().is_empty()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let start = recent.len().saturating_sub(8);
+        recent.into_iter().skip(start).collect()
+    }
+
+    fn snapshot_output(&self, state: &CoreState, effects: Vec<CoreEffect>) -> ProviderOutput {
+        ProviderOutput {
+            snapshot: Some(self.build_snapshot(state)),
+            effects,
+        }
+    }
+
+    fn stale_request_output(&self, state: &CoreState) -> ProviderOutput {
+        self.snapshot_output(state, Vec::new())
+    }
+
+    fn disconnected_request_output(&self, state: &CoreState, effect: CoreEffect) -> ProviderOutput {
+        self.snapshot_output(state, vec![effect])
+    }
+
+    fn disconnected_task_output(&self, state: &CoreState, effect: CoreEffect) -> ProviderOutput {
+        self.snapshot_output(state, vec![effect])
+    }
+
     fn active_memory_summary(&self) -> Option<&MemorySummary> {
         let active_id = self.active_memory_id.as_deref()?;
         self.memory_summaries
@@ -916,28 +1261,86 @@ impl KinicProvider {
             .find(|summary| summary.id == active_id)
     }
 
+    fn active_rename_target(&self, state: &CoreState) -> Option<(&MemorySummary, String)> {
+        if self.tab_id != KINIC_MEMORIES_TAB_ID || self.memories_mode != MemoriesMode::Browser {
+            return None;
+        }
+        if self.is_add_memory_action_selected(state) {
+            return None;
+        }
+        let summary = self.active_memory_summary()?;
+        summary.searchable_memory_id.as_ref().map(|_| {
+            (
+                summary,
+                resolved_memory_name(summary.name.as_str(), summary.detail.as_str()),
+            )
+        })
+    }
+
+    fn active_memory_is_manual(&self) -> bool {
+        let Some(active_id) = self.active_memory_id.as_deref() else {
+            return false;
+        };
+        self.user_preferences
+            .manual_memory_ids
+            .iter()
+            .any(|memory_id| memory_id == active_id)
+    }
+
     fn access_selection<'a>(&'a self, state: &CoreState) -> Option<AccessSelection<'a>> {
         let summary = self.active_memory_summary()?;
         let user_count = summary.users.as_ref().map_or(0, Vec::len);
-        if state.access_list_index >= user_count {
+        let add_user_index = user_count;
+        let remove_index = add_user_index + usize::from(self.active_memory_is_manual());
+        let selected_index = state.memory_content_action_index.min(remove_index);
+
+        if selected_index < user_count {
+            return summary
+                .users
+                .as_ref()
+                .and_then(|users| users.get(selected_index))
+                .map(AccessSelection::User);
+        }
+
+        if selected_index == add_user_index {
             return Some(AccessSelection::AddUser);
         }
-        summary
-            .users
-            .as_ref()
-            .and_then(|users| users.get(state.access_list_index))
-            .map(AccessSelection::User)
+
+        self.active_memory_is_manual()
+            .then_some(AccessSelection::RemoveManualMemory)
     }
 
     fn next_access_index(&self, state: &CoreState, delta: isize) -> usize {
         let selectable_len = self
             .active_memory_summary()
-            .map(|summary| summary.users.as_ref().map_or(0, Vec::len) + 1)
+            .map(|summary| {
+                summary.users.as_ref().map_or(0, Vec::len)
+                    + 1
+                    + usize::from(self.active_memory_is_manual())
+            })
             .unwrap_or(1);
         let current = state
-            .access_list_index
+            .memory_content_action_index
             .min(selectable_len.saturating_sub(1)) as isize;
         (current + delta).clamp(0, selectable_len.saturating_sub(1) as isize) as usize
+    }
+
+    fn jump_access_index(&self, state: &CoreState, forward: bool) -> usize {
+        let user_count = self
+            .active_memory_summary()
+            .and_then(|summary| summary.users.as_ref())
+            .map_or(0, Vec::len);
+        let add_user_index = user_count;
+        let remove_index = add_user_index + usize::from(self.active_memory_is_manual());
+        let current = state.memory_content_action_index.min(remove_index);
+
+        if self.active_memory_is_manual() && forward {
+            return remove_index;
+        }
+        if self.active_memory_is_manual() && current == remove_index {
+            return add_user_index;
+        }
+        add_user_index
     }
 
     fn access_role_from_user(user: &bridge::MemoryUser) -> AccessControlRole {
@@ -1429,101 +1832,121 @@ impl KinicProvider {
                 CoreEffect::Notify(format!("Selected tag {} for insert", item.id)),
             ],
             PickerContext::AddTag => Vec::new(),
+            PickerContext::ChatResultLimit => item
+                .id
+                .parse::<usize>()
+                .map(|value| vec![self.set_chat_result_limit_preference(value)])
+                .unwrap_or_else(|_| {
+                    vec![CoreEffect::Notify("Invalid chat result limit.".to_string())]
+                }),
+            PickerContext::ChatPerMemoryLimit => item
+                .id
+                .parse::<usize>()
+                .map(|value| vec![self.set_chat_per_memory_limit_preference(value)])
+                .unwrap_or_else(|_| {
+                    vec![CoreEffect::Notify("Invalid per-memory limit.".to_string())]
+                }),
+            PickerContext::ChatCandidatePool => item
+                .id
+                .parse::<usize>()
+                .map(|value| vec![self.set_chat_candidate_pool_preference(value)])
+                .unwrap_or_else(|_| {
+                    vec![CoreEffect::Notify(
+                        "Invalid chat candidate pool.".to_string(),
+                    )]
+                }),
+            PickerContext::ChatDiversity => item
+                .id
+                .parse::<u8>()
+                .map(|value| vec![self.set_chat_diversity_preference(value)])
+                .unwrap_or_else(|_| {
+                    vec![CoreEffect::Notify("Invalid chat diversity.".to_string())]
+                }),
         }
     }
 
     fn start_session_settings_refresh(&mut self) -> Option<CoreEffect> {
-        if self.session_settings_in_flight {
+        if self.session_settings_task.in_flight {
             return None;
         }
 
-        let request_id = self.next_session_settings_request_id;
-        self.next_session_settings_request_id += 1;
-        self.pending_session_settings_request_id = Some(request_id);
-        self.session_settings_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
-        let (tx, rx) = mpsc::channel();
-        self.pending_session_settings = Some(rx);
-
-        thread::spawn(move || {
-            let runtime =
-                Runtime::new().expect("failed to create tokio runtime for settings refresh");
-            let overview =
-                runtime.block_on(bridge::load_session_account_overview(use_mainnet, auth));
-            let _ = tx.send(SessionSettingsTaskOutput {
-                request_id,
-                overview,
-            });
-        });
+        spawn_request_task(
+            &mut self.next_session_settings_request_id,
+            &mut self.session_settings_task,
+            move |request_id, tx| {
+                let runtime =
+                    Runtime::new().expect("failed to create tokio runtime for settings refresh");
+                let overview =
+                    runtime.block_on(bridge::load_session_account_overview(use_mainnet, auth));
+                let _ = tx.send(SessionSettingsTaskOutput {
+                    request_id,
+                    overview,
+                });
+            },
+        );
 
         None
     }
 
     fn start_create_cost_refresh(&mut self) -> Option<CoreEffect> {
-        if self.create_cost_in_flight {
+        if self.create_cost_task.in_flight {
             return None;
         }
 
-        let request_id = self.next_create_request_id;
-        self.next_create_request_id += 1;
-        self.pending_create_cost_request_id = Some(request_id);
         self.create_cost_state = CreateCostState::Loading;
-        self.create_cost_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
-        let (tx, rx) = mpsc::channel();
-        self.pending_create_cost = Some(rx);
-
-        thread::spawn(move || {
-            let runtime =
-                Runtime::new().expect("failed to create tokio runtime for create cost refresh");
-            let overview =
-                runtime.block_on(bridge::load_session_account_overview(use_mainnet, auth));
-            let _ = tx.send(CreateCostTaskOutput {
-                request_id,
-                overview,
-            });
-        });
+        spawn_request_task(
+            &mut self.next_create_request_id,
+            &mut self.create_cost_task,
+            move |request_id, tx| {
+                let runtime =
+                    Runtime::new().expect("failed to create tokio runtime for create cost refresh");
+                let overview =
+                    runtime.block_on(bridge::load_session_account_overview(use_mainnet, auth));
+                let _ = tx.send(CreateCostTaskOutput {
+                    request_id,
+                    overview,
+                });
+            },
+        );
 
         None
     }
 
     fn start_create_submit(&mut self, name: String, description: String) -> CoreEffect {
-        let request_id = self.next_create_request_id;
-        self.next_create_request_id += 1;
-        self.pending_create_submit_request_id = Some(request_id);
-        self.create_submit_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
-        let (tx, rx) = mpsc::channel();
-        self.pending_create_submit = Some(rx);
-
-        thread::spawn(move || {
-            let runtime = Runtime::new().expect("failed to create tokio runtime for create submit");
-            let result =
-                runtime.block_on(bridge::create_memory(use_mainnet, auth, name, description));
-            let _ = tx.send(CreateSubmitTaskOutput { request_id, result });
-        });
+        spawn_request_task(
+            &mut self.next_create_request_id,
+            &mut self.create_submit_task,
+            move |request_id, tx| {
+                let runtime =
+                    Runtime::new().expect("failed to create tokio runtime for create submit");
+                let result =
+                    runtime.block_on(bridge::create_memory(use_mainnet, auth, name, description));
+                let _ = tx.send(CreateSubmitTaskOutput { request_id, result });
+            },
+        );
 
         CoreEffect::Notify("Creating memory...".to_string())
     }
 
     fn start_insert_submit(&mut self, request: InsertRequest) -> CoreEffect {
-        let request_id = self.next_insert_request_id;
-        self.next_insert_request_id += 1;
-        self.pending_insert_submit_request_id = Some(request_id);
-        self.insert_submit_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
-        let (tx, rx) = mpsc::channel();
-        self.pending_insert_submit = Some(rx);
-
-        thread::spawn(move || {
-            let runtime = Runtime::new().expect("failed to create tokio runtime for insert submit");
-            let result = runtime.block_on(bridge::run_insert(use_mainnet, auth, request));
-            let _ = tx.send(InsertSubmitTaskOutput { request_id, result });
-        });
+        spawn_request_task(
+            &mut self.next_insert_request_id,
+            &mut self.insert_submit_task,
+            move |request_id, tx| {
+                let runtime =
+                    Runtime::new().expect("failed to create tokio runtime for insert submit");
+                let result = runtime.block_on(bridge::run_insert(use_mainnet, auth, request));
+                let _ = tx.send(InsertSubmitTaskOutput { request_id, result });
+            },
+        );
 
         CoreEffect::Notify("Submitting insert request...".to_string())
     }
@@ -1557,6 +1980,251 @@ impl KinicProvider {
         });
 
         CoreEffect::Notify("Applying access change...".to_string())
+    }
+
+    fn start_add_memory_validation(&mut self, memory_id: String) -> Result<CoreEffect, String> {
+        let principal_id = self
+            .config
+            .auth
+            .principal_text()
+            .map_err(|error| short_error(&error.to_string()))?;
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        spawn_task(&mut self.add_memory_validation_task, move |tx| {
+            let runtime =
+                Runtime::new().expect("failed to create tokio runtime for add memory validation");
+            let result = runtime
+                .block_on(bridge::validate_manual_memory_access(
+                    use_mainnet,
+                    auth,
+                    memory_id.clone(),
+                    principal_id,
+                ))
+                .map_err(|error| error.to_string());
+            let _ = tx.send(AddMemoryValidationTaskOutput { memory_id, result });
+        });
+
+        Ok(CoreEffect::Notify(
+            "Checking memory access via get_users()...".to_string(),
+        ))
+    }
+
+    fn start_rename_submit(&mut self, memory_id: String, next_name: String) -> CoreEffect {
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        spawn_task(&mut self.rename_submit_task, move |tx| {
+            let runtime = Runtime::new().expect("failed to create tokio runtime for rename submit");
+            let result = runtime.block_on(bridge::rename_memory(
+                use_mainnet,
+                auth,
+                memory_id.clone(),
+                next_name.clone(),
+            ));
+            let _ = tx.send(RenameSubmitTaskOutput {
+                memory_id,
+                next_name,
+                result,
+            });
+        });
+
+        CoreEffect::Notify("Renaming memory...".to_string())
+    }
+
+    fn save_manual_memory_to_preferences(&mut self, memory_id: &str) -> Result<(), String> {
+        if self
+            .user_preferences
+            .manual_memory_ids
+            .iter()
+            .any(|existing| existing == memory_id)
+        {
+            return Ok(());
+        }
+        self.update_user_preferences(|preferences| {
+            preferences.manual_memory_ids.push(memory_id.to_string());
+        })
+    }
+
+    fn remove_manual_memory_from_preferences(&mut self, memory_id: &str) -> Result<(), String> {
+        self.update_user_preferences(|preferences| {
+            preferences
+                .manual_memory_ids
+                .retain(|existing| existing != memory_id);
+            if preferences.default_memory_id.as_deref() == Some(memory_id) {
+                preferences.default_memory_id = None;
+            }
+        })
+    }
+
+    fn set_chat_result_limit_preference(&mut self, value: usize) -> CoreEffect {
+        if self.user_preferences.chat_overall_top_k == value {
+            return CoreEffect::Notify(format!(
+                "Chat result limit already set to {}",
+                settings::chat_result_limit_display(value)
+            ));
+        }
+        match self.update_user_preferences(|preferences| {
+            preferences.chat_overall_top_k = value;
+        }) {
+            Ok(()) => CoreEffect::Notify(format!(
+                "Chat result limit set to {}",
+                settings::chat_result_limit_display(value)
+            )),
+            Err(error) => CoreEffect::Notify(format!("Chat result limit save failed: {error}")),
+        }
+    }
+
+    fn set_chat_per_memory_limit_preference(&mut self, value: usize) -> CoreEffect {
+        if self.user_preferences.chat_per_memory_cap == value {
+            return CoreEffect::Notify(format!(
+                "Per-memory limit already set to {}",
+                settings::chat_per_memory_limit_display(value)
+            ));
+        }
+        match self.update_user_preferences(|preferences| {
+            preferences.chat_per_memory_cap = value;
+        }) {
+            Ok(()) => CoreEffect::Notify(format!(
+                "Per-memory limit set to {}",
+                settings::chat_per_memory_limit_display(value)
+            )),
+            Err(error) => CoreEffect::Notify(format!("Per-memory limit save failed: {error}")),
+        }
+    }
+
+    fn set_chat_candidate_pool_preference(&mut self, value: usize) -> CoreEffect {
+        if self.user_preferences.chat_candidate_pool_size == value {
+            return CoreEffect::Notify(format!(
+                "Chat candidate pool already set to {}",
+                settings::chat_candidate_pool_display(value)
+            ));
+        }
+        match self.update_user_preferences(|preferences| {
+            preferences.chat_candidate_pool_size = value;
+        }) {
+            Ok(()) => CoreEffect::Notify(format!(
+                "Chat candidate pool set to {}",
+                settings::chat_candidate_pool_display(value)
+            )),
+            Err(error) => CoreEffect::Notify(format!("Chat candidate pool save failed: {error}")),
+        }
+    }
+
+    fn set_chat_diversity_preference(&mut self, value: u8) -> CoreEffect {
+        if self.user_preferences.chat_mmr_lambda == value {
+            return CoreEffect::Notify(format!(
+                "Chat diversity already set to {}",
+                settings::chat_diversity_display(value)
+            ));
+        }
+        match self.update_user_preferences(|preferences| {
+            preferences.chat_mmr_lambda = value;
+        }) {
+            Ok(()) => CoreEffect::Notify(format!(
+                "Chat diversity set to {}",
+                settings::chat_diversity_display(value)
+            )),
+            Err(error) => CoreEffect::Notify(format!("Chat diversity save failed: {error}")),
+        }
+    }
+
+    fn update_user_preferences<F>(&mut self, update: F) -> Result<(), String>
+    where
+        F: FnOnce(&mut UserPreferences),
+    {
+        let mut updated_preferences = self.user_preferences.clone();
+        update(&mut updated_preferences);
+
+        #[cfg(test)]
+        let _settings_io_lock = settings_io_lock()
+            .lock()
+            .expect("settings io lock should be available");
+        match save_user_preferences_for_apply(&updated_preferences) {
+            Ok(()) => {
+                let reloaded_preferences = reload_preferences_for_apply(&updated_preferences);
+                apply_reloaded_preferences(
+                    &mut self.user_preferences,
+                    &mut self.preferences_health,
+                    updated_preferences,
+                    reloaded_preferences,
+                );
+                Ok(())
+            }
+            Err(error) => {
+                self.preferences_health.save_error = Some(error.to_string());
+                Err(error.to_string())
+            }
+        }
+    }
+
+    fn next_memory_after_removal(&self, removed_memory_id: &str) -> Option<String> {
+        let visible_ids = self
+            .visible_memory_records()
+            .into_iter()
+            .map(|record| record.id.clone())
+            .collect::<Vec<_>>();
+        let removed_index = visible_ids
+            .iter()
+            .position(|memory_id| memory_id == removed_memory_id)?;
+        visible_ids.get(removed_index + 1).cloned().or_else(|| {
+            removed_index
+                .checked_sub(1)
+                .and_then(|index| visible_ids.get(index).cloned())
+        })
+    }
+
+    fn remove_manual_memory_locally(&mut self, memory_id: &str) {
+        self.memory_summaries
+            .retain(|summary| summary.id != memory_id);
+        self.memory_records.retain(|record| record.id != memory_id);
+        self.all.retain(|record| record.id != memory_id);
+        self.loaded_memory_details.remove(memory_id);
+        if self.pending_memory_detail_memory_id.as_deref() == Some(memory_id) {
+            self.pending_memory_detail = None;
+            self.pending_memory_detail_memory_id = None;
+        }
+        self.refresh_memory_records_from_summaries();
+    }
+
+    fn start_transfer_prerequisites_load(&mut self) {
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        spawn_task(&mut self.transfer_prerequisites_task, move |tx| {
+            let runtime =
+                Runtime::new().expect("failed to create tokio runtime for transfer prerequisites");
+            let result = runtime.block_on(bridge::load_transfer_prerequisites(use_mainnet, auth));
+            let _ = tx.send(TransferPrerequisitesTaskOutput { result });
+        });
+    }
+
+    fn cached_transfer_prerequisites(&self) -> Option<(u128, u128)> {
+        Some((
+            self.session_overview.balance_base_units?,
+            self.session_overview.fee_base_units?,
+        ))
+    }
+
+    fn start_transfer_submit(
+        &mut self,
+        recipient_principal: String,
+        amount_base_units: u128,
+        fee_base_units: u128,
+    ) -> CoreEffect {
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        spawn_task(&mut self.transfer_submit_task, move |tx| {
+            let runtime =
+                Runtime::new().expect("failed to create tokio runtime for transfer submit");
+            let result = runtime.block_on(bridge::transfer_kinic(
+                use_mainnet,
+                auth,
+                recipient_principal,
+                amount_base_units,
+                fee_base_units,
+            ));
+            let _ = tx.send(TransferSubmitTaskOutput { result });
+        });
+
+        CoreEffect::Notify("Submitting transfer...".to_string())
     }
 
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
@@ -1792,6 +2460,106 @@ impl KinicProvider {
         })
     }
 
+    fn poll_add_memory_validation_background(
+        &mut self,
+        state: &CoreState,
+    ) -> Option<ProviderOutput> {
+        let receiver = self.add_memory_validation_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                finish_task(&mut self.add_memory_validation_task);
+                return Some(self.disconnected_task_output(
+                    state,
+                    CoreEffect::AddMemoryFormError(Some(
+                        "Manual memory validation failed.".to_string(),
+                    )),
+                ));
+            }
+        };
+
+        finish_task(&mut self.add_memory_validation_task);
+
+        let mut effects = Vec::new();
+        match output.result {
+            Ok(()) => match self.save_manual_memory_to_preferences(output.memory_id.as_str()) {
+                Ok(()) => {
+                    self.preferred_memory_after_refresh = Some(output.memory_id.clone());
+                    effects.push(CoreEffect::CloseAddMemory);
+                    effects.push(CoreEffect::Notify(format!(
+                        "Added memory {}.",
+                        output.memory_id
+                    )));
+                    if let Some(effect) = self.start_live_memories_load(None, true) {
+                        effects.push(effect);
+                    }
+                }
+                Err(error) => {
+                    effects.push(CoreEffect::AddMemoryFormError(Some(format!(
+                        "Manual memory save failed: {error}"
+                    ))));
+                }
+            },
+            Err(error) => {
+                effects.push(CoreEffect::AddMemoryFormError(Some(short_error(&error))));
+            }
+        }
+
+        Some(self.snapshot_output(state, effects))
+    }
+
+    fn poll_rename_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.rename_submit_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                finish_task(&mut self.rename_submit_task);
+                return Some(self.disconnected_task_output(
+                    state,
+                    CoreEffect::RenameFormError(Some("Rename request failed.".to_string())),
+                ));
+            }
+        };
+
+        finish_task(&mut self.rename_submit_task);
+
+        let mut effects = Vec::new();
+        match output.result {
+            Ok(()) => {
+                if let Some(summary) = self
+                    .memory_summaries
+                    .iter_mut()
+                    .find(|summary| summary.id == output.memory_id)
+                {
+                    summary.name = output.next_name.clone();
+                }
+                self.refresh_memory_records_from_summaries();
+                self.loaded_memory_details.remove(&output.memory_id);
+                if self.active_memory_id.as_deref() == Some(output.memory_id.as_str()) {
+                    self.start_active_memory_detail_load();
+                }
+                effects.push(CoreEffect::CloseRenameMemory);
+                effects.push(CoreEffect::Notify(format!(
+                    "Renamed memory to {}.",
+                    output.next_name
+                )));
+            }
+            Err(error) => {
+                let message = match error {
+                    bridge::RenameMemoryError::ResolveAgentFactory(message)
+                    | bridge::RenameMemoryError::BuildAgent(message)
+                    | bridge::RenameMemoryError::ParseMemoryId(message)
+                    | bridge::RenameMemoryError::Rename(message) => message,
+                };
+                effects.push(CoreEffect::RenameFormError(Some(message)));
+            }
+        }
+
+        Some(self.snapshot_output(state, effects))
+    }
+
     fn poll_memory_detail_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
         let receiver = self.pending_memory_detail.as_ref()?;
         let output = match receiver.try_recv() {
@@ -2006,7 +2774,13 @@ impl KinicProvider {
 
     fn selected_memory_id_for_default(&self, state: &CoreState) -> Option<String> {
         match self.memories_mode {
-            MemoriesMode::Browser => self.active_memory_id.clone(),
+            MemoriesMode::Browser => {
+                if self.is_add_memory_action_selected(state) {
+                    None
+                } else {
+                    self.active_memory_id.clone()
+                }
+            }
             MemoriesMode::Results => self
                 .result_records
                 .get(state.selected_index.unwrap_or(0))
@@ -2307,65 +3081,74 @@ impl KinicProvider {
         self.initial_memories_in_flight = false;
         match output.result {
             Ok(memories) => {
+                let previous_active_memory_id = self.active_memory_id.clone();
                 self.memory_summaries = memories;
                 self.refresh_memory_records_from_summaries();
                 self.active_memory_id = self
-                    .default_memory_selection()
-                    .preferred_initial_memory_id()
+                    .preferred_memory_after_refresh
+                    .take()
+                    .filter(|memory_id| {
+                        self.memory_records
+                            .iter()
+                            .any(|record| record.id == *memory_id)
+                    })
+                    .or_else(|| {
+                        self.default_memory_selection()
+                            .preferred_initial_memory_id()
+                    })
                     .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
                 self.last_search_state = None;
                 self.start_active_memory_detail_load();
                 self.start_insert_dim_load(state);
+                let mut effects = Vec::new();
+                if self.active_memory_id != previous_active_memory_id {
+                    effects.extend(self.load_active_chat_history_effects(state));
+                }
                 Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
-                    effects: Vec::new(),
+                    effects,
                 })
             }
             Err(error) => {
+                let previous_active_memory_id = self.active_memory_id.clone();
                 self.memory_records.clear();
                 self.result_records.clear();
                 self.memories_mode = MemoriesMode::Browser;
                 self.all = vec![load_error_record(error)];
                 self.active_memory_id = None;
                 self.last_search_state = None;
+                let mut effects = vec![CoreEffect::Notify("Unable to load memories.".to_string())];
+                if self.active_memory_id != previous_active_memory_id {
+                    effects.extend(self.load_active_chat_history_effects(state));
+                }
                 Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
-                    effects: vec![CoreEffect::Notify("Unable to load memories.".to_string())],
+                    effects,
                 })
             }
         }
     }
 
     fn poll_create_cost_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
-        let receiver = self.pending_create_cost.as_ref()?;
-        let output = match receiver.try_recv() {
-            Ok(output) => output,
-            Err(mpsc::TryRecvError::Empty) => return None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.pending_create_cost = None;
-                self.invalidate_pending_create_cost();
-                self.create_cost_in_flight = false;
+        let receiver = self.create_cost_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                reset_request_task(&mut self.create_cost_task);
                 self.create_cost_state = CreateCostState::Error(vec![
                     "Account info refresh worker disconnected.".to_string(),
                 ]);
-                return Some(ProviderOutput {
-                    snapshot: Some(self.build_snapshot(state)),
-                    effects: vec![CoreEffect::Notify(
-                        "Account info refresh failed unexpectedly.".to_string(),
-                    )],
-                });
+                return Some(self.disconnected_request_output(
+                    state,
+                    CoreEffect::Notify("Account info refresh failed unexpectedly.".to_string()),
+                ));
             }
         };
 
-        self.pending_create_cost = None;
-        self.create_cost_in_flight = false;
-        let is_current = self.pending_create_cost_request_id == Some(output.request_id);
-        self.invalidate_pending_create_cost();
+        let is_current = finish_request_task(&mut self.create_cost_task, output.request_id);
         if !is_current {
-            return Some(ProviderOutput {
-                snapshot: Some(self.build_snapshot(state)),
-                effects: Vec::new(),
-            });
+            return Some(self.stale_request_output(state));
         }
 
         let issues = output.overview.account_issue_messages();
@@ -2391,41 +3174,84 @@ impl KinicProvider {
         self.apply_session_overview(output.overview);
         self.create_cost_state = next_state;
 
-        Some(ProviderOutput {
-            snapshot: Some(self.build_snapshot(state)),
-            effects: Vec::new(),
-        })
+        Some(self.snapshot_output(state, Vec::new()))
     }
 
-    fn poll_create_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
-        let receiver = self.pending_create_submit.as_ref()?;
-        let output = match receiver.try_recv() {
-            Ok(output) => output,
-            Err(mpsc::TryRecvError::Empty) => return None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.pending_create_submit = None;
-                self.invalidate_pending_create_submit();
-                self.create_submit_in_flight = false;
-                return Some(ProviderOutput {
-                    snapshot: Some(self.build_snapshot(state)),
-                    effects: vec![CoreEffect::CreateFormError(Some(
-                        "Create request failed: background worker disconnected.".to_string(),
-                    ))],
-                });
+    fn poll_chat_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.chat_submit_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                reset_request_task(&mut self.chat_submit_task);
+                return Some(self.snapshot_output(
+                    state,
+                    vec![
+                        CoreEffect::SetChatLoading(false),
+                        CoreEffect::Notify(
+                            "Ask AI failed: background worker disconnected.".to_string(),
+                        ),
+                    ],
+                ));
             }
         };
 
-        self.pending_create_submit = None;
-        self.create_submit_in_flight = false;
-        let is_current = self.pending_create_submit_request_id == Some(output.request_id);
-        self.invalidate_pending_create_submit();
+        let is_current = finish_request_task(&mut self.chat_submit_task, output.request_id);
         if !is_current {
-            return Some(ProviderOutput {
-                snapshot: Some(self.build_snapshot(state)),
-                effects: Vec::new(),
-            });
+            return Some(self.stale_request_output(state));
         }
 
+        let mut effects = vec![CoreEffect::SetChatLoading(false)];
+        match output.result {
+            Ok(response) => {
+                if let Err(error) = self.append_chat_history_message(
+                    output.history_thread_key.as_str(),
+                    "assistant",
+                    &response,
+                ) {
+                    effects.push(CoreEffect::Notify(format!(
+                        "Chat history save failed: {error}"
+                    )));
+                }
+                if self.chat_history_thread_key(state).as_deref()
+                    == Some(output.history_thread_key.as_str())
+                {
+                    effects.push(CoreEffect::AppendChatMessage {
+                        role: "assistant".to_string(),
+                        content: response,
+                    });
+                }
+            }
+            Err(error) => {
+                effects.push(CoreEffect::Notify(format!("Ask AI failed: {error}")));
+            }
+        }
+
+        Some(self.snapshot_output(state, effects))
+    }
+
+    fn poll_create_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.create_submit_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                reset_request_task(&mut self.create_submit_task);
+                return Some(self.disconnected_request_output(
+                    state,
+                    CoreEffect::CreateFormError(Some(
+                        "Create request failed: background worker disconnected.".to_string(),
+                    )),
+                ));
+            }
+        };
+
+        let is_current = finish_request_task(&mut self.create_submit_task, output.request_id);
+        if !is_current {
+            return Some(self.stale_request_output(state));
+        }
+
+        let previous_active_memory_id = self.active_memory_id.clone();
         let mut effects = Vec::new();
         match output.result {
             Ok(success) => {
@@ -2474,40 +3300,30 @@ impl KinicProvider {
                 )));
             }
         }
+        if self.active_memory_id != previous_active_memory_id {
+            effects.extend(self.load_active_chat_history_effects(state));
+        }
 
-        Some(ProviderOutput {
-            snapshot: Some(self.build_snapshot(state)),
-            effects,
-        })
+        Some(self.snapshot_output(state, effects))
     }
 
     fn poll_session_settings_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
-        let receiver = self.pending_session_settings.as_ref()?;
-        let output = match receiver.try_recv() {
-            Ok(output) => output,
-            Err(mpsc::TryRecvError::Empty) => return None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.pending_session_settings = None;
-                self.invalidate_pending_session_settings();
-                self.session_settings_in_flight = false;
-                return Some(ProviderOutput {
-                    snapshot: Some(self.build_snapshot(state)),
-                    effects: vec![CoreEffect::Notify(
-                        "Session settings refresh failed unexpectedly.".to_string(),
-                    )],
-                });
+        let receiver = self.session_settings_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                reset_request_task(&mut self.session_settings_task);
+                return Some(self.disconnected_request_output(
+                    state,
+                    CoreEffect::Notify("Session settings refresh failed unexpectedly.".to_string()),
+                ));
             }
         };
 
-        self.pending_session_settings = None;
-        self.session_settings_in_flight = false;
-        let is_current = self.pending_session_settings_request_id == Some(output.request_id);
-        self.invalidate_pending_session_settings();
+        let is_current = finish_request_task(&mut self.session_settings_task, output.request_id);
         if !is_current {
-            return Some(ProviderOutput {
-                snapshot: Some(self.build_snapshot(state)),
-                effects: Vec::new(),
-            });
+            return Some(self.stale_request_output(state));
         }
 
         let failure_message = output.overview.session_settings_refresh_failure_message();
@@ -2739,6 +3555,7 @@ impl DataProvider for KinicProvider {
         action: &CoreAction,
         state: &CoreState,
     ) -> CoreResult<ProviderOutput> {
+        let previous_active_memory_id = self.active_memory_id.clone();
         let mut effects = Vec::new();
         let mut close_picker_after_submit = false;
         match action {
@@ -2768,6 +3585,9 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::SearchScopeNext => {
                 self.invalidate_pending_search();
+            }
+            CoreAction::ChatScopePrev | CoreAction::ChatScopeNext => {
+                effects.extend(self.load_active_chat_history_effects(state));
             }
             CoreAction::SearchSubmit => {
                 if let Some(effect) = self.run_live_search(state.search_scope) {
@@ -2808,9 +3628,53 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::ChatSubmit => {
-                effects.push(CoreEffect::Notify(
-                    "Chat is not implemented yet; search is available first.".to_string(),
-                ));
+                if self.chat_submit_task.in_flight {
+                    effects.push(CoreEffect::Notify(
+                        "Ask AI request already running.".to_string(),
+                    ));
+                } else {
+                    let history_thread_key = self.chat_history_thread_key(state);
+                    match (history_thread_key, self.chat_targets(state.chat_scope)) {
+                        (Some(history_thread_key), Ok(targets)) => {
+                            let submitted_query = state
+                                .chat_messages
+                                .last()
+                                .map(|(_, content)| content.clone())
+                                .unwrap_or_default();
+                            let prompt_history = self.prompt_history_messages(state);
+                            if let Some((role, content)) = state.chat_messages.last()
+                                && role == "user"
+                            {
+                                if let Err(error) = self.append_chat_history_message(
+                                    history_thread_key.as_str(),
+                                    role,
+                                    content,
+                                ) {
+                                    effects.push(CoreEffect::Notify(format!(
+                                        "Chat history save failed: {error}"
+                                    )));
+                                }
+                            }
+                            effects.push(self.start_chat_submit(
+                                state.chat_scope,
+                                history_thread_key,
+                                targets,
+                                submitted_query,
+                                prompt_history,
+                            ));
+                        }
+                        (None, _) => {
+                            effects.push(CoreEffect::SetChatLoading(false));
+                            effects.push(CoreEffect::Notify(
+                                "Select a memory before asking AI.".to_string(),
+                            ));
+                        }
+                        (_, Err(error)) => {
+                            effects.push(CoreEffect::SetChatLoading(false));
+                            effects.push(CoreEffect::Notify(error));
+                        }
+                    }
+                }
             }
             CoreAction::CreateSubmit => {
                 let name = state.create_name.trim().to_string();
@@ -2863,30 +3727,50 @@ impl DataProvider for KinicProvider {
             | CoreAction::DeleteSelectedPickerItem
             | CoreAction::PickerInput(_)
             | CoreAction::PickerBackspace => {}
-            CoreAction::AccessMoveNext => {
+            CoreAction::MemoryContentMoveNext => {
                 let next_index = self.next_access_index(state, 1);
-                effects.push(CoreEffect::SetAccessListIndex(next_index));
+                effects.push(CoreEffect::SetMemoryContentActionIndex(next_index));
                 let mut preview_state = state.clone();
-                preview_state.access_list_index = next_index;
+                preview_state.memory_content_action_index = next_index;
                 return Ok(ProviderOutput {
                     snapshot: Some(self.build_snapshot(&preview_state)),
                     effects,
                 });
             }
-            CoreAction::AccessMovePrev => {
+            CoreAction::MemoryContentMovePrev => {
                 let next_index = self.next_access_index(state, -1);
-                effects.push(CoreEffect::SetAccessListIndex(next_index));
+                effects.push(CoreEffect::SetMemoryContentActionIndex(next_index));
                 let mut preview_state = state.clone();
-                preview_state.access_list_index = next_index;
+                preview_state.memory_content_action_index = next_index;
                 return Ok(ProviderOutput {
                     snapshot: Some(self.build_snapshot(&preview_state)),
                     effects,
                 });
             }
-            CoreAction::AccessOpenSelected => {
+            CoreAction::MemoryContentJumpNext => {
+                let next_index = self.jump_access_index(state, true);
+                effects.push(CoreEffect::SetMemoryContentActionIndex(next_index));
+                let mut preview_state = state.clone();
+                preview_state.memory_content_action_index = next_index;
+                return Ok(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(&preview_state)),
+                    effects,
+                });
+            }
+            CoreAction::MemoryContentJumpPrev => {
+                let next_index = self.jump_access_index(state, false);
+                effects.push(CoreEffect::SetMemoryContentActionIndex(next_index));
+                let mut preview_state = state.clone();
+                preview_state.memory_content_action_index = next_index;
+                return Ok(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(&preview_state)),
+                    effects,
+                });
+            }
+            CoreAction::MemoryContentOpenSelected => {
                 let Some(memory_id) = self.active_memory_id.clone() else {
                     effects.push(CoreEffect::Notify(
-                        "Select a memory before managing access.".to_string(),
+                        "Select a memory before running this action.".to_string(),
                     ));
                     return Ok(ProviderOutput {
                         snapshot: Some(self.build_snapshot(state)),
@@ -2960,6 +3844,193 @@ impl DataProvider for KinicProvider {
                             }
                         }
                         AccessControlMode::None => {}
+                    }
+                }
+            }
+            CoreAction::OpenAddMemory => {
+                effects.push(CoreEffect::OpenAddMemory);
+            }
+            CoreAction::CloseAddMemory => {
+                effects.push(CoreEffect::CloseAddMemory);
+            }
+            CoreAction::AddMemoryInput(_) => {}
+            CoreAction::AddMemoryBackspace => {}
+            CoreAction::AddMemorySubmit => {
+                if self.add_memory_validation_task.in_flight {
+                    effects.push(CoreEffect::Notify(
+                        "Manual memory validation already running.".to_string(),
+                    ));
+                } else {
+                    match self.validate_add_memory_submit(state) {
+                        Ok(memory_id) => match self.start_add_memory_validation(memory_id) {
+                            Ok(effect) => effects.push(effect),
+                            Err(error) => {
+                                effects.push(CoreEffect::AddMemoryFormError(Some(error)));
+                            }
+                        },
+                        Err(error) => {
+                            effects.push(CoreEffect::AddMemoryFormError(Some(error)));
+                        }
+                    }
+                }
+            }
+            CoreAction::OpenRemoveMemory => {
+                if !self.active_memory_is_manual() {
+                    effects.push(CoreEffect::Notify(
+                        "Only manually added memories can be removed from this list.".to_string(),
+                    ));
+                } else {
+                    effects.push(CoreEffect::OpenRemoveMemory);
+                }
+            }
+            CoreAction::CloseRemoveMemory => {
+                effects.push(CoreEffect::CloseRemoveMemory);
+            }
+            CoreAction::RemoveMemoryToggleConfirm => {}
+            CoreAction::RemoveMemorySubmit => {
+                if !state.remove_memory.open {
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                }
+                if !state.remove_memory.confirm_yes {
+                    effects.push(CoreEffect::CloseRemoveMemory);
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                }
+
+                let Some(memory_id) = self.active_memory_id.clone() else {
+                    effects.push(CoreEffect::RemoveMemoryFormError(Some(
+                        "Select a memory before removing it.".to_string(),
+                    )));
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                };
+                if !self.active_memory_is_manual() {
+                    effects.push(CoreEffect::RemoveMemoryFormError(Some(
+                        "Only manually added memories can be removed from this list.".to_string(),
+                    )));
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                }
+
+                let next_memory_id = self.next_memory_after_removal(memory_id.as_str());
+                match self.remove_manual_memory_from_preferences(memory_id.as_str()) {
+                    Ok(()) => {
+                        self.remove_manual_memory_locally(memory_id.as_str());
+                        self.active_memory_id = next_memory_id;
+                        self.sync_active_memory_to_visible_records();
+                        self.invalidate_pending_search();
+                        self.start_active_memory_detail_load();
+                        effects.push(CoreEffect::CloseRemoveMemory);
+                        effects.push(CoreEffect::SetMemoryContentActionIndex(0));
+                        effects.push(CoreEffect::Notify(format!(
+                            "Removed manual memory {memory_id} from this list"
+                        )));
+                    }
+                    Err(error) => {
+                        effects.push(CoreEffect::RemoveMemoryFormError(Some(format!(
+                            "Manual memory removal failed: {error}"
+                        ))));
+                    }
+                }
+            }
+            CoreAction::OpenRenameMemory => {
+                let Some((summary, current_name)) = self.active_rename_target(state) else {
+                    effects.push(CoreEffect::Notify(
+                        "Select a memory before renaming.".to_string(),
+                    ));
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                };
+                effects.push(CoreEffect::OpenRenameMemory {
+                    memory_id: summary.id.clone(),
+                    current_name,
+                });
+            }
+            CoreAction::CloseRenameMemory => {
+                effects.push(CoreEffect::CloseRenameMemory);
+            }
+            CoreAction::RenameMemoryInput(_) => {}
+            CoreAction::RenameMemoryBackspace => {}
+            CoreAction::RenameMemoryNextField => {}
+            CoreAction::RenameMemoryPrevField => {}
+            CoreAction::RenameMemorySubmit => {
+                if self.rename_submit_task.in_flight {
+                    effects.push(CoreEffect::Notify(
+                        "Rename request already running.".to_string(),
+                    ));
+                } else {
+                    match self.validate_rename_submit(state) {
+                        Ok((memory_id, next_name)) => {
+                            effects.push(self.start_rename_submit(memory_id, next_name));
+                        }
+                        Err(error) => {
+                            effects.push(CoreEffect::RenameFormError(Some(error)));
+                        }
+                    }
+                }
+            }
+            CoreAction::OpenTransferModal => {
+                if let Some((available_balance_base_units, fee_base_units)) =
+                    self.cached_transfer_prerequisites()
+                {
+                    effects.push(CoreEffect::OpenTransferModal {
+                        fee_base_units,
+                        available_balance_base_units,
+                    });
+                } else if !self.transfer_prerequisites_task.in_flight {
+                    self.start_transfer_prerequisites_load();
+                }
+            }
+            CoreAction::CloseTransferModal => {
+                effects.push(CoreEffect::CloseTransferModal);
+            }
+            CoreAction::TransferInput(_)
+            | CoreAction::TransferBackspace
+            | CoreAction::TransferNextField
+            | CoreAction::TransferPrevField
+            | CoreAction::TransferApplyMax
+            | CoreAction::TransferConfirmToggle => {}
+            CoreAction::TransferSubmit => {
+                if self.transfer_submit_task.in_flight {
+                    effects.push(CoreEffect::Notify(
+                        "Transfer request already running.".to_string(),
+                    ));
+                } else if state.transfer_modal.mode == TransferModalMode::Confirm {
+                    if !state.transfer_modal.confirm_yes {
+                        effects.push(CoreEffect::CloseTransferModal);
+                    } else {
+                        match self.validate_transfer_submit(state) {
+                            Ok((recipient_principal, amount_base_units, fee_base_units)) => {
+                                effects.push(self.start_transfer_submit(
+                                    recipient_principal,
+                                    amount_base_units,
+                                    fee_base_units,
+                                ));
+                            }
+                            Err(error) => {
+                                effects.push(CoreEffect::TransferFormError(Some(error)));
+                            }
+                        }
+                    }
+                } else {
+                    match self.validate_transfer_submit(state) {
+                        Ok(_) => {
+                            effects.push(CoreEffect::OpenTransferConfirm);
+                        }
+                        Err(error) => {
+                            effects.push(CoreEffect::TransferFormError(Some(error)));
+                        }
                     }
                 }
             }
@@ -3053,6 +4124,10 @@ impl DataProvider for KinicProvider {
                             | PickerContext::InsertTarget
                             | PickerContext::InsertTag
                             | PickerContext::TagManagement
+                            | PickerContext::ChatResultLimit
+                            | PickerContext::ChatPerMemoryLimit
+                            | PickerContext::ChatCandidatePool
+                            | PickerContext::ChatDiversity
                     ) =>
             {
                 match &state.picker {
@@ -3066,6 +4141,9 @@ impl DataProvider for KinicProvider {
             }
             _ => self.build_snapshot(state),
         };
+        if self.active_memory_id != previous_active_memory_id {
+            effects.extend(self.load_active_chat_history_effects(state));
+        }
 
         Ok(ProviderOutput {
             snapshot: Some(snapshot),
@@ -3075,8 +4153,13 @@ impl DataProvider for KinicProvider {
 
     fn poll_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
         self.poll_initial_memories_background(state)
+            .or_else(|| self.poll_chat_submit_background(state))
             .or_else(|| self.poll_create_submit_background(state))
             .or_else(|| self.poll_access_submit_background(state))
+            .or_else(|| self.poll_add_memory_validation_background(state))
+            .or_else(|| self.poll_rename_submit_background(state))
+            .or_else(|| self.poll_transfer_submit_background(state))
+            .or_else(|| self.poll_transfer_prerequisites_background(state))
             .or_else(|| self.poll_insert_dim_background(state))
             .or_else(|| self.poll_memory_detail_background(state))
             .or_else(|| self.poll_insert_submit_background(state))

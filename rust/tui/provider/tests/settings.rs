@@ -226,15 +226,19 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
         .poll_background(&CoreState::default())
         .expect("create submit output");
 
-    assert!(!provider.create_submit_in_flight);
+    assert!(!provider.create_submit_task.in_flight);
     assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
     assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
     assert_eq!(
         provider.user_preferences.default_memory_id.as_deref(),
         Some("bbbbb-bb")
     );
-    assert_eq!(provider.memory_records.len(), 1);
-    assert_eq!(provider.memory_records[0].id, "bbbbb-bb");
+    assert!(
+        provider
+            .memory_records
+            .iter()
+            .all(|record| record.id != "aaaaa-aa")
+    );
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::ResetCreateFormAndSetTab { tab_id }
@@ -282,6 +286,39 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
         quick_entry_value(&snapshot, tui_kit_runtime::SETTINGS_ENTRY_DEFAULT_MEMORY_ID),
         "Beta Memory"
     );
+}
+
+#[test]
+fn set_default_memory_from_selection_ignores_add_memory_action_row() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+    provider.memory_records = vec![
+        live_memory("aaaaa-aa", "Alpha Memory"),
+        live_memory("bbbbb-bb", "Beta Memory"),
+    ];
+    provider.all = provider.memory_records.clone();
+    provider.active_memory_id = Some("bbbbb-bb".to_string());
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+
+    let output = provider
+        .handle_action(
+            &CoreAction::SetDefaultMemoryFromSelection,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                selected_index: Some(provider.memory_records.len()),
+                ..CoreState::default()
+            },
+        )
+        .expect("set default output");
+
+    assert_eq!(
+        provider.user_preferences.default_memory_id.as_deref(),
+        Some("aaaaa-aa")
+    );
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Select a memory before setting the default."
+    )));
 }
 
 #[test]
@@ -418,4 +455,59 @@ fn apply_reloaded_preferences_updates_health_for_success_and_failure() {
         provider.preferences_health.load_error.as_deref(),
         Some("No config directory found")
     );
+}
+
+#[test]
+fn validate_transfer_submit_rejects_invalid_principal_and_overspend() {
+    let provider = KinicProvider::new(live_config());
+    let invalid_principal_state = CoreState {
+        transfer_modal: TransferModalState {
+            principal_id: "not-a-principal".to_string(),
+            amount: "1.00000000".to_string(),
+            fee_base_units: Some(100_000),
+            available_balance_base_units: Some(1_000_000_000),
+            ..TransferModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    assert!(
+        provider
+            .validate_transfer_submit(&invalid_principal_state)
+            .expect_err("invalid principal")
+            .contains("Invalid principal")
+    );
+
+    let overspend_state = CoreState {
+        transfer_modal: TransferModalState {
+            principal_id: "aaaaa-aa".to_string(),
+            amount: "10.00000000".to_string(),
+            fee_base_units: Some(100_000),
+            available_balance_base_units: Some(1_000_000_000),
+            ..TransferModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    assert!(
+        provider
+            .validate_transfer_submit(&overspend_state)
+            .expect_err("overspend")
+            .contains("Max sendable")
+    );
+}
+
+#[test]
+fn chat_result_limit_picker_updates_preferences() {
+    let mut provider = KinicProvider::new(live_config());
+    let effects = provider.picker_option_submit_effects(
+        PickerContext::ChatResultLimit,
+        &PickerItem::option("10".to_string(), "10 docs".to_string(), false),
+    );
+
+    assert_eq!(provider.user_preferences.chat_overall_top_k, 10);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Chat result limit set to 10 docs"
+    )));
 }

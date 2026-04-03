@@ -391,4 +391,56 @@ mod global_commands {
             HostGlobalCommand::None
         );
     }
+
+    #[test]
+    fn replace_chat_messages_effect_replaces_visible_thread() {
+        let mut state = CoreState {
+            chat_messages: vec![("user".to_string(), "old".to_string())],
+            chat_scroll: 5,
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(
+            &mut state,
+            vec![CoreEffect::ReplaceChatMessages(vec![(
+                "assistant".to_string(),
+                "new".to_string(),
+            )])],
+        );
+
+        assert_eq!(
+            state.chat_messages,
+            vec![("assistant".to_string(), "new".to_string())]
+        );
+        assert_eq!(state.chat_scroll, 0);
+    }
+
+    #[test]
+    fn append_chat_message_effect_extends_thread_and_updates_loading() {
+        let mut state = CoreState {
+            chat_messages: vec![("user".to_string(), "hello".to_string())],
+            chat_loading: true,
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(
+            &mut state,
+            vec![
+                CoreEffect::AppendChatMessage {
+                    role: "assistant".to_string(),
+                    content: "world".to_string(),
+                },
+                CoreEffect::SetChatLoading(false),
+            ],
+        );
+
+        assert_eq!(
+            state.chat_messages,
+            vec![
+                ("user".to_string(), "hello".to_string()),
+                ("assistant".to_string(), "world".to_string())
+            ]
+        );
+        assert!(!state.chat_loading);
+    }
 }

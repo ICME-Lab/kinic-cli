@@ -17,6 +17,11 @@ impl<'a> TuiKitUi<'a> {
         let highlight_intensity = self.animation.map(|a| a.selection_highlight).unwrap_or(1.0);
         let visible_height = area.height.saturating_sub(2) as usize;
         let total_items = self.ui_summaries.len();
+        let display_total_items = self
+            .ui_summaries
+            .iter()
+            .filter(|item| item.id != "kinic-action-add-memory")
+            .count();
         let scroll_offset = self.list_scroll_offset.unwrap_or_else(|| {
             if let Some(sel) = selected {
                 if visible_height == 0 {
@@ -111,11 +116,11 @@ impl<'a> TuiKitUi<'a> {
             String::new()
         };
         let title = if self.search_input.is_empty() {
-            format!(" Items ({}){} ", total_items, scroll_indicator)
+            format!(" Items ({}){} ", display_total_items, scroll_indicator)
         } else {
             format!(
                 " Items ({}/{}){} ",
-                total_items, self.ui_total_count, scroll_indicator
+                display_total_items, self.ui_total_count, scroll_indicator
             )
         };
 

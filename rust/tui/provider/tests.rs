@@ -212,3 +212,9 @@ mod settings;
 
 #[path = "tests/snapshot.rs"]
 mod snapshot;
+
+#[path = "tests/rename.rs"]
+mod rename;
+
+#[path = "tests/chat.rs"]
+mod chat;

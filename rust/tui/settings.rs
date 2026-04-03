@@ -1,13 +1,17 @@
 //! Kinic TUI settings model.
 //! Where: shared between provider and bridge in the embedded TUI runtime.
-//! What: stores account/session snapshot data plus persisted user preferences.
+//! What: stores account/session snapshot data plus persisted user preferences and chat history.
 //! Why: keep settings rendering stable while separating session/account data from saved prefs.
+
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 use tui_kit_runtime::{
+    SETTINGS_ENTRY_CHAT_CANDIDATE_POOL_ID, SETTINGS_ENTRY_CHAT_DIVERSITY_ID,
+    SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID, SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID,
     SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview, SessionSettingsSnapshot,
     SettingsEntry, SettingsSection, SettingsSnapshot, format_e8s_to_kinic_string_u128,
 };
@@ -18,14 +22,49 @@ use crate::tui::TuiAuth;
 const APP_NAMESPACE: &str = "kinic";
 #[cfg(not(test))]
 const SETTINGS_FILE_NAME: &str = "tui.yaml";
+#[cfg(not(test))]
+const CHAT_HISTORY_FILE_NAME: &str = "chat-history.yaml";
 const UNAVAILABLE: &str = "unavailable";
 const NOT_SET: &str = "not set";
+const CHAT_HISTORY_MAX_MESSAGES: usize = 40;
+const CHAT_MESSAGE_MAX_CONTENT_LEN: usize = 4096;
+pub const DEFAULT_CHAT_OVERALL_TOP_K: usize = 8;
+pub const DEFAULT_CHAT_PER_MEMORY_CAP: usize = 3;
+pub const DEFAULT_CHAT_CANDIDATE_POOL_SIZE: usize = 24;
+pub const DEFAULT_CHAT_MMR_LAMBDA: u8 = 70;
+const CHAT_RESULT_LIMIT_OPTIONS: &[usize] = &[4, 6, 8, 10, 12];
+const CHAT_PER_MEMORY_LIMIT_OPTIONS: &[usize] = &[1, 2, 3, 4];
+const CHAT_CANDIDATE_POOL_OPTIONS: &[usize] = &[12, 16, 24, 32, 48];
+const CHAT_DIVERSITY_OPTIONS: &[u8] = &[60, 70, 80, 90];
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 // The current on-disk schema is intentionally fixed; unsupported legacy shapes fail to decode.
 pub struct UserPreferences {
     pub default_memory_id: Option<String>,
     pub saved_tags: Vec<String>,
+    pub manual_memory_ids: Vec<String>,
+    #[serde(default = "default_chat_overall_top_k")]
+    pub chat_overall_top_k: usize,
+    #[serde(default = "default_chat_per_memory_cap")]
+    pub chat_per_memory_cap: usize,
+    #[serde(default = "default_chat_candidate_pool_size")]
+    pub chat_candidate_pool_size: usize,
+    #[serde(default = "default_chat_mmr_lambda")]
+    pub chat_mmr_lambda: u8,
+}
+
+impl Default for UserPreferences {
+    fn default() -> Self {
+        Self {
+            default_memory_id: None,
+            saved_tags: Vec::new(),
+            manual_memory_ids: Vec::new(),
+            chat_overall_top_k: DEFAULT_CHAT_OVERALL_TOP_K,
+            chat_per_memory_cap: DEFAULT_CHAT_PER_MEMORY_CAP,
+            chat_candidate_pool_size: DEFAULT_CHAT_CANDIDATE_POOL_SIZE,
+            chat_mmr_lambda: DEFAULT_CHAT_MMR_LAMBDA,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -34,16 +73,51 @@ pub struct PreferencesHealth {
     pub save_error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ChatHistoryStore {
+    pub conversations: Vec<ChatConversation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatConversation {
+    pub network: String,
+    pub identity_label: String,
+    pub memory_id: String,
+    pub messages: Vec<StoredChatMessage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredChatMessage {
+    pub role: String,
+    pub content: String,
+    pub saved_at: u64,
+}
+
+pub fn default_chat_overall_top_k() -> usize {
+    DEFAULT_CHAT_OVERALL_TOP_K
+}
+
+pub fn default_chat_per_memory_cap() -> usize {
+    DEFAULT_CHAT_PER_MEMORY_CAP
+}
+
+pub fn default_chat_candidate_pool_size() -> usize {
+    DEFAULT_CHAT_CANDIDATE_POOL_SIZE
+}
+
+pub fn default_chat_mmr_lambda() -> u8 {
+    DEFAULT_CHAT_MMR_LAMBDA
+}
+
 #[cfg(test)]
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
-    Ok(UserPreferences::default())
+    Ok(normalize_user_preferences(UserPreferences::default()))
 }
 
 #[cfg(not(test))]
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
-    let mut preferences: UserPreferences = load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)?;
-    preferences.saved_tags = normalize_saved_tags(preferences.saved_tags);
-    Ok(preferences)
+    let preferences: UserPreferences = load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)?;
+    Ok(normalize_user_preferences(preferences))
 }
 
 #[cfg(test)]
@@ -53,7 +127,192 @@ pub fn save_user_preferences(_preferences: &UserPreferences) -> Result<(), Setti
 
 #[cfg(not(test))]
 pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), SettingsError> {
-    save_yaml(APP_NAMESPACE, SETTINGS_FILE_NAME, preferences)
+    save_yaml(
+        APP_NAMESPACE,
+        SETTINGS_FILE_NAME,
+        &normalize_user_preferences(preferences.clone()),
+    )
+}
+
+pub fn current_chat_saved_at() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+#[cfg(test)]
+pub fn load_chat_history(
+    network: &str,
+    identity_label: &str,
+    memory_id: &str,
+) -> Result<Vec<(String, String)>, SettingsError> {
+    let store = test_chat_history_store()
+        .lock()
+        .expect("test chat history store lock should be available")
+        .clone();
+    Ok(project_chat_history(
+        &store,
+        network,
+        identity_label,
+        memory_id,
+    ))
+}
+
+#[cfg(not(test))]
+pub fn load_chat_history(
+    network: &str,
+    identity_label: &str,
+    memory_id: &str,
+) -> Result<Vec<(String, String)>, SettingsError> {
+    let store: ChatHistoryStore = load_yaml_or_default(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME)?;
+    Ok(project_chat_history(
+        &store,
+        network,
+        identity_label,
+        memory_id,
+    ))
+}
+
+#[cfg(test)]
+pub fn append_chat_history_message(
+    network: &str,
+    identity_label: &str,
+    memory_id: &str,
+    role: &str,
+    content: &str,
+    saved_at: u64,
+) -> Result<(), SettingsError> {
+    let mut guard = test_chat_history_store()
+        .lock()
+        .expect("test chat history store lock should be available");
+    append_chat_history_message_to_store(
+        &mut guard,
+        network,
+        identity_label,
+        memory_id,
+        role,
+        content,
+        saved_at,
+    );
+    Ok(())
+}
+
+#[cfg(not(test))]
+pub fn append_chat_history_message(
+    network: &str,
+    identity_label: &str,
+    memory_id: &str,
+    role: &str,
+    content: &str,
+    saved_at: u64,
+) -> Result<(), SettingsError> {
+    let mut store: ChatHistoryStore = load_yaml_or_default(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME)?;
+    append_chat_history_message_to_store(
+        &mut store,
+        network,
+        identity_label,
+        memory_id,
+        role,
+        content,
+        saved_at,
+    );
+    save_yaml(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME, &store)
+}
+
+fn append_chat_history_message_to_store(
+    store: &mut ChatHistoryStore,
+    network: &str,
+    identity_label: &str,
+    memory_id: &str,
+    role: &str,
+    content: &str,
+    saved_at: u64,
+) {
+    let normalized_content = clip_chat_message_content(content);
+    if normalized_content.is_empty() {
+        return;
+    }
+
+    let conversation_index = store.conversations.iter().position(|entry| {
+        entry.network == network
+            && entry.identity_label == identity_label
+            && entry.memory_id == memory_id
+    });
+    let conversation_index = conversation_index.unwrap_or_else(|| {
+        store.conversations.push(ChatConversation {
+            network: network.to_string(),
+            identity_label: identity_label.to_string(),
+            memory_id: memory_id.to_string(),
+            messages: Vec::new(),
+        });
+        store.conversations.len().saturating_sub(1)
+    });
+    let conversation = store
+        .conversations
+        .get_mut(conversation_index)
+        .expect("conversation should exist after upsert");
+
+    conversation.messages.push(StoredChatMessage {
+        role: role.to_string(),
+        content: normalized_content,
+        saved_at,
+    });
+    normalize_conversation_messages(&mut conversation.messages);
+}
+
+fn project_chat_history(
+    store: &ChatHistoryStore,
+    network: &str,
+    identity_label: &str,
+    memory_id: &str,
+) -> Vec<(String, String)> {
+    store
+        .conversations
+        .iter()
+        .find(|entry| {
+            entry.network == network
+                && entry.identity_label == identity_label
+                && entry.memory_id == memory_id
+        })
+        .map(|entry| {
+            let mut messages = entry.messages.clone();
+            normalize_conversation_messages(&mut messages);
+            messages
+                .into_iter()
+                .map(|message| (message.role, message.content))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn normalize_conversation_messages(messages: &mut Vec<StoredChatMessage>) {
+    for message in messages.iter_mut() {
+        message.content = clip_chat_message_content(&message.content);
+    }
+    messages.retain(|message| !message.content.is_empty());
+    if messages.len() > CHAT_HISTORY_MAX_MESSAGES {
+        let overflow = messages.len() - CHAT_HISTORY_MAX_MESSAGES;
+        messages.drain(0..overflow);
+    }
+}
+
+fn clip_chat_message_content(content: &str) -> String {
+    content.chars().take(CHAT_MESSAGE_MAX_CONTENT_LEN).collect()
+}
+
+#[cfg(test)]
+pub fn clear_chat_history_for_tests() {
+    *test_chat_history_store()
+        .lock()
+        .expect("test chat history store lock should be available") = ChatHistoryStore::default();
+}
+
+#[cfg(test)]
+fn test_chat_history_store() -> &'static std::sync::Mutex<ChatHistoryStore> {
+    static STORE: std::sync::OnceLock<std::sync::Mutex<ChatHistoryStore>> =
+        std::sync::OnceLock::new();
+    STORE.get_or_init(|| std::sync::Mutex::new(ChatHistoryStore::default()))
 }
 
 pub fn build_settings_snapshot(
@@ -67,6 +326,12 @@ pub fn build_settings_snapshot(
     let default_memory_display =
         default_memory_display(preferences, selector_items, selector_labels);
     let saved_tags_display = saved_tags_display(preferences);
+    let chat_result_limit_display = chat_result_limit_display(preferences.chat_overall_top_k);
+    let chat_per_memory_limit_display =
+        chat_per_memory_limit_display(preferences.chat_per_memory_cap);
+    let chat_candidate_pool_display =
+        chat_candidate_pool_display(preferences.chat_candidate_pool_size);
+    let chat_diversity_display = chat_diversity_display(preferences.chat_mmr_lambda);
 
     SettingsSnapshot {
         quick_entries: vec![
@@ -121,6 +386,36 @@ pub fn build_settings_snapshot(
                         id: "preferences_status".to_string(),
                         label: "Preferences status".to_string(),
                         value: preferences_status_label(health),
+                        note: None,
+                    },
+                ],
+                footer: None,
+            },
+            SettingsSection {
+                title: "Chat retrieval".to_string(),
+                entries: vec![
+                    SettingsEntry {
+                        id: SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID.to_string(),
+                        label: "Chat result limit".to_string(),
+                        value: chat_result_limit_display,
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID.to_string(),
+                        label: "Per-memory limit".to_string(),
+                        value: chat_per_memory_limit_display,
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: SETTINGS_ENTRY_CHAT_CANDIDATE_POOL_ID.to_string(),
+                        label: "Chat candidate pool".to_string(),
+                        value: chat_candidate_pool_display,
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: SETTINGS_ENTRY_CHAT_DIVERSITY_ID.to_string(),
+                        label: "Chat diversity".to_string(),
+                        value: chat_diversity_display,
                         note: None,
                     },
                 ],
@@ -302,6 +597,82 @@ pub(crate) fn normalize_saved_tags(mut tags: Vec<String>) -> Vec<String> {
     tags.sort();
     tags.dedup();
     tags
+}
+
+pub fn normalize_user_preferences(mut preferences: UserPreferences) -> UserPreferences {
+    preferences.saved_tags = normalize_saved_tags(preferences.saved_tags);
+    preferences.manual_memory_ids = normalize_manual_memory_ids(preferences.manual_memory_ids);
+    preferences.chat_overall_top_k = normalize_chat_overall_top_k(preferences.chat_overall_top_k);
+    preferences.chat_per_memory_cap =
+        normalize_chat_per_memory_cap(preferences.chat_per_memory_cap);
+    preferences.chat_candidate_pool_size =
+        normalize_chat_candidate_pool_size(preferences.chat_candidate_pool_size);
+    preferences.chat_mmr_lambda = normalize_chat_mmr_lambda(preferences.chat_mmr_lambda);
+    preferences
+}
+
+pub fn normalize_chat_overall_top_k(value: usize) -> usize {
+    if CHAT_RESULT_LIMIT_OPTIONS.contains(&value) {
+        value
+    } else {
+        DEFAULT_CHAT_OVERALL_TOP_K
+    }
+}
+
+pub fn normalize_chat_per_memory_cap(value: usize) -> usize {
+    if CHAT_PER_MEMORY_LIMIT_OPTIONS.contains(&value) {
+        value
+    } else {
+        DEFAULT_CHAT_PER_MEMORY_CAP
+    }
+}
+
+pub fn normalize_chat_candidate_pool_size(value: usize) -> usize {
+    if CHAT_CANDIDATE_POOL_OPTIONS.contains(&value) {
+        value
+    } else {
+        DEFAULT_CHAT_CANDIDATE_POOL_SIZE
+    }
+}
+
+pub fn normalize_chat_mmr_lambda(value: u8) -> u8 {
+    if CHAT_DIVERSITY_OPTIONS.contains(&value) {
+        value
+    } else {
+        DEFAULT_CHAT_MMR_LAMBDA
+    }
+}
+
+pub fn chat_result_limit_options() -> &'static [usize] {
+    CHAT_RESULT_LIMIT_OPTIONS
+}
+
+pub fn chat_per_memory_limit_options() -> &'static [usize] {
+    CHAT_PER_MEMORY_LIMIT_OPTIONS
+}
+
+pub fn chat_candidate_pool_options() -> &'static [usize] {
+    CHAT_CANDIDATE_POOL_OPTIONS
+}
+
+pub fn chat_diversity_options() -> &'static [u8] {
+    CHAT_DIVERSITY_OPTIONS
+}
+
+pub fn chat_result_limit_display(value: usize) -> String {
+    format!("{value} docs")
+}
+
+pub fn chat_per_memory_limit_display(value: usize) -> String {
+    format!("{value} per memory")
+}
+
+pub fn chat_candidate_pool_display(value: usize) -> String {
+    format!("{value} candidates")
+}
+
+pub fn chat_diversity_display(value: u8) -> String {
+    format!("{:.2}", f32::from(value) / 100.0)
 }
 
 fn saved_tags_display(preferences: &UserPreferences) -> String {

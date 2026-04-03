@@ -225,10 +225,39 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
         );
         assert_eq!(
             section_titles,
-            vec!["Saved preferences", "Current session", "Account"],
+            vec![
+                "Saved preferences",
+                "Chat retrieval",
+                "Current session",
+                "Account"
+            ],
             "{name}"
         );
     }
+}
+
+#[test]
+fn user_preferences_normalizes_missing_chat_retrieval_fields() {
+    let preferences: UserPreferences = serde_yaml::from_str(
+        r#"
+default_memory_id: aaaaa-aa
+saved_tags:
+  - docs
+manual_memory_ids:
+  - bbbbb-bb
+"#,
+    )
+    .expect("chat retrieval fields should default");
+
+    let normalized = normalize_user_preferences(preferences);
+
+    assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
+    assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
+    assert_eq!(
+        normalized.chat_candidate_pool_size,
+        DEFAULT_CHAT_CANDIDATE_POOL_SIZE
+    );
+    assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
 }
 
 #[test]
@@ -274,19 +303,131 @@ fn settings_snapshot_marks_partial_account_cost_with_error_notes() {
     );
 
     assert_eq!(
-        section_entry_value(&snapshot, "Account", "principal_id"),
-        "principal-1"
-    );
-    assert_eq!(
-        quick_entry_value(&snapshot, "principal_id"),
-        "princ...pal-1"
-    );
-    assert_eq!(
         section_entry_value(&snapshot, "Account", "kinic_balance"),
-        "12.34000000 KINIC"
+        "12.340 KINIC"
     );
     assert_eq!(
         section_entry_note(&snapshot, "Account", "kinic_balance"),
         Some("Could not fetch create price. Cause: price unavailable")
+    );
+}
+
+#[test]
+fn settings_snapshot_projects_chat_retrieval_section() {
+    let snapshot = build_settings_snapshot(
+        &deferred_overview(),
+        &UserPreferences {
+            chat_overall_top_k: 10,
+            chat_per_memory_cap: 4,
+            chat_candidate_pool_size: 32,
+            chat_mmr_lambda: 80,
+            ..UserPreferences::default()
+        },
+        &Vec::new(),
+        &Vec::new(),
+        &PreferencesHealth::default(),
+    );
+
+    assert_eq!(
+        section_entry_value(&snapshot, "Chat retrieval", "chat_result_limit"),
+        "10 docs"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Chat retrieval", "chat_per_memory_limit"),
+        "4 per memory"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Chat retrieval", "chat_candidate_pool"),
+        "32 candidates"
+    );
+    assert_eq!(
+        section_entry_value(&snapshot, "Chat retrieval", "chat_diversity"),
+        "0.80"
+    );
+}
+
+#[test]
+fn chat_history_store_keeps_threads_separated_by_identity_network_and_memory() {
+    let mut store = ChatHistoryStore::default();
+
+    append_chat_history_message_to_store(
+        &mut store, "local", "alice", "aaaaa-aa", "user", "one", 1,
+    );
+    append_chat_history_message_to_store(
+        &mut store, "mainnet", "alice", "aaaaa-aa", "user", "two", 2,
+    );
+    append_chat_history_message_to_store(
+        &mut store, "local", "bob", "aaaaa-aa", "user", "three", 3,
+    );
+    append_chat_history_message_to_store(
+        &mut store, "local", "alice", "bbbbb-bb", "user", "four", 4,
+    );
+    append_chat_history_message_to_store(
+        &mut store,
+        "local",
+        "alice",
+        "all-memories",
+        "assistant",
+        "five",
+        5,
+    );
+
+    assert_eq!(
+        project_chat_history(&store, "local", "alice", "aaaaa-aa"),
+        vec![("user".to_string(), "one".to_string())]
+    );
+    assert_eq!(
+        project_chat_history(&store, "mainnet", "alice", "aaaaa-aa"),
+        vec![("user".to_string(), "two".to_string())]
+    );
+    assert_eq!(
+        project_chat_history(&store, "local", "bob", "aaaaa-aa"),
+        vec![("user".to_string(), "three".to_string())]
+    );
+    assert_eq!(
+        project_chat_history(&store, "local", "alice", "bbbbb-bb"),
+        vec![("user".to_string(), "four".to_string())]
+    );
+    assert_eq!(
+        project_chat_history(&store, "local", "alice", "all-memories"),
+        vec![("assistant".to_string(), "five".to_string())]
+    );
+}
+
+#[test]
+fn chat_history_store_trims_old_messages_and_long_content() {
+    let mut store = ChatHistoryStore::default();
+
+    for index in 0..45 {
+        append_chat_history_message_to_store(
+            &mut store,
+            "local",
+            "alice",
+            "aaaaa-aa",
+            "user",
+            format!("message-{index}").as_str(),
+            index,
+        );
+    }
+    append_chat_history_message_to_store(
+        &mut store,
+        "local",
+        "alice",
+        "aaaaa-aa",
+        "assistant",
+        "x".repeat(5000).as_str(),
+        99,
+    );
+
+    let projected = project_chat_history(&store, "local", "alice", "aaaaa-aa");
+
+    assert_eq!(projected.len(), 40);
+    assert_eq!(
+        projected.first(),
+        Some(&("user".to_string(), "message-6".to_string()))
+    );
+    assert_eq!(
+        projected.last().map(|(_, content)| content.len()),
+        Some(4096)
     );
 }

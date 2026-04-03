@@ -5,9 +5,9 @@ use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
 use tui_kit_runtime::{
-    AccessControlAction, AccessControlFocus, AccessControlMode, AccessControlRole, CreateCostState,
-    CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode, PickerState, SearchScope,
-    SettingsSnapshot,
+    AccessControlModalState, ChatScope, CreateCostState, CreateModalFocus, CreateSubmitState,
+    InsertFormFocus, InsertMode, PickerState, RenameMemoryModalState, SearchScope,
+    SettingsSnapshot, TextInputModalState, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
@@ -83,6 +83,7 @@ pub struct TuiKitUi<'a> {
     pub(super) chat_input: &'a str,
     pub(super) chat_loading: bool,
     pub(super) chat_scroll: usize,
+    pub(super) chat_scope: ChatScope,
 }
 
 impl<'a> TuiKitUi<'a> {
@@ -157,6 +158,7 @@ impl<'a> TuiKitUi<'a> {
             chat_input: "",
             chat_loading: false,
             chat_scroll: 0,
+            chat_scope: ChatScope::Selected,
         }
     }
 }

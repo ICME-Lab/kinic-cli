@@ -277,6 +277,308 @@ fn add_tag_submit_empty_value_keeps_picker_input_open() {
 }
 
 #[test]
+fn build_snapshot_appends_add_memory_action_in_memories_tab() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.all = provider.memory_records.clone();
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        ..CoreState::default()
+    });
+
+    assert_eq!(snapshot.items.len(), 2);
+    assert_eq!(snapshot.items[1].id, "kinic-action-add-memory");
+    assert_eq!(snapshot.items[1].name, "+ Add Existing Memory Canister");
+}
+
+#[test]
+fn build_snapshot_shows_remove_action_only_for_manual_memory() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.manual_memory_ids = vec!["aaaaa-aa".to_string()];
+    provider.memory_summaries = vec![MemorySummary {
+        users: Some(vec![bridge::MemoryUser {
+            principal_id: "user-1".to_string(),
+            role: "reader".to_string(),
+        }]),
+        ..running_memory_summary("aaaaa-aa", "first")
+    }];
+    provider.refresh_memory_records_from_summaries();
+    provider.active_memory_id = Some("aaaaa-aa".to_string());
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        memory_content_action_index: 2,
+        ..CoreState::default()
+    });
+
+    let content = snapshot.selected_content.expect("selected content");
+    let actions = content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Actions")
+        .expect("actions section");
+    assert_eq!(actions.body_lines, vec!["> Remove from list".to_string()]);
+
+    provider.user_preferences.manual_memory_ids.clear();
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        ..CoreState::default()
+    });
+    let content = snapshot.selected_content.expect("selected content");
+    assert!(
+        content
+            .sections
+            .iter()
+            .all(|section| section.heading != "Actions")
+    );
+}
+
+#[test]
+fn memory_content_open_selected_opens_remove_modal_for_manual_memory_action() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.manual_memory_ids = vec!["aaaaa-aa".to_string()];
+    provider.memory_summaries = vec![MemorySummary {
+        users: Some(vec![bridge::MemoryUser {
+            principal_id: "user-1".to_string(),
+            role: "reader".to_string(),
+        }]),
+        ..running_memory_summary("aaaaa-aa", "first")
+    }];
+    provider.refresh_memory_records_from_summaries();
+    provider.active_memory_id = Some("aaaaa-aa".to_string());
+
+    let output = provider
+        .handle_action(
+            &CoreAction::MemoryContentOpenSelected,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                memory_content_action_index: 2,
+                ..CoreState::default()
+            },
+        )
+        .expect("open selected output");
+
+    assert!(
+        output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::OpenRemoveMemory))
+    );
+}
+
+#[test]
+fn memory_content_jump_moves_between_add_and_remove_actions() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.manual_memory_ids = vec!["aaaaa-aa".to_string()];
+    provider.memory_summaries = vec![MemorySummary {
+        users: Some(vec![
+            bridge::MemoryUser {
+                principal_id: "user-1".to_string(),
+                role: "reader".to_string(),
+            },
+            bridge::MemoryUser {
+                principal_id: "user-2".to_string(),
+                role: "writer".to_string(),
+            },
+        ]),
+        ..running_memory_summary("aaaaa-aa", "first")
+    }];
+    provider.refresh_memory_records_from_summaries();
+    provider.active_memory_id = Some("aaaaa-aa".to_string());
+
+    let output = provider
+        .handle_action(
+            &CoreAction::MemoryContentJumpNext,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                memory_content_action_index: 0,
+                ..CoreState::default()
+            },
+        )
+        .expect("jump next output");
+    assert!(
+        output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::SetMemoryContentActionIndex(3)))
+    );
+
+    let output = provider
+        .handle_action(
+            &CoreAction::MemoryContentJumpPrev,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                memory_content_action_index: 3,
+                ..CoreState::default()
+            },
+        )
+        .expect("jump prev output");
+    assert!(
+        output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::SetMemoryContentActionIndex(2)))
+    );
+}
+
+#[test]
+fn remove_manual_memory_submit_updates_preferences_and_active_selection() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.manual_memory_ids = vec!["aaaaa-aa".to_string()];
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+    provider.memory_summaries = vec![
+        running_memory_summary("aaaaa-aa", "first"),
+        running_memory_summary("bbbbb-bb", "second"),
+    ];
+    provider.refresh_memory_records_from_summaries();
+    provider.active_memory_id = Some("aaaaa-aa".to_string());
+
+    let output = provider
+        .handle_action(
+            &CoreAction::RemoveMemorySubmit,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                remove_memory: RemoveMemoryModalState {
+                    open: true,
+                    confirm_yes: true,
+                    ..RemoveMemoryModalState::default()
+                },
+                ..CoreState::default()
+            },
+        )
+        .expect("remove output");
+
+    assert_eq!(
+        provider.user_preferences.manual_memory_ids,
+        Vec::<String>::new()
+    );
+    assert_eq!(provider.user_preferences.default_memory_id, None);
+    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert!(
+        provider
+            .memory_records
+            .iter()
+            .all(|record| record.id != "aaaaa-aa")
+    );
+    assert!(
+        output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::CloseRemoveMemory))
+    );
+}
+
+#[test]
+fn remove_manual_memory_submit_keeps_modal_open_on_save_failure() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.manual_memory_ids = vec!["aaaaa-aa".to_string()];
+    provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "first")];
+    provider.refresh_memory_records_from_summaries();
+    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_next_test_settings_save_to_fail();
+
+    let output = provider
+        .handle_action(
+            &CoreAction::RemoveMemorySubmit,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                remove_memory: RemoveMemoryModalState {
+                    open: true,
+                    confirm_yes: true,
+                    ..RemoveMemoryModalState::default()
+                },
+                ..CoreState::default()
+            },
+        )
+        .expect("remove output");
+
+    assert_eq!(
+        provider.user_preferences.manual_memory_ids,
+        vec!["aaaaa-aa".to_string()]
+    );
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::RemoveMemoryFormError(Some(message))
+            if message.contains("Manual memory removal failed")
+    )));
+}
+
+#[test]
+fn open_selected_on_add_memory_action_opens_modal() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.all = provider.memory_records.clone();
+
+    let output = provider
+        .handle_action(
+            &CoreAction::OpenSelected,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                selected_index: Some(1),
+                ..CoreState::default()
+            },
+        )
+        .expect("open selected output");
+
+    assert!(
+        output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::OpenAddMemory))
+    );
+}
+
+#[test]
+fn poll_add_memory_validation_background_saves_preference_and_reloads() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel();
+    provider.add_memory_validation_task.receiver = Some(rx);
+    provider.add_memory_validation_task.in_flight = true;
+    tx.send(AddMemoryValidationTaskOutput {
+        memory_id: "bbbbb-bb".to_string(),
+        result: Ok(()),
+    })
+    .expect("send validation result");
+
+    let output = provider
+        .poll_add_memory_validation_background(&CoreState {
+            current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+            ..CoreState::default()
+        })
+        .expect("background output");
+
+    assert_eq!(
+        provider.user_preferences.manual_memory_ids,
+        vec!["bbbbb-bb".to_string()]
+    );
+    assert!(provider.initial_memories_in_flight);
+    assert!(
+        output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::CloseAddMemory))
+    );
+}
+
+#[test]
+fn validate_add_memory_submit_rejects_invalid_principal() {
+    let provider = KinicProvider::new(live_config());
+
+    let error = provider
+        .validate_add_memory_submit(&CoreState {
+            add_memory: TextInputModalState {
+                value: "not-a-principal".to_string(),
+                ..TextInputModalState::default()
+            },
+            ..CoreState::default()
+        })
+        .expect_err("invalid principal should fail");
+
+    assert_eq!(error, "Invalid principal text: not-a-principal");
+}
+
+#[test]
 fn submit_tag_management_delete_confirm_removes_saved_tag_and_keeps_picker_open() {
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.saved_tags = vec!["docs".to_string(), "research".to_string()];

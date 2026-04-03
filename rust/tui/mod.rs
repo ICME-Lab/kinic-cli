@@ -14,6 +14,7 @@ use crate::{TUI_IDENTITY_REQUIRED_MESSAGE, resolve_tui_identity};
 
 mod adapter;
 mod bridge;
+mod chat_prompt;
 mod provider;
 mod settings;
 mod ui_config;

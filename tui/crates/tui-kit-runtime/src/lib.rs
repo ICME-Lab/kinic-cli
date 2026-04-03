@@ -17,6 +17,12 @@ use std::path::PathBuf;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
 
 pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
+pub const SETTINGS_ENTRY_KINIC_BALANCE_ID: &str = "kinic_balance";
+pub const SETTINGS_ENTRY_SAVED_TAGS_ID: &str = "saved_tags";
+pub const SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID: &str = "chat_result_limit";
+pub const SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID: &str = "chat_per_memory_limit";
+pub const SETTINGS_ENTRY_CHAT_CANDIDATE_POOL_ID: &str = "chat_candidate_pool";
+pub const SETTINGS_ENTRY_CHAT_DIVERSITY_ID: &str = "chat_diversity";
 pub const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
     "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
 ];
@@ -137,6 +143,13 @@ pub enum SearchScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatScope {
+    All,
+    #[default]
+    Selected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InsertFormFocus {
     #[default]
     Mode,
@@ -155,6 +168,10 @@ pub enum PickerContext {
     InsertTag,
     TagManagement,
     AddTag,
+    ChatResultLimit,
+    ChatPerMemoryLimit,
+    ChatCandidatePool,
+    ChatDiversity,
 }
 
 impl Default for PickerContext {
@@ -632,6 +649,7 @@ pub struct CoreState {
     pub chat_input: String,
     pub chat_loading: bool,
     pub chat_scroll: usize,
+    pub chat_scope: ChatScope,
     pub create_name: String,
     pub create_description: String,
     pub create_submit_state: CreateSubmitState,
@@ -686,6 +704,7 @@ impl Default for CoreState {
             chat_input: String::new(),
             chat_loading: false,
             chat_scroll: 0,
+            chat_scope: ChatScope::default(),
             create_name: String::new(),
             create_description: String::new(),
             create_submit_state: CreateSubmitState::default(),
@@ -826,6 +845,8 @@ pub enum CoreAction {
     Cancel,
     ChatInput(char),
     ChatBackspace,
+    ChatScopePrev,
+    ChatScopeNext,
     ChatSubmit,
     ChatScrollUp,
     ChatScrollDown,
@@ -881,6 +902,12 @@ pub enum CoreEffect {
     OpenExternal(String),
     Notify(String),
     NotifyPersistent(String),
+    ReplaceChatMessages(Vec<(String, String)>),
+    AppendChatMessage {
+        role: String,
+        content: String,
+    },
+    SetChatLoading(bool),
     RequestRefresh,
     /// Validation or async error for the create form (clears submitting state).
     CreateFormError(Option<String>),
@@ -1533,15 +1560,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 state.focus = focus_after_chat_close(state.current_tab_id.as_str());
             }
         }
-        CoreAction::AccessMoveNext => {}
-        CoreAction::AccessMovePrev => {}
-        CoreAction::AccessOpenSelected => {}
+        CoreAction::MemoryContentMoveNext => {}
+        CoreAction::MemoryContentMovePrev => {}
+        CoreAction::MemoryContentJumpNext => {}
+        CoreAction::MemoryContentJumpPrev => {}
+        CoreAction::MemoryContentOpenSelected => {}
         CoreAction::CloseAccessControl => {
-            state.access_control_open = false;
-            state.access_control_mode = AccessControlMode::None;
-            state.access_control_confirm_yes = true;
-            state.access_control_submit_state = CreateSubmitState::Idle;
-            state.access_control_error = None;
+            close_access_control_modal(state);
         }
         CoreAction::ChatInput(c) => {
             state.chat_input.push(*c);
@@ -1549,7 +1574,20 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::ChatBackspace => {
             state.chat_input.pop();
         }
+        CoreAction::ChatScopePrev => {
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+                state.chat_scope = prev_chat_scope(state.chat_scope);
+            }
+        }
+        CoreAction::ChatScopeNext => {
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+                state.chat_scope = next_chat_scope(state.chat_scope);
+            }
+        }
         CoreAction::ChatSubmit => {
+            if state.chat_loading {
+                return;
+            }
             let input = state.chat_input.trim().to_string();
             if !input.is_empty() {
                 state.chat_messages.push(("user".to_string(), input));
@@ -1853,15 +1891,71 @@ fn prev_search_scope(scope: SearchScope) -> SearchScope {
     next_search_scope(scope)
 }
 
-fn clear_access_control_error(state: &mut CoreState) {
-    state.access_control_error = None;
-    if state.access_control_submit_state == CreateSubmitState::Error {
-        state.access_control_submit_state = CreateSubmitState::Idle;
+fn next_chat_scope(scope: ChatScope) -> ChatScope {
+    match scope {
+        ChatScope::All => ChatScope::Selected,
+        ChatScope::Selected => ChatScope::All,
     }
 }
 
+fn prev_chat_scope(scope: ChatScope) -> ChatScope {
+    next_chat_scope(scope)
+}
+
+pub fn clear_modal_error_state(submit_state: &mut CreateSubmitState, error: &mut Option<String>) {
+    *error = None;
+    if *submit_state == CreateSubmitState::Error {
+        *submit_state = CreateSubmitState::Idle;
+    }
+}
+
+pub fn apply_modal_error(
+    submit_state: &mut CreateSubmitState,
+    error: &mut Option<String>,
+    message: Option<String>,
+) {
+    *submit_state = if message.is_some() {
+        CreateSubmitState::Error
+    } else {
+        CreateSubmitState::Idle
+    };
+    *error = message;
+}
+
+pub fn reset_modal_submission(submit_state: &mut CreateSubmitState, error: &mut Option<String>) {
+    *submit_state = CreateSubmitState::Idle;
+    *error = None;
+}
+
+pub fn begin_modal_submit(submit_state: &mut CreateSubmitState, error: &mut Option<String>) {
+    *submit_state = CreateSubmitState::Submitting;
+    *error = None;
+}
+
+pub fn modal_locked(submit_state: CreateSubmitState) -> bool {
+    submit_state == CreateSubmitState::Submitting
+}
+
+fn clear_access_control_error(state: &mut CoreState) {
+    clear_modal_error_state(
+        &mut state.access_control.submit_state,
+        &mut state.access_control.error,
+    );
+}
+
+fn clear_transfer_error(state: &mut CoreState) {
+    clear_modal_error_state(
+        &mut state.transfer_modal.submit_state,
+        &mut state.transfer_modal.error,
+    );
+}
+
 fn access_control_locked(state: &CoreState) -> bool {
-    state.access_control_submit_state == CreateSubmitState::Submitting
+    modal_locked(state.access_control.submit_state.clone())
+}
+
+fn transfer_modal_locked(state: &CoreState) -> bool {
+    modal_locked(state.transfer_modal.submit_state.clone())
 }
 
 fn access_control_focus_order() -> &'static [AccessControlFocus] {
@@ -2244,6 +2338,12 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             PaneFocus::Form => None,
             PaneFocus::Extra => match key {
                 CoreKey::Backspace => Some(CoreAction::ChatBackspace),
+                CoreKey::Left if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
+                    Some(CoreAction::ChatScopePrev)
+                }
+                CoreKey::Right if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
+                    Some(CoreAction::ChatScopeNext)
+                }
                 CoreKey::Enter => Some(CoreAction::ChatSubmit),
                 CoreKey::Down => Some(CoreAction::ChatScrollDown),
                 CoreKey::Up => Some(CoreAction::ChatScrollUp),
@@ -2327,13 +2427,51 @@ pub fn settings_entry(settings: &SettingsSnapshot, index: usize) -> Option<&Sett
     None
 }
 
-pub fn should_open_default_memory_picker(state: &CoreState) -> bool {
-    is_settings_content(state.current_tab_id.as_str(), state.focus)
-        && state
-            .selected_index
-            .and_then(|index| settings_entry(&state.settings, index))
-            .map(|entry| entry.id.as_str())
-            == Some(SETTINGS_ENTRY_DEFAULT_MEMORY_ID)
+pub fn selected_settings_row_behavior(state: &CoreState) -> Option<SettingsRowBehavior> {
+    if !is_settings_content(state.current_tab_id.as_str(), state.focus) {
+        return None;
+    }
+
+    state
+        .selected_index
+        .and_then(|index| settings_row_behavior_for_index(&state.settings, index))
+}
+
+pub fn settings_row_behavior_for_index(
+    settings: &SettingsSnapshot,
+    index: usize,
+) -> Option<SettingsRowBehavior> {
+    let entry = settings_entry(settings, index)?;
+    Some(match entry.id.as_str() {
+        SETTINGS_ENTRY_KINIC_BALANCE_ID => {
+            SettingsRowBehavior::new(Some(CoreAction::OpenTransferModal), " send KINIC ")
+        }
+        SETTINGS_ENTRY_DEFAULT_MEMORY_ID => SettingsRowBehavior::new(
+            Some(CoreAction::OpenPicker(PickerContext::DefaultMemory)),
+            " open Default memory ",
+        ),
+        SETTINGS_ENTRY_SAVED_TAGS_ID => SettingsRowBehavior::new(
+            Some(CoreAction::OpenPicker(PickerContext::TagManagement)),
+            " manage saved tags ",
+        ),
+        SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID => SettingsRowBehavior::new(
+            Some(CoreAction::OpenPicker(PickerContext::ChatResultLimit)),
+            " adjust chat limit ",
+        ),
+        SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID => SettingsRowBehavior::new(
+            Some(CoreAction::OpenPicker(PickerContext::ChatPerMemoryLimit)),
+            " adjust per-memory limit ",
+        ),
+        SETTINGS_ENTRY_CHAT_CANDIDATE_POOL_ID => SettingsRowBehavior::new(
+            Some(CoreAction::OpenPicker(PickerContext::ChatCandidatePool)),
+            " adjust candidate pool ",
+        ),
+        SETTINGS_ENTRY_CHAT_DIVERSITY_ID => SettingsRowBehavior::new(
+            Some(CoreAction::OpenPicker(PickerContext::ChatDiversity)),
+            " adjust chat diversity ",
+        ),
+        _ => SettingsRowBehavior::new(None, " row details "),
+    })
 }
 
 fn is_settings_content(current_tab_id: &str, focus: PaneFocus) -> bool {
@@ -2468,7 +2606,12 @@ fn picker_selected_index(
                     let insert_tag = state.insert_tag.trim();
                     (!insert_tag.is_empty()).then(|| insert_tag.to_string())
                 }
-                PickerContext::TagManagement | PickerContext::AddTag => None,
+                PickerContext::TagManagement
+                | PickerContext::AddTag
+                | PickerContext::ChatResultLimit
+                | PickerContext::ChatPerMemoryLimit
+                | PickerContext::ChatCandidatePool
+                | PickerContext::ChatDiversity => None,
             });
 
     if let Some(selected_id) = preferred_selected_id
@@ -3099,7 +3242,54 @@ mod tests {
     }
 
     #[test]
-    fn should_open_default_memory_picker_only_on_default_memory_row() {
+    fn memories_chat_focus_maps_left_right_to_scope_changes() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Left,
+                PaneFocus::Extra,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::ChatScopePrev)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Right,
+                PaneFocus::Extra,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::ChatScopeNext)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Left,
+                PaneFocus::Extra,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn chat_scope_actions_only_mutate_memories_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            chat_scope: ChatScope::Selected,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ChatScopeNext);
+        assert_eq!(state.chat_scope, ChatScope::All);
+
+        apply_core_action(&mut state, &CoreAction::ChatScopePrev);
+        assert_eq!(state.chat_scope, ChatScope::Selected);
+
+        state.current_tab_id = kinic_tabs::KINIC_CREATE_TAB_ID.to_string();
+        apply_core_action(&mut state, &CoreAction::ChatScopeNext);
+        assert_eq!(state.chat_scope, ChatScope::Selected);
+    }
+
+    #[test]
+    fn selected_settings_row_behavior_matches_default_memory_row() {
         let settings = SettingsSnapshot {
             quick_entries: vec![],
             sections: vec![SettingsSection {
@@ -3134,8 +3324,264 @@ mod tests {
             ..state.clone()
         };
 
-        assert!(should_open_default_memory_picker(&state));
-        assert!(!should_open_default_memory_picker(&other_row_state));
+        assert_eq!(
+            selected_settings_row_behavior(&state),
+            Some(SettingsRowBehavior {
+                enter_action: Some(CoreAction::OpenPicker(PickerContext::DefaultMemory)),
+                status_hint: " open Default memory ",
+            })
+        );
+        assert_eq!(
+            selected_settings_row_behavior(&other_row_state),
+            Some(SettingsRowBehavior {
+                enter_action: None,
+                status_hint: " row details ",
+            })
+        );
+    }
+
+    #[test]
+    fn selected_settings_row_behavior_matches_transfer_row() {
+        let settings = SettingsSnapshot {
+            quick_entries: vec![],
+            sections: vec![SettingsSection {
+                title: "Account".to_string(),
+                entries: vec![
+                    SettingsEntry {
+                        id: "kinic_balance".to_string(),
+                        label: "KINIC balance".to_string(),
+                        value: "1.00000000 KINIC".to_string(),
+                        note: None,
+                    },
+                    SettingsEntry {
+                        id: "principal_id".to_string(),
+                        label: "Principal ID".to_string(),
+                        value: "aaaaa-aa".to_string(),
+                        note: None,
+                    },
+                ],
+                footer: None,
+            }],
+        };
+        let state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(0),
+            settings: settings.clone(),
+            ..CoreState::default()
+        };
+        let other_row_state = CoreState {
+            selected_index: Some(1),
+            settings,
+            ..state.clone()
+        };
+
+        assert_eq!(
+            selected_settings_row_behavior(&state),
+            Some(SettingsRowBehavior {
+                enter_action: Some(CoreAction::OpenTransferModal),
+                status_hint: " send KINIC ",
+            })
+        );
+        assert_eq!(
+            selected_settings_row_behavior(&other_row_state),
+            Some(SettingsRowBehavior {
+                enter_action: None,
+                status_hint: " row details ",
+            })
+        );
+    }
+
+    #[test]
+    fn selected_settings_row_behavior_matches_saved_tags_row() {
+        let settings = SettingsSnapshot {
+            quick_entries: vec![],
+            sections: vec![SettingsSection {
+                title: "Saved tags".to_string(),
+                entries: vec![SettingsEntry {
+                    id: SETTINGS_ENTRY_SAVED_TAGS_ID.to_string(),
+                    label: "Saved tags".to_string(),
+                    value: "2".to_string(),
+                    note: None,
+                }],
+                footer: None,
+            }],
+        };
+        let state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(0),
+            settings,
+            ..CoreState::default()
+        };
+
+        assert_eq!(
+            selected_settings_row_behavior(&state),
+            Some(SettingsRowBehavior {
+                enter_action: Some(CoreAction::OpenPicker(PickerContext::TagManagement)),
+                status_hint: " manage saved tags ",
+            })
+        );
+    }
+
+    #[test]
+    fn selected_settings_row_behavior_matches_chat_result_limit_row() {
+        let settings = SettingsSnapshot {
+            quick_entries: vec![],
+            sections: vec![SettingsSection {
+                title: "Chat retrieval".to_string(),
+                entries: vec![SettingsEntry {
+                    id: SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID.to_string(),
+                    label: "Chat result limit".to_string(),
+                    value: "8 docs".to_string(),
+                    note: None,
+                }],
+                footer: None,
+            }],
+        };
+        let state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(0),
+            settings,
+            ..CoreState::default()
+        };
+
+        assert_eq!(
+            selected_settings_row_behavior(&state),
+            Some(SettingsRowBehavior {
+                enter_action: Some(CoreAction::OpenPicker(PickerContext::ChatResultLimit)),
+                status_hint: " adjust chat limit ",
+            })
+        );
+    }
+
+    #[test]
+    fn transfer_apply_max_sets_amount_to_balance_minus_fee() {
+        let mut state = CoreState {
+            transfer_modal: TransferModalState {
+                open: true,
+                mode: TransferModalMode::Edit,
+                available_balance_base_units: Some(1_000_000_000),
+                fee_base_units: Some(100_000),
+                focus: TransferModalFocus::Amount,
+                ..TransferModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::TransferApplyMax);
+
+        assert_eq!(state.transfer_modal.amount, "9.99900000");
+        assert_eq!(state.transfer_modal.focus, TransferModalFocus::Submit);
+    }
+
+    #[test]
+    fn close_transfer_modal_resets_submit_error_and_focus() {
+        let mut state = CoreState {
+            transfer_modal: TransferModalState {
+                open: true,
+                mode: TransferModalMode::Confirm,
+                confirm_yes: false,
+                submit_state: CreateSubmitState::Error,
+                error: Some("boom".to_string()),
+                focus: TransferModalFocus::Submit,
+                ..TransferModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::CloseTransferModal);
+
+        assert!(!state.transfer_modal.open);
+        assert_eq!(state.transfer_modal.mode, TransferModalMode::Edit);
+        assert!(state.transfer_modal.confirm_yes);
+        assert_eq!(state.transfer_modal.submit_state, CreateSubmitState::Idle);
+        assert_eq!(state.transfer_modal.error, None);
+        assert_eq!(state.transfer_modal.focus, TransferModalFocus::Principal);
+    }
+
+    #[test]
+    fn close_add_memory_resets_submit_error() {
+        let mut state = CoreState {
+            add_memory: TextInputModalState {
+                open: true,
+                submit_state: CreateSubmitState::Error,
+                error: Some("boom".to_string()),
+                ..TextInputModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::CloseAddMemory);
+
+        assert!(!state.add_memory.open);
+        assert_eq!(state.add_memory.submit_state, CreateSubmitState::Idle);
+        assert_eq!(state.add_memory.error, None);
+    }
+
+    #[test]
+    fn close_access_control_resets_submit_error_and_confirm() {
+        let mut state = CoreState {
+            access_control: AccessControlModalState {
+                open: true,
+                mode: AccessControlMode::Confirm,
+                confirm_yes: false,
+                submit_state: CreateSubmitState::Error,
+                error: Some("boom".to_string()),
+                ..AccessControlModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::CloseAccessControl);
+
+        assert!(!state.access_control.open);
+        assert_eq!(state.access_control.mode, AccessControlMode::None);
+        assert!(state.access_control.confirm_yes);
+        assert_eq!(state.access_control.submit_state, CreateSubmitState::Idle);
+        assert_eq!(state.access_control.error, None);
+    }
+
+    #[test]
+    fn transfer_and_access_confirm_toggles_still_flip_selection() {
+        let mut transfer_state = CoreState {
+            transfer_modal: TransferModalState {
+                open: true,
+                mode: TransferModalMode::Confirm,
+                confirm_yes: true,
+                ..TransferModalState::default()
+            },
+            ..CoreState::default()
+        };
+        apply_core_action(&mut transfer_state, &CoreAction::TransferConfirmToggle);
+        assert!(!transfer_state.transfer_modal.confirm_yes);
+
+        let mut access_state = CoreState {
+            access_control: AccessControlModalState {
+                open: true,
+                mode: AccessControlMode::Confirm,
+                confirm_yes: true,
+                ..AccessControlModalState::default()
+            },
+            ..CoreState::default()
+        };
+        apply_core_action(&mut access_state, &CoreAction::AccessCycleAction);
+        assert!(!access_state.access_control.confirm_yes);
+
+        let mut remove_memory_state = CoreState {
+            remove_memory: RemoveMemoryModalState {
+                open: true,
+                confirm_yes: true,
+                ..RemoveMemoryModalState::default()
+            },
+            ..CoreState::default()
+        };
+        apply_core_action(
+            &mut remove_memory_state,
+            &CoreAction::RemoveMemoryToggleConfirm,
+        );
+        assert!(!remove_memory_state.remove_memory.confirm_yes);
     }
 
     #[test]

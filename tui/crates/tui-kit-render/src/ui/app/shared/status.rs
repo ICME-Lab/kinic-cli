@@ -37,35 +37,24 @@ impl<'a> TuiKitUi<'a> {
         } else if self.show_context_panel {
             self.context_status_line()
         } else if !self.status_message.is_empty() {
-            self.generic_status_line()
+            self.generic_status_line(inner.width)
         } else {
             self.default_status_line()
         };
 
-        let block = Block::default()
-            .borders(Borders::TOP)
-            .border_style(self.theme.style_border())
-            .style(Style::default().bg(self.theme.bg_panel));
-        let inner = block.inner(area);
         block.render(area, buf);
         Paragraph::new(status_line)
             .alignment(Alignment::Left)
             .render(inner, buf);
     }
 
-    fn generic_status_line(&self) -> Line<'_> {
+    fn generic_status_line(&self, max_width: u16) -> Line<'_> {
         let cfg = &self.ui_config.status;
         let (icon, label) = self.focus_indicator();
         let tab_id = self.current_tab_id.0.as_str();
-        let mut spans = vec![
-            Span::styled(
-                format!(" {} ", self.status_message),
-                self.theme.style_string(),
-            ),
-            Span::styled(" │ ", self.theme.style_muted()),
-        ];
+        let mut suffix_spans = Vec::new();
         if show_memories_search_scope_hint(tab_id, self.focus) {
-            spans.extend([
+            suffix_spans.extend([
                 Span::styled("←/→", self.theme.style_accent()),
                 Span::styled(" scope ", self.theme.style_muted()),
                 Span::styled("Enter", self.theme.style_accent()),
@@ -73,7 +62,23 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled("│ ", self.theme.style_dim()),
             ]);
         }
-        spans.extend([
+        if show_memories_chat_scope_hint(tab_id, self.focus, self.show_chat_panel) {
+            suffix_spans.extend([
+                Span::styled("←/→", self.theme.style_accent()),
+                Span::styled(" chat scope ", self.theme.style_muted()),
+                Span::styled("Enter", self.theme.style_accent()),
+                Span::styled(" send ", self.theme.style_muted()),
+                Span::styled("│ ", self.theme.style_dim()),
+            ]);
+        }
+        if show_memories_rename_hint(tab_id, self.focus) {
+            suffix_spans.extend([
+                Span::styled("Shift+R", self.theme.style_accent()),
+                Span::styled(" rename ", self.theme.style_muted()),
+                Span::styled("│ ", self.theme.style_dim()),
+            ]);
+        }
+        suffix_spans.extend([
             Span::styled("Tab", self.theme.style_accent()),
             Span::styled(" focus ", self.theme.style_muted()),
             Span::styled("↑/↓ Enter / ", self.theme.style_accent()),
@@ -323,6 +328,14 @@ impl<'a> TuiKitUi<'a> {
 
 fn show_memories_search_scope_hint(tab_id: &str, focus: Focus) -> bool {
     tab_id == KINIC_MEMORIES_TAB_ID && focus == Focus::Search
+}
+
+fn show_memories_chat_scope_hint(tab_id: &str, focus: Focus, show_chat_panel: bool) -> bool {
+    tab_id == KINIC_MEMORIES_TAB_ID && show_chat_panel && focus == Focus::Chat
+}
+
+fn show_memories_rename_hint(tab_id: &str, focus: Focus) -> bool {
+    tab_id == KINIC_MEMORIES_TAB_ID && matches!(focus, Focus::Items | Focus::Content)
 }
 
 fn show_form_change_shortcut(ui: &TuiKitUi<'_>) -> bool {

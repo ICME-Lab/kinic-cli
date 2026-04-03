@@ -283,6 +283,17 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.persistent_status_message = Some(message.clone());
                 state.status_message = Some(message);
             }
+            CoreEffect::ReplaceChatMessages(messages) => {
+                state.chat_messages = messages;
+                state.chat_scroll = 0;
+            }
+            CoreEffect::AppendChatMessage { role, content } => {
+                state.chat_messages.push((role, content));
+                state.chat_scroll = state.chat_scroll.saturating_add(9999);
+            }
+            CoreEffect::SetChatLoading(loading) => {
+                state.chat_loading = loading;
+            }
             CoreEffect::OpenExternal(url) => match open_external(&url) {
                 Ok(()) => {
                     state.persistent_status_message = None;
