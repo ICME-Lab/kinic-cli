@@ -1,17 +1,18 @@
 #[path = "form_tab_flow.rs"]
 mod form_tab_flow;
 
+use ratatui_textarea::{Input as TextAreaInput, Key as TextAreaKey, TextArea};
 use std::{io, time::Duration};
 use tui_kit_render::theme::Theme;
 use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, PickerContext, PickerState,
-    apply_snapshot, dispatch_action, is_insert_form_locked,
+    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, PickerState, apply_snapshot,
+    dispatch_action, is_insert_form_locked,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
-    should_open_default_memory_picker, should_open_saved_tags_picker,
+    selected_settings_row_behavior,
 };
 
 use crate::{
@@ -59,6 +60,26 @@ enum OverlayInputResult {
     ApplyEffects(Vec<CoreEffect>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveTextarea {
+    CreateDescription,
+    InsertText,
+}
+
+struct FormTextareas {
+    create_description: TextArea<'static>,
+    insert_text: TextArea<'static>,
+}
+
+impl Default for FormTextareas {
+    fn default() -> Self {
+        Self {
+            create_description: textarea_from_text(""),
+            insert_text: textarea_from_text(""),
+        }
+    }
+}
+
 pub fn run_provider_app<P: DataProvider>(
     provider: &mut P,
     cfg: RuntimeLoopConfig,
@@ -93,14 +114,17 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
         let mut last_selected_index: Option<usize> = None;
         let mut last_tab_id = state.current_tab_id.clone();
         let mut list_scroll_offset: usize = 0;
+        let mut textareas = FormTextareas::default();
 
         if let Ok(snapshot) = provider.initialize() {
             apply_snapshot(&mut state, snapshot);
         }
+        sync_form_textareas_from_state(&mut textareas, &state);
 
         loop {
             hooks.on_tick(provider, &mut state);
             animation.update();
+            sync_form_textareas_from_state(&mut textareas, &state);
 
             if let Ok(size) = terminal.size() {
                 let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
@@ -144,6 +168,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .show_create_modal(false)
                     .create_name(&state.create_name)
                     .create_description(&state.create_description)
+                    .create_description_cursor(textarea_cursor(
+                        active_textarea(&state),
+                        ActiveTextarea::CreateDescription,
+                        &textareas.create_description,
+                    ))
                     .create_submit_state(state.create_submit_state.clone())
                     .create_spinner_frame(state.create_spinner_frame)
                     .create_error(state.create_error.as_deref())
@@ -227,6 +256,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     execute_effects_to_status(&mut state, effects);
                     continue;
                 }
+            }
+
+            if handle_textarea_input(provider, &mut state, hooks, &mut textareas, &key_event)? {
+                continue;
             }
 
             match global_command_for_key(
@@ -497,6 +530,7 @@ fn build_ui<'a>(
     theme: &'a Theme,
     cfg: &RuntimeLoopConfig,
     state: &'a CoreState,
+    textareas: &FormTextareas,
     list_scroll_offset: usize,
     inspector_scroll: usize,
     show_help: bool,
@@ -521,6 +555,11 @@ fn build_ui<'a>(
         .show_create_modal(false)
         .create_name(&state.create_name)
         .create_description(&state.create_description)
+        .create_description_cursor(textarea_cursor(
+            active_textarea(state),
+            ActiveTextarea::CreateDescription,
+            &textareas.create_description,
+        ))
         .create_submit_state(state.create_submit_state.clone())
         .create_spinner_frame(state.create_spinner_frame)
         .create_error(state.create_error.as_deref())
@@ -604,6 +643,211 @@ fn handle_overlay_input<P: DataProvider>(
     }
 
     OverlayInputResult::NotHandled
+}
+
+fn dispatch_overlay_action<P: DataProvider>(
+    provider: &mut P,
+    state: &mut CoreState,
+    action: Option<CoreAction>,
+    clear_persistent: bool,
+) -> OverlayInputResult {
+    let Some(action) = action else {
+        return OverlayInputResult::Consumed;
+    };
+    let result = if clear_persistent {
+        dispatch_action_with_persistent_clear(provider, state, &action)
+    } else {
+        dispatch_action(provider, state, &action)
+    };
+    match result {
+        Ok(effects) => OverlayInputResult::ApplyEffects(effects),
+        Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
+    }
+}
+
+fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    textareas: &mut FormTextareas,
+    key_event: &crossterm::event::KeyEvent,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let Some(target) = active_textarea(state) else {
+        return Ok(false);
+    };
+    let textarea = textarea_mut(textareas, target);
+    let action = textarea_navigation_action(target, key_event.code, textarea);
+
+    let Some(action) = action else {
+        if key_event.code == crossterm::event::KeyCode::Esc {
+            return Ok(false);
+        }
+        textarea.input(textarea_input_from_key_event(*key_event));
+        sync_state_from_textareas(state, textareas);
+        return Ok(true);
+    };
+
+    match dispatch_with_effects(provider, state, hooks, &action) {
+        Ok(()) => Ok(true),
+        Err(error) => {
+            state.status_message = Some(error);
+            Ok(true)
+        }
+    }
+}
+
+fn textarea_navigation_action(
+    target: ActiveTextarea,
+    code: crossterm::event::KeyCode,
+    textarea: &TextArea<'static>,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Tab => Some(textarea_next_field_action(target)),
+        crossterm::event::KeyCode::BackTab => Some(textarea_prev_field_action(target)),
+        crossterm::event::KeyCode::Up if textarea_is_at_first_row(textarea) => {
+            Some(textarea_prev_field_action(target))
+        }
+        crossterm::event::KeyCode::Down if textarea_is_at_last_row(textarea) => {
+            Some(textarea_next_field_action(target))
+        }
+        _ => None,
+    }
+}
+
+fn textarea_next_field_action(target: ActiveTextarea) -> CoreAction {
+    match target {
+        ActiveTextarea::CreateDescription => CoreAction::CreateNextField,
+        ActiveTextarea::InsertText => CoreAction::InsertNextField,
+    }
+}
+
+fn textarea_prev_field_action(target: ActiveTextarea) -> CoreAction {
+    match target {
+        ActiveTextarea::CreateDescription => CoreAction::CreatePrevField,
+        ActiveTextarea::InsertText => CoreAction::InsertPrevField,
+    }
+}
+
+fn textarea_is_at_first_row(textarea: &TextArea<'static>) -> bool {
+    textarea.cursor().0 == 0
+}
+
+fn textarea_is_at_last_row(textarea: &TextArea<'static>) -> bool {
+    textarea.cursor().0 + 1 >= textarea.lines().len()
+}
+
+fn active_textarea(state: &CoreState) -> Option<ActiveTextarea> {
+    if state.focus != PaneFocus::Form {
+        return None;
+    }
+
+    if state.current_tab_id == KINIC_CREATE_TAB_ID
+        && state.create_focus == tui_kit_runtime::CreateModalFocus::Description
+    {
+        return Some(ActiveTextarea::CreateDescription);
+    }
+
+    if state.current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_INSERT_TAB_ID
+        && state.insert_focus == tui_kit_runtime::InsertFormFocus::Text
+        && matches!(
+            state.insert_mode,
+            tui_kit_runtime::InsertMode::InlineText | tui_kit_runtime::InsertMode::ManualEmbedding
+        )
+    {
+        return Some(ActiveTextarea::InsertText);
+    }
+
+    None
+}
+
+fn textarea_mut(textareas: &mut FormTextareas, target: ActiveTextarea) -> &mut TextArea<'static> {
+    match target {
+        ActiveTextarea::CreateDescription => &mut textareas.create_description,
+        ActiveTextarea::InsertText => &mut textareas.insert_text,
+    }
+}
+
+fn sync_form_textareas_from_state(textareas: &mut FormTextareas, state: &CoreState) {
+    sync_textarea_from_string(
+        &mut textareas.create_description,
+        state.create_description.as_str(),
+    );
+    sync_textarea_from_string(&mut textareas.insert_text, state.insert_text.as_str());
+}
+
+fn sync_textarea_from_string(textarea: &mut TextArea<'static>, value: &str) {
+    if textarea.lines().join("\n") == value {
+        return;
+    }
+    *textarea = textarea_from_text(value);
+}
+
+fn textarea_from_text(value: &str) -> TextArea<'static> {
+    TextArea::from(value.split('\n'))
+}
+
+fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
+    let create_description = textareas.create_description.lines().join("\n");
+    if state.create_description != create_description {
+        state.create_description = create_description;
+        state.create_error = None;
+        if state.create_submit_state == tui_kit_runtime::CreateSubmitState::Error {
+            state.create_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+        }
+    }
+
+    let insert_text = textareas.insert_text.lines().join("\n");
+    if state.insert_text != insert_text {
+        state.insert_text = insert_text;
+        state.insert_error = None;
+        if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
+            state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+        }
+    }
+}
+
+fn textarea_cursor(
+    active: Option<ActiveTextarea>,
+    target: ActiveTextarea,
+    textarea: &TextArea<'static>,
+) -> Option<(usize, usize)> {
+    if active != Some(target) {
+        return None;
+    }
+    Some(textarea.cursor())
+}
+
+fn textarea_input_from_key_event(key_event: crossterm::event::KeyEvent) -> TextAreaInput {
+    let key = match key_event.code {
+        crossterm::event::KeyCode::Char(c) => TextAreaKey::Char(c),
+        crossterm::event::KeyCode::Backspace => TextAreaKey::Backspace,
+        crossterm::event::KeyCode::Enter => TextAreaKey::Enter,
+        crossterm::event::KeyCode::Left => TextAreaKey::Left,
+        crossterm::event::KeyCode::Right => TextAreaKey::Right,
+        crossterm::event::KeyCode::Up => TextAreaKey::Up,
+        crossterm::event::KeyCode::Down => TextAreaKey::Down,
+        crossterm::event::KeyCode::Tab => TextAreaKey::Tab,
+        crossterm::event::KeyCode::Delete => TextAreaKey::Delete,
+        crossterm::event::KeyCode::Home => TextAreaKey::Home,
+        crossterm::event::KeyCode::End => TextAreaKey::End,
+        crossterm::event::KeyCode::PageUp => TextAreaKey::PageUp,
+        crossterm::event::KeyCode::PageDown => TextAreaKey::PageDown,
+        crossterm::event::KeyCode::Esc => TextAreaKey::Esc,
+        crossterm::event::KeyCode::F(value) => TextAreaKey::F(value),
+        _ => TextAreaKey::Null,
+    };
+    TextAreaInput {
+        key,
+        ctrl: key_event
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL),
+        alt: key_event
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::ALT),
+        shift: key_event
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::SHIFT),
+    }
 }
 
 fn access_control_overlay_action(

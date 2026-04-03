@@ -233,6 +233,190 @@ fn handle_overlay_input_consumes_unknown_selector_keys() {
 }
 
 #[test]
+fn textarea_input_updates_create_description_with_newlines() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: tui_kit_runtime::CreateModalFocus::Description,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('a'),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+    assert!(handled);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+    assert!(handled);
+
+    assert_eq!(state.create_description, "a\n");
+}
+
+#[test]
+fn textarea_up_on_first_create_description_row_moves_to_previous_field() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: tui_kit_runtime::CreateModalFocus::Description,
+        create_description: "first\nsecond".into(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Up,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+
+    assert!(handled);
+    assert_eq!(state.create_focus, tui_kit_runtime::CreateModalFocus::Name);
+    assert_eq!(state.create_description, "first\nsecond");
+}
+
+#[test]
+fn textarea_down_on_last_create_description_row_moves_to_submit() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: tui_kit_runtime::CreateModalFocus::Description,
+        create_description: "first\nsecond".into(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+    textareas
+        .create_description
+        .input(textarea_input_from_key_event(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        ));
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+
+    assert!(handled);
+    assert_eq!(
+        state.create_focus,
+        tui_kit_runtime::CreateModalFocus::Submit
+    );
+    assert_eq!(state.create_description, "first\nsecond");
+}
+
+#[test]
+fn textarea_down_inside_insert_text_moves_cursor_before_leaving_field() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: tui_kit_runtime::kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: tui_kit_runtime::InsertMode::InlineText,
+        insert_focus: tui_kit_runtime::InsertFormFocus::Text,
+        insert_text: "first\nsecond".into(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+
+    assert!(handled);
+    assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Text);
+    assert_eq!(textareas.insert_text.cursor().0, 1);
+}
+
+#[test]
+fn textarea_down_on_last_insert_text_row_moves_to_next_field() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: tui_kit_runtime::kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: tui_kit_runtime::InsertMode::InlineText,
+        insert_focus: tui_kit_runtime::InsertFormFocus::Text,
+        insert_text: "first\nsecond".into(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+    textareas.insert_text.input(textarea_input_from_key_event(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    ));
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+
+    assert!(handled);
+    assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Submit);
+    assert_eq!(state.insert_text, "first\nsecond");
+}
+
+#[test]
 fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     let mut provider = TestProvider::err("tab failed");
     let mut hooks = NoopRuntimeHooks;
@@ -335,11 +519,13 @@ fn build_ui_forwards_insert_validation_fields_to_render_tree() {
         ),
         ..CoreState::default()
     };
+    let textareas = FormTextareas::default();
 
     let ui = build_ui(
         &theme,
         &test_runtime_config(),
         &state,
+        &textareas,
         0,
         0,
         false,

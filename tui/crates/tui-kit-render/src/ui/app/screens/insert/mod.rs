@@ -42,6 +42,36 @@ impl<'a> TuiKitUi<'a> {
         let layout = insert_layout(area, !self.tab_specs.is_empty());
         let form = insert_form_lines(self, layout.form_area.width.saturating_sub(6));
         let row = form.focus_row(self.insert_focus)?;
+        if self.insert_focus == InsertFormFocus::Text
+            && matches!(
+                self.insert_mode,
+                InsertMode::InlineText | InsertMode::ManualEmbedding
+            )
+        {
+            let (cursor_row, cursor_col) = self.insert_text_cursor.unwrap_or_default();
+            let visible = visible_multiline_rows(
+                self.insert_text,
+                text_placeholder(self.insert_mode),
+                INSERT_TEXT_HEIGHT,
+                cursor_row,
+                layout.form_area.width.saturating_sub(6),
+            );
+            let visible_row = cursor_row
+                .saturating_sub(visible.scroll_row)
+                .min(INSERT_TEXT_HEIGHT.saturating_sub(1) as usize)
+                as u16;
+            let x = layout.form_area.x
+                + 3
+                + multiline_cursor_x(
+                    visible.rows[visible_row as usize].as_str(),
+                    cursor_col,
+                    layout.form_area.width.saturating_sub(6),
+                );
+            return Some((
+                x.min(layout.form_area.right().saturating_sub(2)),
+                layout.form_area.y + 1 + row + visible_row,
+            ));
+        }
         let width = form.focus_width(self.insert_focus);
         Some((
             (layout.form_area.x + 3 + width).min(layout.form_area.right().saturating_sub(2)),
@@ -113,14 +143,22 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         ui.insert_mode,
         InsertMode::InlineText | InsertMode::ManualEmbedding
     ) {
-        push_field(
+        let text_rows = visible_multiline_rows(
+            ui.insert_text,
+            text_placeholder(ui.insert_mode),
+            INSERT_TEXT_HEIGHT,
+            ui.insert_text_cursor
+                .map(|(row, _)| row)
+                .unwrap_or_default(),
+            max_width,
+        );
+        push_multiline_field(
             &mut lines,
             &mut rows,
             ui,
             InsertFormFocus::Text,
             text_label(ui),
-            display_value(ui.insert_text, text_placeholder(ui.insert_mode)),
-            max_width,
+            text_rows.rows,
         );
     }
     if matches!(ui.insert_mode, InsertMode::File) {
@@ -216,6 +254,33 @@ fn push_field(
     lines.push(Line::from(""));
 }
 
+fn push_multiline_field(
+    lines: &mut Vec<Line<'_>>,
+    rows: &mut FormRows<InsertFormFocus>,
+    ui: &TuiKitUi<'_>,
+    focus: InsertFormFocus,
+    label: &str,
+    rows_value: Vec<String>,
+) {
+    rows.push_labeled_row(
+        lines,
+        Line::from(Span::styled(label.to_string(), ui.theme.style_dim())),
+        focus,
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(rows_value[0].clone(), field_style(ui, focus)),
+        ]),
+        rows_value[0].as_str(),
+    );
+    for row in rows_value.iter().skip(1) {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(row.clone(), field_style(ui, focus)),
+        ]));
+    }
+    lines.push(Line::from(""));
+}
+
 fn push_readonly_field(lines: &mut Vec<Line<'_>>, ui: &TuiKitUi<'_>, label: &str, value: String) {
     lines.push(Line::from(Span::styled(
         label.to_string(),
@@ -252,6 +317,47 @@ fn display_value(value: &str, placeholder: &str) -> String {
     } else {
         value.to_string()
     }
+}
+
+fn visible_multiline_rows(
+    value: &str,
+    placeholder: &str,
+    height: u16,
+    cursor_row: usize,
+    max_width: u16,
+) -> VisibleMultilineRows {
+    let mut source_rows = if value.is_empty() {
+        vec![placeholder.to_string()]
+    } else {
+        value
+            .split('\n')
+            .map(|row| row.to_string())
+            .collect::<Vec<_>>()
+    };
+    if source_rows.is_empty() {
+        source_rows.push(String::new());
+    }
+    let height_usize = height as usize;
+    let scroll_row = if cursor_row >= height_usize {
+        cursor_row + 1 - height_usize
+    } else {
+        0
+    };
+    let mut rows = source_rows
+        .into_iter()
+        .skip(scroll_row)
+        .take(height_usize)
+        .map(|row| trim_to_width(row.as_str(), max_width))
+        .collect::<Vec<_>>();
+    while rows.len() < height_usize {
+        rows.push(String::new());
+    }
+    VisibleMultilineRows { rows, scroll_row }
+}
+
+fn multiline_cursor_x(line: &str, cursor_col: usize, max_width: u16) -> u16 {
+    let prefix = line.chars().take(cursor_col).collect::<String>();
+    UnicodeWidthStr::width(trim_to_width(prefix.as_str(), max_width).as_str()) as u16
 }
 
 fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
@@ -418,18 +524,37 @@ mod tests {
     }
 
     #[test]
+    fn insert_form_renders_multiline_text_rows() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_mode(InsertMode::InlineText)
+            .insert_text("first\nsecond\nthird")
+            .insert_text_cursor(Some((1, 2)));
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("first"));
+        assert!(rendered.contains("second"));
+        assert!(rendered.contains("third"));
+    }
+
+    #[test]
     fn mode_value_uses_file_inline_text_manual_embedding_labels() {
         assert_eq!(
             mode_value(InsertMode::File),
-            "[File] /  Inline Text  /  Manual Embedding "
+            "[File] / Inline Text / Manual Embedding"
         );
         assert_eq!(
             mode_value(InsertMode::InlineText),
-            " File  / [Inline Text] /  Manual Embedding "
+            "File / [Inline Text] / Manual Embedding"
         );
         assert_eq!(
             mode_value(InsertMode::ManualEmbedding),
-            " File  /  Inline Text  / [Manual Embedding]"
+            "File / Inline Text / [Manual Embedding]"
         );
     }
 

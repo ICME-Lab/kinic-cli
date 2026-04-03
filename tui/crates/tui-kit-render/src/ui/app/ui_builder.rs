@@ -176,6 +176,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn create_description_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.create_description_cursor = value;
+        self
+    }
+
+    #[must_use]
     pub fn create_submit_state(mut self, value: CreateSubmitState) -> Self {
         self.create_submit_state = value;
         self
@@ -274,6 +280,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn insert_text(mut self, value: &'a str) -> Self {
         self.insert_text = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_text_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.insert_text_cursor = value;
         self
     }
 

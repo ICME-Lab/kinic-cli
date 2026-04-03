@@ -2885,7 +2885,7 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         .unwrap_or_else(|| "unknown".to_string());
     let description_line = resolved_description
         .as_deref()
-        .map(|description| format!("- Description: `{description}`\n"))
+        .map(|description| format_multiline_metadata_field("Description", description))
         .unwrap_or_default();
     KinicRecord::new(
         memory.id.clone(),
@@ -2954,6 +2954,16 @@ fn format_owner_list(owners: &[String]) -> String {
     }
 
     owners.join(", ")
+}
+
+fn format_multiline_metadata_field(label: &str, value: &str) -> String {
+    let mut rendered = format!("- {label}:\n");
+    for line in value.lines() {
+        rendered.push_str("  ");
+        rendered.push_str(line);
+        rendered.push('\n');
+    }
+    rendered
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -242,6 +242,10 @@ fn metadata_value(record: &KinicRecord, prefix: &str) -> String {
     row_value(&record.content_md, prefix).unwrap_or_else(|| "unknown".to_string())
 }
 
+fn description_value(body: &str) -> Option<String> {
+    multiline_row_value(body, "- Description:").or_else(|| row_value(body, "- Description:"))
+}
+
 fn row_value(body: &str, prefix: &str) -> Option<String> {
     body.lines()
         .find(|line| line.trim_start().starts_with(prefix))
@@ -252,6 +256,29 @@ fn row_value(body: &str, prefix: &str) -> Option<String> {
                 .trim_matches('`')
                 .to_string()
         })
+}
+
+fn multiline_row_value(body: &str, prefix: &str) -> Option<String> {
+    let mut lines = body.lines().peekable();
+    while let Some(line) = lines.next() {
+        if !line.trim_start().starts_with(prefix) {
+            continue;
+        }
+        let mut value_lines = Vec::new();
+        while let Some(next_line) = lines.peek().copied() {
+            if next_line.starts_with("  ") {
+                value_lines.push(next_line.trim_start().to_string());
+                lines.next();
+                continue;
+            }
+            break;
+        }
+        if value_lines.is_empty() {
+            return None;
+        }
+        return Some(value_lines.join("\n"));
+    }
+    None
 }
 
 fn section_body(body: &str, marker: &str) -> Vec<String> {
