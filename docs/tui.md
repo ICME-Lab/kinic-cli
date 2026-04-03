@@ -68,6 +68,7 @@ If you want to try File mode, either install `yazi` first or type the file path 
 - List existing memories
 - Search across all memories or within a single memory
 - View memory details
+- Ask AI about the selected memory or all searchable memories from the chat panel
 - Create a new memory
 - Insert text, files, or manual embeddings
 - Manage the default memory and saved tags
@@ -96,10 +97,12 @@ The `Memories` tab opens first when the TUI starts.
 - `q`: quit
 - `Ctrl+N`: open the `Create` tab
 - `Ctrl+R`: refresh the current view
+- `Shift+C`: toggle the chat panel in the `Memories` tab
 
 The status bar at the bottom also shows the keys available in the current context.
 
 `?` and `q` are intended for normal list and tab navigation, not while typing in a search field or form.
+In multiline text fields, `Enter` inserts a newline instead of submitting. Move to `Submit` with `Tab` or `Shift+Tab` and press `Enter` there.
 
 ## Common Workflows
 
@@ -137,14 +140,20 @@ PDFs are converted to Markdown before insertion. This will fail if `pdftotext` i
 ## Memories Tab
 
 In the `Memories` tab, you work with memories using the search field, list, and detail pane.
+The chat panel asks AI against either the selected memory or all searchable memories, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` narrows candidates with reranking and diversity-aware selection before building the final answer prompt.
 
-> [SCREENSHOT TODO] Replace this with a full view of the `Memories` tab showing the search field, list, and detail pane at the same time.
+![Memories tab screenshot](./images/tui-memories.png)
 
 - Type in the search field and press `Enter` to search
 - Switch the search scope with `←` `→`
   - `all memories`: search across every memory
   - `selected memory`: search only the currently selected memory
 - Use `↑` `↓` in the list and `Enter` to open details
+- Press `Shift+R` in the list or detail pane to rename the currently selected memory
+- Move to `+ Add Existing Memory Canister` at the end of the list and press `Enter` to register an existing memory manually
+- In the modal, enter an existing memory canister id and submit it to validate access via `get_users()`
+- For manually added memories, move focus to the detail pane and use `Tab` / `Shift+Tab` to jump between actions, including `Remove from list`
+- `Remove from list` deletes only the local saved entry
 - Press `Esc` while viewing details to return to the list
 
 If you want to search within a single memory, it is easier to select that memory in the list first.
@@ -153,7 +162,7 @@ If you want to search within a single memory, it is easier to select that memory
 
 In the `Insert` tab, you choose how to add data to a memory. There are three modes.
 
-> [SCREENSHOT TODO] Replace this with the `Insert` tab showing mode switching, memory ID, tag, input field, and submit button.
+![Insert tab screenshot](./images/tui-insert.png)
 
 - `File`: load and insert a file
 - `Inline Text`: insert text written directly in the UI
@@ -188,6 +197,7 @@ If you select a `pdf`, it is converted to Markdown before insertion. On macOS, i
 ### Inline Text Mode
 
 This stores text entered directly in the UI after generating an embedding. It is useful for short notes or test data.
+`Inline Text` supports multiple lines.
 
 ### Manual Embedding Mode
 
@@ -195,6 +205,8 @@ Use this when you already have an embedding.
 
 - `Text`: body text to save together with the embedding
 - `Embedding`: vector in JSON array format
+
+`Text` supports multiple lines. `Embedding` remains a single-line JSON array field.
 
 In this mode, the expected dimension and current dimension are shown when available. If the dimensions do not match, you will get an error before submission.
 
@@ -206,12 +218,12 @@ Tags can be reused from the picker. If saved tags exist, you can choose from the
 
 Create a new memory canister.
 
-> [SCREENSHOT TODO] Replace this with the `Create` tab showing name, description, creation cost, and balance.
+![Create tab screenshot](./images/tui-create.png)
 
 Fields:
 
 - `Name`: memory name
-- `Description`: short description
+- `Description`: multi-line description
 - `Submit`: create the memory
 
 The creation screen also shows the following information.
@@ -226,7 +238,14 @@ If the balance is insufficient or retrieval fails, a message is shown on the spo
 
 In the `Settings` tab, you can view the current session information and saved settings.
 
-> [SCREENSHOT TODO] Replace this with the `Settings` tab showing the default memory and saved tags.
+The `Chat retrieval` section controls how `all memories` chat narrows cross-memory evidence before answering.
+
+- `Chat result limit`: final number of documents passed into the answer prompt
+- `Per-memory limit`: maximum number of documents kept from any one memory
+- `Chat candidate pool`: larger preselection pool before reranking and diversity selection
+- `Chat diversity`: balance between highest-score results and less-overlapping evidence
+
+![Settings tab screenshot](./images/tui-settings.png)
 
 Main items you can review:
 
@@ -242,10 +261,13 @@ Main items you can review:
 ### What You Can Configure
 
 - Select `Default memory` and press `Enter`: change the default memory
+- Select `KINIC balance` and press `Enter`: open the transfer modal
 - Select `Saved tags` and press `Enter`: open saved tags and choose one for `Insert`
 - `+ Add new tag` in the saved tag list: add a new tag
 - `d` in the saved tag list: delete a tag
 - `Ctrl+R`: refresh `Principal ID` and `KINIC balance`
+
+The transfer modal accepts a recipient principal and an amount in KINIC. `Max` fills the largest sendable amount after subtracting the current ledger fee, and `Submit` opens a confirmation step before the transfer is sent.
 
 Values saved from `Settings` persist across restarts.
 
