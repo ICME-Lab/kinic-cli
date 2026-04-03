@@ -112,6 +112,12 @@ const MAX_CONCURRENT_MEMORY_SEARCHES: usize = 10;
 const ADD_MEMORY_ACTION_ID: &str = "kinic-action-add-memory";
 const ALL_MEMORIES_CHAT_THREAD_KEY: &str = "all-memories";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveChatThreadRef {
+    thread_key: String,
+    thread_id: String,
+}
+
 pub struct KinicProvider {
     all: Vec<KinicRecord>,
     query: String,
@@ -134,6 +140,7 @@ pub struct KinicProvider {
     create_cost_task: RequestTaskState<CreateCostTaskOutput>,
     create_submit_task: RequestTaskState<CreateSubmitTaskOutput>,
     chat_submit_task: RequestTaskState<ChatTaskOutput>,
+    active_chat_thread: Option<ActiveChatThreadRef>,
     session_settings_task: RequestTaskState<SessionSettingsTaskOutput>,
     next_session_settings_request_id: u64,
     next_create_request_id: u64,
@@ -143,6 +150,7 @@ pub struct KinicProvider {
     insert_expected_dim_memory_id: Option<String>,
     insert_expected_dim: Option<u64>,
     insert_expected_dim_loading: bool,
+    insert_expected_dim_load_error: Option<String>,
     pending_insert_dim: Option<mpsc::Receiver<InsertDimTaskOutput>>,
     pending_access_submit: Option<mpsc::Receiver<AccessSubmitTaskOutput>>,
     access_submit_in_flight: bool,
@@ -214,13 +222,15 @@ struct CreateSubmitTaskOutput {
 struct ChatTaskOutput {
     request_id: u64,
     history_thread_key: String,
-    result: Result<String, String>,
+    thread_id: String,
+    result: Result<bridge::AskMemoriesOutput, String>,
 }
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CapturedChatRequest {
     history_thread_key: String,
+    thread_id: String,
     scope: ChatScope,
     target_memory_ids: Vec<String>,
     query: String,
@@ -587,13 +597,15 @@ fn take_test_settings_save_override() -> Option<()> {
 }
 
 #[cfg(test)]
-fn test_chat_submit_override() -> &'static Mutex<Option<Result<String, String>>> {
-    static OVERRIDE: OnceLock<Mutex<Option<Result<String, String>>>> = OnceLock::new();
+fn test_chat_submit_override() -> &'static Mutex<Option<Result<bridge::AskMemoriesOutput, String>>>
+{
+    static OVERRIDE: OnceLock<Mutex<Option<Result<bridge::AskMemoriesOutput, String>>>> =
+        OnceLock::new();
     OVERRIDE.get_or_init(|| Mutex::new(None))
 }
 
 #[cfg(test)]
-fn set_next_test_chat_submit_result(result: Result<String, String>) {
+fn set_next_test_chat_submit_result(result: Result<bridge::AskMemoriesOutput, String>) {
     let mut guard = test_chat_submit_override()
         .lock()
         .expect("test chat submit override lock should be available");
@@ -601,7 +613,7 @@ fn set_next_test_chat_submit_result(result: Result<String, String>) {
 }
 
 #[cfg(test)]
-fn take_test_chat_submit_result() -> Option<Result<String, String>> {
+fn take_test_chat_submit_result() -> Option<Result<bridge::AskMemoriesOutput, String>> {
     let mut guard = test_chat_submit_override()
         .lock()
         .expect("test chat submit override lock should be available");
@@ -690,6 +702,22 @@ impl<T> Default for RequestTaskState<T> {
     }
 }
 
+impl<T> RequestTaskState<T> {
+    fn reset(&mut self) {
+        self.receiver = None;
+        self.in_flight = false;
+        self.request_id = None;
+    }
+
+    fn finish(&mut self, output_request_id: u64) -> bool {
+        self.receiver = None;
+        self.in_flight = false;
+        let is_current = self.request_id == Some(output_request_id);
+        self.request_id = None;
+        is_current
+    }
+}
+
 struct TaskState<T> {
     receiver: Option<mpsc::Receiver<T>>,
     in_flight: bool,
@@ -701,6 +729,13 @@ impl<T> Default for TaskState<T> {
             receiver: None,
             in_flight: false,
         }
+    }
+}
+
+impl<T> TaskState<T> {
+    fn reset(&mut self) {
+        self.receiver = None;
+        self.in_flight = false;
     }
 }
 
@@ -738,17 +773,11 @@ where
 }
 
 fn finish_request_task<T>(task_state: &mut RequestTaskState<T>, output_request_id: u64) -> bool {
-    task_state.receiver = None;
-    task_state.in_flight = false;
-    let is_current = task_state.request_id == Some(output_request_id);
-    task_state.request_id = None;
-    is_current
+    task_state.finish(output_request_id)
 }
 
 fn reset_request_task<T>(task_state: &mut RequestTaskState<T>) {
-    task_state.receiver = None;
-    task_state.in_flight = false;
-    task_state.request_id = None;
+    task_state.reset();
 }
 
 fn spawn_task<T, F>(task_state: &mut TaskState<T>, worker: F)
@@ -763,8 +792,7 @@ where
 }
 
 fn finish_task<T>(task_state: &mut TaskState<T>) {
-    task_state.receiver = None;
-    task_state.in_flight = false;
+    task_state.reset();
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -818,6 +846,7 @@ impl KinicProvider {
             create_cost_task: RequestTaskState::default(),
             create_submit_task: RequestTaskState::default(),
             chat_submit_task: RequestTaskState::default(),
+            active_chat_thread: None,
             session_settings_task: RequestTaskState::default(),
             next_session_settings_request_id: 0,
             next_create_request_id: 0,
@@ -827,6 +856,7 @@ impl KinicProvider {
             insert_expected_dim_memory_id: None,
             insert_expected_dim: None,
             insert_expected_dim_loading: false,
+            insert_expected_dim_load_error: None,
             pending_insert_dim: None,
             pending_access_submit: None,
             access_submit_in_flight: false,
@@ -868,6 +898,7 @@ impl KinicProvider {
         self.pending_memory_detail = None;
         self.pending_memory_detail_memory_id = None;
         self.active_memory_id = None;
+        self.active_chat_thread = None;
         self.initial_memories_in_flight = true;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
@@ -1009,8 +1040,13 @@ impl KinicProvider {
 
         let visible_records = self.visible_memory_records();
         let current = self.active_visible_memory_index().unwrap_or(0) as isize;
-        let last = visible_records.len().saturating_sub(1) as isize;
-        let next = (current + delta).clamp(0, last) as usize;
+        let len = visible_records.len() as isize;
+        let last = len.saturating_sub(1);
+        let next = if delta == 1 || delta == -1 {
+            (current + delta).rem_euclid(len)
+        } else {
+            (current + delta).clamp(0, last)
+        } as usize;
         self.active_memory_id = Some(visible_records[next].id.clone());
         self.invalidate_pending_search();
         self.start_active_memory_detail_load();
@@ -1038,19 +1074,63 @@ impl KinicProvider {
     }
 
     fn load_chat_history_messages(
-        &self,
+        &mut self,
         history_thread_key: &str,
     ) -> Result<Vec<(String, String)>, String> {
         let network = self.network_label().to_string();
         let identity = self.identity_label().to_string();
-        self.with_settings_io(move || {
-            settings::load_chat_history(network.as_str(), identity.as_str(), history_thread_key)
-        })
+        let active_thread = self.with_settings_io(move || {
+            settings::load_or_create_active_chat_thread(
+                network.as_str(),
+                identity.as_str(),
+                history_thread_key,
+            )
+        })?;
+        self.active_chat_thread = Some(ActiveChatThreadRef {
+            thread_key: history_thread_key.to_string(),
+            thread_id: active_thread.thread_id,
+        });
+        Ok(active_thread.messages)
+    }
+
+    fn create_chat_thread(&mut self, history_thread_key: &str) -> Result<String, String> {
+        let network = self.network_label().to_string();
+        let identity = self.identity_label().to_string();
+        let thread_id = self.with_settings_io(move || {
+            settings::create_chat_thread(network.as_str(), identity.as_str(), history_thread_key)
+        })?;
+        self.active_chat_thread = Some(ActiveChatThreadRef {
+            thread_key: history_thread_key.to_string(),
+            thread_id: thread_id.clone(),
+        });
+        Ok(thread_id)
+    }
+
+    fn ensure_chat_thread_id(&mut self, history_thread_key: &str) -> Result<String, String> {
+        if let Some(thread) = self.current_chat_thread(history_thread_key) {
+            return Ok(thread.thread_id.clone());
+        }
+        let network = self.network_label().to_string();
+        let identity = self.identity_label().to_string();
+        let active_thread = self.with_settings_io(move || {
+            settings::load_or_create_active_chat_thread(
+                network.as_str(),
+                identity.as_str(),
+                history_thread_key,
+            )
+        })?;
+        let thread_id = active_thread.thread_id;
+        self.active_chat_thread = Some(ActiveChatThreadRef {
+            thread_key: history_thread_key.to_string(),
+            thread_id: thread_id.clone(),
+        });
+        Ok(thread_id)
     }
 
     fn append_chat_history_message(
         &self,
         history_thread_key: &str,
+        thread_id: &str,
         role: &str,
         content: &str,
     ) -> Result<(), String> {
@@ -1062,6 +1142,7 @@ impl KinicProvider {
                 network.as_str(),
                 identity.as_str(),
                 history_thread_key,
+                thread_id,
                 role,
                 content,
                 saved_at,
@@ -1087,8 +1168,15 @@ impl KinicProvider {
         }
     }
 
-    fn load_active_chat_history_effects(&self, state: &CoreState) -> Vec<CoreEffect> {
+    fn current_chat_thread(&self, history_thread_key: &str) -> Option<&ActiveChatThreadRef> {
+        self.active_chat_thread
+            .as_ref()
+            .filter(|thread| thread.thread_key == history_thread_key)
+    }
+
+    fn load_active_chat_history_effects(&mut self, state: &CoreState) -> Vec<CoreEffect> {
         let Some(history_thread_key) = self.chat_history_thread_key(state) else {
+            self.active_chat_thread = None;
             return vec![
                 CoreEffect::ReplaceChatMessages(Vec::new()),
                 CoreEffect::SetChatLoading(false),
@@ -1101,7 +1189,10 @@ impl KinicProvider {
                 CoreEffect::SetChatLoading(false),
             ],
             Err(error) => vec![
-                CoreEffect::ReplaceChatMessages(Vec::new()),
+                {
+                    self.active_chat_thread = None;
+                    CoreEffect::ReplaceChatMessages(Vec::new())
+                },
                 CoreEffect::SetChatLoading(false),
                 CoreEffect::Notify(format!("Chat history load failed: {error}")),
             ],
@@ -1164,6 +1255,7 @@ impl KinicProvider {
         &mut self,
         scope: ChatScope,
         history_thread_key: String,
+        thread_id: String,
         targets: Vec<bridge::ChatTarget>,
         query: String,
         history: Vec<(String, String)>,
@@ -1175,6 +1267,7 @@ impl KinicProvider {
         #[cfg(test)]
         set_last_test_chat_request(CapturedChatRequest {
             history_thread_key: history_thread_key.clone(),
+            thread_id: thread_id.clone(),
             scope,
             target_memory_ids: targets
                 .iter()
@@ -1193,6 +1286,7 @@ impl KinicProvider {
                     let _ = tx.send(ChatTaskOutput {
                         request_id,
                         history_thread_key: history_thread_key.clone(),
+                        thread_id: thread_id.clone(),
                         result,
                     });
                     return;
@@ -1214,6 +1308,7 @@ impl KinicProvider {
                 let _ = tx.send(ChatTaskOutput {
                     request_id,
                     history_thread_key,
+                    thread_id,
                     result,
                 });
             },
@@ -1399,6 +1494,7 @@ impl KinicProvider {
         self.insert_expected_dim_memory_id = None;
         self.insert_expected_dim = None;
         self.insert_expected_dim_loading = false;
+        self.insert_expected_dim_load_error = None;
         self.pending_insert_dim = None;
     }
 
@@ -1417,6 +1513,7 @@ impl KinicProvider {
         let (tx, rx) = mpsc::channel();
         self.insert_expected_dim_memory_id = Some(memory_id.clone());
         self.insert_expected_dim = None;
+        self.insert_expected_dim_load_error = None;
         self.pending_insert_dim = Some(rx);
         self.insert_expected_dim_loading = true;
 
@@ -1659,7 +1756,6 @@ impl KinicProvider {
 
     fn insert_validation_message(&self, state: &CoreState) -> Option<String> {
         if !matches!(state.insert_mode, InsertMode::ManualEmbedding)
-            || self.insert_expected_dim_loading
             || state.insert_embedding.trim().is_empty()
         {
             return None;
@@ -1668,6 +1764,12 @@ impl KinicProvider {
         let selected_memory_id = self.selected_insert_memory_id(state)?;
         if self.insert_expected_dim_memory_id.as_deref() != Some(selected_memory_id.as_str()) {
             return None;
+        }
+        if self.insert_expected_dim_loading {
+            return Some("Loading expected embedding dimension for this memory…".to_string());
+        }
+        if let Some(message) = self.insert_expected_dim_load_error.as_ref() {
+            return Some(format!("Could not load expected dimension: {message}"));
         }
         let expected_dim = self.insert_expected_dim?;
         let provided_dim = match parse_embedding_json(state.insert_embedding.as_str()) {
@@ -2365,8 +2467,22 @@ impl KinicProvider {
         if self.insert_expected_dim_memory_id.as_deref() != Some(selected_memory_id.as_str()) {
             return Ok(());
         }
+        if self.insert_expected_dim_loading {
+            return Err(
+                "Embedding dimension is still loading for this memory. Wait or press Ctrl-R."
+                    .to_string(),
+            );
+        }
+        if let Some(message) = self.insert_expected_dim_load_error.as_ref() {
+            return Err(format!(
+                "Could not load expected embedding dimension: {message} Try switching away from Insert and back, or press Ctrl-R."
+            ));
+        }
         let Some(expected_dim) = self.insert_expected_dim else {
-            return Ok(());
+            return Err(
+                "Embedding dimension is not available yet. Open the Insert tab or press Ctrl-R."
+                    .to_string(),
+            );
         };
 
         let provided_dim = parse_embedding_json(embedding_json)
@@ -2397,6 +2513,7 @@ impl KinicProvider {
 
         self.pending_insert_dim = None;
         if self.insert_expected_dim_memory_id.as_deref() != Some(output.memory_id.as_str()) {
+            self.insert_expected_dim_loading = false;
             return Some(ProviderOutput {
                 snapshot: Some(self.build_snapshot(state)),
                 effects: Vec::new(),
@@ -2406,10 +2523,12 @@ impl KinicProvider {
 
         match output.result {
             Ok(dim) => {
+                self.insert_expected_dim_load_error = None;
                 self.insert_expected_dim = Some(dim);
             }
-            Err(_) => {
-                self.insert_expected_dim_memory_id = None;
+            Err(err) => {
+                self.insert_expected_dim = None;
+                self.insert_expected_dim_load_error = Some(format_insert_submit_error(&err));
             }
         }
 
@@ -2586,27 +2705,46 @@ impl KinicProvider {
             });
         }
 
-        if let Ok(details) = output.result
-            && let Some(summary) = self
-                .memory_summaries
-                .iter_mut()
-                .find(|summary| summary.id == output.memory_id)
-        {
-            summary.name = details.name;
-            summary.detail = details.content_preview;
-            summary.version = details.version;
-            summary.dim = details.dim;
-            summary.owners = Some(details.owners);
-            summary.stable_memory_size = details.stable_memory_size;
-            summary.cycle_amount = details.cycle_amount;
-            summary.users = Some(details.users);
-            self.loaded_memory_details.insert(output.memory_id);
-            self.refresh_memory_records_from_summaries();
+        let mut effects = Vec::new();
+        match output.result {
+            Ok(details) => {
+                if let Some(summary) = self
+                    .memory_summaries
+                    .iter_mut()
+                    .find(|summary| summary.id == output.memory_id)
+                {
+                    summary.name = details.name;
+                    summary.detail = details.content_preview;
+                    summary.version = details.version;
+                    summary.dim = details.dim;
+                    summary.owners = Some(details.owners);
+                    summary.stable_memory_size = details.stable_memory_size;
+                    summary.cycle_amount = details.cycle_amount;
+                    summary.users = Some(details.users);
+                    self.loaded_memory_details.insert(output.memory_id);
+                    self.refresh_memory_records_from_summaries();
+                }
+                if let Some(message) = details.users_load_error.as_ref() {
+                    effects.push(CoreEffect::Notify(format!(
+                        "Could not load memory access list: {message}"
+                    )));
+                }
+                if let Some(message) = details.content_preview_error.as_ref() {
+                    effects.push(CoreEffect::Notify(format!(
+                        "Could not load content preview: {message}"
+                    )));
+                }
+            }
+            Err(message) => {
+                effects.push(CoreEffect::Notify(format!(
+                    "Could not load memory details: {message}"
+                )));
+            }
         }
 
         Some(ProviderOutput {
             snapshot: Some(self.build_snapshot(state)),
-            effects: Vec::new(),
+            effects,
         })
     }
 
@@ -3203,9 +3341,12 @@ impl KinicProvider {
 
         let mut effects = vec![CoreEffect::SetChatLoading(false)];
         match output.result {
-            Ok(response) => {
+            Ok(success) => {
+                let failed_count = success.failed_memory_ids.len();
+                let response = success.response;
                 if let Err(error) = self.append_chat_history_message(
                     output.history_thread_key.as_str(),
+                    output.thread_id.as_str(),
                     "assistant",
                     &response,
                 ) {
@@ -3213,13 +3354,19 @@ impl KinicProvider {
                         "Chat history save failed: {error}"
                     )));
                 }
-                if self.chat_history_thread_key(state).as_deref()
-                    == Some(output.history_thread_key.as_str())
+                if self
+                    .current_chat_thread(output.history_thread_key.as_str())
+                    .is_some_and(|thread| thread.thread_id == output.thread_id)
                 {
                     effects.push(CoreEffect::AppendChatMessage {
                         role: "assistant".to_string(),
                         content: response,
                     });
+                }
+                if failed_count > 0 {
+                    effects.push(CoreEffect::Notify(format!(
+                        "AI response ready; {failed_count} memory search(es) failed"
+                    )));
                 }
             }
             Err(error) => {
@@ -3589,6 +3736,31 @@ impl DataProvider for KinicProvider {
             CoreAction::ChatScopePrev | CoreAction::ChatScopeNext => {
                 effects.extend(self.load_active_chat_history_effects(state));
             }
+            CoreAction::ChatNewThread => {
+                if self.chat_submit_task.in_flight {
+                    effects.push(CoreEffect::Notify(
+                        "Wait for the current AI response before starting a new thread."
+                            .to_string(),
+                    ));
+                } else if let Some(history_thread_key) = self.chat_history_thread_key(state) {
+                    match self.create_chat_thread(history_thread_key.as_str()) {
+                        Ok(_) => {
+                            effects.push(CoreEffect::ReplaceChatMessages(Vec::new()));
+                            effects.push(CoreEffect::SetChatLoading(false));
+                            effects.push(CoreEffect::Notify(
+                                "Started a new chat thread.".to_string(),
+                            ));
+                        }
+                        Err(error) => effects.push(CoreEffect::Notify(format!(
+                            "Chat thread create failed: {error}"
+                        ))),
+                    }
+                } else {
+                    effects.push(CoreEffect::Notify(
+                        "Select a memory before starting a new thread.".to_string(),
+                    ));
+                }
+            }
             CoreAction::SearchSubmit => {
                 if let Some(effect) = self.run_live_search(state.search_scope) {
                     effects.push(effect);
@@ -3636,6 +3808,17 @@ impl DataProvider for KinicProvider {
                     let history_thread_key = self.chat_history_thread_key(state);
                     match (history_thread_key, self.chat_targets(state.chat_scope)) {
                         (Some(history_thread_key), Ok(targets)) => {
+                            let thread_id =
+                                match self.ensure_chat_thread_id(history_thread_key.as_str()) {
+                                    Ok(thread_id) => thread_id,
+                                    Err(error) => {
+                                        effects.push(CoreEffect::SetChatLoading(false));
+                                        effects.push(CoreEffect::Notify(format!(
+                                            "Chat thread load failed: {error}"
+                                        )));
+                                        return Ok(self.snapshot_output(state, effects));
+                                    }
+                                };
                             let submitted_query = state
                                 .chat_messages
                                 .last()
@@ -3644,20 +3827,21 @@ impl DataProvider for KinicProvider {
                             let prompt_history = self.prompt_history_messages(state);
                             if let Some((role, content)) = state.chat_messages.last()
                                 && role == "user"
-                            {
-                                if let Err(error) = self.append_chat_history_message(
+                                && let Err(error) = self.append_chat_history_message(
                                     history_thread_key.as_str(),
+                                    thread_id.as_str(),
                                     role,
                                     content,
-                                ) {
-                                    effects.push(CoreEffect::Notify(format!(
-                                        "Chat history save failed: {error}"
-                                    )));
-                                }
+                                )
+                            {
+                                effects.push(CoreEffect::Notify(format!(
+                                    "Chat history save failed: {error}"
+                                )));
                             }
                             effects.push(self.start_chat_submit(
                                 state.chat_scope,
                                 history_thread_key,
+                                thread_id,
                                 targets,
                                 submitted_query,
                                 prompt_history,
@@ -4224,6 +4408,9 @@ fn format_transfer_error(error: &bridge::TransferKinicError) -> String {
         bridge::TransferKinicError::ParsePrincipal(message) => {
             format!("Recipient principal failed: {message}")
         }
+        bridge::TransferKinicError::LoadBalance(message) => {
+            format!("Transfer balance lookup failed: {message}")
+        }
         bridge::TransferKinicError::LoadFee(message) => {
             format!("Transfer fee lookup failed: {message}")
         }
@@ -4671,6 +4858,9 @@ fn format_create_submit_error(error: &bridge::CreateMemoryError) -> String {
         }
         bridge::CreateMemoryError::Price(reason) => {
             format!("Could not fetch create price. Cause: {reason}")
+        }
+        bridge::CreateMemoryError::Fee(reason) => {
+            format!("Could not fetch ledger fee. Cause: {reason}")
         }
         bridge::CreateMemoryError::InsufficientBalance {
             required_total_kinic,

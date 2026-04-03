@@ -66,6 +66,8 @@ impl<'a> TuiKitUi<'a> {
             suffix_spans.extend([
                 Span::styled("←/→", self.theme.style_accent()),
                 Span::styled(" chat scope ", self.theme.style_muted()),
+                Span::styled("Shift+N", self.theme.style_accent()),
+                Span::styled(" new thread ", self.theme.style_muted()),
                 Span::styled("Enter", self.theme.style_accent()),
                 Span::styled(" send ", self.theme.style_muted()),
                 Span::styled("│ ", self.theme.style_dim()),
@@ -93,7 +95,7 @@ impl<'a> TuiKitUi<'a> {
         let suffix_width = line_width(&suffix_spans);
         let message_width = max_width.saturating_sub(suffix_width);
         let mut spans = status_message_prefix(
-            &self.status_message,
+            self.status_message,
             message_width,
             self.theme.style_string(),
             self.theme.style_muted(),
@@ -549,6 +551,20 @@ mod tests {
         assert!(rendered.contains("open Default memory"));
         assert!(rendered.contains("Esc"));
         assert!(rendered.contains("Shift+D"));
+    }
+
+    #[test]
+    fn chat_status_mentions_new_thread_shortcut() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_MEMORIES_TAB_ID))
+            .focus(Focus::Chat)
+            .show_chat(true)
+            .status_message("Ready");
+        let rendered = render_status_line(&ui);
+
+        assert!(rendered.contains("Shift+N"));
+        assert!(rendered.contains("new thread"));
     }
 
     #[test]

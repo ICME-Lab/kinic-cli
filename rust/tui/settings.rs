@@ -23,7 +23,7 @@ const APP_NAMESPACE: &str = "kinic";
 #[cfg(not(test))]
 const SETTINGS_FILE_NAME: &str = "tui.yaml";
 #[cfg(not(test))]
-const CHAT_HISTORY_FILE_NAME: &str = "chat-history.yaml";
+const CHAT_HISTORY_FILE_NAME: &str = "chat-threads.yaml";
 const UNAVAILABLE: &str = "unavailable";
 const NOT_SET: &str = "not set";
 const CHAT_HISTORY_MAX_MESSAGES: usize = 40;
@@ -75,14 +75,24 @@ pub struct PreferencesHealth {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ChatHistoryStore {
-    pub conversations: Vec<ChatConversation>,
+    #[serde(default)]
+    pub contexts: Vec<ChatContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChatConversation {
+pub struct ChatContext {
     pub network: String,
     pub identity_label: String,
-    pub memory_id: String,
+    pub thread_key: String,
+    pub active_thread_id: String,
+    #[serde(default)]
+    pub threads: Vec<ChatThread>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatThread {
+    pub thread_id: String,
+    #[serde(default)]
     pub messages: Vec<StoredChatMessage>,
 }
 
@@ -91,6 +101,12 @@ pub struct StoredChatMessage {
     pub role: String,
     pub content: String,
     pub saved_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveChatThread {
+    pub thread_id: String,
+    pub messages: Vec<(String, String)>,
 }
 
 pub fn default_chat_overall_top_k() -> usize {
@@ -142,43 +158,77 @@ pub fn current_chat_saved_at() -> u64 {
 }
 
 #[cfg(test)]
-pub fn load_chat_history(
+pub fn load_or_create_active_chat_thread(
     network: &str,
     identity_label: &str,
-    memory_id: &str,
-) -> Result<Vec<(String, String)>, SettingsError> {
-    let store = test_chat_history_store()
+    thread_key: &str,
+) -> Result<ActiveChatThread, SettingsError> {
+    let mut store = test_chat_history_store()
         .lock()
-        .expect("test chat history store lock should be available")
-        .clone();
-    Ok(project_chat_history(
-        &store,
+        .expect("test chat history store lock should be available");
+    Ok(load_or_create_active_chat_thread_in_store(
+        &mut store,
         network,
         identity_label,
-        memory_id,
+        thread_key,
     ))
 }
 
 #[cfg(not(test))]
-pub fn load_chat_history(
+pub fn load_or_create_active_chat_thread(
     network: &str,
     identity_label: &str,
-    memory_id: &str,
-) -> Result<Vec<(String, String)>, SettingsError> {
-    let store: ChatHistoryStore = load_yaml_or_default(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME)?;
-    Ok(project_chat_history(
-        &store,
+    thread_key: &str,
+) -> Result<ActiveChatThread, SettingsError> {
+    let mut store: ChatHistoryStore = load_yaml_or_default(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME)?;
+    let active_thread =
+        load_or_create_active_chat_thread_in_store(&mut store, network, identity_label, thread_key);
+    save_yaml(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME, &store)?;
+    Ok(active_thread)
+}
+
+#[cfg(test)]
+pub fn create_chat_thread(
+    network: &str,
+    identity_label: &str,
+    thread_key: &str,
+) -> Result<String, SettingsError> {
+    let mut store = test_chat_history_store()
+        .lock()
+        .expect("test chat history store lock should be available");
+    Ok(create_chat_thread_in_store(
+        &mut store,
         network,
         identity_label,
-        memory_id,
+        thread_key,
+        next_chat_thread_id(),
     ))
+}
+
+#[cfg(not(test))]
+pub fn create_chat_thread(
+    network: &str,
+    identity_label: &str,
+    thread_key: &str,
+) -> Result<String, SettingsError> {
+    let mut store: ChatHistoryStore = load_yaml_or_default(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME)?;
+    let thread_id = create_chat_thread_in_store(
+        &mut store,
+        network,
+        identity_label,
+        thread_key,
+        next_chat_thread_id(),
+    );
+    save_yaml(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME, &store)?;
+    Ok(thread_id)
 }
 
 #[cfg(test)]
 pub fn append_chat_history_message(
     network: &str,
     identity_label: &str,
-    memory_id: &str,
+    thread_key: &str,
+    thread_id: &str,
     role: &str,
     content: &str,
     saved_at: u64,
@@ -190,7 +240,8 @@ pub fn append_chat_history_message(
         &mut guard,
         network,
         identity_label,
-        memory_id,
+        thread_key,
+        thread_id,
         role,
         content,
         saved_at,
@@ -202,7 +253,8 @@ pub fn append_chat_history_message(
 pub fn append_chat_history_message(
     network: &str,
     identity_label: &str,
-    memory_id: &str,
+    thread_key: &str,
+    thread_id: &str,
     role: &str,
     content: &str,
     saved_at: u64,
@@ -212,7 +264,8 @@ pub fn append_chat_history_message(
         &mut store,
         network,
         identity_label,
-        memory_id,
+        thread_key,
+        thread_id,
         role,
         content,
         saved_at,
@@ -224,7 +277,8 @@ fn append_chat_history_message_to_store(
     store: &mut ChatHistoryStore,
     network: &str,
     identity_label: &str,
-    memory_id: &str,
+    thread_key: &str,
+    thread_id: &str,
     role: &str,
     content: &str,
     saved_at: u64,
@@ -234,59 +288,145 @@ fn append_chat_history_message_to_store(
         return;
     }
 
-    let conversation_index = store.conversations.iter().position(|entry| {
-        entry.network == network
-            && entry.identity_label == identity_label
-            && entry.memory_id == memory_id
-    });
-    let conversation_index = conversation_index.unwrap_or_else(|| {
-        store.conversations.push(ChatConversation {
-            network: network.to_string(),
-            identity_label: identity_label.to_string(),
-            memory_id: memory_id.to_string(),
-            messages: Vec::new(),
-        });
-        store.conversations.len().saturating_sub(1)
-    });
-    let conversation = store
-        .conversations
-        .get_mut(conversation_index)
-        .expect("conversation should exist after upsert");
+    let thread = ensure_chat_thread_mut(store, network, identity_label, thread_key, thread_id);
+    if let Some(last) = thread.messages.last()
+        && last.role == role
+        && last.content == normalized_content
+    {
+        return;
+    }
 
-    conversation.messages.push(StoredChatMessage {
+    thread.messages.push(StoredChatMessage {
         role: role.to_string(),
         content: normalized_content,
         saved_at,
     });
-    normalize_conversation_messages(&mut conversation.messages);
+    normalize_thread_messages(&mut thread.messages);
 }
 
-fn project_chat_history(
-    store: &ChatHistoryStore,
+fn load_or_create_active_chat_thread_in_store(
+    store: &mut ChatHistoryStore,
     network: &str,
     identity_label: &str,
-    memory_id: &str,
-) -> Vec<(String, String)> {
-    store
-        .conversations
-        .iter()
-        .find(|entry| {
-            entry.network == network
-                && entry.identity_label == identity_label
-                && entry.memory_id == memory_id
-        })
-        .map(|entry| {
-            let mut messages = entry.messages.clone();
-            normalize_conversation_messages(&mut messages);
-            messages
-                .into_iter()
-                .map(|message| (message.role, message.content))
-                .collect()
-        })
-        .unwrap_or_default()
+    thread_key: &str,
+) -> ActiveChatThread {
+    let context_index = ensure_chat_context_index(store, network, identity_label, thread_key);
+    let context = store
+        .contexts
+        .get_mut(context_index)
+        .expect("chat context should exist after upsert");
+    if context.active_thread_id.is_empty() || !context.threads.iter().any(|thread| thread.thread_id == context.active_thread_id) {
+        context.active_thread_id =
+            create_chat_thread_for_context(context, next_chat_thread_id()).thread_id.clone();
+    }
+    project_active_chat_thread(context)
 }
 
-fn normalize_conversation_messages(messages: &mut Vec<StoredChatMessage>) {
+fn create_chat_thread_in_store(
+    store: &mut ChatHistoryStore,
+    network: &str,
+    identity_label: &str,
+    thread_key: &str,
+    thread_id: String,
+) -> String {
+    let context_index = ensure_chat_context_index(store, network, identity_label, thread_key);
+    let context = store
+        .contexts
+        .get_mut(context_index)
+        .expect("chat context should exist after upsert");
+    context.active_thread_id = thread_id.clone();
+    if !context.threads.iter().any(|thread| thread.thread_id == thread_id) {
+        create_chat_thread_for_context(context, thread_id.clone());
+    }
+    thread_id
+}
+
+fn ensure_chat_thread_mut<'a>(
+    store: &'a mut ChatHistoryStore,
+    network: &str,
+    identity_label: &str,
+    thread_key: &str,
+    thread_id: &str,
+) -> &'a mut ChatThread {
+    let context_index = ensure_chat_context_index(store, network, identity_label, thread_key);
+    let context = store
+        .contexts
+        .get_mut(context_index)
+        .expect("chat context should exist after upsert");
+    context.active_thread_id = thread_id.to_string();
+    let thread_index = context
+        .threads
+        .iter()
+        .position(|thread| thread.thread_id == thread_id)
+        .unwrap_or_else(|| {
+            create_chat_thread_for_context(context, thread_id.to_string());
+            context.threads.len().saturating_sub(1)
+        });
+    context
+        .threads
+        .get_mut(thread_index)
+        .expect("chat thread should exist after upsert")
+}
+
+fn ensure_chat_context_index(
+    store: &mut ChatHistoryStore,
+    network: &str,
+    identity_label: &str,
+    thread_key: &str,
+) -> usize {
+    store
+        .contexts
+        .iter()
+        .position(|context| {
+            context.network == network
+                && context.identity_label == identity_label
+                && context.thread_key == thread_key
+        })
+        .unwrap_or_else(|| {
+            store.contexts.push(ChatContext {
+                network: network.to_string(),
+                identity_label: identity_label.to_string(),
+                thread_key: thread_key.to_string(),
+                active_thread_id: String::new(),
+                threads: Vec::new(),
+            });
+            store.contexts.len().saturating_sub(1)
+        })
+}
+
+fn create_chat_thread_for_context(
+    context: &mut ChatContext,
+    thread_id: String,
+) -> &mut ChatThread {
+    context.threads.push(ChatThread {
+        thread_id,
+        messages: Vec::new(),
+    });
+    context
+        .threads
+        .last_mut()
+        .expect("chat thread should exist after push")
+}
+
+fn project_active_chat_thread(context: &ChatContext) -> ActiveChatThread {
+    let thread = context
+        .threads
+        .iter()
+        .find(|thread| thread.thread_id == context.active_thread_id)
+        .or_else(|| context.threads.last())
+        .expect("chat context should always have at least one thread");
+    let mut messages = thread.messages.clone();
+    normalize_thread_messages(&mut messages);
+    ActiveChatThread {
+        thread_id: thread.thread_id.clone(),
+        messages: messages
+            .into_iter()
+            .map(|message| (message.role, message.content))
+            .collect(),
+    }
+}
+
+fn normalize_thread_messages(messages: &mut Vec<StoredChatMessage>) {
     for message in messages.iter_mut() {
         message.content = clip_chat_message_content(&message.content);
     }
@@ -299,6 +439,14 @@ fn normalize_conversation_messages(messages: &mut Vec<StoredChatMessage>) {
 
 fn clip_chat_message_content(content: &str) -> String {
     content.chars().take(CHAT_MESSAGE_MAX_CONTENT_LEN).collect()
+}
+
+fn next_chat_thread_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("thread-{nanos}")
 }
 
 #[cfg(test)]

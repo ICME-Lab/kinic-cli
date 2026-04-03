@@ -6,8 +6,8 @@ use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
 use tui_kit_runtime::{
     AccessControlModalState, ChatScope, CreateCostState, CreateModalFocus, CreateSubmitState,
-    InsertFormFocus, InsertMode, PickerState, RenameMemoryModalState, SearchScope,
-    SettingsSnapshot, TextInputModalState, TransferModalState,
+    InsertFormFocus, InsertMode, PickerState, RemoveMemoryModalState, RenameMemoryModalState,
+    SearchScope, SettingsSnapshot, TextInputModalState, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
@@ -68,10 +68,7 @@ pub struct TuiKitUi<'a> {
     pub(super) insert_focus: InsertFormFocus,
     pub(super) access_control: AccessControlModalState,
     pub(super) add_memory: TextInputModalState,
-    pub(super) remove_memory_open: bool,
-    pub(super) remove_memory_confirm_yes: bool,
-    pub(super) remove_memory_submit_state: CreateSubmitState,
-    pub(super) remove_memory_error: Option<&'a str>,
+    pub(super) remove_memory: RemoveMemoryModalState,
     pub(super) rename_memory: RenameMemoryModalState,
     pub(super) transfer_modal: TransferModalState,
     pub(super) status_message: &'a str,
@@ -143,10 +140,7 @@ impl<'a> TuiKitUi<'a> {
             insert_focus: InsertFormFocus::Mode,
             access_control: AccessControlModalState::default(),
             add_memory: TextInputModalState::default(),
-            remove_memory_open: false,
-            remove_memory_confirm_yes: true,
-            remove_memory_submit_state: CreateSubmitState::Idle,
-            remove_memory_error: None,
+            remove_memory: RemoveMemoryModalState::default(),
             rename_memory: RenameMemoryModalState::default(),
             transfer_modal: TransferModalState::default(),
             status_message: "",

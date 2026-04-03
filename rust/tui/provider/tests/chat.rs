@@ -1,6 +1,8 @@
 use super::*;
+use crate::tui::bridge::AskMemoriesOutput;
 use crate::tui::settings::{
-    append_chat_history_message, clear_chat_history_for_tests, load_chat_history,
+    append_chat_history_message, clear_chat_history_for_tests, create_chat_thread,
+    load_or_create_active_chat_thread,
 };
 use std::{
     sync::{Mutex, MutexGuard, OnceLock},
@@ -61,7 +63,10 @@ fn chat_submit_starts_background_task_and_saves_user_message() {
     let _ = take_test_chat_submit_result();
     let _ = take_last_test_chat_request();
     clear_chat_history_for_tests();
-    set_next_test_chat_submit_result(Ok("saved".to_string()));
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "saved".to_string(),
+        failed_memory_ids: vec![],
+    }));
     let mut provider = configure_provider_for_chat();
     let mut state = chat_state("What changed?");
 
@@ -80,13 +85,21 @@ fn chat_submit_starts_background_task_and_saves_user_message() {
         CoreEffect::Notify(message) if message == "Asking AI..."
     )));
     assert_eq!(
-        load_chat_history("local", "provided", "aaaaa-aa").expect("history should load"),
+        load_or_create_active_chat_thread("local", "provided", "aaaaa-aa")
+            .expect("history should load")
+            .messages,
         vec![("user".to_string(), "What changed?".to_string())]
     );
     assert_eq!(
         take_last_test_chat_request().expect("captured request should exist"),
         CapturedChatRequest {
             history_thread_key: "aaaaa-aa".to_string(),
+            thread_id: provider
+                .active_chat_thread
+                .as_ref()
+                .expect("thread should be active")
+                .thread_id
+                .clone(),
             scope: ChatScope::Selected,
             target_memory_ids: vec!["aaaaa-aa".to_string()],
             query: "What changed?".to_string(),
@@ -101,7 +114,10 @@ fn chat_background_success_appends_assistant_and_persists_reply() {
     let _ = take_test_chat_submit_result();
     let _ = take_last_test_chat_request();
     clear_chat_history_for_tests();
-    set_next_test_chat_submit_result(Ok("Answer".to_string()));
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "Answer".to_string(),
+        failed_memory_ids: vec![],
+    }));
     let mut provider = configure_provider_for_chat();
     let mut state = chat_state("Question");
 
@@ -121,8 +137,49 @@ fn chat_background_success_appends_assistant_and_persists_reply() {
     );
     assert!(!state.chat_loading);
     assert_eq!(
-        load_chat_history("local", "provided", "aaaaa-aa").expect("history should load"),
+        load_or_create_active_chat_thread("local", "provided", "aaaaa-aa")
+            .expect("history should load")
+            .messages,
         state.chat_messages
+    );
+}
+
+#[test]
+fn chat_background_partial_search_failure_notifies_status() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "Partial answer".to_string(),
+        failed_memory_ids: vec!["bbbbb-bb".to_string()],
+    }));
+    let mut provider = configure_provider_for_chat();
+    let mut state = chat_state("Question");
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("chat submit should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    let output = poll_background_until_ready(&mut provider, &state);
+    let notified_partial_search_failure = output.effects.iter().any(|effect| {
+        matches!(
+            effect,
+            CoreEffect::Notify(msg) if msg.contains("1 memory search(es) failed")
+        )
+    });
+    execute_effects_to_status(&mut state, output.effects);
+    assert!(
+        notified_partial_search_failure,
+        "expected notify about failed memory searches",
+    );
+
+    assert_eq!(
+        state.chat_messages,
+        vec![
+            ("user".to_string(), "Question".to_string()),
+            ("assistant".to_string(), "Partial answer".to_string())
+        ]
     );
 }
 
@@ -153,7 +210,55 @@ fn chat_background_failure_clears_loading_without_persisting_assistant() {
         Some("Ask AI failed: chat failed")
     );
     assert_eq!(
-        load_chat_history("local", "provided", "aaaaa-aa").expect("history should load"),
+        load_or_create_active_chat_thread("local", "provided", "aaaaa-aa")
+            .expect("history should load")
+            .messages,
+        vec![("user".to_string(), "Question".to_string())]
+    );
+}
+
+#[test]
+fn chat_retry_after_failure_does_not_duplicate_user_in_saved_history() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    set_next_test_chat_submit_result(Err("chat failed".to_string()));
+    let mut provider = configure_provider_for_chat();
+    let mut state = chat_state("Question");
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("first chat submit should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    let output = poll_background_until_ready(&mut provider, &state);
+    execute_effects_to_status(&mut state, output.effects);
+
+    assert_eq!(
+        state.chat_messages,
+        vec![("user".to_string(), "Question".to_string())]
+    );
+
+    set_next_test_chat_submit_result(Err("chat failed".to_string()));
+    state.chat_input = "Question".to_string();
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("second chat submit should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    let output = poll_background_until_ready(&mut provider, &state);
+    execute_effects_to_status(&mut state, output.effects);
+
+    assert_eq!(
+        state.chat_messages,
+        vec![
+            ("user".to_string(), "Question".to_string()),
+            ("user".to_string(), "Question".to_string()),
+        ]
+    );
+    assert_eq!(
+        load_or_create_active_chat_thread("local", "provided", "aaaaa-aa")
+            .expect("history should load")
+            .messages,
         vec![("user".to_string(), "Question".to_string())]
     );
 }
@@ -195,9 +300,17 @@ fn memory_switch_loads_chat_history_for_new_active_memory() {
     let _ = take_test_chat_submit_result();
     let _ = take_last_test_chat_request();
     clear_chat_history_for_tests();
-    append_chat_history_message("local", "provided", "aaaaa-aa", "user", "alpha", 1)
+    append_chat_history_message("local", "provided", "aaaaa-aa", "thread-alpha", "user", "alpha", 1)
         .expect("alpha history should save");
-    append_chat_history_message("local", "provided", "bbbbb-bb", "assistant", "beta", 2)
+    append_chat_history_message(
+        "local",
+        "provided",
+        "bbbbb-bb",
+        "thread-beta",
+        "assistant",
+        "beta",
+        2,
+    )
         .expect("beta history should save");
     let mut provider = configure_provider_for_chat();
     let mut state = CoreState {
@@ -228,7 +341,10 @@ fn chat_submit_uses_latest_user_query_and_recent_visible_history() {
     let _ = take_test_chat_submit_result();
     let _ = take_last_test_chat_request();
     clear_chat_history_for_tests();
-    set_next_test_chat_submit_result(Ok("ok".to_string()));
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "ok".to_string(),
+        failed_memory_ids: vec![],
+    }));
     let mut provider = configure_provider_for_chat();
     let mut state = CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
@@ -255,6 +371,15 @@ fn chat_submit_uses_latest_user_query_and_recent_visible_history() {
     assert_eq!(request.query, "latest");
     assert_eq!(request.scope, ChatScope::Selected);
     assert_eq!(request.history_thread_key, "aaaaa-aa".to_string());
+    assert_eq!(
+        request.thread_id,
+        provider
+            .active_chat_thread
+            .as_ref()
+            .expect("thread should be active")
+            .thread_id
+            .clone()
+    );
     assert_eq!(request.target_memory_ids, vec!["aaaaa-aa".to_string()]);
     assert_eq!(request.history.len(), 8);
     assert_eq!(
@@ -278,7 +403,10 @@ fn all_memories_chat_submit_uses_all_targets_and_separate_history_thread() {
     let _ = take_test_chat_submit_result();
     let _ = take_last_test_chat_request();
     clear_chat_history_for_tests();
-    set_next_test_chat_submit_result(Ok("ok".to_string()));
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "ok".to_string(),
+        failed_memory_ids: vec![],
+    }));
     let mut provider = configure_provider_for_chat();
     let mut state = CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
@@ -292,13 +420,21 @@ fn all_memories_chat_submit_uses_all_targets_and_separate_history_thread() {
         .expect("chat submit should dispatch");
 
     assert_eq!(
-        load_chat_history("local", "provided", "all-memories").expect("history should load"),
+        load_or_create_active_chat_thread("local", "provided", "all-memories")
+            .expect("history should load")
+            .messages,
         vec![("user".to_string(), "compare everything".to_string())]
     );
     assert_eq!(
         take_last_test_chat_request().expect("captured request should exist"),
         CapturedChatRequest {
             history_thread_key: "all-memories".to_string(),
+            thread_id: provider
+                .active_chat_thread
+                .as_ref()
+                .expect("thread should be active")
+                .thread_id
+                .clone(),
             scope: ChatScope::All,
             target_memory_ids: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
             query: "compare everything".to_string(),
@@ -313,12 +449,21 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
     let _ = take_test_chat_submit_result();
     let _ = take_last_test_chat_request();
     clear_chat_history_for_tests();
-    append_chat_history_message("local", "provided", "aaaaa-aa", "user", "alpha", 1)
+    append_chat_history_message(
+        "local",
+        "provided",
+        "aaaaa-aa",
+        "thread-selected",
+        "user",
+        "alpha",
+        1,
+    )
         .expect("selected history should save");
     append_chat_history_message(
         "local",
         "provided",
         "all-memories",
+        "thread-all",
         "assistant",
         "global",
         2,
@@ -351,6 +496,143 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
         state.chat_messages,
         vec![("user".to_string(), "alpha".to_string())]
     );
+}
+
+#[test]
+fn chat_new_thread_switches_to_empty_thread_and_submit_uses_it() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    append_chat_history_message(
+        "local",
+        "provided",
+        "aaaaa-aa",
+        "thread-original",
+        "user",
+        "alpha",
+        1,
+    )
+    .expect("original history should save");
+    let mut provider = configure_provider_for_chat();
+    let mut state = CoreState {
+        current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_messages: vec![("user".to_string(), "alpha".to_string())],
+        ..CoreState::default()
+    };
+
+    let effects = provider.load_active_chat_history_effects(&state);
+    execute_effects_to_status(&mut state, effects);
+    let original_thread_id = provider
+        .active_chat_thread
+        .as_ref()
+        .expect("original thread should exist")
+        .thread_id
+        .clone();
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatNewThread)
+        .expect("chat new thread should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    let next_thread_id = provider
+        .active_chat_thread
+        .as_ref()
+        .expect("new thread should exist")
+        .thread_id
+        .clone();
+    assert_ne!(next_thread_id, original_thread_id);
+    assert!(state.chat_messages.is_empty());
+
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "ok".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    state.chat_input = "fresh".to_string();
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("chat submit should dispatch");
+
+    let request = take_last_test_chat_request().expect("captured request should exist");
+    assert_eq!(request.thread_id, next_thread_id);
+    assert_eq!(request.history, vec![("user".to_string(), "fresh".to_string())]);
+}
+
+#[test]
+fn chat_new_thread_is_blocked_while_request_is_running() {
+    let _guard = chat_test_guard();
+    clear_chat_history_for_tests();
+    let mut provider = configure_provider_for_chat();
+    provider.chat_submit_task.in_flight = true;
+    let mut state = CoreState {
+        current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_messages: vec![("user".to_string(), "keep".to_string())],
+        ..CoreState::default()
+    };
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatNewThread)
+        .expect("chat new thread should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    assert_eq!(
+        state.status_message.as_deref(),
+        Some("Wait for the current AI response before starting a new thread.")
+    );
+    assert_eq!(
+        state.chat_messages,
+        vec![("user".to_string(), "keep".to_string())]
+    );
+}
+
+#[test]
+fn memory_switch_restores_last_active_thread_for_each_memory() {
+    let _guard = chat_test_guard();
+    clear_chat_history_for_tests();
+    append_chat_history_message(
+        "local",
+        "provided",
+        "aaaaa-aa",
+        "thread-a1",
+        "user",
+        "alpha",
+        1,
+    )
+    .expect("alpha history should save");
+    create_chat_thread("local", "provided", "aaaaa-aa").expect("second alpha thread");
+    append_chat_history_message(
+        "local",
+        "provided",
+        "bbbbb-bb",
+        "thread-b1",
+        "assistant",
+        "beta",
+        2,
+    )
+    .expect("beta history should save");
+    let mut provider = configure_provider_for_chat();
+    let mut state = CoreState {
+        current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Items,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    let effects = provider.load_active_chat_history_effects(&state);
+    execute_effects_to_status(&mut state, effects);
+    assert!(state.chat_messages.is_empty());
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
+        .expect("move next should dispatch");
+    execute_effects_to_status(&mut state, effects);
+    assert_eq!(
+        state.chat_messages,
+        vec![("assistant".to_string(), "beta".to_string())]
+    );
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::MovePrev)
+        .expect("move prev should dispatch");
+    execute_effects_to_status(&mut state, effects);
+    assert!(state.chat_messages.is_empty());
 }
 
 #[test]

@@ -1006,6 +1006,7 @@ fn simple_text_overlay_action(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn focusable_text_overlay_action(
     code: crossterm::event::KeyCode,
     editable: bool,

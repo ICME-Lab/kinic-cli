@@ -204,6 +204,9 @@ mod insert_submit;
 #[path = "tests/live_browser.rs"]
 mod live_browser;
 
+#[path = "tests/memory_navigation.rs"]
+mod memory_navigation;
+
 #[path = "tests/search.rs"]
 mod search;
 

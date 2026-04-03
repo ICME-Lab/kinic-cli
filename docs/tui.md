@@ -140,7 +140,7 @@ PDFs are converted to Markdown before insertion. This will fail if `pdftotext` i
 ## Memories Tab
 
 In the `Memories` tab, you work with memories using the search field, list, and detail pane.
-The chat panel asks AI against either the selected memory or all searchable memories, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` narrows candidates with reranking and diversity-aware selection before building the final answer prompt.
+The chat panel asks AI against either the selected memory or all searchable memories, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` narrows candidates with reranking and diversity-aware selection before building the final answer prompt. The reranking step uses both token matches and short character-fragment matches so Japanese or other low-whitespace text can still influence retrieval. Chat history is now stored per `network + identity + chat context + thread`, so each selected memory and the `all memories` scope can keep multiple local threads.
 
 ![Memories tab screenshot](./images/tui-memories.png)
 
@@ -148,6 +148,10 @@ The chat panel asks AI against either the selected memory or all searchable memo
 - Switch the search scope with `←` `→`
   - `all memories`: search across every memory
   - `selected memory`: search only the currently selected memory
+- Press `Shift+N` in the chat pane to start a new empty thread for the current chat context
+- The TUI restores the last thread used for each selected memory and for `all memories`
+- v1 does not include a thread list yet, so you cannot reopen older threads from the UI
+- Existing saved chat history is not migrated; the TUI starts from the new thread store file
 - Use `↑` `↓` in the list and `Enter` to open details
 - Press `Shift+R` in the list or detail pane to rename the currently selected memory
 - Move to `+ Add Existing Memory Canister` at the end of the list and press `Enter` to register an existing memory manually

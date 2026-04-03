@@ -11,10 +11,11 @@ use crate::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
     },
-    commands::ask_ai::{AskAiResult, ask_ai_flow},
-    commands::convert_pdf,
+    commands::{
+        ask_ai::{AskAiResult, ask_ai_flow},
+        convert_pdf, create,
+    },
     embedding::{fetch_embedding, late_chunking},
-    ledger::fetch_fee,
     memory_client_builder::build_memory_client_from_identity,
 };
 use icrc_ledger_types::icrc1::account::Account;
@@ -26,13 +27,7 @@ pub(crate) async fn create_memory(
     description: String,
 ) -> Result<String> {
     let factory = AgentFactory::new(use_mainnet, identity);
-    let agent = factory.build().await?;
-    let client = LauncherClient::new(agent.clone());
-
-    let price = client.fetch_deployment_price().await?;
-    let fee = fetch_fee(&agent).await?;
-    client.approve_launcher(&price, fee).await?;
-    client.deploy_memory(&name, &description).await
+    create::create_memory(&factory, &name, &description).await
 }
 
 pub(crate) async fn list_memories(use_mainnet: bool, identity: String) -> Result<Vec<String>> {

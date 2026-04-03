@@ -15,9 +15,17 @@ use crate::{TUI_IDENTITY_REQUIRED_MESSAGE, resolve_tui_identity};
 mod adapter;
 mod bridge;
 mod chat_prompt;
+mod chat_retrieval;
+mod chat_service;
+mod chat_similarity;
 mod provider;
 mod settings;
 mod ui_config;
+
+#[cfg(test)]
+mod chat_retrieval_tests;
+#[cfg(test)]
+mod chat_service_tests;
 
 use tui_kit_host::{
     execute_effects_to_status,

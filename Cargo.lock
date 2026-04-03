@@ -3716,6 +3716,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "tui-kit"
+version = "0.1.0"
+dependencies = [
+ "tui-kit-host",
+ "tui-kit-model",
+ "tui-kit-render",
+ "tui-kit-runtime",
+]
+
+[[package]]
 name = "tui-kit-host"
 version = "0.1.0"
 dependencies = [

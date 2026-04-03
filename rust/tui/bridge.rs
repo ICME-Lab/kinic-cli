@@ -1,29 +1,23 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
-use anyhow::{Context, Result};
-use ic_agent::{Agent, export::Principal};
-use tokio::{sync::Semaphore, task::JoinSet};
-use tui_kit_runtime::{
-    AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview,
-    format_e8s_to_kinic_string_nat,
-};
-
-use super::chat_prompt::{
-    PromptDocument, PromptHistoryMessage, build_multi_turn_chat_prompt, build_search_rewrite_prompt,
-};
 use crate::{
     clients::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
     },
-    commands::ask_ai::call_chat_endpoint,
     create_domain::{BalanceDelta, balance_delta, required_balance},
-    embedding::{embedding_base_url, fetch_embedding},
+    embedding::embedding_base_url,
     insert_service::{InsertRequest, execute_insert_request},
     ledger::{fetch_balance, fetch_fee, transfer},
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
+};
+
+use anyhow::{Context, Result};
+use ic_agent::{Agent, export::Principal};
+use tui_kit_runtime::{
+    AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview,
+    format_e8s_to_kinic_string_nat,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +42,12 @@ pub struct SearchResultItem {
     pub payload: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AskMemoriesOutput {
+    pub response: String,
+    pub failed_memory_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatTarget {
     pub memory_id: String,
@@ -70,6 +70,8 @@ pub struct MemoryDetails {
     pub cycle_amount: Option<u64>,
     pub users: Vec<MemoryUser>,
     pub content_preview: String,
+    pub users_load_error: Option<String>,
+    pub content_preview_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +99,7 @@ pub enum CreateMemoryError {
     Principal(String),
     Balance(String),
     Price(String),
+    Fee(String),
     InsufficientBalance {
         required_total_kinic: String,
         required_total_base_units: String,
@@ -120,6 +123,7 @@ pub enum TransferKinicError {
     ResolveAgentFactory(String),
     BuildAgent(String),
     ParsePrincipal(String),
+    LoadBalance(String),
     LoadFee(String),
     Transfer(String),
 }
@@ -138,8 +142,6 @@ struct AccessControlRequest {
     action: AccessControlAction,
     role_code: Option<u8>,
 }
-
-const MAX_CONCURRENT_CHAT_SEARCHES: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChatRetrievalConfig {
@@ -185,7 +187,7 @@ pub async fn create_memory(
     let price = price.map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
     let fee = fetch_fee(&agent)
         .await
-        .map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
+        .map_err(|error| CreateMemoryError::Fee(short_error(&error.to_string())))?;
     match balance_delta(&price, balance, fee) {
         BalanceDelta::Surplus(_) => {}
         BalanceDelta::Shortfall(shortfall) => {
@@ -302,8 +304,8 @@ pub async fn load_transfer_prerequisites(
         .await
         .map_err(|error| TransferKinicError::BuildAgent(short_error(&error.to_string())))?;
     let (balance, fee) = tokio::join!(fetch_balance(&agent), fetch_fee(&agent));
-    let balance =
-        balance.map_err(|error| TransferKinicError::Transfer(short_error(&error.to_string())))?;
+    let balance = balance
+        .map_err(|error| TransferKinicError::LoadBalance(short_error(&error.to_string())))?;
     let fee = fee.map_err(|error| TransferKinicError::LoadFee(short_error(&error.to_string())))?;
     Ok((balance, fee))
 }
@@ -358,339 +360,17 @@ pub async fn ask_memories(
     query: String,
     history: Vec<(String, String)>,
     retrieval_config: ChatRetrievalConfig,
-) -> Result<String> {
-    if targets.is_empty() {
-        anyhow::bail!("no searchable memories are available for chat");
-    }
-
-    let history = history
-        .into_iter()
-        .map(|(role, content)| PromptHistoryMessage { role, content })
-        .collect::<Vec<_>>();
-    let rewrite_prompt = build_search_rewrite_prompt(&query, &history, "en");
-    let search_query = call_chat_endpoint(&rewrite_prompt)
-        .await?
-        .trim()
-        .to_string();
-    if search_query.is_empty() {
-        anyhow::bail!("chat endpoint returned an empty search rewrite");
-    }
-    let embedding = fetch_embedding(&search_query).await?;
-    let results = search_chat_targets(use_mainnet, auth, &targets, &embedding).await?;
-    let prompt_documents = select_chat_prompt_documents(
+) -> Result<AskMemoriesOutput> {
+    super::chat_service::ask_memories(
+        use_mainnet,
+        auth,
         scope,
-        results,
-        &targets,
-        &query,
-        &search_query,
-        retrieval_config,
-    );
-    let prompt =
-        build_multi_turn_chat_prompt(&query, &search_query, &history, &prompt_documents, "en");
-    call_chat_endpoint(&prompt).await
-}
-
-async fn search_chat_targets(
-    use_mainnet: bool,
-    auth: TuiAuth,
-    targets: &[ChatTarget],
-    embedding: &[f32],
-) -> Result<Vec<SearchResultItem>> {
-    let agent = build_search_agent(use_mainnet, auth).await?;
-    let concurrency_limit = usize::min(MAX_CONCURRENT_CHAT_SEARCHES, targets.len().max(1));
-    let semaphore = std::sync::Arc::new(Semaphore::new(concurrency_limit));
-    let mut tasks = JoinSet::new();
-    for target in targets.iter().cloned() {
-        let agent = agent.clone();
-        let embedding = embedding.to_vec();
-        let semaphore = semaphore.clone();
-        tasks.spawn(async move {
-            let permit = semaphore
-                .acquire_owned()
-                .await
-                .expect("chat search semaphore should remain open");
-            let result = search_memory_with_agent(agent, target.memory_id.clone(), embedding).await;
-            drop(permit);
-            (target.memory_id, result)
-        });
-    }
-
-    let mut items = Vec::new();
-    let mut failed_memory_ids = Vec::new();
-    let mut first_error = None;
-    while let Some(task_result) = tasks.join_next().await {
-        match task_result {
-            Ok((_memory_id, Ok(mut next_items))) => items.append(&mut next_items),
-            Ok((memory_id, Err(error))) => {
-                failed_memory_ids.push(memory_id);
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-            Err(error) => {
-                failed_memory_ids.push("join-error".to_string());
-                if first_error.is_none() {
-                    first_error = Some(error.into());
-                }
-            }
-        }
-    }
-
-    if !targets.is_empty()
-        && failed_memory_ids.len() == targets.len()
-        && let Some(error) = first_error
-    {
-        return Err(error);
-    }
-
-    Ok(items)
-}
-
-fn select_chat_prompt_documents(
-    scope: ChatScope,
-    results: Vec<SearchResultItem>,
-    targets: &[ChatTarget],
-    latest_query: &str,
-    rewritten_query: &str,
-    retrieval_config: ChatRetrievalConfig,
-) -> Vec<PromptDocument> {
-    if scope == ChatScope::Selected {
-        return select_single_memory_prompt_documents(
-            results,
-            targets,
-            retrieval_config.overall_top_k,
-        );
-    }
-    select_multi_memory_prompt_documents(
-        results,
         targets,
-        latest_query,
-        rewritten_query,
+        query,
+        history,
         retrieval_config,
     )
-}
-
-fn select_single_memory_prompt_documents(
-    results: Vec<SearchResultItem>,
-    targets: &[ChatTarget],
-    overall_top_k: usize,
-) -> Vec<PromptDocument> {
-    let name_by_id = targets
-        .iter()
-        .map(|target| (target.memory_id.as_str(), target.memory_name.as_str()))
-        .collect::<HashMap<_, _>>();
-    let mut documents = results
-        .into_iter()
-        .filter_map(|item| {
-            name_by_id
-                .get(item.memory_id.as_str())
-                .map(|memory_name| PromptDocument {
-                    memory_id: item.memory_id,
-                    memory_name: (*memory_name).to_string(),
-                    score: item.score,
-                    content: item.payload,
-                })
-        })
-        .collect::<Vec<_>>();
-    documents.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-    documents.truncate(overall_top_k.max(1));
-    documents
-}
-
-fn select_multi_memory_prompt_documents(
-    results: Vec<SearchResultItem>,
-    targets: &[ChatTarget],
-    latest_query: &str,
-    rewritten_query: &str,
-    retrieval_config: ChatRetrievalConfig,
-) -> Vec<PromptDocument> {
-    let name_by_id = targets
-        .iter()
-        .map(|target| (target.memory_id.as_str(), target.memory_name.as_str()))
-        .collect::<HashMap<_, _>>();
-    let mut documents = results
-        .into_iter()
-        .filter_map(|item| {
-            name_by_id
-                .get(item.memory_id.as_str())
-                .map(|memory_name| PromptDocument {
-                    memory_id: item.memory_id,
-                    memory_name: (*memory_name).to_string(),
-                    score: item.score,
-                    content: item.payload,
-                })
-        })
-        .collect::<Vec<_>>();
-    documents.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-    let candidate_pool = limit_candidate_pool(
-        documents,
-        retrieval_config.candidate_pool_size,
-        retrieval_config.per_memory_cap,
-    );
-    let reranked = heuristic_rerank(candidate_pool, latest_query, rewritten_query);
-    select_with_mmr(
-        reranked,
-        retrieval_config.overall_top_k,
-        retrieval_config.per_memory_cap,
-        retrieval_config.mmr_lambda,
-    )
-}
-
-fn limit_candidate_pool(
-    documents: Vec<PromptDocument>,
-    candidate_pool_size: usize,
-    per_memory_cap: usize,
-) -> Vec<PromptDocument> {
-    let mut per_memory_counts = HashMap::<String, usize>::new();
-    let mut limited = Vec::new();
-    for document in documents {
-        let next_count = per_memory_counts
-            .get(document.memory_id.as_str())
-            .copied()
-            .unwrap_or(0);
-        if next_count >= per_memory_cap.max(1) {
-            continue;
-        }
-        per_memory_counts.insert(document.memory_id.clone(), next_count + 1);
-        limited.push(document);
-        if limited.len() >= candidate_pool_size.max(1) {
-            break;
-        }
-    }
-    limited
-}
-
-fn heuristic_rerank(
-    mut documents: Vec<PromptDocument>,
-    latest_query: &str,
-    rewritten_query: &str,
-) -> Vec<PromptDocument> {
-    let latest_tokens = tokenize(latest_query);
-    let rewritten_tokens = tokenize(rewritten_query);
-    let latest_query_lower = latest_query.trim().to_lowercase();
-    for document in &mut documents {
-        let payload_tokens = tokenize(document.content.as_str());
-        let memory_name_tokens = tokenize(document.memory_name.as_str());
-        if has_token_overlap(&latest_tokens, &payload_tokens) {
-            document.score += 0.08;
-        }
-        if has_token_overlap(&rewritten_tokens, &payload_tokens) {
-            document.score += 0.05;
-        }
-        if has_token_overlap(&memory_name_tokens, &latest_tokens)
-            || has_token_overlap(&memory_name_tokens, &rewritten_tokens)
-        {
-            document.score += 0.04;
-        }
-        if latest_query_lower.chars().count() >= 3
-            && document
-                .content
-                .to_lowercase()
-                .contains(latest_query_lower.as_str())
-        {
-            document.score += 0.03;
-        }
-    }
-    documents.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-    documents
-}
-
-fn select_with_mmr(
-    mut candidates: Vec<PromptDocument>,
-    overall_top_k: usize,
-    per_memory_cap: usize,
-    mmr_lambda: f32,
-) -> Vec<PromptDocument> {
-    let mut selected = Vec::new();
-    let mut per_memory_counts = HashMap::<String, usize>::new();
-    while !candidates.is_empty() && selected.len() < overall_top_k.max(1) {
-        let next_index = if selected.is_empty() {
-            candidates
-                .iter()
-                .enumerate()
-                .max_by(|(_, left), (_, right)| {
-                    left.score
-                        .partial_cmp(&right.score)
-                        .unwrap_or(Ordering::Equal)
-                })
-                .map(|(index, _)| index)
-        } else {
-            candidates
-                .iter()
-                .enumerate()
-                .filter(|(_, candidate)| {
-                    per_memory_counts
-                        .get(candidate.memory_id.as_str())
-                        .copied()
-                        .unwrap_or(0)
-                        < per_memory_cap.max(1)
-                })
-                .max_by(|(_, left), (_, right)| {
-                    let left_score = mmr_score(left, &selected, mmr_lambda);
-                    let right_score = mmr_score(right, &selected, mmr_lambda);
-                    left_score
-                        .partial_cmp(&right_score)
-                        .unwrap_or(Ordering::Equal)
-                })
-                .map(|(index, _)| index)
-        };
-
-        let Some(next_index) = next_index else {
-            break;
-        };
-        let document = candidates.remove(next_index);
-        let next_count = per_memory_counts
-            .get(document.memory_id.as_str())
-            .copied()
-            .unwrap_or(0);
-        if next_count >= per_memory_cap.max(1) {
-            continue;
-        }
-        per_memory_counts.insert(document.memory_id.clone(), next_count + 1);
-        selected.push(document);
-    }
-    selected
-}
-
-fn mmr_score(candidate: &PromptDocument, selected: &[PromptDocument], mmr_lambda: f32) -> f32 {
-    let max_similarity = selected
-        .iter()
-        .map(|current| token_jaccard(candidate.content.as_str(), current.content.as_str()))
-        .fold(0.0_f32, f32::max);
-    (mmr_lambda * candidate.score) - ((1.0 - mmr_lambda) * max_similarity)
-}
-
-fn tokenize(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn has_token_overlap(left: &[String], right: &[String]) -> bool {
-    left.iter()
-        .any(|token| right.iter().any(|candidate| candidate == token))
-}
-
-fn token_jaccard(left: &str, right: &str) -> f32 {
-    let left_tokens = tokenize(left);
-    let right_tokens = tokenize(right);
-    if left_tokens.is_empty() || right_tokens.is_empty() {
-        return 0.0;
-    }
-    let intersection = left_tokens
-        .iter()
-        .filter(|token| right_tokens.iter().any(|candidate| candidate == *token))
-        .count();
-    let union = left_tokens.len() + right_tokens.len() - intersection;
-    if union == 0 {
-        0.0
-    } else {
-        let intersection_u16 = u16::try_from(intersection).unwrap_or(u16::MAX);
-        let union_u16 = u16::try_from(union).unwrap_or(u16::MAX);
-        f32::from(intersection_u16) / f32::from(union_u16)
-    }
+    .await
 }
 
 pub async fn load_memory_dim(
@@ -727,13 +407,17 @@ pub async fn load_memory_details(
     let metadata = client.get_metadata().await?;
     let (dim, users, exported_chunks) =
         tokio::join!(client.get_dim(), client.get_users(), client.export_all(),);
-    let content_preview = render_content_preview(
-        exported_chunks
-            .unwrap_or_default()
-            .into_iter()
-            .map(|chunk| chunk.text)
-            .collect(),
-    );
+    let (users, users_load_error) = memory_users_from_query(users, &launcher_id);
+    let (content_preview, content_preview_error) = match exported_chunks {
+        Ok(chunks) => (
+            render_content_preview(chunks.into_iter().map(|chunk| chunk.text).collect()),
+            None,
+        ),
+        Err(err) => (
+            "No additional content available.".to_string(),
+            Some(short_error(&err.to_string())),
+        ),
+    };
 
     Ok(MemoryDetails {
         name: metadata.name,
@@ -742,8 +426,10 @@ pub async fn load_memory_details(
         owners: metadata.owners,
         stable_memory_size: Some(metadata.stable_memory_size),
         cycle_amount: Some(metadata.cycle_amount),
-        users: decode_memory_users(users, &launcher_id),
+        users,
         content_preview,
+        users_load_error,
+        content_preview_error,
     })
 }
 
@@ -987,12 +673,18 @@ fn role_name(role_code: u8) -> String {
     }
 }
 
-fn decode_memory_users(
+fn memory_users_from_query(
     users: Result<Vec<(String, u8)>, anyhow::Error>,
     launcher_id: &str,
-) -> Vec<MemoryUser> {
+) -> (Vec<MemoryUser>, Option<String>) {
+    match users {
+        Ok(rows) => (decode_memory_users(rows, launcher_id), None),
+        Err(err) => (Vec::new(), Some(short_error(&err.to_string()))),
+    }
+}
+
+fn decode_memory_users(users: Vec<(String, u8)>, launcher_id: &str) -> Vec<MemoryUser> {
     users
-        .unwrap_or_default()
         .into_iter()
         .filter(|(principal_id, _)| principal_id != launcher_id)
         .map(|(principal_id, role_code)| MemoryUser {
@@ -1158,10 +850,7 @@ mod tests {
 
     #[test]
     fn decode_memory_users_excludes_launcher_canister() {
-        let users = Ok(vec![
-            ("launcher-aa".to_string(), 0),
-            ("writer-aa".to_string(), 2),
-        ]);
+        let users = vec![("launcher-aa".to_string(), 0), ("writer-aa".to_string(), 2)];
 
         let decoded = decode_memory_users(users, "launcher-aa");
 
@@ -1176,7 +865,7 @@ mod tests {
 
     #[test]
     fn decode_memory_users_keeps_unknown_roles_for_non_launcher_entries() {
-        let users = Ok(vec![("other-aa".to_string(), 9)]);
+        let users = vec![("other-aa".to_string(), 9)];
 
         let decoded = decode_memory_users(users, "launcher-aa");
 
@@ -1187,6 +876,15 @@ mod tests {
                 role: "unknown(9)".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn memory_users_from_query_records_error_instead_of_silent_empty_list() {
+        let err = anyhow::anyhow!("canister rejected get_users");
+        let (users, load_err) = memory_users_from_query(Err(err), "launcher-aa");
+
+        assert!(users.is_empty());
+        assert_eq!(load_err.as_deref(), Some("canister rejected get_users"));
     }
 
     #[test]
@@ -1351,179 +1049,5 @@ mod tests {
             overview.session_settings_refresh_failure_message(),
             Some("Session settings refresh failed: identity lookup failed".to_string())
         );
-    }
-
-    #[test]
-    fn multi_memory_selection_applies_candidate_and_final_caps() {
-        let results = vec![
-            SearchResultItem {
-                memory_id: "aaaaa-aa".to_string(),
-                score: 0.9,
-                payload: "a1".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "aaaaa-aa".to_string(),
-                score: 0.85,
-                payload: "a2".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "aaaaa-aa".to_string(),
-                score: 0.8,
-                payload: "a3".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "bbbbb-bb".to_string(),
-                score: 0.7,
-                payload: "b1".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "bbbbb-bb".to_string(),
-                score: 0.65,
-                payload: "b2".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "ccccc-cc".to_string(),
-                score: 0.6,
-                payload: "c1".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "ddddd-dd".to_string(),
-                score: 0.55,
-                payload: "d1".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "eeeee-ee".to_string(),
-                score: 0.5,
-                payload: "e1".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "fffff-ff".to_string(),
-                score: 0.45,
-                payload: "f1".to_string(),
-            },
-            SearchResultItem {
-                memory_id: "ggggg-gg".to_string(),
-                score: 0.0,
-                payload: "g0".to_string(),
-            },
-        ];
-        let targets = vec![
-            ChatTarget {
-                memory_id: "aaaaa-aa".to_string(),
-                memory_name: "Alpha".to_string(),
-            },
-            ChatTarget {
-                memory_id: "bbbbb-bb".to_string(),
-                memory_name: "Beta".to_string(),
-            },
-            ChatTarget {
-                memory_id: "ccccc-cc".to_string(),
-                memory_name: "Gamma".to_string(),
-            },
-            ChatTarget {
-                memory_id: "ddddd-dd".to_string(),
-                memory_name: "Delta".to_string(),
-            },
-            ChatTarget {
-                memory_id: "eeeee-ee".to_string(),
-                memory_name: "Epsilon".to_string(),
-            },
-            ChatTarget {
-                memory_id: "fffff-ff".to_string(),
-                memory_name: "Zeta".to_string(),
-            },
-            ChatTarget {
-                memory_id: "ggggg-gg".to_string(),
-                memory_name: "Eta".to_string(),
-            },
-        ];
-
-        let limited = select_chat_prompt_documents(
-            ChatScope::All,
-            results,
-            &targets,
-            "compare alpha beta",
-            "compare alpha beta",
-            ChatRetrievalConfig {
-                overall_top_k: 8,
-                per_memory_cap: 2,
-                candidate_pool_size: 24,
-                mmr_lambda: 0.70,
-            },
-        );
-
-        assert_eq!(limited.len(), 8);
-        assert_eq!(
-            limited
-                .iter()
-                .filter(|doc| doc.memory_id == "aaaaa-aa")
-                .count(),
-            2
-        );
-        assert!(!limited.iter().any(|doc| doc.content == "a3"));
-        assert!(limited.iter().any(|doc| doc.content == "b2"));
-        assert!(!limited.iter().any(|doc| doc.memory_id == "ggggg-gg"));
-        assert_eq!(limited.first().map(|doc| doc.content.as_str()), Some("a1"));
-        assert_eq!(limited.get(1).map(|doc| doc.content.as_str()), Some("a2"));
-    }
-
-    #[test]
-    fn heuristic_rerank_can_promote_query_overlap() {
-        let reranked = heuristic_rerank(
-            vec![
-                PromptDocument {
-                    memory_id: "aaaaa-aa".to_string(),
-                    memory_name: "Alpha".to_string(),
-                    score: 0.40,
-                    content: "owner and staffing plan".to_string(),
-                },
-                PromptDocument {
-                    memory_id: "bbbbb-bb".to_string(),
-                    memory_name: "Beta".to_string(),
-                    score: 0.39,
-                    content: "q1 goals owner staffing".to_string(),
-                },
-            ],
-            "Q1 goals owner",
-            "Q1 goals owner",
-        );
-
-        assert_eq!(
-            reranked.first().map(|doc| doc.memory_id.as_str()),
-            Some("bbbbb-bb")
-        );
-    }
-
-    #[test]
-    fn mmr_prefers_diverse_documents_when_scores_are_close() {
-        let selected = select_with_mmr(
-            vec![
-                PromptDocument {
-                    memory_id: "aaaaa-aa".to_string(),
-                    memory_name: "Alpha".to_string(),
-                    score: 0.90,
-                    content: "same theme shared wording".to_string(),
-                },
-                PromptDocument {
-                    memory_id: "bbbbb-bb".to_string(),
-                    memory_name: "Beta".to_string(),
-                    score: 0.89,
-                    content: "same theme shared wording".to_string(),
-                },
-                PromptDocument {
-                    memory_id: "ccccc-cc".to_string(),
-                    memory_name: "Gamma".to_string(),
-                    score: 0.88,
-                    content: "different evidence separate topic".to_string(),
-                },
-            ],
-            2,
-            2,
-            0.70,
-        );
-
-        assert_eq!(selected.len(), 2);
-        assert!(selected.iter().any(|doc| doc.memory_id == "aaaaa-aa"));
-        assert!(selected.iter().any(|doc| doc.memory_id == "ccccc-cc"));
     }
 }

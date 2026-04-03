@@ -45,7 +45,7 @@ impl<'a> TuiKitUi<'a> {
         if self.add_memory.open {
             return self.add_memory_cursor_position_for_area(area);
         }
-        if self.remove_memory_open {
+        if self.remove_memory.open {
             return None;
         }
         if self.rename_memory.form.open {

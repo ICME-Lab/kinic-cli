@@ -161,8 +161,9 @@ pub enum InsertFormFocus {
     Submit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PickerContext {
+    #[default]
     DefaultMemory,
     InsertTarget,
     InsertTag,
@@ -172,12 +173,6 @@ pub enum PickerContext {
     ChatPerMemoryLimit,
     ChatCandidatePool,
     ChatDiversity,
-}
-
-impl Default for PickerContext {
-    fn default() -> Self {
-        Self::DefaultMemory
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -847,6 +842,7 @@ pub enum CoreAction {
     ChatBackspace,
     ChatScopePrev,
     ChatScopeNext,
+    ChatNewThread,
     ChatSubmit,
     ChatScrollUp,
     ChatScrollDown,
@@ -1584,6 +1580,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 state.chat_scope = next_chat_scope(state.chat_scope);
             }
         }
+        CoreAction::ChatNewThread => {}
         CoreAction::ChatSubmit => {
             if state.chat_loading {
                 return;
@@ -1701,13 +1698,14 @@ fn apply_form_command(state: &mut CoreState, action: &CoreAction) {
         return;
     };
 
-    if kind == FormKind::Insert && is_insert_form_locked(state) {
-        if !matches!(
+    if kind == FormKind::Insert
+        && is_insert_form_locked(state)
+        && !matches!(
             command,
             FormCommand::OpenPicker(_) | FormCommand::OpenFileDialog
-        ) {
-            return;
-        }
+        )
+    {
+        return;
     }
 
     match (kind, command) {
@@ -2343,6 +2341,9 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
                 }
                 CoreKey::Right if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
                     Some(CoreAction::ChatScopeNext)
+                }
+                CoreKey::Char('N') if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
+                    Some(CoreAction::ChatNewThread)
                 }
                 CoreKey::Enter => Some(CoreAction::ChatSubmit),
                 CoreKey::Down => Some(CoreAction::ChatScrollDown),
@@ -3286,6 +3287,47 @@ mod tests {
         state.current_tab_id = kinic_tabs::KINIC_CREATE_TAB_ID.to_string();
         apply_core_action(&mut state, &CoreAction::ChatScopeNext);
         assert_eq!(state.chat_scope, ChatScope::Selected);
+    }
+
+    #[test]
+    fn memories_chat_focus_maps_shift_n_to_new_thread() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('N'),
+                PaneFocus::Extra,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::ChatNewThread)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('N'),
+                PaneFocus::Extra,
+                kinic_tabs::KINIC_CREATE_TAB_ID
+            ),
+            Some(CoreAction::ChatInput('N'))
+        );
+    }
+
+    #[test]
+    fn chat_new_thread_does_not_mutate_runtime_state_directly() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            chat_messages: vec![("user".to_string(), "hello".to_string())],
+            chat_loading: true,
+            chat_scroll: 7,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ChatNewThread);
+        assert_eq!(state.chat_messages, vec![("user".to_string(), "hello".to_string())]);
+        assert!(state.chat_loading);
+        assert_eq!(state.chat_scroll, 7);
+
+        state.current_tab_id = kinic_tabs::KINIC_CREATE_TAB_ID.to_string();
+        state.chat_messages = vec![("user".to_string(), "keep".to_string())];
+        apply_core_action(&mut state, &CoreAction::ChatNewThread);
+        assert_eq!(state.chat_messages, vec![("user".to_string(), "keep".to_string())]);
     }
 
     #[test]

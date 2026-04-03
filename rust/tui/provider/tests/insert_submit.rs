@@ -417,3 +417,40 @@ fn insert_submit_reports_in_flight_insert_requests() {
         CoreEffect::Notify(message) if message == "Insert request already running."
     )));
 }
+
+#[test]
+fn insert_submit_blocks_after_insert_dim_task_returns_error() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = std::sync::mpsc::channel();
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = None;
+    provider.insert_expected_dim_loading = true;
+    provider.insert_expected_dim_load_error = None;
+    provider.pending_insert_dim = Some(rx);
+    tx.send(super::super::InsertDimTaskOutput {
+        memory_id: "aaaaa-aa".to_string(),
+        result: Err(bridge::InsertMemoryError::ResolveAgentFactory(
+            "network down".to_string(),
+        )),
+    })
+    .expect("dim task output");
+
+    let state = raw_insert_state("payload", "[0.1, 0.2]");
+    provider
+        .poll_background(&state)
+        .expect("insert dim poll should return output");
+
+    assert!(provider.insert_expected_dim_load_error.is_some());
+    assert!(!provider.insert_expected_dim_loading);
+    assert!(!provider.insert_submit_task.in_flight);
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit output");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message.contains("Could not load expected embedding dimension")
+    )));
+}

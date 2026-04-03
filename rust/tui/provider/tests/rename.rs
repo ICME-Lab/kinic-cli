@@ -161,3 +161,24 @@ fn poll_rename_submit_background_updates_memory_name_and_closes_overlay() {
         CoreEffect::Notify(message) if message == "Renamed memory to New Name."
     )));
 }
+
+#[test]
+fn poll_rename_submit_background_resets_task_when_worker_disconnects() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel::<RenameSubmitTaskOutput>();
+    provider.rename_submit_task.receiver = Some(rx);
+    provider.rename_submit_task.in_flight = true;
+    drop(tx);
+
+    let output = provider
+        .poll_rename_submit_background(&CoreState::default())
+        .expect("rename disconnect output");
+
+    assert!(matches!(
+        output.effects.as_slice(),
+        [CoreEffect::RenameFormError(Some(message))]
+            if message == "Rename request failed."
+    ));
+    assert!(provider.rename_submit_task.receiver.is_none());
+    assert!(!provider.rename_submit_task.in_flight);
+}

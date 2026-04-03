@@ -65,9 +65,23 @@ pub fn build_multi_turn_chat_prompt(
     history: &[PromptHistoryMessage],
     docs: &[PromptDocument],
     language: &str,
+    failed_memory_search_count: usize,
 ) -> String {
     let language_instruction = language_instruction(language);
     let conversation_block = render_conversation_block(history, MAX_HISTORY_MESSAGES);
+
+    let retrieval_status_block = if failed_memory_search_count == 0 {
+        "\n".to_string()
+    } else {
+        format!(
+            r#"<retrieval_status>
+{count} parallel memory search(es) failed. <docs> only include evidence from memories that returned results; do not imply you searched the full set.
+</retrieval_status>
+
+"#,
+            count = failed_memory_search_count,
+        )
+    };
 
     let docs_block = docs
         .iter()
@@ -120,6 +134,7 @@ Answer the latest user message using the document evidence in <docs> and the rec
 - Then provide the final answer in <answer>...</answer>.
 - Treat <docs> as the source of truth. Use <conversation> only to preserve continuity and resolve references.
 - If <docs> do not support a claim, say so briefly instead of inventing facts.
+- If <retrieval_status> reports failed memory searches, mention briefly in <answer> that some sources were unavailable.
 - Keep the final answer concise and grounded in the retrieved content.
 - Answer in {language_instruction} inside the <answer> tag.
 
@@ -132,8 +147,7 @@ Answer the latest user message using the document evidence in <docs> and the rec
 <search_query>
 {search_query}
 </search_query>
-
-<conversation>
+{retrieval_status}<conversation>
 {conversation}
 </conversation>
 
@@ -149,6 +163,7 @@ Answer the latest user message using the document evidence in <docs> and the rec
         full_document = full_document,
         latest_user_query = sanitize(latest_user_query.trim()),
         language_instruction = language_instruction,
+        retrieval_status = retrieval_status_block,
         search_query = sanitize(search_query.trim()),
     )
 }
@@ -298,6 +313,7 @@ mod tests {
                 content: "doc text".to_string(),
             }],
             "en",
+            0,
         );
 
         assert!(prompt.contains("<latest_user_query>\nlatest question\n</latest_user_query>"));
@@ -326,7 +342,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let prompt =
-            build_multi_turn_chat_prompt("latest", "rewritten latest", &history, &[], "en");
+            build_multi_turn_chat_prompt("latest", "rewritten latest", &history, &[], "en", 0);
 
         assert!(!prompt.contains("message-0"));
         assert!(!prompt.contains("message-1"));
@@ -356,11 +372,20 @@ mod tests {
                 },
             ],
             "en",
+            0,
         );
 
         assert!(prompt.contains("memory_id=\"aaaaa-aa\""));
         assert!(prompt.contains("memory_name=\"Alpha\""));
         assert!(prompt.contains("memory_id=\"bbbbb-bb\""));
         assert!(prompt.contains("memory_name=\"Beta\""));
+    }
+
+    #[test]
+    fn prompt_includes_retrieval_status_when_some_memory_searches_failed() {
+        let prompt = build_multi_turn_chat_prompt("q", "rq", &[], &[], "en", 2);
+        assert!(prompt.contains("<retrieval_status>"));
+        assert!(prompt.contains("2 parallel memory search(es) failed."));
+        assert!(prompt.contains("If <retrieval_status> reports failed"));
     }
 }

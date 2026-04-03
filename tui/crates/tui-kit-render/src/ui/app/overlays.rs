@@ -7,6 +7,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
+#[cfg(test)]
+use tui_kit_runtime::RemoveMemoryModalState;
 use tui_kit_runtime::{
     AccessControlAction, AccessControlFocus, AccessControlMode, AccessControlRole,
     CreateModalFocus, CreateSubmitState, RenameModalFocus, SettingsSnapshot, TransferModalFocus,
@@ -420,7 +422,7 @@ impl<'a> TuiKitUi<'a> {
     }
 
     pub(super) fn render_remove_memory_overlay(&self, area: Rect, buf: &mut Buffer) {
-        if !self.remove_memory_open {
+        if !self.remove_memory.open {
             return;
         }
 
@@ -434,9 +436,9 @@ impl<'a> TuiKitUi<'a> {
             "Remove Memory",
             "Remove this manually added memory from the list?",
             Vec::new(),
-            self.remove_memory_confirm_yes,
-            self.remove_memory_submit_state.clone(),
-            self.remove_memory_error.as_deref(),
+            self.remove_memory.confirm_yes,
+            self.remove_memory.submit_state.clone(),
+            self.remove_memory.error.as_deref(),
             "Removing memory from local list...",
         );
     }
@@ -597,6 +599,7 @@ fn push_hint_line(ui: &TuiKitUi<'_>, lines: &mut Vec<Line<'static>>, hint: &str)
     )));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_confirm_choice_modal(
     ui: &TuiKitUi<'_>,
     overlay_area: Rect,
@@ -1475,10 +1478,14 @@ mod tests {
     #[test]
     fn remove_memory_overlay_renders_shared_confirm_copy() {
         let theme = Theme::default();
+        let remove_memory = RemoveMemoryModalState {
+            open: true,
+            confirm_yes: false,
+            ..RemoveMemoryModalState::default()
+        };
         let ui = TuiKitUi::new(&theme)
             .current_tab_id(TabId::new("tab-1"))
-            .remove_memory_open(true)
-            .remove_memory_confirm_yes(false);
+            .remove_memory_modal(&remove_memory);
 
         let rendered = render_ui(ui, Rect::new(0, 0, 100, 30));
 

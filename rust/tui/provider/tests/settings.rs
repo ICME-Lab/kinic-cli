@@ -200,6 +200,29 @@ fn poll_background_returns_create_error_for_failed_submit() {
 }
 
 #[test]
+fn poll_background_resets_create_submit_task_when_worker_disconnects() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel::<CreateSubmitTaskOutput>();
+    provider.create_submit_task.receiver = Some(rx);
+    provider.create_submit_task.request_id = Some(12);
+    provider.create_submit_task.in_flight = true;
+    drop(tx);
+
+    let output = provider
+        .poll_background(&CoreState::default())
+        .expect("create submit disconnect output");
+
+    assert!(matches!(
+        output.effects.as_slice(),
+        [CoreEffect::CreateFormError(Some(message))]
+            if message == "Create request failed: background worker disconnected."
+    ));
+    assert!(provider.create_submit_task.receiver.is_none());
+    assert_eq!(provider.create_submit_task.request_id, None);
+    assert!(!provider.create_submit_task.in_flight);
+}
+
+#[test]
 fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_records = vec![live_memory("bbbbb-bb", "Existing Memory")];
@@ -271,7 +294,6 @@ fn set_default_memory_from_selection_updates_preferences_snapshot_and_markers() 
         )
         .expect("set default output");
 
-    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
     assert_eq!(
         provider.user_preferences.default_memory_id.as_deref(),
         Some("bbbbb-bb")
@@ -495,19 +517,4 @@ fn validate_transfer_submit_rejects_invalid_principal_and_overspend() {
             .expect_err("overspend")
             .contains("Max sendable")
     );
-}
-
-#[test]
-fn chat_result_limit_picker_updates_preferences() {
-    let mut provider = KinicProvider::new(live_config());
-    let effects = provider.picker_option_submit_effects(
-        PickerContext::ChatResultLimit,
-        &PickerItem::option("10".to_string(), "10 docs".to_string(), false),
-    );
-
-    assert_eq!(provider.user_preferences.chat_overall_top_k, 10);
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message) if message == "Chat result limit set to 10 docs"
-    )));
 }

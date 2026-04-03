@@ -347,50 +347,172 @@ fn settings_snapshot_projects_chat_retrieval_section() {
 }
 
 #[test]
-fn chat_history_store_keeps_threads_separated_by_identity_network_and_memory() {
+fn chat_history_store_keeps_threads_separated_by_identity_network_context_and_thread() {
     let mut store = ChatHistoryStore::default();
 
     append_chat_history_message_to_store(
-        &mut store, "local", "alice", "aaaaa-aa", "user", "one", 1,
+        &mut store, "local", "alice", "aaaaa-aa", "thread-1", "user", "one", 1,
     );
     append_chat_history_message_to_store(
-        &mut store, "mainnet", "alice", "aaaaa-aa", "user", "two", 2,
+        &mut store, "mainnet", "alice", "aaaaa-aa", "thread-1", "user", "two", 2,
     );
     append_chat_history_message_to_store(
-        &mut store, "local", "bob", "aaaaa-aa", "user", "three", 3,
+        &mut store, "local", "bob", "aaaaa-aa", "thread-1", "user", "three", 3,
     );
     append_chat_history_message_to_store(
-        &mut store, "local", "alice", "bbbbb-bb", "user", "four", 4,
+        &mut store, "local", "alice", "bbbbb-bb", "thread-1", "user", "four", 4,
     );
     append_chat_history_message_to_store(
         &mut store,
         "local",
         "alice",
         "all-memories",
+        "thread-2",
         "assistant",
         "five",
         5,
     );
 
     assert_eq!(
-        project_chat_history(&store, "local", "alice", "aaaaa-aa"),
-        vec![("user".to_string(), "one".to_string())]
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "alice", "aaaaa-aa"),
+        ActiveChatThread {
+            thread_id: "thread-1".to_string(),
+            messages: vec![("user".to_string(), "one".to_string())],
+        }
     );
     assert_eq!(
-        project_chat_history(&store, "mainnet", "alice", "aaaaa-aa"),
-        vec![("user".to_string(), "two".to_string())]
+        load_or_create_active_chat_thread_in_store(&mut store, "mainnet", "alice", "aaaaa-aa"),
+        ActiveChatThread {
+            thread_id: "thread-1".to_string(),
+            messages: vec![("user".to_string(), "two".to_string())],
+        }
     );
     assert_eq!(
-        project_chat_history(&store, "local", "bob", "aaaaa-aa"),
-        vec![("user".to_string(), "three".to_string())]
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "bob", "aaaaa-aa"),
+        ActiveChatThread {
+            thread_id: "thread-1".to_string(),
+            messages: vec![("user".to_string(), "three".to_string())],
+        }
     );
     assert_eq!(
-        project_chat_history(&store, "local", "alice", "bbbbb-bb"),
-        vec![("user".to_string(), "four".to_string())]
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "alice", "bbbbb-bb"),
+        ActiveChatThread {
+            thread_id: "thread-1".to_string(),
+            messages: vec![("user".to_string(), "four".to_string())],
+        }
     );
     assert_eq!(
-        project_chat_history(&store, "local", "alice", "all-memories"),
-        vec![("assistant".to_string(), "five".to_string())]
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "alice", "all-memories"),
+        ActiveChatThread {
+            thread_id: "thread-2".to_string(),
+            messages: vec![("assistant".to_string(), "five".to_string())],
+        }
+    );
+}
+
+#[test]
+fn chat_history_store_skips_consecutive_duplicate_role_and_content() {
+    let mut store = ChatHistoryStore::default();
+
+    append_chat_history_message_to_store(
+        &mut store, "local", "alice", "aaaaa-aa", "thread-1", "user", "same", 1,
+    );
+    append_chat_history_message_to_store(
+        &mut store, "local", "alice", "aaaaa-aa", "thread-1", "user", "same", 2,
+    );
+    assert_eq!(
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "alice", "aaaaa-aa"),
+        ActiveChatThread {
+            thread_id: "thread-1".to_string(),
+            messages: vec![("user".to_string(), "same".to_string())],
+        }
+    );
+
+    append_chat_history_message_to_store(
+        &mut store,
+        "local",
+        "alice",
+        "aaaaa-aa",
+        "thread-1",
+        "assistant",
+        "reply",
+        3,
+    );
+    append_chat_history_message_to_store(
+        &mut store,
+        "local",
+        "alice",
+        "aaaaa-aa",
+        "thread-1",
+        "assistant",
+        "reply",
+        4,
+    );
+    assert_eq!(
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "alice", "aaaaa-aa"),
+        ActiveChatThread {
+            thread_id: "thread-1".to_string(),
+            messages: vec![
+                ("user".to_string(), "same".to_string()),
+                ("assistant".to_string(), "reply".to_string()),
+            ],
+        }
+    );
+
+    append_chat_history_message_to_store(
+        &mut store, "local", "alice", "aaaaa-aa", "thread-1", "user", "same", 5,
+    );
+    assert_eq!(
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "alice", "aaaaa-aa"),
+        ActiveChatThread {
+            thread_id: "thread-1".to_string(),
+            messages: vec![
+                ("user".to_string(), "same".to_string()),
+                ("assistant".to_string(), "reply".to_string()),
+                ("user".to_string(), "same".to_string()),
+            ],
+        }
+    );
+}
+
+#[test]
+fn chat_history_store_tracks_active_thread_per_context() {
+    let mut store = ChatHistoryStore::default();
+
+    append_chat_history_message_to_store(
+        &mut store,
+        "local",
+        "alice",
+        "aaaaa-aa",
+        "thread-1",
+        "user",
+        "first",
+        1,
+    );
+    create_chat_thread_in_store(
+        &mut store,
+        "local",
+        "alice",
+        "aaaaa-aa",
+        "thread-2".to_string(),
+    );
+    append_chat_history_message_to_store(
+        &mut store,
+        "local",
+        "alice",
+        "aaaaa-aa",
+        "thread-2",
+        "assistant",
+        "second",
+        2,
+    );
+
+    assert_eq!(
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "alice", "aaaaa-aa"),
+        ActiveChatThread {
+            thread_id: "thread-2".to_string(),
+            messages: vec![("assistant".to_string(), "second".to_string())],
+        }
     );
 }
 
@@ -404,6 +526,7 @@ fn chat_history_store_trims_old_messages_and_long_content() {
             "local",
             "alice",
             "aaaaa-aa",
+            "thread-1",
             "user",
             format!("message-{index}").as_str(),
             index,
@@ -414,20 +537,23 @@ fn chat_history_store_trims_old_messages_and_long_content() {
         "local",
         "alice",
         "aaaaa-aa",
+        "thread-1",
         "assistant",
         "x".repeat(5000).as_str(),
         99,
     );
 
-    let projected = project_chat_history(&store, "local", "alice", "aaaaa-aa");
+    let projected =
+        load_or_create_active_chat_thread_in_store(&mut store, "local", "alice", "aaaaa-aa");
 
-    assert_eq!(projected.len(), 40);
+    assert_eq!(projected.thread_id, "thread-1");
+    assert_eq!(projected.messages.len(), 40);
     assert_eq!(
-        projected.first(),
+        projected.messages.first(),
         Some(&("user".to_string(), "message-6".to_string()))
     );
     assert_eq!(
-        projected.last().map(|(_, content)| content.len()),
+        projected.messages.last().map(|(_, content)| content.len()),
         Some(4096)
     );
 }

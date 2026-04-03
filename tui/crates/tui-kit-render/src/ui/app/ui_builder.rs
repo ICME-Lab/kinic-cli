@@ -339,34 +339,7 @@ impl<'a> TuiKitUi<'a> {
 
     #[must_use]
     pub fn remove_memory_modal(mut self, value: &'a RemoveMemoryModalState) -> Self {
-        self.remove_memory_open = value.open;
-        self.remove_memory_confirm_yes = value.confirm_yes;
-        self.remove_memory_submit_state = value.submit_state.clone();
-        self.remove_memory_error = value.error.as_deref();
-        self
-    }
-
-    #[must_use]
-    pub fn remove_memory_open(mut self, value: bool) -> Self {
-        self.remove_memory_open = value;
-        self
-    }
-
-    #[must_use]
-    pub fn remove_memory_confirm_yes(mut self, value: bool) -> Self {
-        self.remove_memory_confirm_yes = value;
-        self
-    }
-
-    #[must_use]
-    pub fn remove_memory_submit_state(mut self, value: CreateSubmitState) -> Self {
-        self.remove_memory_submit_state = value;
-        self
-    }
-
-    #[must_use]
-    pub fn remove_memory_error(mut self, value: Option<&'a str>) -> Self {
-        self.remove_memory_error = value;
+        self.remove_memory = value.clone();
         self
     }
 

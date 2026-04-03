@@ -58,3 +58,15 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "kinic-cli"
 path = "rust/cli.rs"
+
+[workspace]
+members = [
+    ".",
+    "tui/crates/tui-kit",
+    "tui/crates/tui-kit-host",
+    "tui/crates/tui-kit-runtime",
+    "tui/crates/tui-kit-model",
+    "tui/crates/tui-kit-render",
+]
+default-members = ["."]
+resolver = "3"
