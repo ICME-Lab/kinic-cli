@@ -136,10 +136,12 @@ impl<'a> ContentPanel<'a> {
         } else if let Some(subtitle) = &content.subtitle {
             lines.push(self.section_header("Description"));
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(subtitle.clone(), self.theme.style_muted()),
-            ]));
+            for line in subtitle.lines() {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(line.to_string(), self.theme.style_normal()),
+                ]));
+            }
         }
 
         if !content.definition.trim().is_empty() {
@@ -350,5 +352,28 @@ mod tests {
 
         assert!(rendered.contains("Description"));
         assert!(rendered.contains("Notes"));
+    }
+
+    #[test]
+    fn memory_description_uses_normal_body_foreground() {
+        let theme = Theme::default();
+        let mut content = item_content("memory-1", UiItemKind::Custom("memory".to_string()));
+        content.subtitle = Some("Notes".to_string());
+
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 60, 20));
+        ContentPanel::new(&theme)
+            .ui_content(Some(&content))
+            .render(ratatui::layout::Rect::new(0, 0, 60, 20), &mut buf);
+
+        let notes_cell = (0..20)
+            .flat_map(|y| (0..60).map(move |x| (x, y)))
+            .find_map(|(x, y)| {
+                buf.cell((x, y))
+                    .filter(|cell| cell.symbol() == "N")
+                    .map(|cell| cell)
+            })
+            .expect("notes cell");
+
+        assert_eq!(notes_cell.fg, theme.fg);
     }
 }

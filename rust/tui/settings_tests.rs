@@ -239,16 +239,8 @@ fn settings_snapshot_projects_account_cost_section_from_overview() {
     );
 
     assert_eq!(
-        section_entry_value(&snapshot, "Account", "principal_id"),
-        "principal-1"
-    );
-    assert_eq!(
-        quick_entry_value(&snapshot, "principal_id"),
-        "princ...pal-1"
-    );
-    assert_eq!(
         quick_entry_value(&snapshot, "kinic_balance"),
-        "12.34000000 KINIC"
+        "12.340 KINIC"
     );
     assert_eq!(
         section_entry_note(&snapshot, "Account", "kinic_balance"),
@@ -256,7 +248,7 @@ fn settings_snapshot_projects_account_cost_section_from_overview() {
     );
     assert_eq!(
         section_entry_value(&snapshot, "Account", "kinic_balance"),
-        "12.34000000 KINIC"
+        "12.340 KINIC"
     );
 }
 

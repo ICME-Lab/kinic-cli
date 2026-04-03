@@ -341,7 +341,7 @@ fn access_principal_span(ui: &TuiKitUi<'_>) -> Span<'static> {
 }
 
 fn access_role_value(ui: &TuiKitUi<'_>) -> String {
-    match ui.access_control_role {
+    match ui.access_control.role {
         AccessControlRole::Admin => "[admin] / writer / reader".to_string(),
         AccessControlRole::Writer => " admin / [writer] / reader".to_string(),
         AccessControlRole::Reader => " admin / writer / [reader]".to_string(),
@@ -349,7 +349,7 @@ fn access_role_value(ui: &TuiKitUi<'_>) -> String {
 }
 
 fn access_field_style(ui: &TuiKitUi<'_>, focus: AccessControlFocus) -> ratatui::style::Style {
-    if ui.access_control_focus == focus {
+    if ui.access_control.focus == focus {
         ui.theme.style_accent_bold()
     } else {
         ui.theme.style_normal()
@@ -374,7 +374,7 @@ fn access_overlay_copy(ui: &TuiKitUi<'_>) -> (&'static str, Vec<Line<'static>>) 
                 Line::from(Span::styled(
                     format!(
                         "Current role: {}",
-                        role_label(ui.access_control_current_role)
+                        role_label(ui.access_control.current_role)
                     ),
                     ui.theme.style_muted(),
                 )),
@@ -446,19 +446,19 @@ fn access_action_line(ui: &TuiKitUi<'_>) -> Line<'static> {
         }
         first = false;
         let label = role_label(role);
-        let style = if role == ui.access_control_current_role {
+        let style = if role == ui.access_control.current_role {
             ui.theme.style_muted()
-        } else if ui.access_control_action == AccessControlAction::Change
-            && ui.access_control_role == role
+        } else if ui.access_control.action == AccessControlAction::Change
+            && ui.access_control.role == role
         {
             ui.theme.style_accent_bold()
         } else {
             ui.theme.style_normal()
         };
-        let text = if role == ui.access_control_current_role {
+        let text = if role == ui.access_control.current_role {
             label.to_string()
-        } else if ui.access_control_action == AccessControlAction::Change
-            && ui.access_control_role == role
+        } else if ui.access_control.action == AccessControlAction::Change
+            && ui.access_control.role == role
         {
             format!("[{label}]")
         } else {
@@ -467,12 +467,12 @@ fn access_action_line(ui: &TuiKitUi<'_>) -> Line<'static> {
         spans.push(Span::styled(text, style));
     }
     spans.push(Span::raw(" / "));
-    let remove_text = if ui.access_control_action == AccessControlAction::Remove {
+    let remove_text = if ui.access_control.action == AccessControlAction::Remove {
         "[remove]".to_string()
     } else {
         "remove".to_string()
     };
-    let remove_style = if ui.access_control_action == AccessControlAction::Remove {
+    let remove_style = if ui.access_control.action == AccessControlAction::Remove {
         ui.theme.style_accent_bold()
     } else {
         ui.theme.style_normal()
@@ -482,7 +482,7 @@ fn access_action_line(ui: &TuiKitUi<'_>) -> Line<'static> {
 }
 
 fn confirm_message(ui: &TuiKitUi<'_>) -> String {
-    match ui.access_control_action {
+    match ui.access_control.action {
         AccessControlAction::Remove => {
             format!("Remove access for {}?", access_principal_value(ui))
         }
@@ -773,7 +773,7 @@ mod tests {
 
         assert!(cfg.lines.iter().any(|line| {
             line
-                == "Insert form: ←/→ switch mode, Enter moves to next mode / opens target picker / browses file / submits"
+                == "Insert form: ←/→ switch mode, Enter moves to next field / opens pickers / browses file / submits"
         }));
     }
 

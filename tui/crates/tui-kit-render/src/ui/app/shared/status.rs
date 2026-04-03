@@ -10,13 +10,20 @@ use ratatui::{
 use tui_kit_runtime::{
     current_form_focus_for_tab, form_shows_horizontal_change_hint,
     kinic_tabs::{KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind},
+    settings_row_behavior_for_index,
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::{Focus, TuiKitUi};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_status(&self, area: Rect, buf: &mut Buffer) {
         let tab_id = self.current_tab_id.0.as_str();
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(self.theme.style_border())
+            .style(Style::default().bg(self.theme.bg_panel));
+        let inner = block.inner(area);
 
         let status_line = if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
             self.form_status_line(tab_id)
@@ -78,6 +85,15 @@ impl<'a> TuiKitUi<'a> {
             Span::styled(icon, self.theme.style_accent()),
             Span::styled(format!(" {}", label), self.theme.style_dim()),
         ]);
+        let suffix_width = line_width(&suffix_spans);
+        let message_width = max_width.saturating_sub(suffix_width);
+        let mut spans = status_message_prefix(
+            &self.status_message,
+            message_width,
+            self.theme.style_string(),
+            self.theme.style_muted(),
+        );
+        spans.extend(suffix_spans);
         Line::from(spans)
     }
 
@@ -129,13 +145,21 @@ impl<'a> TuiKitUi<'a> {
 
     fn placeholder_status_line(&self, tab_id: &str) -> Line<'_> {
         if tab_id == KINIC_SETTINGS_TAB_ID && self.focus == Focus::Content {
+            let enter_hint = self
+                .list_selected
+                .and_then(|index| {
+                    self.settings_snapshot
+                        .and_then(|snapshot| settings_row_behavior_for_index(snapshot, index))
+                })
+                .map(|behavior| behavior.status_hint)
+                .unwrap_or(" open Default memory ");
             return prepend_status_message(
                 self,
                 vec![
                     Span::styled("↑/↓", self.theme.style_accent()),
                     Span::styled(" choose row ", self.theme.style_muted()),
                     Span::styled("Enter", self.theme.style_accent()),
-                    Span::styled(" open Default memory ", self.theme.style_muted()),
+                    Span::styled(enter_hint, self.theme.style_muted()),
                     Span::styled("Esc", self.theme.style_accent()),
                     Span::styled(" tabs ", self.theme.style_muted()),
                     Span::styled("│ ", self.theme.style_dim()),
@@ -315,6 +339,61 @@ fn prepend_status_message<'a>(ui: &'a TuiKitUi<'a>, mut spans: Vec<Span<'a>>) ->
     ];
     prefixed.append(&mut spans);
     Line::from(prefixed)
+}
+
+fn line_width(spans: &[Span<'_>]) -> u16 {
+    spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum::<usize>()
+        .min(u16::MAX as usize) as u16
+}
+
+fn status_message_prefix<'a>(
+    message: &str,
+    max_width: u16,
+    message_style: Style,
+    separator_style: Style,
+) -> Vec<Span<'a>> {
+    if message.is_empty() || max_width == 0 {
+        return Vec::new();
+    }
+
+    let separator = " │ ";
+    let separator_width = UnicodeWidthStr::width(separator).min(u16::MAX as usize) as u16;
+    if max_width <= separator_width {
+        return vec![Span::styled(
+            trim_to_width(message, max_width),
+            message_style,
+        )];
+    }
+
+    vec![
+        Span::styled(
+            format!(
+                " {} ",
+                trim_to_width(message, max_width - separator_width - 2)
+            ),
+            message_style,
+        ),
+        Span::styled(separator, separator_style),
+    ]
+}
+
+fn trim_to_width(value: &str, max_width: u16) -> String {
+    if max_width == 0 || UnicodeWidthStr::width(value) as u16 <= max_width {
+        return value.to_string();
+    }
+
+    let mut trimmed = String::new();
+    for ch in value.chars() {
+        let next = format!("{trimmed}{ch}");
+        if UnicodeWidthStr::width(next.as_str()) as u16 >= max_width.saturating_sub(1) {
+            break;
+        }
+        trimmed.push(ch);
+    }
+    format!("{trimmed}…")
 }
 
 #[cfg(test)]

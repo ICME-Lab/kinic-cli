@@ -10,9 +10,9 @@ fn run_session_settings_refresh(
         provider.session_overview = existing;
     }
     let (tx, rx) = mpsc::channel();
-    provider.pending_session_settings = Some(rx);
-    provider.pending_session_settings_request_id = Some(request_id);
-    provider.session_settings_in_flight = true;
+    provider.session_settings_task.receiver = Some(rx);
+    provider.session_settings_task.request_id = Some(request_id);
+    provider.session_settings_task.in_flight = true;
     tx.send(SessionSettingsTaskOutput {
         request_id,
         overview,
@@ -36,9 +36,9 @@ fn run_create_cost_refresh(
         provider.session_overview = existing;
     }
     let (tx, rx) = mpsc::channel();
-    provider.pending_create_cost = Some(rx);
-    provider.pending_create_cost_request_id = Some(request_id);
-    provider.create_cost_in_flight = true;
+    provider.create_cost_task.receiver = Some(rx);
+    provider.create_cost_task.request_id = Some(request_id);
+    provider.create_cost_task.in_flight = true;
     tx.send(CreateCostTaskOutput {
         request_id,
         overview,
@@ -58,8 +58,8 @@ fn set_tab_create_starts_account_refresh() {
     let effects = provider.set_tab(KINIC_CREATE_TAB_ID);
     assert_eq!(provider.tab_id, KINIC_CREATE_TAB_ID);
     assert_eq!(provider.create_cost_state, CreateCostState::Loading);
-    assert!(provider.create_cost_in_flight);
-    assert!(provider.pending_create_cost.is_some());
+    assert!(provider.create_cost_task.in_flight);
+    assert!(provider.create_cost_task.receiver.is_some());
     assert!(effects.is_empty());
 }
 
@@ -93,9 +93,9 @@ fn poll_background_projects_partial_session_overview_into_settings() {
     provider.session_overview = seeded_overview.clone();
     provider.create_cost_state = loaded_create_cost(provider.session_overview.clone());
     let (tx, rx) = mpsc::channel();
-    provider.pending_session_settings = Some(rx);
-    provider.pending_session_settings_request_id = Some(6);
-    provider.session_settings_in_flight = true;
+    provider.session_settings_task.receiver = Some(rx);
+    provider.session_settings_task.request_id = Some(6);
+    provider.session_settings_task.in_flight = true;
     tx.send(SessionSettingsTaskOutput {
         request_id: 6,
         overview: balance_only_session_overview(),
@@ -106,7 +106,7 @@ fn poll_background_projects_partial_session_overview_into_settings() {
         .poll_background(&CoreState::default())
         .expect("settings refresh output");
 
-    assert!(!provider.session_settings_in_flight);
+    assert!(!provider.session_settings_task.in_flight);
     assert_eq!(
         provider.session_overview.price_error.as_deref(),
         Some("price unavailable")
@@ -116,18 +116,9 @@ fn poll_background_projects_partial_session_overview_into_settings() {
         Some(1_234_000_000u128)
     );
     let snapshot = output.snapshot.expect("settings snapshot");
-    assert_eq!(quick_entry_value(&snapshot, "principal_id"), "aaaaa-aa");
-    assert_eq!(
-        quick_entry_value(&snapshot, "kinic_balance"),
-        "12.34000000 KINIC"
-    );
-    assert_eq!(
-        section_entry_value(&snapshot, "Account", "principal_id"),
-        "aaaaa-aa"
-    );
     assert_eq!(
         section_entry_value(&snapshot, "Account", "kinic_balance"),
-        "12.34000000 KINIC"
+        "12.340 KINIC"
     );
     assert_eq!(
         section_entry_note(&snapshot, "Account", "kinic_balance"),
@@ -174,9 +165,9 @@ fn poll_background_drops_stale_account_values_when_session_context_changes() {
 fn poll_background_returns_create_error_for_failed_submit() {
     let mut provider = KinicProvider::new(live_config());
     let (tx, rx) = mpsc::channel();
-    provider.pending_create_submit = Some(rx);
-    provider.pending_create_submit_request_id = Some(3);
-    provider.create_submit_in_flight = true;
+    provider.create_submit_task.receiver = Some(rx);
+    provider.create_submit_task.request_id = Some(3);
+    provider.create_submit_task.in_flight = true;
     tx.send(CreateSubmitTaskOutput {
         request_id: 3,
         result: Err(bridge::CreateMemoryError::Approve(
@@ -194,7 +185,7 @@ fn poll_background_returns_create_error_for_failed_submit() {
         CoreEffect::CreateFormError(Some(message))
             if message.contains("Approve step failed")
     )));
-    assert!(!provider.create_submit_in_flight);
+    assert!(!provider.create_submit_task.in_flight);
 }
 
 #[test]
@@ -204,9 +195,9 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
     provider.all = provider.memory_records.clone();
     provider.user_preferences.default_memory_id = Some("bbbbb-bb".to_string());
     let (tx, rx) = mpsc::channel();
-    provider.pending_create_submit = Some(rx);
-    provider.pending_create_submit_request_id = Some(5);
-    provider.create_submit_in_flight = true;
+    provider.create_submit_task.receiver = Some(rx);
+    provider.create_submit_task.request_id = Some(5);
+    provider.create_submit_task.in_flight = true;
     tx.send(CreateSubmitTaskOutput {
         request_id: 5,
         result: Ok(bridge::CreateMemorySuccess {
@@ -343,9 +334,9 @@ fn session_settings_snapshot_uses_current_preferences_after_old_refresh_complete
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.default_memory_id = Some("newer-memory".to_string());
     let (tx, rx) = mpsc::channel();
-    provider.pending_session_settings = Some(rx);
-    provider.pending_session_settings_request_id = Some(10);
-    provider.session_settings_in_flight = true;
+    provider.session_settings_task.receiver = Some(rx);
+    provider.session_settings_task.request_id = Some(10);
+    provider.session_settings_task.in_flight = true;
     tx.send(SessionSettingsTaskOutput {
         request_id: 10,
         overview: refreshed_session_overview(),

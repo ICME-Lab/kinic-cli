@@ -170,6 +170,9 @@ struct SearchTaskOutput {
     result: Result<SearchBatchResult, String>,
 }
 
+/// In-flight memory search with explicit cancellation. Kept separate from
+/// `RequestTaskState` because workers use `CancellationToken` and batching
+/// differs from other request/response tasks.
 struct PendingSearch {
     receiver: mpsc::Receiver<SearchTaskOutput>,
     cancellation: CancellationToken,
@@ -841,7 +844,24 @@ impl KinicProvider {
         let users = self
             .active_memory_summary()
             .and_then(|summary| summary.users.as_ref());
-        section.body_lines = render_access_lines(users, state.access_list_index);
+        section.body_lines = render_access_lines(users, state.memory_content_action_index, false);
+
+        content
+            .sections
+            .retain(|section| section.heading != "Actions");
+        if self.active_memory_is_manual() {
+            let user_count = users.map_or(0, Vec::len);
+            let action_index = user_count + 1;
+            let selected = state.memory_content_action_index.min(action_index) == action_index;
+            content.sections.push(tui_kit_model::UiSection {
+                heading: "Actions".to_string(),
+                rows: Vec::new(),
+                body_lines: vec![format!(
+                    "{} Remove from list",
+                    if selected { ">" } else { " " }
+                )],
+            });
+        }
     }
 
     fn selected_insert_memory_id(&self, state: &CoreState) -> Option<String> {
@@ -896,6 +916,7 @@ impl KinicProvider {
     }
 
     fn refresh_memory_records_from_summaries(&mut self) {
+        self.normalize_memory_summaries();
         self.memory_records = self
             .memory_summaries
             .iter()
@@ -975,9 +996,9 @@ impl KinicProvider {
                     default_memory,
                     &self.user_preferences,
                 );
-                let preferred_selected_id = selected_id
-                    .clone()
-                    .or_else(|| picker_selected_id_for_context(*context, state));
+                let preferred_selected_id = selected_id.clone().or_else(|| {
+                    picker_selected_id_for_context(*context, state, &self.user_preferences)
+                });
                 let resolved_index = picker_selected_index(
                     &items,
                     preferred_selected_id.as_deref(),
@@ -1008,7 +1029,7 @@ impl KinicProvider {
                 }
             }
         };
-        let items = filtered
+        let mut items = filtered
             .iter()
             .map(|record| {
                 let mut summary = adapter::to_summary(record);
@@ -1518,22 +1539,6 @@ impl KinicProvider {
         validate_insert_request_for_submit(&request).map_err(|error| error.to_string())
     }
 
-    fn invalidate_pending_create_cost(&mut self) {
-        self.pending_create_cost_request_id = None;
-    }
-
-    fn invalidate_pending_create_submit(&mut self) {
-        self.pending_create_submit_request_id = None;
-    }
-
-    fn invalidate_pending_session_settings(&mut self) {
-        self.pending_session_settings_request_id = None;
-    }
-
-    fn invalidate_pending_insert_submit(&mut self) {
-        self.pending_insert_submit_request_id = None;
-    }
-
     fn validate_insert_expected_dim(
         &self,
         request: &InsertRequest,
@@ -1728,12 +1733,12 @@ impl KinicProvider {
         &self,
         state: &CoreState,
     ) -> Result<(String, AccessControlAction, String, AccessControlRole), String> {
-        let memory_id = state.access_control_memory_id.trim();
+        let memory_id = state.access_control.memory_id.trim();
         if memory_id.is_empty() {
             return Err("Select a memory before managing access.".to_string());
         }
 
-        let principal_id = state.access_control_principal_id.trim();
+        let principal_id = state.access_control.principal_id.trim();
         if principal_id.is_empty() {
             return Err("Principal ID is required.".to_string());
         }
@@ -1747,8 +1752,8 @@ impl KinicProvider {
                 .map_err(|_| format!("Invalid principal text: {principal_id}"))?;
         }
 
-        let action = state.access_control_action;
-        let role = state.access_control_role;
+        let action = state.access_control.action;
+        let role = state.access_control.role;
         if action != AccessControlAction::Remove
             && role == AccessControlRole::Admin
             && principal_id == "anonymous"
@@ -2334,10 +2339,7 @@ impl KinicProvider {
             ))],
         };
 
-        Some(ProviderOutput {
-            snapshot: Some(self.build_snapshot(state)),
-            effects,
-        })
+        Some(self.snapshot_output(state, effects))
     }
 
     fn reset_memories_browser(&mut self) {
@@ -2524,7 +2526,7 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::CreateFormError(Some(
                         "Name and description are required.".to_string(),
                     )));
-                } else if self.create_submit_in_flight {
+                } else if self.create_submit_task.in_flight {
                     effects.push(CoreEffect::Notify(
                         "Create request already running.".to_string(),
                     ));
@@ -2538,7 +2540,7 @@ impl DataProvider for KinicProvider {
                     effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if let Err(error) = self.validate_insert_expected_dim(&request, state) {
                     effects.push(CoreEffect::InsertFormError(Some(error)));
-                } else if self.insert_submit_in_flight {
+                } else if self.insert_submit_task.in_flight {
                     effects.push(CoreEffect::Notify(
                         "Insert request already running.".to_string(),
                     ));
@@ -2812,7 +2814,7 @@ fn render_access_lines(
     }
 
     for (index, user) in user_list.iter().enumerate() {
-        let marker = if selected_index.min(user_list.len()) == index {
+        let marker = if selected_index.min(remove_index) == index {
             ">"
         } else {
             " "
@@ -2824,7 +2826,7 @@ fn render_access_lines(
         ));
     }
 
-    let add_marker = if selected_index.min(user_list.len()) == user_list.len() {
+    let add_marker = if selected_index.min(remove_index) == add_user_index {
         ">"
     } else {
         " "

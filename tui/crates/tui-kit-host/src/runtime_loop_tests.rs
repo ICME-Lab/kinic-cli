@@ -20,6 +20,12 @@ impl TestProvider {
             result: Err(CoreError::new(message)),
         }
     }
+
+    fn ok() -> Self {
+        Self {
+            result: Ok(ProviderOutput::default()),
+        }
+    }
 }
 
 impl DataProvider for TestProvider {

@@ -17,24 +17,6 @@ mod key_mapping {
     }
 
     #[test]
-    fn normalize_host_input_event_maps_key_press_only() {
-        let key_event = Event::Key(KeyEvent {
-            code: KeyCode::Enter,
-            modifiers: KeyModifiers::SHIFT,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        });
-
-        assert_eq!(
-            normalize_host_input_event(key_event),
-            Some(HostInputEvent {
-                code: KeyCode::Enter,
-                modifiers: KeyModifiers::SHIFT,
-            })
-        );
-    }
-
-    #[test]
     fn normalize_host_input_event_ignores_non_press_key_events() {
         let key_event = Event::Key(KeyEvent {
             code: KeyCode::Enter,

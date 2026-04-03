@@ -63,11 +63,11 @@ fn memory_content(record: &KinicRecord) -> UiItemContent {
     let content_text = section_body(&record.content_md, "### Content");
     let user_lines = memory_user_lines(&section_body(&record.content_md, "### Users"));
     let name = metadata_value(record, "- Name:");
-    let description = row_value(&record.content_md, "- Description:");
+    let description = description_value(&record.content_md);
 
     UiItemContent {
         id: record.id.clone(),
-        title: name,
+        title: name.clone(),
         subtitle: description,
         kind: summary_kind(record),
         definition: String::new(),
@@ -78,6 +78,10 @@ fn memory_content(record: &KinicRecord) -> UiItemContent {
             UiSection {
                 heading: "Overview".to_string(),
                 rows: vec![
+                    UiRow {
+                        label: "Name".to_string(),
+                        value: name.clone(),
+                    },
                     UiRow {
                         label: "Status".to_string(),
                         value: summary_value(&record.summary),
@@ -402,7 +406,7 @@ mod tests {
             "2chl6-4hpzw-vqaaa-aaaaa-c",
             "memories",
             "Status: running",
-            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description: `Project notes`\n- Version: `1.0.0`\n- Owners: `aaaaa-aa, bbbbb-bb`\n- Dimension: `768`\n- Stable Memory Size: `2,048`\n- Cycle Amount: `1.235T`\n\n### Content\nready\n\n### Search\nsearch help\n\n### Users\n- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer\n".to_string(),
+            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description:\n  Project notes\n  second line\n- Version: `1.0.0`\n- Owners: `aaaaa-aa, bbbbb-bb`\n- Dimension: `768`\n- Stable Memory Size: `2,048`\n- Cycle Amount: `1.235T`\n\n### Content\nready\n\n### Search\nsearch help\n\n### Users\n- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer\n".to_string(),
         );
 
         let content = memory_content(&record);
@@ -429,7 +433,16 @@ mod tests {
         );
 
         assert_eq!(content.title, "Alpha");
-        assert_eq!(content.subtitle.as_deref(), Some("Project notes"));
+        assert_eq!(
+            content.subtitle.as_deref(),
+            Some("Project notes\nsecond line")
+        );
+        assert!(
+            overview
+                .rows
+                .iter()
+                .any(|row| row.label == "Name" && row.value == "Alpha")
+        );
         assert!(
             overview
                 .rows

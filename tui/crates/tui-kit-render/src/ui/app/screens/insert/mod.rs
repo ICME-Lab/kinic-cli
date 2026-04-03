@@ -14,6 +14,8 @@ use crate::ui::app::{Focus, TuiKitUi, shared};
 
 use super::{FormRows, submit_button_text};
 
+const INSERT_TEXT_HEIGHT: u16 = 5;
+
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_insert_screen(&self, area: Rect, buf: &mut Buffer) {
         let layout = insert_layout(area, !self.tab_specs.is_empty());
@@ -60,6 +62,11 @@ fn insert_layout(area: Rect, has_tabs: bool) -> InsertLayout {
 struct InsertForm<'a> {
     lines: Vec<Line<'a>>,
     rows: FormRows<InsertFormFocus>,
+}
+
+struct VisibleMultilineRows {
+    rows: Vec<String>,
+    scroll_row: usize,
 }
 
 impl InsertForm<'_> {
@@ -256,12 +263,23 @@ fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
 }
 
 fn mode_value(mode: InsertMode) -> String {
-    let (file, text, embedding) = match mode {
-        InsertMode::File => ("[File]", " Inline Text ", " Manual Embedding "),
-        InsertMode::InlineText => (" File ", "[Inline Text]", " Manual Embedding "),
-        InsertMode::ManualEmbedding => (" File ", " Inline Text ", "[Manual Embedding]"),
-    };
-    format!("{file} / {text} / {embedding}")
+    let labels = [
+        mode_segment("File", matches!(mode, InsertMode::File)),
+        mode_segment("Inline Text", matches!(mode, InsertMode::InlineText)),
+        mode_segment(
+            "Manual Embedding",
+            matches!(mode, InsertMode::ManualEmbedding),
+        ),
+    ];
+    labels.join(" / ")
+}
+
+fn mode_segment(label: &str, selected: bool) -> String {
+    if selected {
+        format!("[{label}]")
+    } else {
+        label.to_string()
+    }
 }
 
 fn text_label<'a>(ui: &'a TuiKitUi<'a>) -> &'a str {

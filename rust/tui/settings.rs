@@ -274,6 +274,18 @@ fn format_kinic_value(value: &str) -> String {
     format!("{value} KINIC")
 }
 
+/// Shortens the fractional part of a KINIC amount string for compact UI (up to three digits,
+/// truncation not rounding). Full precision strings come from `format_e8s_to_kinic_string_*`.
+fn truncate_kinic_fraction_to_three_digits(value: String) -> String {
+    match value.split_once('.') {
+        Some((whole, fraction)) => {
+            let limited = &fraction[..fraction.len().min(3)];
+            format!("{whole}.{limited}")
+        }
+        None => value,
+    }
+}
+
 fn preferences_status_label(health: &PreferencesHealth) -> String {
     match (&health.load_error, &health.save_error) {
         (Some(_), _) => "preferences unavailable".to_string(),

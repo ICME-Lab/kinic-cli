@@ -169,7 +169,17 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
             "scenario: {scenario}"
         );
 
-        assert!(provider.poll_background(&CoreState::default()).is_none());
+        // Query / selection changes can start a memory-detail fetch; `poll_background` runs that
+        // poller before search. Drain any immediate completions so we assert the provider is idle,
+        // not that no other background work exists.
+        let mut drain_steps = 0;
+        while provider.poll_background(&CoreState::default()).is_some() {
+            drain_steps += 1;
+            assert!(
+                drain_steps < 32,
+                "scenario: {scenario}: poll_background should quiesce"
+            );
+        }
         assert!(cancellation.is_cancelled(), "scenario: {scenario}");
         assert!(provider.pending_search.is_none(), "scenario: {scenario}");
     }

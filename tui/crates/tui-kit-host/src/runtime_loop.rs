@@ -205,7 +205,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             let Some(input) = poll_host_input(poll_duration)? else {
                 continue;
             };
-            let HostInputEvent { code, modifiers } = input;
+            let HostInputEvent {
+                key_event,
+                code,
+                modifiers,
+            } = input;
 
             match handle_overlay_input(provider, &mut state, show_settings, code, modifiers) {
                 OverlayInputResult::NotHandled => {}
@@ -336,14 +340,12 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             }
 
             let action = form_tab_action_from_key(code, &mut state).or_else(|| {
-                if code == crossterm::event::KeyCode::Enter
-                    && should_open_default_memory_picker(&state)
-                {
-                    return Some(CoreAction::OpenPicker(PickerContext::DefaultMemory));
-                }
-                if code == crossterm::event::KeyCode::Enter && should_open_saved_tags_picker(&state)
-                {
-                    return Some(CoreAction::OpenPicker(PickerContext::TagManagement));
+                if code == crossterm::event::KeyCode::Enter {
+                    if let Some(action) = selected_settings_row_behavior(&state)
+                        .and_then(|behavior| behavior.enter_action)
+                    {
+                        return Some(action);
+                    }
                 }
                 action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
                     |a| {
@@ -409,7 +411,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 && hooks.on_unhandled_input(
                     provider,
                     &mut state,
-                    HostInputEvent { code, modifiers },
+                    HostInputEvent {
+                        key_event,
+                        code,
+                        modifiers,
+                    },
                 )
             {
                 continue;

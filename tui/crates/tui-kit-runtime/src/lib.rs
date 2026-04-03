@@ -355,6 +355,9 @@ impl SessionAccountOverview {
         if let Some(error) = &self.balance_error {
             messages.push(format!("Could not fetch KINIC balance. Cause: {error}"));
         }
+        if let Some(error) = &self.fee_error {
+            messages.push(format!("Could not fetch ledger fee. Cause: {error}"));
+        }
         if let Some(error) = &self.price_error {
             messages.push(format!("Could not fetch create price. Cause: {error}"));
         }
@@ -697,6 +700,7 @@ pub enum CoreEffect {
     /// Apply a selector-picked insert tag without routing it through text input.
     SetInsertTag(String),
     SetAccessListIndex(usize),
+    SetMemoryContentActionIndex(usize),
     OpenAccessAction {
         memory_id: String,
         principal_id: String,
@@ -1142,7 +1146,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 state.selected_index = None;
             } else {
                 let idx = state.selected_index.unwrap_or(0);
-                state.selected_index = Some((idx + 1).min(len - 1));
+                state.selected_index = Some(if idx + 1 >= len { 0 } else { idx + 1 });
             }
         }
         CoreAction::MovePrev => {
@@ -1151,7 +1155,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 state.selected_index = None;
             } else {
                 let idx = state.selected_index.unwrap_or(0);
-                state.selected_index = Some(idx.saturating_sub(1));
+                state.selected_index = Some(if idx == 0 { len - 1 } else { idx - 1 });
             }
         }
         CoreAction::MoveHome => {
@@ -1442,21 +1446,11 @@ fn access_control_focus_order() -> &'static [AccessControlFocus] {
 }
 
 fn next_access_control_focus(focus: AccessControlFocus) -> AccessControlFocus {
-    let order = access_control_focus_order();
-    let current = order
-        .iter()
-        .position(|candidate| *candidate == focus)
-        .unwrap_or(0);
-    order[(current + 1) % order.len()]
+    next_in_cycle(focus, access_control_focus_order())
 }
 
 fn prev_access_control_focus(focus: AccessControlFocus) -> AccessControlFocus {
-    let order = access_control_focus_order();
-    let current = order
-        .iter()
-        .position(|candidate| *candidate == focus)
-        .unwrap_or(0);
-    order[(current + order.len() - 1) % order.len()]
+    prev_in_cycle(focus, access_control_focus_order())
 }
 
 fn next_access_control_selection(
@@ -1580,6 +1574,14 @@ pub fn dispatch_action(
 
 /// Shared focus-aware keymap from abstract keys to core actions.
 pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> Option<CoreAction> {
+    if focus == PaneFocus::Content && current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+        match key {
+            CoreKey::Tab => return Some(CoreAction::MemoryContentJumpNext),
+            CoreKey::BackTab => return Some(CoreAction::MemoryContentJumpPrev),
+            _ => {}
+        }
+    }
+
     if focus == PaneFocus::Tabs {
         return match key {
             CoreKey::Up | CoreKey::Left => Some(CoreAction::SelectPrevTab),
@@ -1641,13 +1643,13 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             PaneFocus::Content => match key {
                 CoreKey::Enter if is_settings_content(current_tab_id, PaneFocus::Content) => None,
                 CoreKey::Enter if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
-                    Some(CoreAction::AccessOpenSelected)
+                    Some(CoreAction::MemoryContentOpenSelected)
                 }
                 CoreKey::Down if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
-                    Some(CoreAction::AccessMoveNext)
+                    Some(CoreAction::MemoryContentMoveNext)
                 }
                 CoreKey::Up if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
-                    Some(CoreAction::AccessMovePrev)
+                    Some(CoreAction::MemoryContentMovePrev)
                 }
                 CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
                 _ if is_settings_content(current_tab_id, PaneFocus::Content) => {
@@ -1770,16 +1772,6 @@ fn settings_content_action_for_key(key: CoreKey) -> Option<CoreAction> {
         CoreKey::End | CoreKey::Char('G') => Some(CoreAction::MoveEnd),
         _ => None,
     }
-}
-
-pub fn should_open_saved_tags_picker(state: &CoreState) -> bool {
-    state.current_tab_id == kinic_tabs::KINIC_SETTINGS_TAB_ID
-        && state.focus == PaneFocus::Content
-        && state
-            .selected_index
-            .and_then(|index| settings_entry(&state.settings, index))
-            .map(|entry| entry.id.as_str())
-            == Some("saved_tags")
 }
 
 fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerState {
@@ -2377,6 +2369,26 @@ mod tests {
     }
 
     #[test]
+    fn memories_content_tab_jumps_within_detail_actions() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Tab,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::MemoryContentJumpNext)
+        );
+        assert_eq!(
+            action_for_key(
+                CoreKey::BackTab,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
+            ),
+            Some(CoreAction::MemoryContentJumpPrev)
+        );
+    }
+
+    #[test]
     fn items_jk_no_longer_move_selection() {
         assert_eq!(
             action_for_key(
@@ -2762,6 +2774,9 @@ mod tests {
         assert_eq!(state.selected_index, Some(2));
 
         apply_core_action(&mut state, &CoreAction::MoveNext);
+        assert_eq!(state.selected_index, Some(0));
+
+        apply_core_action(&mut state, &CoreAction::MovePrev);
         assert_eq!(state.selected_index, Some(2));
 
         state.selected_index = Some(0);

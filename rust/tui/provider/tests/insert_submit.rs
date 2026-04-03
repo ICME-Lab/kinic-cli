@@ -236,7 +236,7 @@ fn insert_submit_rejects_existing_pdf_submit_after_validation() {
         .handle_action(&CoreAction::InsertSubmit, &file_insert_state(&file_path))
         .expect("insert submit should succeed");
 
-    assert!(provider.insert_submit_in_flight);
+    assert!(provider.insert_submit_task.in_flight);
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::Notify(message) if message == "Submitting insert request..."
@@ -337,9 +337,9 @@ fn poll_insert_submit_background_resets_form_and_notifies_on_success() {
     let mut provider = KinicProvider::new(live_config());
     let (tx, rx) = std::sync::mpsc::channel();
     let request_id = 7;
-    provider.pending_insert_submit = Some(rx);
-    provider.pending_insert_submit_request_id = Some(request_id);
-    provider.insert_submit_in_flight = true;
+    provider.insert_submit_task.receiver = Some(rx);
+    provider.insert_submit_task.request_id = Some(request_id);
+    provider.insert_submit_task.in_flight = true;
     tx.send(InsertSubmitTaskOutput {
         request_id,
         result: Ok(bridge::InsertMemorySuccess {
@@ -369,9 +369,9 @@ fn poll_insert_submit_background_resets_form_and_notifies_on_success() {
 fn insert_success_status_emits_persistent_notify() {
     let mut provider = KinicProvider::new(live_config());
     let (tx, rx) = std::sync::mpsc::channel();
-    provider.pending_insert_submit = Some(rx);
-    provider.pending_insert_submit_request_id = Some(1);
-    provider.insert_submit_in_flight = true;
+    provider.insert_submit_task.receiver = Some(rx);
+    provider.insert_submit_task.request_id = Some(1);
+    provider.insert_submit_task.in_flight = true;
     tx.send(InsertSubmitTaskOutput {
         request_id: 1,
         result: Ok(bridge::InsertMemorySuccess {
@@ -397,7 +397,7 @@ fn insert_success_status_emits_persistent_notify() {
 #[test]
 fn insert_submit_reports_in_flight_insert_requests() {
     let mut provider = KinicProvider::new(live_config());
-    provider.insert_submit_in_flight = true;
+    provider.insert_submit_task.in_flight = true;
 
     let output = provider
         .handle_action(
