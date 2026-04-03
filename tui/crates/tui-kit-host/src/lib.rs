@@ -4,9 +4,7 @@ pub mod runtime_loop;
 pub mod settings;
 pub mod terminal;
 
-use crossterm::event::{
-    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
-};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::time::Duration;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateCostState, CreateModalFocus,
@@ -18,15 +16,9 @@ pub const DEFAULT_TAB_IDS: [&str; 4] = ["tab-1", "tab-2", "tab-3", "tab-4"];
 
 /// Host-level normalized input event used by app loops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HostInputEvent {
-    KeyPress {
-        code: KeyCode,
-        modifiers: KeyModifiers,
-    },
-    MouseLeftDown {
-        column: u16,
-        row: u16,
-    },
+pub struct HostInputEvent {
+    pub code: KeyCode,
+    pub modifiers: KeyModifiers,
 }
 
 /// Poll and normalize crossterm events for host loops.
@@ -34,20 +26,17 @@ pub fn poll_host_input(timeout: Duration) -> std::io::Result<Option<HostInputEve
     if !event::poll(timeout)? {
         return Ok(None);
     }
-    let ev = match event::read()? {
-        Event::Key(key) if key.kind == KeyEventKind::Press => Some(HostInputEvent::KeyPress {
+    Ok(normalize_host_input_event(event::read()?))
+}
+
+fn normalize_host_input_event(event: Event) -> Option<HostInputEvent> {
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => Some(HostInputEvent {
             code: key.code,
             modifiers: key.modifiers,
         }),
-        Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) => {
-            Some(HostInputEvent::MouseLeftDown {
-                column: mouse.column,
-                row: mouse.row,
-            })
-        }
         _ => None,
-    };
-    Ok(ev)
+    }
 }
 
 /// Convert crossterm key codes into runtime-agnostic core keys.
@@ -247,7 +236,7 @@ pub fn global_command_for_key(
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateTab;
     }
-    if code == KeyCode::F(5) && modifiers.is_empty() {
+    if code == KeyCode::Char('r') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::RefreshCurrentView;
     }
     if code == KeyCode::Esc {
@@ -272,11 +261,22 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
     for effect in effects {
         match effect {
             CoreEffect::Notify(message) => {
+                state.persistent_status_message = None;
+                state.status_message = Some(message);
+            }
+            CoreEffect::NotifyPersistent(message) => {
+                state.persistent_status_message = Some(message.clone());
                 state.status_message = Some(message);
             }
             CoreEffect::OpenExternal(url) => match open_external(&url) {
-                Ok(()) => state.status_message = Some(format!("Opened: {url}")),
-                Err(e) => state.status_message = Some(format!("Failed to open URL: {url} ({e})")),
+                Ok(()) => {
+                    state.persistent_status_message = None;
+                    state.status_message = Some(format!("Opened: {url}"));
+                }
+                Err(e) => {
+                    state.persistent_status_message = None;
+                    state.status_message = Some(format!("Failed to open URL: {url} ({e})"));
+                }
             },
             CoreEffect::RequestRefresh => {}
             CoreEffect::CreateFormError(message) => {
@@ -292,6 +292,14 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                     };
                 }
                 state.create_error = message.clone();
+            }
+            CoreEffect::InsertFormError(message) => {
+                state.insert_submit_state = if message.is_some() {
+                    CreateSubmitState::Error
+                } else {
+                    CreateSubmitState::Idle
+                };
+                state.insert_error = message.clone();
             }
             CoreEffect::SelectFirstListItem => {
                 state.selected_index = if state.list_items.is_empty() {
@@ -323,7 +331,23 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.create_error = None;
                 state.create_focus = CreateModalFocus::Name;
             }
+            CoreEffect::ResetInsertFormForRepeat => {
+                state.insert_text.clear();
+                state.insert_file_path_input.clear();
+                state.insert_selected_file_path = None;
+                state.insert_embedding.clear();
+                state.insert_submit_state = CreateSubmitState::Idle;
+                state.insert_spinner_frame = 0;
+                state.insert_error = None;
+            }
+            CoreEffect::SetInsertMemoryId(memory_id) => {
+                state.insert_memory_id = memory_id.clone();
+                state.insert_memory_placeholder = None;
+                state.default_memory_selector_selected_id = Some(memory_id);
+                state.insert_error = None;
+            }
             CoreEffect::Custom { id, payload } => {
+                state.persistent_status_message = None;
                 state.status_message = Some(match payload {
                     Some(p) => format!("Custom effect: {id} ({p})"),
                     None => format!("Custom effect: {id}"),

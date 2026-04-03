@@ -1,11 +1,109 @@
 use super::*;
-use tui_kit_runtime::CoreState;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
 };
+use tui_kit_runtime::{CoreState, ProviderSnapshot, apply_snapshot};
+
+mod key_mapping {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState};
+
+    #[test]
+    fn action_from_keycode_maps_search_input() {
+        assert_eq!(
+            action_from_keycode(KeyCode::Char('x'), PaneFocus::Search, KINIC_MEMORIES_TAB_ID),
+            Some(CoreAction::SearchInput('x'))
+        );
+    }
+
+    #[test]
+    fn normalize_host_input_event_maps_key_press_only() {
+        let key_event = Event::Key(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::SHIFT,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        });
+
+        assert_eq!(
+            normalize_host_input_event(key_event),
+            Some(HostInputEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::SHIFT,
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_host_input_event_ignores_non_press_key_events() {
+        let key_event = Event::Key(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        });
+
+        assert_eq!(normalize_host_input_event(key_event), None);
+    }
+}
+
+mod tab_resolution {
+    use super::*;
+
+    #[test]
+    fn resolve_tab_action_uses_host_and_default_ids() {
+        let host_mapped = resolve_tab_action(CoreAction::SelectTabIndex(1), &["a", "b", "c"]);
+        let default_mapped = resolve_tab_action(CoreAction::SelectTabIndex(2), &[]);
+
+        assert_eq!(host_mapped, Some(CoreAction::SetTab(CoreTabId::new("b"))));
+        assert_eq!(
+            default_mapped,
+            Some(CoreAction::SetTab(CoreTabId::new("tab-3")))
+        );
+    }
+}
 
 mod effect_application {
     use super::*;
+
+    #[test]
+    fn execute_effects_updates_status_message() {
+        let mut state = CoreState::default();
+        execute_effects_to_status(&mut state, vec![CoreEffect::Notify("hello".to_string())]);
+        assert_eq!(state.status_message.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn persistent_notify_survives_snapshot_until_cleared() {
+        let mut state = CoreState::default();
+        execute_effects_to_status(
+            &mut state,
+            vec![CoreEffect::NotifyPersistent("done".to_string())],
+        );
+        assert_eq!(state.status_message.as_deref(), Some("done"));
+        assert_eq!(state.persistent_status_message.as_deref(), Some("done"));
+
+        apply_snapshot(
+            &mut state,
+            ProviderSnapshot {
+                status_message: Some("generic".to_string()),
+                ..ProviderSnapshot::default()
+            },
+        );
+        assert_eq!(state.status_message.as_deref(), Some("done"));
+
+        state.persistent_status_message = None;
+        assert_eq!(state.persistent_status_message, None);
+
+        apply_snapshot(
+            &mut state,
+            ProviderSnapshot {
+                status_message: Some("generic".to_string()),
+                ..ProviderSnapshot::default()
+            },
+        );
+        assert_eq!(state.status_message.as_deref(), Some("generic"));
+    }
 
     #[test]
     fn execute_effects_sets_memories_tab() {
@@ -58,6 +156,28 @@ mod effect_application {
 
         assert_eq!(state.focus, PaneFocus::Form);
     }
+
+    #[test]
+    fn set_insert_memory_id_effect_updates_insert_target() {
+        let mut state = CoreState {
+            insert_memory_id: "aaaaa-aa".to_string(),
+            insert_error: Some("boom".to_string()),
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(
+            &mut state,
+            vec![CoreEffect::SetInsertMemoryId("bbbbb-bb".to_string())],
+        );
+
+        assert_eq!(state.insert_memory_id, "bbbbb-bb");
+        assert_eq!(
+            state.default_memory_selector_selected_id.as_deref(),
+            Some("bbbbb-bb")
+        );
+        assert_eq!(state.insert_memory_placeholder, None);
+        assert_eq!(state.insert_error, None);
+    }
 }
 
 mod global_commands {
@@ -83,8 +203,8 @@ mod global_commands {
                 HostGlobalCommand::OpenCreateTab,
             ),
             (
-                KeyCode::F(5),
-                KeyModifiers::NONE,
+                KeyCode::Char('r'),
+                KeyModifiers::CONTROL,
                 PaneFocus::Items,
                 KINIC_MEMORIES_TAB_ID,
                 true,

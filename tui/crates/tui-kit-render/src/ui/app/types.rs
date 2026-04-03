@@ -25,6 +25,7 @@ pub struct UiConfig {
     pub branding: BrandingText,
     pub header: HeaderText,
     pub chat: ChatPanelText,
+    pub insert: InsertScreenText,
     pub create: CreateOverlayText,
     pub settings: SettingsOverlayText,
     pub help: HelpOverlayText,
@@ -82,6 +83,22 @@ pub struct CreateOverlayText {
     pub error_prefix: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InsertScreenText {
+    pub title: String,
+    pub intro_description: String,
+    pub mode_label: String,
+    pub memory_id_label: String,
+    pub tag_label: String,
+    pub text_label: String,
+    pub payload_text_label: String,
+    pub file_path_label: String,
+    pub embedding_label: String,
+    pub submit_label: String,
+    pub submit_pending_label: String,
+    pub mode_help: String,
+}
+
 /// Settings overlay text configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsOverlayText {
@@ -105,8 +122,25 @@ pub struct StatusText {
     pub quit_label: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InsertFormCopy {
+    pub mode_help: &'static str,
+    pub help_line: &'static str,
+    pub status_enter_hint: &'static str,
+}
+
+pub(crate) fn insert_form_copy() -> InsertFormCopy {
+    InsertFormCopy {
+        mode_help: "File: .md/.markdown/.mdx/.txt/.json/.yaml/.yml/.csv/.log/.pdf\nInline Text: plain text\nManual Embedding: text + embedding JSON",
+        help_line:
+            "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / browses file / submits",
+        status_enter_hint: " cycle/picker/file/submit ",
+    }
+}
+
 impl Default for UiConfig {
     fn default() -> Self {
+        let insert_form_copy = insert_form_copy();
         Self {
             tabs: default_tab_specs(),
             branding: BrandingText {
@@ -125,6 +159,22 @@ impl Default for UiConfig {
                 loading_hint: "  … Assistant is thinking…".to_string(),
                 input_placeholder: "Ask about this item… (Enter to send, Esc to close)".to_string(),
             },
+            insert: InsertScreenText {
+                title: "Insert Memory Content".to_string(),
+                intro_description:
+                    "Insert files, inline text, or raw embeddings without leaving the tab view."
+                        .to_string(),
+                mode_label: "Mode".to_string(),
+                memory_id_label: "Memory ID".to_string(),
+                tag_label: "Tag".to_string(),
+                text_label: "Inline Text".to_string(),
+                payload_text_label: "Payload Text".to_string(),
+                file_path_label: "File Path".to_string(),
+                embedding_label: "Embedding JSON".to_string(),
+                submit_label: "Insert".to_string(),
+                submit_pending_label: "Inserting...".to_string(),
+                mode_help: insert_form_copy.mode_help.to_string(),
+            },
             create: CreateOverlayText {
                 title: "Create Memory".to_string(),
                 intro_description: "Provision a new memory canister without leaving the tab view."
@@ -141,7 +191,7 @@ impl Default for UiConfig {
                     "Tabs focused. Press Enter or Tab to edit from Name, or Esc for Memories."
                         .to_string(),
                 close_hint:
-                    "Tab: cycle fields, Enter: submit, F5: refresh account info, Esc: back to tab focus"
+                    "Tab: cycle fields, Enter: submit, Ctrl-R: refresh account info, Esc: back to tab focus"
                         .to_string(),
                 account_title: "Account & Cost".to_string(),
                 loading_message: "Loading account info...".to_string(),
@@ -151,7 +201,8 @@ impl Default for UiConfig {
                 status_label: "Status".to_string(),
                 status_ready_label: "Ready to create".to_string(),
                 status_insufficient_label: "Insufficient balance".to_string(),
-                unavailable_message: "Live account info unavailable in mock mode.".to_string(),
+                unavailable_message: "Live account info is currently unavailable."
+                    .to_string(),
                 error_prefix: "Account info error".to_string(),
             },
             settings: SettingsOverlayText {
@@ -163,9 +214,10 @@ impl Default for UiConfig {
                 lines: vec![
                     "Tab: enter selected tab or move focus, Shift+Tab: previous focus"
                         .to_string(),
+                    insert_form_copy.help_line.to_string(),
                     "/: focus search".to_string(),
                     "Esc: back / clear / close".to_string(),
-                    "F5: refresh current view".to_string(),
+                    "Ctrl-R: refresh current view".to_string(),
                     "↑/↓: move selection".to_string(),
                     "Enter or →: open/focus content".to_string(),
                     "C: toggle chat panel".to_string(),
@@ -268,5 +320,19 @@ impl Focus {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_config_uses_shared_insert_form_copy() {
+        let config = UiConfig::default();
+        let copy = insert_form_copy();
+
+        assert_eq!(config.insert.mode_help, copy.mode_help);
+        assert!(config.help.lines.iter().any(|line| line == copy.help_line));
     }
 }

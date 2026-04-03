@@ -1,6 +1,7 @@
 use super::*;
+use std::path::PathBuf;
 use tui_kit_runtime::kinic_tabs::{
-    KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
+    KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
 };
 use tui_kit_runtime::{CoreError, CoreResult, ProviderOutput, ProviderSnapshot};
 
@@ -56,6 +57,21 @@ fn normalize_focus_resets_create_tab_to_tabs_and_name_field() {
 
     assert_eq!(state.focus, PaneFocus::Tabs);
     assert_eq!(state.create_focus, tui_kit_runtime::CreateModalFocus::Name);
+}
+
+#[test]
+fn normalize_focus_resets_insert_tab_to_tabs_and_mode_field() {
+    let mut state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        insert_focus: tui_kit_runtime::InsertFormFocus::Submit,
+        ..CoreState::default()
+    };
+
+    normalize_focus_after_set_tab(&mut state);
+
+    assert_eq!(state.focus, PaneFocus::Tabs);
+    assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Mode);
 }
 
 #[test]
@@ -134,6 +150,61 @@ fn handle_overlay_input_closes_settings_without_provider_dispatch() {
     );
 
     assert!(matches!(result, OverlayInputResult::CloseSettings));
+}
+
+#[test]
+fn handle_overlay_input_consumes_unknown_selector_keys() {
+    let mut provider = TestProvider::err("should not run");
+    let mut state = CoreState {
+        default_memory_selector_open: true,
+        ..CoreState::default()
+    };
+
+    let result = handle_overlay_input(
+        &mut provider,
+        &mut state,
+        false,
+        crossterm::event::KeyCode::Char('x'),
+        crossterm::event::KeyModifiers::NONE,
+    );
+
+    assert!(matches!(result, OverlayInputResult::Consumed));
+}
+
+#[test]
+fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
+    let mut provider = TestProvider::err("tab failed");
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        insert_mode: tui_kit_runtime::InsertMode::File,
+        insert_memory_id: "aaaaa-aa".into(),
+        insert_tag: "docs".into(),
+        insert_file_path_input: "/tmp/doc.pdf".into(),
+        insert_focus: tui_kit_runtime::InsertFormFocus::Submit,
+        status_message: Some("ready".into()),
+        ..CoreState::default()
+    };
+
+    open_form_tab(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        KINIC_INSERT_TAB_ID,
+        true,
+    );
+
+    assert_eq!(state.focus, PaneFocus::Content);
+    assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::File);
+    assert_eq!(state.insert_memory_id, "aaaaa-aa");
+    assert_eq!(state.insert_tag, "docs");
+    assert_eq!(state.insert_file_path_input, "/tmp/doc.pdf");
+    assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Submit);
+    assert_eq!(
+        state.status_message.as_deref(),
+        Some("Dispatch error: tab failed")
+    );
 }
 
 #[test]
@@ -236,4 +307,113 @@ fn content_scroll_helper_handles_scroll_end_only() {
         &mut inspector_scroll
     ));
     assert_eq!(inspector_scroll, 10002);
+}
+
+#[test]
+fn dispatch_action_with_persistent_clear_clears_for_edit_actions() {
+    let mut provider = TestProvider {
+        result: Ok(ProviderOutput::default()),
+    };
+    let mut state = CoreState {
+        persistent_status_message: Some("done".into()),
+        status_message: Some("done".into()),
+        insert_focus: tui_kit_runtime::InsertFormFocus::Text,
+        ..CoreState::default()
+    };
+
+    let effects = dispatch_action_with_persistent_clear(
+        &mut provider,
+        &mut state,
+        &CoreAction::InsertInput('x'),
+    )
+    .expect("dispatch should succeed");
+
+    assert!(effects.is_empty());
+    assert_eq!(state.persistent_status_message, None);
+    assert_eq!(state.status_message, None);
+}
+
+#[test]
+fn dispatch_action_with_persistent_clear_keeps_for_navigation_actions() {
+    let mut provider = TestProvider {
+        result: Ok(ProviderOutput::default()),
+    };
+    let mut state = CoreState {
+        persistent_status_message: Some("done".into()),
+        status_message: Some("done".into()),
+        ..CoreState::default()
+    };
+
+    let effects =
+        dispatch_action_with_persistent_clear(&mut provider, &mut state, &CoreAction::MoveNext)
+            .expect("dispatch should succeed");
+
+    assert!(effects.is_empty());
+    assert_eq!(state.persistent_status_message.as_deref(), Some("done"));
+    assert_eq!(state.status_message.as_deref(), Some("done"));
+}
+
+#[test]
+fn apply_insert_file_dialog_selection_updates_file_path_and_clears_insert_error() {
+    let mut state = CoreState {
+        insert_file_path_input: "stale".into(),
+        insert_error: Some("bad path".into()),
+        insert_submit_state: tui_kit_runtime::CreateSubmitState::Error,
+        ..CoreState::default()
+    };
+
+    let effects = apply_insert_file_dialog_selection(&mut state, Some(PathBuf::from("/tmp/doc.pdf")));
+
+    assert_eq!(state.insert_file_path_input, "/tmp/doc.pdf");
+    assert_eq!(
+        state.insert_selected_file_path,
+        Some(PathBuf::from("/tmp/doc.pdf"))
+    );
+    assert_eq!(state.insert_error, None);
+    assert_eq!(
+        state.insert_submit_state,
+        tui_kit_runtime::CreateSubmitState::Idle
+    );
+    assert_eq!(
+        effects,
+        vec![CoreEffect::Notify("Selected file: /tmp/doc.pdf".to_string())]
+    );
+}
+
+#[test]
+fn apply_insert_file_dialog_selection_keeps_existing_path_on_cancel() {
+    let mut state = CoreState {
+        insert_selected_file_path: Some(PathBuf::from("/tmp/existing.md")),
+        ..CoreState::default()
+    };
+
+    let effects = apply_insert_file_dialog_selection(&mut state, None);
+
+    assert_eq!(
+        state.insert_selected_file_path,
+        Some(PathBuf::from("/tmp/existing.md"))
+    );
+    assert_eq!(
+        effects,
+        vec![CoreEffect::Notify("File selection canceled.".to_string())]
+    );
+}
+
+#[test]
+fn should_open_insert_file_dialog_is_false_while_insert_submit_is_in_flight() {
+    let state = CoreState {
+        insert_submit_state: tui_kit_runtime::CreateSubmitState::Submitting,
+        insert_file_path_input: "/tmp/existing.md".into(),
+        insert_error: Some("keep".into()),
+        status_message: Some("ready".into()),
+        ..CoreState::default()
+    };
+
+    assert!(!should_open_insert_file_dialog(
+        &CoreAction::InsertOpenFileDialog,
+        &state
+    ));
+    assert_eq!(state.insert_file_path_input, "/tmp/existing.md");
+    assert_eq!(state.insert_error.as_deref(), Some("keep"));
+    assert_eq!(state.status_message.as_deref(), Some("ready"));
 }

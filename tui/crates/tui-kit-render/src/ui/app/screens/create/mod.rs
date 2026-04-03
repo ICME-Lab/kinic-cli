@@ -2,54 +2,21 @@
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
-use tui_kit_runtime::{
-    CreateCostState, CreateModalFocus, CreateSubmitState, format_e8s_to_kinic_string_u128,
-};
+use tui_kit_runtime::{CreateCostState, CreateModalFocus, format_e8s_to_kinic_string_u128};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
 
+use super::submit_button_text;
+
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_create_screen(&self, area: Rect, buf: &mut Buffer) {
         let screen = CreateScreenState::from_root_area(self, area);
-        let intro = vec![
-            Line::from(vec![
-                Span::styled(" Create ", self.theme.style_accent_bold()),
-                Span::styled(
-                    self.ui_config.create.intro_description.as_str(),
-                    self.theme.style_normal(),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(" Enter ", self.theme.style_accent()),
-                Span::styled(
-                    self.ui_config.create.intro_enter_hint.as_str(),
-                    self.theme.style_muted(),
-                ),
-                Span::styled("  │  ", self.theme.style_dim()),
-                Span::styled(" Tab / Shift+Tab ", self.theme.style_accent()),
-                Span::styled(
-                    self.ui_config.create.intro_cycle_hint.as_str(),
-                    self.theme.style_muted(),
-                ),
-                Span::styled("  │  ", self.theme.style_dim()),
-                Span::styled(" Esc ", self.theme.style_accent()),
-                Span::styled(
-                    self.ui_config.create.intro_escape_hint.as_str(),
-                    self.theme.style_muted(),
-                ),
-            ]),
-        ];
-        Paragraph::new(intro)
-            .wrap(Wrap { trim: false })
-            .render(screen.layout.intro_area, buf);
-
         Paragraph::new(screen.form_lines.lines)
             .block(
                 Block::default()
@@ -92,24 +59,17 @@ impl<'a> CreateScreenState<'a> {
 }
 #[derive(Clone, Copy)]
 struct CreateScreenLayout {
-    intro_area: Rect,
     form_area: Rect,
     form_inner_area: Option<Rect>,
 }
 impl CreateScreenLayout {
-    const INTRO_HEIGHT: u16 = 6;
     const INPUT_INDENT_WIDTH: u16 = 2;
 
     fn from_root_area(area: Rect, has_tabs: bool) -> Self {
         let body = shared::layout::body_rect_for_area_with_tabs(area, has_tabs);
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(Self::INTRO_HEIGHT), Constraint::Min(12)])
-            .split(body);
-        let form_inner_area = inner_bordered_area(chunks[1]);
+        let form_inner_area = inner_bordered_area(body);
         Self {
-            intro_area: chunks[0],
-            form_area: chunks[1],
+            form_area: body,
             form_inner_area,
         }
     }
@@ -456,16 +416,12 @@ fn display_create_value<'a>(value: &'a str, placeholder: &'a str) -> &'a str {
     if value.is_empty() { placeholder } else { value }
 }
 fn create_submit_text(ui: &TuiKitUi<'_>) -> String {
-    match ui.create_submit_state {
-        CreateSubmitState::Submitting => format!(
-            "{} {}",
-            spinner_frame(ui.create_spinner_frame),
-            ui.ui_config.create.submit_pending_label
-        ),
-        CreateSubmitState::Idle | CreateSubmitState::Error => {
-            ui.ui_config.create.submit_label.clone()
-        }
-    }
+    submit_button_text(
+        &ui.create_submit_state,
+        ui.create_spinner_frame,
+        ui.ui_config.create.submit_label.as_str(),
+        ui.ui_config.create.submit_pending_label.as_str(),
+    )
 }
 fn create_close_hint<'a>(ui: &'a TuiKitUi<'a>) -> &'a str {
     if ui.focus == Focus::Tabs {
@@ -529,10 +485,6 @@ fn next_entry_hint(ui: &TuiKitUi<'_>, focus: CreateModalFocus) -> Span<'static> 
         return Span::styled("  ← next input", ui.theme.style_muted());
     }
     Span::raw("")
-}
-fn spinner_frame(frame: usize) -> &'static str {
-    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
-    FRAMES[frame % FRAMES.len()]
 }
 #[cfg(test)]
 mod tests;

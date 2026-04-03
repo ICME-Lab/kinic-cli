@@ -1,52 +1,96 @@
-//! Shared helpers for tab-scoped form screens such as Kinic Create.
+//! Shared helpers for tab-scoped form screens such as Kinic Create and Insert.
 
 use crossterm::event::KeyCode;
 use tui_kit_runtime::{
-    CoreAction, CoreState, CreateModalFocus, PaneFocus, kinic_tabs::is_form_tab,
+    CoreAction, CoreState, CreateModalFocus, InsertFormFocus, PaneFocus,
+    kinic_tabs::{is_form_tab, is_kinic_create_tab, is_kinic_insert_tab},
 };
 
-/// Route create-form key input while preserving normal text entry semantics.
-///
-/// The dedicated create form owns `Tab` and `Shift+Tab` so field order stays
-/// predictable: `Name -> Description -> Submit -> Name`.
 pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<CoreAction> {
-    if !is_create_form_input_mode(state) {
+    if !is_form_input_mode(state) {
         return None;
     }
 
+    if is_kinic_create_tab(state.current_tab_id.as_str()) {
+        return match code {
+            KeyCode::Tab => Some(CoreAction::CreateNextField),
+            KeyCode::BackTab => Some(CoreAction::CreatePrevField),
+            KeyCode::Backspace => Some(CoreAction::CreateBackspace),
+            KeyCode::Enter => Some(CoreAction::CreateSubmit),
+            KeyCode::Char(c) if !c.is_control() => match state.create_focus {
+                CreateModalFocus::Name | CreateModalFocus::Description => {
+                    Some(CoreAction::CreateInput(c))
+                }
+                CreateModalFocus::Submit => None,
+            },
+            _ => None,
+        };
+    }
+
     match code {
-        KeyCode::Tab => Some(CoreAction::CreateNextField),
-        KeyCode::BackTab => Some(CoreAction::CreatePrevField),
-        KeyCode::Backspace => Some(CoreAction::CreateBackspace),
-        KeyCode::Enter => Some(CoreAction::CreateSubmit),
-        KeyCode::Char(c) if !c.is_control() => match state.create_focus {
-            CreateModalFocus::Name | CreateModalFocus::Description => {
-                Some(CoreAction::CreateInput(c))
-            }
-            CreateModalFocus::Submit => None,
+        KeyCode::Tab => Some(CoreAction::InsertNextField),
+        KeyCode::BackTab => Some(CoreAction::InsertPrevField),
+        KeyCode::Backspace => Some(CoreAction::InsertBackspace),
+        KeyCode::Left => match state.insert_focus {
+            InsertFormFocus::Mode => Some(CoreAction::InsertCycleModePrev),
+            _ => None,
+        },
+        KeyCode::Right => match state.insert_focus {
+            InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
+            _ => None,
+        },
+        KeyCode::Enter => match state.insert_focus {
+            InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
+            InsertFormFocus::MemoryId => Some(CoreAction::OpenDefaultMemoryPicker),
+            InsertFormFocus::FilePath => Some(CoreAction::InsertOpenFileDialog),
+            InsertFormFocus::Submit => Some(CoreAction::InsertSubmit),
+            _ => None,
+        },
+        KeyCode::Char(c) if !c.is_control() => match state.insert_focus {
+            InsertFormFocus::Tag
+            | InsertFormFocus::Text
+            | InsertFormFocus::FilePath
+            | InsertFormFocus::Embedding => Some(CoreAction::InsertInput(c)),
+            InsertFormFocus::Mode | InsertFormFocus::MemoryId | InsertFormFocus::Submit => None,
         },
         _ => None,
     }
 }
 
-/// Whether the current state should treat typed characters as create-form input.
-pub fn is_create_form_input_mode(state: &CoreState) -> bool {
+pub fn is_form_input_mode(state: &CoreState) -> bool {
     is_form_tab(state.current_tab_id.as_str()) && state.focus == PaneFocus::Form
 }
 
-/// Reset field focus back to the name field when entering the create form.
-pub fn reset_create_focus(state: &mut CoreState) {
+pub fn reset_form_focus(state: &mut CoreState) {
+    if is_kinic_insert_tab(state.current_tab_id.as_str()) {
+        state.insert_focus = InsertFormFocus::Mode;
+        return;
+    }
     state.create_focus = CreateModalFocus::Name;
 }
 
-/// Clear stale create-tab form state before opening a fresh create flow.
-pub fn reset_create_form_state(state: &mut CoreState) {
+pub fn reset_form_state_for_tab(state: &mut CoreState, tab_id: &str) {
+    if is_kinic_insert_tab(tab_id) {
+        state.insert_mode = tui_kit_runtime::InsertMode::default();
+        state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
+        state.insert_tag.clear();
+        state.insert_text.clear();
+        state.insert_file_path_input.clear();
+        state.insert_selected_file_path = None;
+        state.insert_embedding.clear();
+        state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+        state.insert_spinner_frame = 0;
+        state.insert_error = None;
+        state.insert_focus = InsertFormFocus::Mode;
+        return;
+    }
+
     state.create_name.clear();
     state.create_description.clear();
     state.create_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
     state.create_spinner_frame = 0;
     state.create_error = None;
-    reset_create_focus(state);
+    state.create_focus = CreateModalFocus::Name;
 }
 
 #[cfg(test)]

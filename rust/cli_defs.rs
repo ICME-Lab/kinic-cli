@@ -2,6 +2,14 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
 
+pub fn parse_identity_arg(value: &str) -> Result<String, String> {
+    if value.trim().is_empty() {
+        return Err("identity must not be empty or whitespace-only".to_string());
+    }
+
+    Ok(value.to_string())
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "kinic-cli",
@@ -30,6 +38,7 @@ pub struct GlobalOpts {
     #[arg(
         long,
         conflicts_with = "ii",
+        value_parser = parse_identity_arg,
         help = "Dfx identity name used to load credentials from the system keyring"
     )]
     pub identity: Option<String>,
@@ -80,7 +89,10 @@ pub enum Command {
     AskAi(AskAiArgs),
     #[command(about = "Login via Internet Identity and store a delegation")]
     Login(LoginArgs),
-    #[command(about = "Launch the Kinic terminal UI")]
+    #[command(
+        about = "Launch the Kinic terminal UI (requires global --identity)",
+        after_help = "Required invocation:\n  kinic-cli --identity <IDENTITY> tui"
+    )]
     Tui(TuiArgs),
 }
 

@@ -1,11 +1,13 @@
 //! Screen-oriented modules for the app body.
 
 pub mod create;
+pub mod insert;
 pub mod memories;
 pub mod placeholder;
 pub mod settings;
 
 use ratatui::{buffer::Buffer, layout::Rect};
+use tui_kit_runtime::CreateSubmitState;
 use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
 
 use crate::ui::app::TuiKitUi;
@@ -31,8 +33,12 @@ fn placeholder_screen_spec(kind: TabKind) -> Option<PlaceholderScreenSpec<'stati
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_tab_screen(&self, area: Rect, buf: &mut Buffer) -> bool {
         match tab_kind(self.current_tab_id.0.as_str()) {
-            TabKind::Form => {
+            TabKind::CreateForm => {
                 self.render_create_screen(area, buf);
+                true
+            }
+            TabKind::InsertForm => {
+                self.render_insert_screen(area, buf);
                 true
             }
             TabKind::PlaceholderSettings => {
@@ -48,4 +54,23 @@ impl<'a> TuiKitUi<'a> {
             }
         }
     }
+}
+
+fn submit_button_text(
+    submit_state: &CreateSubmitState,
+    spinner_frame_index: usize,
+    idle_label: &str,
+    pending_label: &str,
+) -> String {
+    match submit_state {
+        CreateSubmitState::Submitting => {
+            format!("{} {}", spinner_frame(spinner_frame_index), pending_label)
+        }
+        CreateSubmitState::Idle | CreateSubmitState::Error => idle_label.to_string(),
+    }
+}
+
+fn spinner_frame(frame: usize) -> &'static str {
+    const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+    FRAMES[frame % FRAMES.len()]
 }

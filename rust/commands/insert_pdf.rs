@@ -1,46 +1,30 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use ic_agent::export::Principal;
 use tracing::info;
 
 use crate::{
-    cli::InsertPdfArgs, clients::memory::MemoryClient, commands::convert_pdf::pdf_to_markdown,
-    embedding::late_chunking,
+    cli::InsertPdfArgs,
+    clients::memory::MemoryClient,
+    insert_service::{InsertRequest, execute_insert_request},
 };
 
 use super::CommandContext;
 
 pub async fn handle(args: InsertPdfArgs, ctx: &CommandContext) -> Result<()> {
     let client = build_memory_client(&args.memory_id, ctx).await?;
-    let markdown = pdf_to_markdown(&args.file_path).map_err(|e| {
-        anyhow!(
-            "Failed to convert PDF {} to markdown: {e}",
-            args.file_path.display()
-        )
-    })?;
-
-    let chunks = late_chunking(&markdown).await?;
+    let request = InsertRequest::Pdf {
+        memory_id: args.memory_id.clone(),
+        tag: args.tag.clone(),
+        file_path: args.file_path.clone(),
+    };
+    let result = execute_insert_request(&client, &request).await?;
 
     info!(
         canister_id = %client.canister_id(),
-        chunk_count = chunks.len(),
-        tag = %args.tag,
-        source = %args.file_path.display(),
-        "insert-pdf prepared embeddings"
+        inserted_count = result.inserted_count,
+        tag = %result.tag,
+        "insert-pdf command finished"
     );
-
-    for (index, chunk) in chunks.into_iter().enumerate() {
-        let payload = format_chunk_text(&args.tag, &chunk.sentence);
-        info!(
-            chunk_index = index,
-            sentence_preview = %chunk
-                .sentence
-                .chars()
-                .take(40)
-                .collect::<String>(),
-            "inserting chunk"
-        );
-        client.insert(chunk.embedding, &payload).await?;
-    }
 
     Ok(())
 }
@@ -50,8 +34,4 @@ async fn build_memory_client(id: &str, ctx: &CommandContext) -> Result<MemoryCli
     let memory =
         Principal::from_text(id).context("Failed to parse canister id for insert-pdf command")?;
     Ok(MemoryClient::new(agent, memory))
-}
-
-fn format_chunk_text(tag: &str, sentence: &str) -> String {
-    serde_json::json!({ "tag": tag, "sentence": sentence }).to_string()
 }

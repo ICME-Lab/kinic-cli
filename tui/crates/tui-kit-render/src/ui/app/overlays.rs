@@ -7,10 +7,14 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
+#[cfg(test)]
+use tui_kit_runtime::MemorySelectorItem;
 use tui_kit_runtime::{CreateModalFocus, CreateSubmitState, SettingsSnapshot};
 
 use super::TuiKitUi;
-use super::screens::settings::{DefaultMemorySelectorLineKind, default_memory_selector_lines};
+use super::screens::settings::{
+    DefaultMemorySelectorLineKind, default_memory_selector_copy, default_memory_selector_lines,
+};
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_create_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -209,7 +213,9 @@ impl<'a> TuiKitUi<'a> {
             self.default_memory_selector_items,
             self.default_memory_selector_index,
             self.default_memory_selector_selected_id,
+            default_memory_selector_copy(self.default_memory_selector_context),
         );
+        let copy = default_memory_selector_copy(self.default_memory_selector_context);
         let Some((w, h)) = fit_overlay_rect(area, 56, lines.len().saturating_add(2) as u16, 8)
         else {
             return;
@@ -237,9 +243,6 @@ impl<'a> TuiKitUi<'a> {
                 DefaultMemorySelectorLineKind::Normal => {
                     Line::from(Span::styled(line, self.theme.style_normal()))
                 }
-                DefaultMemorySelectorLineKind::Title => {
-                    Line::from(Span::styled(line, self.theme.style_accent_bold()))
-                }
             })
             .collect::<Vec<_>>();
 
@@ -248,7 +251,7 @@ impl<'a> TuiKitUi<'a> {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(self.theme.style_border_focused())
-                    .title(" Select Default Memory ")
+                    .title(format!(" {} ", copy.title))
                     .style(Style::default().bg(self.theme.bg_panel)),
             )
             .wrap(Wrap { trim: false })
@@ -281,7 +284,7 @@ fn visible_default_memory_selector_lines(
     lines: Vec<(String, DefaultMemorySelectorLineKind)>,
     overlay_height: u16,
 ) -> Vec<(String, DefaultMemorySelectorLineKind)> {
-    let fixed_prefix_len = 2usize;
+    let fixed_prefix_len = 0usize;
     let fixed_suffix_len = 2usize;
     if lines.len() <= fixed_prefix_len + fixed_suffix_len {
         return lines;
@@ -297,7 +300,12 @@ fn visible_default_memory_selector_lines(
     let body_end = lines.len().saturating_sub(fixed_suffix_len);
     let body = &lines[body_start..body_end];
     if body.len() <= visible_body_len {
-        return lines;
+        return center_default_memory_selector_body(
+            &lines[..fixed_prefix_len],
+            body,
+            &lines[body_end..],
+            visible_body_len,
+        );
     }
 
     let selected_in_body = body
@@ -314,6 +322,28 @@ fn visible_default_memory_selector_lines(
     visible.extend_from_slice(&lines[..fixed_prefix_len]);
     visible.extend_from_slice(&body[start..end]);
     visible.extend_from_slice(&lines[body_end..]);
+    visible
+}
+
+fn center_default_memory_selector_body(
+    prefix: &[(String, DefaultMemorySelectorLineKind)],
+    body: &[(String, DefaultMemorySelectorLineKind)],
+    suffix: &[(String, DefaultMemorySelectorLineKind)],
+    visible_body_len: usize,
+) -> Vec<(String, DefaultMemorySelectorLineKind)> {
+    let extra_space = visible_body_len.saturating_sub(body.len());
+    let top_padding = extra_space / 2;
+    let bottom_padding = extra_space.saturating_sub(top_padding);
+
+    let mut visible = Vec::with_capacity(prefix.len() + visible_body_len + suffix.len());
+    visible.extend_from_slice(prefix);
+    visible
+        .extend((0..top_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)));
+    visible.extend_from_slice(body);
+    visible.extend(
+        (0..bottom_padding).map(|_| (String::new(), DefaultMemorySelectorLineKind::Normal)),
+    );
+    visible.extend_from_slice(suffix);
     visible
 }
 
@@ -353,7 +383,9 @@ fn settings_overlay_lines(
 mod tests {
     use super::*;
     use crate::ui::app::UiConfig;
-    use tui_kit_runtime::{SettingsEntry, SettingsSection, SettingsSnapshot};
+    use tui_kit_runtime::{
+        MemorySelectorContext, SettingsEntry, SettingsSection, SettingsSnapshot,
+    };
 
     #[test]
     fn settings_overlay_lines_show_up_to_seven_entries() {
@@ -412,6 +444,16 @@ mod tests {
     }
 
     #[test]
+    fn help_overlay_insert_line_mentions_target_picker() {
+        let cfg = UiConfig::default().help;
+
+        assert!(cfg.lines.iter().any(|line| {
+            line
+                == "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / browses file / submits"
+        }));
+    }
+
+    #[test]
     fn fit_overlay_rect_uses_available_height_when_terminal_is_short() {
         let area = Rect {
             x: 0,
@@ -440,33 +482,77 @@ mod tests {
     }
 
     #[test]
-    fn default_memory_selector_window_keeps_selected_row_visible() {
-        let items = (0..12)
-            .map(|index| format!("Memory {index}"))
-            .collect::<Vec<_>>();
-
-        let near_end = visible_default_memory_selector_lines(
-            default_memory_selector_lines(&items, 10, Some("Memory 2")),
-            8,
+    fn default_memory_selector_window_keeps_selected_row_visible_near_end() {
+        let lines = default_memory_selector_lines(
+            &(0..12)
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
+                .collect::<Vec<_>>(),
+            10,
+            Some("id-2"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
-        let near_end_joined = near_end
+
+        let visible = visible_default_memory_selector_lines(lines, 8);
+        let visible_lines = visible
             .iter()
             .map(|(line, _)| line.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(near_end_joined.contains("Memory 10"));
-        assert!(!near_end_joined.contains("› Memory 1\n"));
+            .collect::<Vec<_>>();
+        let joined = visible_lines.join("\n");
 
-        let near_start = visible_default_memory_selector_lines(
-            default_memory_selector_lines(&items, 1, Some("Memory 9")),
-            8,
+        assert!(joined.contains("Memory 10"));
+        assert!(!visible_lines.iter().any(|line| *line == "   Memory 1"));
+        assert!(joined.contains("Enter: save"));
+    }
+
+    #[test]
+    fn default_memory_selector_window_keeps_selected_row_visible_near_start() {
+        let lines = default_memory_selector_lines(
+            &(0..12)
+                .map(|index| MemorySelectorItem {
+                    id: format!("id-{index}"),
+                    title: Some(format!("Memory {index}")),
+                })
+                .collect::<Vec<_>>(),
+            1,
+            Some("id-9"),
+            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
         );
+        let near_start = visible_default_memory_selector_lines(lines, 8);
         let near_start_joined = near_start
             .iter()
             .map(|(line, _)| line.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(near_start_joined.contains("› Memory 1"));
+
+        assert!(near_start_joined.contains("Memory 1"));
         assert!(!near_start_joined.contains("Memory 10"));
+        assert!(!near_start_joined.contains("Select Default Memory"));
+    }
+
+    #[test]
+    fn insert_target_selector_window_uses_insert_specific_copy() {
+        let lines = default_memory_selector_lines(
+            &[MemorySelectorItem {
+                id: "id-0".to_string(),
+                title: Some("Memory 0".to_string()),
+            }],
+            0,
+            Some("id-0"),
+            default_memory_selector_copy(MemorySelectorContext::InsertTarget),
+        );
+
+        let visible = visible_default_memory_selector_lines(lines, 8);
+        let joined = visible
+            .iter()
+            .map(|(line, _)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!joined.contains("Select Target Memory"));
+        assert!(joined.contains("Enter: use target"));
+        assert!(!joined.contains('★'));
     }
 }
