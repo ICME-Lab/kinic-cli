@@ -1,5 +1,9 @@
 use super::*;
 
+fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
+    provider.cursor_memory_id = Some(memory_id.to_string());
+}
+
 #[test]
 fn open_rename_memory_uses_active_memory_name() {
     let mut provider = KinicProvider::new(live_config());
@@ -17,11 +21,51 @@ fn open_rename_memory_uses_active_memory_name() {
         users: None,
     }];
     provider.refresh_memory_records_from_summaries();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
 
     let output = provider
         .handle_action(&CoreAction::OpenRenameMemory, &CoreState::default())
         .expect("rename open output");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::OpenRenameMemory { memory_id, current_name }
+            if memory_id == "aaaaa-aa" && current_name == "Alpha Memory"
+    )));
+}
+
+#[test]
+fn memory_content_open_selected_opens_rename_modal_for_name_row() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![MemorySummary {
+        id: "aaaaa-aa".to_string(),
+        status: "running".to_string(),
+        detail: "detail".to_string(),
+        searchable_memory_id: Some("aaaaa-aa".to_string()),
+        name: "Alpha Memory".to_string(),
+        version: "1.0.0".to_string(),
+        dim: None,
+        owners: None,
+        stable_memory_size: None,
+        cycle_amount: None,
+        users: Some(vec![bridge::MemoryUser {
+            principal_id: "user-1".to_string(),
+            role: "reader".to_string(),
+        }]),
+    }];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+
+    let output = provider
+        .handle_action(
+            &CoreAction::MemoryContentOpenSelected,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                memory_content_action_index: 0,
+                ..CoreState::default()
+            },
+        )
+        .expect("content open output");
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
@@ -47,7 +91,7 @@ fn open_rename_memory_uses_resolved_name_from_metadata_object() {
         users: None,
     }];
     provider.refresh_memory_records_from_summaries();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
 
     let output = provider
         .handle_action(&CoreAction::OpenRenameMemory, &CoreState::default())
@@ -77,7 +121,7 @@ fn open_rename_memory_ignores_add_memory_action_selection() {
         users: None,
     }];
     provider.refresh_memory_records_from_summaries();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
 
     let output = provider
         .handle_action(

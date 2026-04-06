@@ -362,6 +362,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn selected_memory_label(mut self, value: Option<&'a str>) -> Self {
+        self.selected_memory_label = value;
+        self
+    }
+
+    #[must_use]
     pub fn inspector_scroll(mut self, scroll: usize) -> Self {
         self.inspector_scroll = scroll;
         self

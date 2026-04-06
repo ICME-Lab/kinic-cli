@@ -698,7 +698,7 @@ fn access_overlay_copy(ui: &TuiKitUi<'_>) -> (&'static str, Vec<Line<'static>>) 
                         "Current role: {}",
                         role_label(ui.access_control.current_role)
                     ),
-                    ui.theme.style_muted(),
+                    ui.theme.style_normal(),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
@@ -988,9 +988,7 @@ fn access_action_line(ui: &TuiKitUi<'_>) -> Line<'static> {
         }
         first = false;
         let label = role_label(role);
-        let style = if role == ui.access_control.current_role {
-            ui.theme.style_muted()
-        } else if ui.access_control.action == AccessControlAction::Change
+        let style = if ui.access_control.action == AccessControlAction::Change
             && ui.access_control.role == role
         {
             ui.theme.style_accent_bold()
@@ -1473,6 +1471,71 @@ mod tests {
         assert!(rendered.contains("Confirm Access"));
         assert!(rendered.contains("Remove access"));
         assert!(rendered.contains("yes / [no]"));
+    }
+
+    #[test]
+    fn access_action_line_keeps_current_role_at_normal_style() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new("tab-1"))
+            .access_control_modal(AccessControlModalState {
+                open: true,
+                mode: AccessControlMode::Action,
+                current_role: AccessControlRole::Admin,
+                role: AccessControlRole::Writer,
+                action: AccessControlAction::Change,
+                principal_id: "nqjsd-aa".to_string(),
+                ..AccessControlModalState::default()
+            });
+
+        let line = access_action_line(&ui);
+        let admin_span = &line.spans[1];
+        let writer_span = &line.spans[3];
+
+        assert_eq!(admin_span.content.as_ref(), "admin");
+        assert_eq!(admin_span.style.fg, Some(theme.fg));
+        assert!(
+            !admin_span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+
+        assert_eq!(writer_span.content.as_ref(), "[writer]");
+        assert_eq!(writer_span.style.fg, Some(theme.accent));
+        assert!(
+            writer_span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn access_overlay_current_role_summary_uses_normal_style() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new("tab-1"))
+            .access_control_modal(AccessControlModalState {
+                open: true,
+                mode: AccessControlMode::Action,
+                current_role: AccessControlRole::Admin,
+                principal_id: "nqjsd-aa".to_string(),
+                ..AccessControlModalState::default()
+            });
+
+        let (_, lines) = access_overlay_copy(&ui);
+        let current_role_line = &lines[7];
+        let span = &current_role_line.spans[0];
+
+        assert_eq!(span.content.as_ref(), "Current role: admin");
+        assert_eq!(span.style.fg, Some(theme.fg));
+        assert!(
+            !span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
     }
 
     #[test]

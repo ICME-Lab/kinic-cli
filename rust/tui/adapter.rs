@@ -60,7 +60,6 @@ fn generic_content(record: &KinicRecord) -> UiItemContent {
 }
 
 fn memory_content(record: &KinicRecord) -> UiItemContent {
-    let content_text = section_body(&record.content_md, "### Content");
     let user_lines = memory_user_lines(&section_body(&record.content_md, "### Users"));
     let name = metadata_value(record, "- Name:");
     let description = description_value(&record.content_md);
@@ -104,15 +103,6 @@ fn memory_content(record: &KinicRecord) -> UiItemContent {
                     ]
                 } else {
                     user_lines
-                },
-            },
-            UiSection {
-                heading: "Content".to_string(),
-                rows: vec![],
-                body_lines: if content_text.is_empty() {
-                    vec!["No additional content available.".to_string()]
-                } else {
-                    content_text
                 },
             },
             metadata_section(
@@ -432,7 +422,7 @@ mod tests {
             "2chl6-4hpzw-vqaaa-aaaaa-c",
             "memories",
             "Status: running",
-            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description:\n  Project notes\n  second line\n- Version: `1.0.0`\n- Dimension: `768`\n- Stable Memory Size: `2,048`\n- Cycle Amount: `1.235T`\n\n### Content\nready\n\n### Search\nsearch help\n\n### Users\n- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer\n".to_string(),
+            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description:\n  Project notes\n  second line\n- Version: `1.0.0`\n- Dimension: `768`\n- Stable Memory Size: `2,048`\n- Cycle Amount: `1.235T`\n\n### Search\nsearch help\n\n### Users\n- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer\n".to_string(),
         );
 
         let content = memory_content(&record);
@@ -455,7 +445,7 @@ mod tests {
             content
                 .sections
                 .iter()
-                .all(|section| section.heading != "Search")
+                .all(|section| section.heading != "Search" && section.heading != "Content")
         );
 
         assert_eq!(content.title, "Alpha");

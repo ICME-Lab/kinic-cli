@@ -15,13 +15,6 @@ pub struct DbMetadata {
     pub is_complete_source_chunks: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExportedChunk {
-    pub index: u32,
-    pub embedding: Vec<f32>,
-    pub text: String,
-}
-
 pub struct MemoryClient {
     agent: Agent,
     canister_id: Principal,
@@ -107,17 +100,6 @@ impl MemoryClient {
             .context("Failed to call get_users on memory canister")?;
 
         decode_get_users_response(&response)
-    }
-
-    pub async fn export_all(&self) -> Result<Vec<ExportedChunk>> {
-        let response = self
-            .agent
-            .query(&self.canister_id, "export_all")
-            .call()
-            .await
-            .context("Failed to call export_all on memory canister")?;
-
-        decode_export_all_response(&response)
     }
 
     pub async fn add_new_user(&self, principal: Principal, role: u8) -> Result<()> {
@@ -209,25 +191,11 @@ fn decode_get_users_response(response: &[u8]) -> Result<Vec<(String, u8)>> {
     Decode!(response, Vec<(String, u8)>).context("Failed to decode get_users response")
 }
 
-fn decode_export_all_response(response: &[u8]) -> Result<Vec<ExportedChunk>> {
-    let tuples = Decode!(response, Vec<(u32, Vec<f32>, String)>)
-        .context("Failed to decode export_all response")?;
-    Ok(tuples
-        .into_iter()
-        .map(|(index, embedding, text)| ExportedChunk {
-            index,
-            embedding,
-            text,
-        })
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        DbMetadata, ExportedChunk, decode_export_all_response, decode_get_dim_response,
-        decode_get_metadata_response, decode_get_users_response, encode_change_name_args,
-        encode_remove_user_args,
+        DbMetadata, decode_get_dim_response, decode_get_metadata_response,
+        decode_get_users_response, encode_change_name_args, encode_remove_user_args,
     };
     use candid::Decode;
     use ic_agent::export::Principal;
@@ -298,22 +266,5 @@ mod tests {
         let decoded = candid::Decode!(&payload, Principal).expect("decoded principal");
 
         assert_eq!(decoded.to_text(), "aaaaa-aa");
-    }
-
-    #[test]
-    fn decode_export_all_response_parses_anonymous_record_payload() {
-        let payload = candid::encode_one(vec![(7u32, vec![0.1f32, 0.2f32], "hello".to_string())])
-            .expect("payload should encode");
-
-        let decoded = decode_export_all_response(&payload).expect("payload should decode");
-
-        assert_eq!(
-            decoded,
-            vec![ExportedChunk {
-                index: 7,
-                embedding: vec![0.1, 0.2],
-                text: "hello".to_string(),
-            }]
-        );
     }
 }

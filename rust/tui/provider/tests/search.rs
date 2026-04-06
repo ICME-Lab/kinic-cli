@@ -1,5 +1,34 @@
 use super::*;
 
+fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
+    provider.cursor_memory_id = Some(memory_id.to_string());
+}
+
+fn panic_join_error(message: &str) -> tokio::task::JoinError {
+    let runtime = Runtime::new().expect("test runtime should build");
+    let message = message.to_string();
+    runtime.block_on(async move {
+        tokio::spawn(async move {
+            panic!("{message}");
+        })
+        .await
+        .expect_err("panic should surface as join error")
+    })
+}
+
+fn memory_details(name: &str) -> bridge::MemoryDetails {
+    bridge::MemoryDetails {
+        name: name.to_string(),
+        version: "1.0.0".to_string(),
+        dim: Some(8),
+        owners: vec![],
+        stable_memory_size: Some(1),
+        cycle_amount: Some(1),
+        users: vec![],
+        users_load_error: None,
+    }
+}
+
 fn selected_search_output(
     request_id: u64,
     memory_id: &str,
@@ -20,6 +49,73 @@ fn selected_search_output(
             failed_memory_ids: Vec::new(),
         }),
     }
+}
+
+#[test]
+fn fold_live_search_results_errors_when_only_join_errors_fail_all_targets() {
+    let error = fold_live_search_results(1, Vec::new(), vec![panic_join_error("join exploded")])
+        .expect_err("join-only failure should fail the search");
+
+    assert!(error.contains("join exploded"));
+}
+
+#[test]
+fn fold_live_search_results_counts_join_errors_during_partial_success() {
+    let batch = fold_live_search_results(
+        2,
+        vec![(
+            "aaaaa-aa".to_string(),
+            Ok(vec![SearchResultItem {
+                memory_id: "aaaaa-aa".to_string(),
+                score: 0.9,
+                payload: "alpha".to_string(),
+            }]),
+        )],
+        vec![panic_join_error("join exploded")],
+    )
+    .expect("partial success should still return a batch");
+
+    assert_eq!(batch.items.len(), 1);
+    assert_eq!(
+        batch.failed_memory_ids,
+        vec![SEARCH_JOIN_ERROR_MEMORY_ID.to_string()]
+    );
+}
+
+#[test]
+fn fold_live_search_results_prefers_first_memory_error_before_join_error() {
+    let error = fold_live_search_results(
+        2,
+        vec![(
+            "aaaaa-aa".to_string(),
+            Err(anyhow::anyhow!("memory failed")),
+        )],
+        vec![panic_join_error("join exploded")],
+    )
+    .expect_err("all failures should bubble up");
+
+    assert!(error.contains("memory failed"));
+}
+
+#[test]
+fn non_search_focus_status_message_hides_scope_label() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.all = provider.memory_records.clone();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+
+    let message = provider.status_message(
+        &CoreState {
+            current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            search_scope: SearchScope::All,
+            ..CoreState::default()
+        },
+        provider.memory_records.len(),
+    );
+
+    assert_eq!(message, "Browse memories");
 }
 
 #[test]
@@ -109,8 +205,78 @@ fn poll_background_returns_search_results_with_tab_specific_focus() {
 }
 
 #[test]
+fn poll_background_reports_partial_search_failures_in_success_notification() {
+    let mut provider = KinicProvider::new(live_config());
+    let tx = install_pending_search(
+        &mut provider,
+        0,
+        "alpha",
+        SearchScope::All,
+        &["aaaaa-aa", "bbbbb-bb"],
+    );
+    tx.send(SearchTaskOutput {
+        request_id: 0,
+        query: "alpha".to_string(),
+        scope: SearchScope::All,
+        target_memory_ids: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+        result: Ok(SearchBatchResult {
+            items: vec![SearchResultItem {
+                memory_id: "aaaaa-aa".to_string(),
+                score: 0.9,
+                payload: "alpha".to_string(),
+            }],
+            failed_memory_ids: vec![SEARCH_JOIN_ERROR_MEMORY_ID.to_string()],
+        }),
+    })
+    .unwrap();
+
+    let output = provider
+        .poll_background(&CoreState::default())
+        .expect("partial success should produce an output");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message == "Loaded 1 search results across 2 memories; 1 memory search(es) failed"
+    )));
+}
+
+#[test]
+fn poll_background_uses_failure_notification_when_search_fails() {
+    let mut provider = KinicProvider::new(live_config());
+    let tx = install_pending_search(
+        &mut provider,
+        4,
+        "alpha",
+        SearchScope::Selected,
+        &["aaaaa-aa"],
+    );
+    tx.send(SearchTaskOutput {
+        request_id: 4,
+        query: "alpha".to_string(),
+        scope: SearchScope::Selected,
+        target_memory_ids: vec!["aaaaa-aa".to_string()],
+        result: Err("join exploded".to_string()),
+    })
+    .unwrap();
+
+    let output = provider
+        .poll_background(&CoreState::default())
+        .expect("failed search should produce an output");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Search failed: join exploded"
+    )));
+    assert!(!output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message.contains("Loaded ")
+    )));
+}
+
+#[test]
 fn poll_background_discards_stale_search_results_after_context_changes() {
-    let scenarios = ["query_change", "active_memory_change", "query_clear"];
+    let scenarios = ["query_change", "selected_memory_change", "query_clear"];
 
     for scenario in scenarios {
         let mut provider = KinicProvider::new(live_config());
@@ -119,7 +285,7 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
             live_memory("bbbbb-bb", "Beta Memory"),
         ];
         provider.all = provider.memory_records.clone();
-        provider.active_memory_id = Some("aaaaa-aa".to_string());
+        set_memory_selection(&mut provider, "aaaaa-aa");
         provider.query = "alpha".to_string();
         let tx = install_pending_search(
             &mut provider,
@@ -144,16 +310,19 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
                     )
                     .expect("query update should succeed");
             }
-            "active_memory_change" => {
+            "selected_memory_change" => {
+                provider.query.clear();
                 provider
                     .handle_action(
                         &CoreAction::MoveNext,
                         &CoreState {
                             current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                            focus: PaneFocus::Items,
+                            selected_index: None,
                             ..CoreState::default()
                         },
                     )
-                    .expect("active memory update should succeed");
+                    .expect("cursor update should succeed");
             }
             "query_clear" => {
                 provider
@@ -190,7 +359,7 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
     provider.all = provider.memory_records.clone();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
     provider.result_records = vec![record_from_search_result(
         0,
         SearchResultItem {
@@ -256,7 +425,7 @@ fn poll_background_ignores_stale_memory_detail_results() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "old detail")];
     provider.refresh_memory_records_from_summaries();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
     provider.pending_memory_detail_memory_id = Some("aaaaa-aa".to_string());
     provider.pending_memory_detail.in_flight = true;
     provider.pending_memory_detail.request_id = Some(2);
@@ -273,9 +442,7 @@ fn poll_background_ignores_stale_memory_detail_results() {
             stable_memory_size: Some(1),
             cycle_amount: Some(1),
             users: vec![],
-            content_preview: "new detail".to_string(),
             users_load_error: None,
-            content_preview_error: None,
         }),
     })
     .expect("memory detail result should send");
@@ -289,6 +456,50 @@ fn poll_background_ignores_stale_memory_detail_results() {
     assert_eq!(provider.memory_summaries[0].detail, "old detail");
     assert!(provider.pending_memory_detail.receiver.is_none());
     assert!(!provider.pending_memory_detail.in_flight);
+}
+
+#[test]
+fn poll_background_applies_prefetched_memory_details_without_notifications() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "old detail")];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+    let (tx, rx) = mpsc::channel();
+    provider.memory_detail_prefetch.receiver = Some(rx);
+    provider.memory_detail_prefetch.sender = Some(tx.clone());
+    provider
+        .memory_detail_prefetch
+        .in_flight_memory_ids
+        .insert("aaaaa-aa".to_string());
+    tx.send(PrefetchMemoryDetailTaskOutput {
+        memory_id: "aaaaa-aa".to_string(),
+        result: Ok(memory_details("Prefetched")),
+    })
+    .expect("prefetch result should send");
+
+    let output = provider
+        .poll_background(&CoreState::default())
+        .expect("prefetch output");
+
+    assert!(output.effects.is_empty());
+    assert_eq!(provider.memory_summaries[0].name, "Prefetched");
+    assert!(provider.loaded_memory_details.contains("aaaaa-aa"));
+}
+
+#[test]
+fn cursor_memory_detail_load_skips_duplicate_when_prefetch_is_in_flight() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memories_mode = MemoriesMode::Browser;
+    provider.cursor_memory_id = Some("aaaaa-aa".to_string());
+    provider
+        .memory_detail_prefetch
+        .in_flight_memory_ids
+        .insert("aaaaa-aa".to_string());
+
+    provider.start_cursor_memory_detail_load();
+
+    assert!(!provider.pending_memory_detail.in_flight);
+    assert!(provider.pending_memory_detail.receiver.is_none());
 }
 
 #[test]
@@ -322,22 +533,22 @@ fn sync_active_memory_tracks_visible_records_and_restores_after_query_clears() {
         live_memory("bbbbb-bb", "Beta Memory"),
     ];
     provider.all = provider.memory_records.clone();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
     provider.query = "beta".to_string();
 
-    provider.sync_active_memory_to_visible_records();
-    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    provider.sync_memory_browser_selection();
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
 
     provider.query = "gamma".to_string();
-    provider.sync_active_memory_to_visible_records();
-    assert_eq!(provider.active_memory_id, None);
+    provider.sync_memory_browser_selection();
+    assert_eq!(provider.cursor_memory_id, None);
     let empty_snapshot = provider.build_snapshot(&CoreState::default());
     assert!(empty_snapshot.selected_content.is_none());
     assert!(empty_snapshot.items.is_empty());
 
     provider.query.clear();
-    provider.sync_active_memory_to_visible_records();
-    assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+    provider.sync_memory_browser_selection();
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
     assert_eq!(
         provider
             .build_snapshot(&CoreState::default())
@@ -357,7 +568,7 @@ fn memory_navigation_stays_within_visible_filtered_records() {
         live_memory("ccccc-cc", "Bravo Memory"),
     ];
     provider.all = provider.memory_records.clone();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
     provider.query = "b".to_string();
 
     let output = provider
@@ -370,7 +581,7 @@ fn memory_navigation_stays_within_visible_filtered_records() {
         )
         .expect("move next should succeed");
 
-    assert_eq!(provider.active_memory_id.as_deref(), Some("ccccc-cc"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("ccccc-cc"));
     assert!(output.snapshot.is_some());
     provider
         .handle_action(
@@ -381,7 +592,7 @@ fn memory_navigation_stays_within_visible_filtered_records() {
             },
         )
         .expect("move home should succeed");
-    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
 
     let output = provider
         .handle_action(
@@ -392,7 +603,7 @@ fn memory_navigation_stays_within_visible_filtered_records() {
             },
         )
         .expect("move end should succeed");
-    assert_eq!(provider.active_memory_id.as_deref(), Some("ccccc-cc"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("ccccc-cc"));
     assert_eq!(
         output
             .snapshot
@@ -427,7 +638,7 @@ fn search_target_memory_ids_selected_rejects_non_searchable_memory() {
         "Pending Memory",
         "pending",
     )];
-    provider.active_memory_id = Some("pending:creating".to_string());
+    set_memory_selection(&mut provider, "pending:creating");
 
     let error = provider
         .search_target_memory_ids(SearchScope::Selected)

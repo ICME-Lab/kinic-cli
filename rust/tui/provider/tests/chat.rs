@@ -16,6 +16,10 @@ use tui_kit_runtime::{
 
 const CHAT_HISTORY_IDENTITY_LABEL: &str = "provided";
 
+fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
+    provider.cursor_memory_id = Some(memory_id.to_string());
+}
+
 fn chat_state(query: &str) -> CoreState {
     CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
@@ -37,7 +41,7 @@ fn configure_provider_for_chat() -> KinicProvider {
         live_memory("bbbbb-bb", "Beta"),
     ];
     provider.all = provider.memory_records.clone();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
     provider
 }
 
@@ -64,6 +68,22 @@ fn chat_history_principal() -> String {
         .auth
         .principal_text()
         .expect("test auth principal should resolve")
+}
+
+#[test]
+fn chat_focus_status_message_uses_chat_scope() {
+    let provider = configure_provider_for_chat();
+    let message = provider.status_message(
+        &CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Extra,
+            chat_scope: ChatScope::All,
+            ..CoreState::default()
+        },
+        provider.memory_records.len(),
+    );
+
+    assert_eq!(message, "Chat scope all memories");
 }
 
 #[test]
@@ -365,8 +385,11 @@ fn memory_switch_loads_chat_history_for_new_active_memory() {
     let effects = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
         .expect("move next should dispatch");
     execute_effects_to_status(&mut state, effects);
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::OpenSelected)
+        .expect("open selected should dispatch");
+    execute_effects_to_status(&mut state, effects);
 
-    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -679,6 +702,9 @@ fn memory_switch_restores_last_active_thread_for_each_memory() {
     let effects = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
         .expect("move next should dispatch");
     execute_effects_to_status(&mut state, effects);
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::OpenSelected)
+        .expect("open selected should dispatch");
+    execute_effects_to_status(&mut state, effects);
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -686,6 +712,9 @@ fn memory_switch_restores_last_active_thread_for_each_memory() {
 
     let effects = dispatch_action(&mut provider, &mut state, &CoreAction::MovePrev)
         .expect("move prev should dispatch");
+    execute_effects_to_status(&mut state, effects);
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::OpenSelected)
+        .expect("open selected should dispatch");
     execute_effects_to_status(&mut state, effects);
     assert!(state.chat_messages.is_empty());
 }

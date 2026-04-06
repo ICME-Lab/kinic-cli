@@ -1,6 +1,7 @@
 use super::*;
+use tui_kit_host::execute_effects_to_status;
 use tui_kit_model::{UiItemKind, UiItemSummary, UiVisibility};
-use tui_kit_runtime::{CoreState, PaneFocus, dispatch_action, kinic_tabs};
+use tui_kit_runtime::{CoreEffect, CoreState, PaneFocus, dispatch_action, kinic_tabs};
 
 fn two_stub_list_items() -> Vec<UiItemSummary> {
     let stub = |id: &str| UiItemSummary {
@@ -16,6 +17,10 @@ fn two_stub_list_items() -> Vec<UiItemSummary> {
     vec![stub("stub-0"), stub("stub-1")]
 }
 
+fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
+    provider.cursor_memory_id = Some(memory_id.to_string());
+}
+
 fn provider_two_memories_active_last() -> (KinicProvider, CoreState) {
     let mut provider = KinicProvider::new(live_config());
     provider.tab_id = kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string();
@@ -28,7 +33,7 @@ fn provider_two_memories_active_last() -> (KinicProvider, CoreState) {
         live_memory("bbbbb-bb", "Beta"),
     ];
     provider.all = provider.memory_records.clone();
-    provider.active_memory_id = Some("bbbbb-bb".to_string());
+    set_memory_selection(&mut provider, "bbbbb-bb");
     let state = CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Items,
@@ -51,7 +56,7 @@ fn provider_two_memories_active_first() -> (KinicProvider, CoreState) {
         live_memory("bbbbb-bb", "Beta"),
     ];
     provider.all = provider.memory_records.clone();
-    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
     let state = CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Items,
@@ -67,8 +72,15 @@ fn memories_browser_move_next_wraps_active_memory_to_first() {
     let (mut provider, mut state) = provider_two_memories_active_last();
     let _ = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
         .expect("move next should dispatch");
-    assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
     assert_eq!(state.selected_index, Some(0));
+    assert_eq!(
+        state
+            .selected_content
+            .as_ref()
+            .map(|content| content.id.as_str()),
+        Some("aaaaa-aa")
+    );
 }
 
 #[test]
@@ -76,6 +88,77 @@ fn memories_browser_move_prev_wraps_active_memory_to_last() {
     let (mut provider, mut state) = provider_two_memories_active_first();
     let _ = dispatch_action(&mut provider, &mut state, &CoreAction::MovePrev)
         .expect("move prev should dispatch");
-    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
     assert_eq!(state.selected_index, Some(1));
+    assert_eq!(
+        state
+            .selected_content
+            .as_ref()
+            .map(|content| content.id.as_str()),
+        Some("bbbbb-bb")
+    );
+}
+
+#[test]
+fn cursor_memory_is_preserved_across_tab_switches() {
+    let (mut provider, mut state) = provider_two_memories_active_first();
+
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
+        .expect("move next should dispatch");
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(state.selected_index, Some(1));
+
+    let _ = dispatch_action(
+        &mut provider,
+        &mut state,
+        &CoreAction::SetTab(kinic_tabs::KINIC_INSERT_TAB_ID.into()),
+    )
+    .expect("switch to insert should dispatch");
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(
+        state
+            .selected_content
+            .as_ref()
+            .map(|content| content.id.as_str()),
+        Some("bbbbb-bb")
+    );
+
+    let _ = dispatch_action(
+        &mut provider,
+        &mut state,
+        &CoreAction::SetTab(kinic_tabs::KINIC_MEMORIES_TAB_ID.into()),
+    )
+    .expect("switch back to memories should dispatch");
+
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(
+        state
+            .selected_content
+            .as_ref()
+            .map(|content| content.id.as_str()),
+        Some("bbbbb-bb")
+    );
+    assert_eq!(
+        state.list_items.get(1).map(|item| item.id.as_str()),
+        Some("bbbbb-bb")
+    );
+    assert_eq!(state.selected_index, Some(1));
+}
+
+#[test]
+fn cursor_memory_change_resets_content_action_index() {
+    let (mut provider, mut state) = provider_two_memories_active_first();
+    state.memory_content_action_index = 2;
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
+        .expect("move next should dispatch");
+    execute_effects_to_status(&mut state, effects.clone());
+
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(state.memory_content_action_index, 0);
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::SetMemoryContentActionIndex(0)))
+    );
 }

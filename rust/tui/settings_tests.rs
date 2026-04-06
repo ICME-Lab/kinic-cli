@@ -338,7 +338,7 @@ fn settings_snapshot_projects_chat_retrieval_section() {
 }
 
 #[test]
-fn chat_history_store_keeps_threads_separated_by_identity_network_context_and_thread() {
+fn chat_history_store_separates_threads_by_network_principal_identity_and_thread_key() {
     let mut store = ChatHistoryStore::default();
 
     append_chat_history_message_to_store(
@@ -410,6 +410,61 @@ fn chat_history_store_keeps_threads_separated_by_identity_network_context_and_th
         ActiveChatThread {
             thread_id: "thread-2".to_string(),
             messages: vec![("assistant".to_string(), "five".to_string())],
+        }
+    );
+}
+
+#[test]
+fn chat_history_store_separates_threads_by_identity_label_for_same_principal() {
+    let mut store = ChatHistoryStore::default();
+
+    append_chat_history_message_to_store(
+        &mut store,
+        "local",
+        "principal-a",
+        "alice",
+        "all-memories",
+        "thread-1",
+        "user",
+        "from-alice",
+        1,
+    );
+    append_chat_history_message_to_store(
+        &mut store,
+        "local",
+        "principal-a",
+        "provided",
+        "all-memories",
+        "thread-2",
+        "assistant",
+        "from-provided",
+        2,
+    );
+
+    assert_eq!(
+        load_or_create_active_chat_thread_in_store(
+            &mut store,
+            "local",
+            "principal-a",
+            "alice",
+            "all-memories",
+        ),
+        ActiveChatThread {
+            thread_id: "thread-1".to_string(),
+            messages: vec![("user".to_string(), "from-alice".to_string())],
+        }
+    );
+    assert_eq!(
+        load_or_create_active_chat_thread_in_store(
+            &mut store,
+            "local",
+            "principal-a",
+            "provided",
+            "all-memories",
+        ),
+        ActiveChatThread {
+            thread_id: "thread-2".to_string(),
+            messages: vec![("assistant".to_string(), "from-provided".to_string())],
         }
     );
 }
@@ -578,11 +633,11 @@ contexts:
     );
     assert_eq!(store.contexts.len(), 1);
     assert_eq!(store.contexts[0].principal_id, "principal-1");
-    assert!(store.contexts[0].identity_label.is_empty());
+    assert_eq!(store.contexts[0].identity_label, "default");
 
     let serialized = serde_yaml::to_string(&store).expect("migrated store should serialize");
     assert!(serialized.contains("principal_id: principal-1"));
-    assert!(!serialized.contains("identity_label:"));
+    assert!(serialized.contains("identity_label: default"));
 }
 
 #[test]
@@ -622,8 +677,15 @@ contexts:
         "all-memories",
     );
 
+    assert_eq!(store.contexts.len(), 2);
+    assert_eq!(store.contexts[0].principal_id, "principal-1");
+    assert_eq!(store.contexts[0].identity_label, "default");
+    assert_eq!(store.contexts[1].principal_id, "");
+    assert_eq!(store.contexts[1].identity_label, "alternate");
+
     let serialized = serde_yaml::to_string(&store).expect("mixed store should serialize");
     assert!(serialized.contains("principal_id: principal-1"));
+    assert!(serialized.contains("identity_label: default"));
     assert!(serialized.contains("identity_label: alternate"));
 }
 

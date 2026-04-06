@@ -25,6 +25,8 @@ pub struct ContentPanel<'a> {
 
 impl<'a> ContentPanel<'a> {
     const SECTION_HEADER_WIDTH: usize = 34;
+    const CONTENT_INDENT: &'static str = "   ";
+    const MEMORY_PLAIN_TEXT_INDENT: &'static str = "     ";
 
     pub fn new(theme: &'a Theme) -> Self {
         Self {
@@ -70,7 +72,10 @@ impl<'a> ContentPanel<'a> {
 
     fn key_value(&self, key: &str, value: String) -> Line<'static> {
         Line::from(vec![
-            Span::styled(format!("  {} ", key), self.theme.style_dim()),
+            Span::styled(
+                format!("{}{} ", Self::CONTENT_INDENT, key),
+                self.theme.style_dim(),
+            ),
             Span::styled(value, self.theme.style_normal()),
         ])
     }
@@ -138,7 +143,7 @@ impl<'a> ContentPanel<'a> {
             lines.push(Line::from(""));
             for line in subtitle.lines() {
                 lines.push(Line::from(vec![
-                    Span::raw("  "),
+                    Span::raw(Self::MEMORY_PLAIN_TEXT_INDENT),
                     Span::styled(line.to_string(), self.theme.style_normal()),
                 ]));
             }
@@ -149,7 +154,7 @@ impl<'a> ContentPanel<'a> {
             lines.push(self.section_header("Definition"));
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::raw("  "),
+                Span::raw(Self::MEMORY_PLAIN_TEXT_INDENT),
                 Span::styled(content.definition.clone(), self.theme.style_type()),
             ]));
         }
@@ -167,7 +172,7 @@ impl<'a> ContentPanel<'a> {
             }
             if !location.is_empty() {
                 lines.push(Line::from(vec![
-                    Span::raw("  📍 "),
+                    Span::raw(format!("{}📍 ", Self::MEMORY_PLAIN_TEXT_INDENT)),
                     Span::styled(location, self.theme.style_muted()),
                 ]));
             }
@@ -178,7 +183,7 @@ impl<'a> ContentPanel<'a> {
             lines.push(self.section_header("Badges"));
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::raw("  "),
+                Span::raw(Self::MEMORY_PLAIN_TEXT_INDENT),
                 Span::styled(content.badges.join(", "), self.theme.style_keyword()),
             ]));
         }
@@ -190,9 +195,16 @@ impl<'a> ContentPanel<'a> {
             for row in &section.rows {
                 lines.push(self.key_value(&format!("{}:", row.label), row.value.clone()));
             }
+            let body_indent = if is_memory_item(content)
+                && !matches!(section.heading.as_str(), "Access" | "Actions")
+            {
+                Self::MEMORY_PLAIN_TEXT_INDENT
+            } else {
+                Self::CONTENT_INDENT
+            };
             for line in &section.body_lines {
                 lines.push(Line::from(vec![
-                    Span::raw("  "),
+                    Span::raw(body_indent),
                     Span::styled(line.clone(), self.theme.style_normal()),
                 ]));
             }
@@ -352,6 +364,7 @@ mod tests {
 
         assert!(rendered.contains("Description"));
         assert!(rendered.contains("Notes"));
+        assert!(rendered.contains("   Notes"));
     }
 
     #[test]
@@ -375,5 +388,35 @@ mod tests {
             .expect("notes cell");
 
         assert_eq!(notes_cell.fg, theme.fg);
+    }
+
+    #[test]
+    fn memory_content_section_body_aligns_with_key_value_rows() {
+        let theme = Theme::default();
+        let mut content = item_content("memory-1", UiItemKind::Custom("memory".to_string()));
+        content.sections.push(crate::ui::model::UiSection {
+            heading: "Content".to_string(),
+            rows: vec![crate::ui::model::UiRow {
+                label: "  Name".to_string(),
+                value: "Alpha".to_string(),
+            }],
+            body_lines: vec!["Body line".to_string()],
+        });
+
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 70, 20));
+        ContentPanel::new(&theme)
+            .ui_content(Some(&content))
+            .render(ratatui::layout::Rect::new(0, 0, 70, 20), &mut buf);
+
+        let rendered = (0..20)
+            .map(|y| {
+                (0..70)
+                    .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("     Body line"));
     }
 }

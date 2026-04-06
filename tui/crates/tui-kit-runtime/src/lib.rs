@@ -636,6 +636,7 @@ pub struct CoreState {
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
+    pub selected_memory_label: Option<String>,
     pub persistent_status_message: Option<String>,
     pub chat_open: bool,
     pub chat_messages: Vec<(String, String)>,
@@ -691,6 +692,7 @@ impl Default for CoreState {
             selected_context: None,
             total_count: 0,
             status_message: None,
+            selected_memory_label: None,
             persistent_status_message: None,
             chat_open: false,
             chat_messages: Vec::new(),
@@ -971,10 +973,12 @@ pub enum CoreEffect {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProviderSnapshot {
     pub items: Vec<UiItemSummary>,
+    pub selected_index: Option<usize>,
     pub selected_content: Option<UiItemContent>,
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
+    pub selected_memory_label: Option<String>,
     pub create_cost_state: CreateCostState,
     pub create_submit_state: CreateSubmitState,
     pub settings: SettingsSnapshot,
@@ -1525,7 +1529,12 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         CoreAction::FocusSearch => state.focus = PaneFocus::Search,
         CoreAction::FocusItems => state.focus = PaneFocus::Items,
-        CoreAction::FocusContent => state.focus = PaneFocus::Content,
+        CoreAction::FocusContent => {
+            state.focus = PaneFocus::Content;
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+                state.memory_content_action_index = 0;
+            }
+        }
         CoreAction::FocusForm => {
             state.focus = PaneFocus::Form;
             match kinic_tabs::tab_kind(state.current_tab_id.as_str()) {
@@ -1538,7 +1547,12 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 _ => {}
             }
         }
-        CoreAction::OpenSelected => state.focus = PaneFocus::Content,
+        CoreAction::OpenSelected => {
+            state.focus = PaneFocus::Content;
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+                state.memory_content_action_index = 0;
+            }
+        }
         CoreAction::Back => {
             state.focus = if state.focus == PaneFocus::Extra {
                 PaneFocus::Content
@@ -2360,12 +2374,14 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
 /// Apply a new snapshot to core runtime state.
 pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.list_items = snapshot.items;
+    let snapshot_selected_index = snapshot.selected_index;
     state.selected_content = snapshot.selected_content;
     state.selected_context = snapshot.selected_context;
     state.total_count = snapshot.total_count;
     if state.persistent_status_message.is_none() {
         state.status_message = snapshot.status_message;
     }
+    state.selected_memory_label = snapshot.selected_memory_label;
     state.create_cost_state = snapshot.create_cost_state;
     state.create_submit_state = snapshot.create_submit_state;
     state.settings = snapshot.settings;
@@ -2382,6 +2398,28 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     }
 
     let selectable_len = selectable_len(state);
+    if let Some(selected_index) = snapshot_selected_index {
+        state.selected_index = if selectable_len == 0 {
+            None
+        } else {
+            Some(selected_index.min(selectable_len.saturating_sub(1)))
+        };
+        return;
+    }
+
+    if !is_settings_content(state.current_tab_id.as_str(), state.focus)
+        && let Some(selected_content_id) = state
+            .selected_content
+            .as_ref()
+            .map(|content| content.id.as_str())
+        && let Some(selected_index) = state
+            .list_items
+            .iter()
+            .position(|item| item.id == selected_content_id)
+    {
+        state.selected_index = Some(selected_index);
+    }
+
     if let Some(sel) = state.selected_index {
         if sel >= selectable_len {
             state.selected_index = if selectable_len == 0 { None } else { Some(0) };
@@ -2830,6 +2868,34 @@ mod tests {
     }
 
     #[test]
+    fn focus_content_resets_memory_content_action_index_on_memories_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            memory_content_action_index: 3,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusContent);
+
+        assert_eq!(state.focus, PaneFocus::Content);
+        assert_eq!(state.memory_content_action_index, 0);
+    }
+
+    #[test]
+    fn open_selected_resets_memory_content_action_index_on_memories_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            memory_content_action_index: 2,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::OpenSelected);
+
+        assert_eq!(state.focus, PaneFocus::Content);
+        assert_eq!(state.memory_content_action_index, 0);
+    }
+
+    #[test]
     fn test_dispatch_action_applies_provider_snapshot() {
         struct DispatchTestProvider;
 
@@ -3129,7 +3195,7 @@ mod tests {
     }
 
     #[test]
-    fn memories_content_tab_jumps_within_detail_actions() {
+    fn memories_content_tab_uses_boundary_navigation_actions() {
         assert_eq!(
             action_for_key(
                 CoreKey::Tab,
@@ -3146,6 +3212,54 @@ mod tests {
             ),
             Some(CoreAction::MemoryContentJumpPrev)
         );
+    }
+
+    #[test]
+    fn memories_items_tab_moves_focus_to_content() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            selected_index: Some(0),
+            list_items: vec![UiItemSummary {
+                id: "1".to_string(),
+                name: "a".to_string(),
+                leading_marker: None,
+                kind: tui_kit_model::UiItemKind::Custom("x".to_string()),
+                visibility: tui_kit_model::UiVisibility::Private,
+                qualified_name: None,
+                subtitle: None,
+                tags: vec![],
+            }],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusNext);
+        assert_eq!(state.focus, PaneFocus::Content);
+        assert_eq!(state.selected_index, Some(0));
+    }
+
+    #[test]
+    fn memories_items_backtab_moves_focus_to_search() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            selected_index: Some(0),
+            list_items: vec![UiItemSummary {
+                id: "1".to_string(),
+                name: "a".to_string(),
+                leading_marker: None,
+                kind: tui_kit_model::UiItemKind::Custom("x".to_string()),
+                visibility: tui_kit_model::UiVisibility::Private,
+                qualified_name: None,
+                subtitle: None,
+                tags: vec![],
+            }],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusPrev);
+        assert_eq!(state.focus, PaneFocus::Search);
+        assert_eq!(state.selected_index, Some(0));
     }
 
     #[test]
@@ -3737,6 +3851,56 @@ mod tests {
                     footer: None,
                 }],
             },
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.selected_index, Some(1));
+    }
+
+    #[test]
+    fn apply_snapshot_aligns_selected_index_with_selected_content_id() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            selected_index: Some(0),
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            items: vec![
+                UiItemSummary {
+                    id: "aaaaa-aa".to_string(),
+                    name: "Alpha".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+                UiItemSummary {
+                    id: "bbbbb-bb".to_string(),
+                    name: "Beta".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+            ],
+            selected_content: Some(UiItemContent {
+                id: "bbbbb-bb".to_string(),
+                title: "Beta".to_string(),
+                subtitle: None,
+                kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                definition: String::new(),
+                location: None,
+                docs: None,
+                badges: vec![],
+                sections: vec![],
+            }),
+            total_count: 2,
             ..ProviderSnapshot::default()
         };
 

@@ -415,11 +415,14 @@ fn ensure_chat_context_index(
     if let Some(index) = store.contexts.iter().position(|context| {
         context.network == network
             && context.principal_id == principal_id
+            && context.identity_label == identity_label
             && context.thread_key == thread_key
     }) {
         return index;
     }
 
+    // Legacy records only had identity_label. Preserve that identity boundary while
+    // backfilling principal_id so mixed old/new stores remain readable.
     if let Some(index) = store.contexts.iter().position(|context| {
         context.network == network
             && context.principal_id.is_empty()
@@ -431,14 +434,13 @@ fn ensure_chat_context_index(
             .get_mut(index)
             .expect("legacy chat context should exist after lookup");
         context.principal_id = principal_id.to_string();
-        context.identity_label.clear();
         return index;
     }
 
     store.contexts.push(ChatContext {
         network: network.to_string(),
         principal_id: principal_id.to_string(),
-        identity_label: String::new(),
+        identity_label: identity_label.to_string(),
         thread_key: thread_key.to_string(),
         active_thread_id: String::new(),
         threads: Vec::new(),

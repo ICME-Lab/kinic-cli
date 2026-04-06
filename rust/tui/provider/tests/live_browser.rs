@@ -1,5 +1,18 @@
 use super::*;
 
+fn memory_details(name: &str) -> bridge::MemoryDetails {
+    bridge::MemoryDetails {
+        name: name.to_string(),
+        version: "1.0.0".to_string(),
+        dim: Some(8),
+        owners: vec![],
+        stable_memory_size: Some(1),
+        cycle_amount: Some(1),
+        users: vec![],
+        users_load_error: None,
+    }
+}
+
 #[test]
 fn poll_initial_memories_background_applies_loaded_memories_and_prefers_saved_default() {
     let mut provider = KinicProvider::new(live_config());
@@ -21,8 +34,43 @@ fn poll_initial_memories_background_applies_loaded_memories_and_prefers_saved_de
 
     assert!(!provider.initial_memories_in_flight);
     assert_eq!(provider.memory_records.len(), 2);
-    assert_eq!(provider.active_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
     assert!(output.snapshot.is_some());
+}
+
+#[test]
+fn poll_initial_memories_background_prefetches_current_cursor_too() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.default_memory_id = Some("bbbbb-bb".to_string());
+    let (tx, rx) = mpsc::channel();
+    provider.pending_initial_memories = Some(rx);
+    provider.initial_memories_in_flight = true;
+    push_test_memory_detail_result("aaaaa-aa", Ok(memory_details("Alpha loaded")));
+    push_test_memory_detail_result("bbbbb-bb", Ok(memory_details("Beta loaded")));
+    tx.send(InitialMemoriesTaskOutput {
+        result: Ok(vec![
+            running_memory_summary("aaaaa-aa", "first"),
+            running_memory_summary("bbbbb-bb", "second"),
+        ]),
+    })
+    .unwrap();
+
+    provider
+        .poll_initial_memories_background(&CoreState::default())
+        .expect("background result");
+
+    assert!(
+        provider
+            .memory_detail_prefetch
+            .in_flight_memory_ids
+            .contains("aaaaa-aa")
+    );
+    assert!(
+        provider
+            .memory_detail_prefetch
+            .in_flight_memory_ids
+            .contains("bbbbb-bb")
+    );
 }
 
 #[test]
@@ -44,7 +92,7 @@ fn poll_initial_memories_background_falls_back_to_first_when_default_missing() {
         .poll_initial_memories_background(&CoreState::default())
         .expect("initial memories output");
 
-    assert_eq!(provider.active_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
 }
 
 #[test]

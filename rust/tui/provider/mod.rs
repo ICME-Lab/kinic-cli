@@ -1,7 +1,7 @@
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     path::Path,
     sync::{Arc, mpsc},
     thread,
@@ -109,6 +109,7 @@ struct SaveTagOutcome {
 }
 
 const MAX_CONCURRENT_MEMORY_SEARCHES: usize = 10;
+const MAX_CONCURRENT_MEMORY_DETAIL_PREFETCHES: usize = 4;
 const ADD_MEMORY_ACTION_ID: &str = "kinic-action-add-memory";
 const ALL_MEMORIES_CHAT_THREAD_KEY: &str = "all-memories";
 
@@ -126,7 +127,7 @@ pub struct KinicProvider {
     session_overview: SessionAccountOverview,
     user_preferences: UserPreferences,
     preferences_health: PreferencesHealth,
-    active_memory_id: Option<String>,
+    cursor_memory_id: Option<String>,
     memory_summaries: Vec<MemorySummary>,
     memory_records: Vec<KinicRecord>,
     result_records: Vec<KinicRecord>,
@@ -163,6 +164,7 @@ pub struct KinicProvider {
     pending_memory_detail: RequestTaskState<MemoryDetailTaskOutput>,
     next_memory_detail_request_id: u64,
     pending_memory_detail_memory_id: Option<String>,
+    memory_detail_prefetch: MemoryDetailPrefetchState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +195,7 @@ struct PendingSearch {
 type MemorySearchTaskResult = (String, anyhow::Result<Vec<SearchResultItem>>);
 type MemorySearchJoinResult = Result<MemorySearchTaskResult, tokio::task::JoinError>;
 type NextMemorySearchTask = Option<MemorySearchJoinResult>;
+const SEARCH_JOIN_ERROR_MEMORY_ID: &str = "join-error";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LastSearchState {
@@ -204,6 +207,45 @@ struct LastSearchState {
 struct SearchBatchResult {
     items: Vec<SearchResultItem>,
     failed_memory_ids: Vec<String>,
+}
+
+fn fold_live_search_results(
+    target_count: usize,
+    results: Vec<MemorySearchTaskResult>,
+    join_errors: Vec<tokio::task::JoinError>,
+) -> Result<SearchBatchResult, String> {
+    let mut items = Vec::new();
+    let mut failed_memory_ids = Vec::new();
+    let mut first_error = None;
+
+    for (memory_id, result) in results {
+        match result {
+            Ok(mut next_items) => items.append(&mut next_items),
+            Err(error) => {
+                failed_memory_ids.push(memory_id);
+                if first_error.is_none() {
+                    first_error = Some(error.to_string());
+                }
+            }
+        }
+    }
+
+    for error in join_errors {
+        failed_memory_ids.push(SEARCH_JOIN_ERROR_MEMORY_ID.to_string());
+        if first_error.is_none() {
+            first_error = Some(error.to_string());
+        }
+    }
+
+    if target_count > 0 && failed_memory_ids.len() == target_count {
+        return Err(first_error
+            .unwrap_or_else(|| "Search failed before any memory returned results.".to_string()));
+    }
+
+    Ok(SearchBatchResult {
+        items,
+        failed_memory_ids,
+    })
 }
 
 struct InitialMemoriesTaskOutput {
@@ -657,6 +699,11 @@ struct MemoryDetailTaskOutput {
     result: Result<bridge::MemoryDetails, String>,
 }
 
+struct PrefetchMemoryDetailTaskOutput {
+    memory_id: String,
+    result: Result<bridge::MemoryDetails, String>,
+}
+
 struct AccessSubmitTaskOutput {
     memory_id: String,
     result: Result<(), String>,
@@ -708,6 +755,33 @@ impl<T> RequestTaskState<T> {
 struct TaskState<T> {
     receiver: Option<mpsc::Receiver<T>>,
     in_flight: bool,
+}
+
+struct MemoryDetailPrefetchState {
+    sender: Option<mpsc::Sender<PrefetchMemoryDetailTaskOutput>>,
+    receiver: Option<mpsc::Receiver<PrefetchMemoryDetailTaskOutput>>,
+    queued_memory_ids: VecDeque<String>,
+    in_flight_memory_ids: HashSet<String>,
+}
+
+impl Default for MemoryDetailPrefetchState {
+    fn default() -> Self {
+        Self {
+            sender: None,
+            receiver: None,
+            queued_memory_ids: VecDeque::new(),
+            in_flight_memory_ids: HashSet::new(),
+        }
+    }
+}
+
+impl MemoryDetailPrefetchState {
+    fn reset(&mut self) {
+        self.sender = None;
+        self.receiver = None;
+        self.queued_memory_ids.clear();
+        self.in_flight_memory_ids.clear();
+    }
 }
 
 impl<T> Default for TaskState<T> {
@@ -782,12 +856,55 @@ fn finish_task<T>(task_state: &mut TaskState<T>) {
     task_state.reset();
 }
 
+#[cfg(test)]
+fn test_memory_detail_results()
+-> &'static Mutex<Vec<(String, Result<bridge::MemoryDetails, String>)>> {
+    static RESULTS: OnceLock<Mutex<Vec<(String, Result<bridge::MemoryDetails, String>)>>> =
+        OnceLock::new();
+    RESULTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+#[cfg(test)]
+fn push_test_memory_detail_result(memory_id: &str, result: Result<bridge::MemoryDetails, String>) {
+    test_memory_detail_results()
+        .lock()
+        .expect("memory detail test results lock should be available")
+        .push((memory_id.to_string(), result));
+}
+
+fn load_memory_details_task_result(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+) -> Result<bridge::MemoryDetails, String> {
+    #[cfg(test)]
+    {
+        let mut guard = test_memory_detail_results()
+            .lock()
+            .expect("memory detail test results lock should be available");
+        if let Some(index) = guard
+            .iter()
+            .position(|(candidate_id, _)| candidate_id == &memory_id)
+        {
+            let (_, result) = guard.remove(index);
+            return result;
+        }
+    }
+
+    let runtime = Runtime::new().expect("failed to create tokio runtime for memory detail load");
+    runtime
+        .block_on(bridge::load_memory_details(use_mainnet, auth, memory_id))
+        .map_err(|error| error.to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum AccessSelection<'a> {
+enum MemoryContentSelection<'a> {
+    RenameMemory,
     User(&'a bridge::MemoryUser),
     AddUser,
     RemoveManualMemory,
 }
+
 impl KinicProvider {
     pub fn new(config: TuiConfig) -> Self {
         #[cfg(test)]
@@ -819,7 +936,7 @@ impl KinicProvider {
             session_overview,
             user_preferences,
             preferences_health,
-            active_memory_id: None,
+            cursor_memory_id: None,
             memory_summaries: Vec::new(),
             memory_records: Vec::new(),
             result_records: Vec::new(),
@@ -856,6 +973,7 @@ impl KinicProvider {
             pending_memory_detail: RequestTaskState::default(),
             next_memory_detail_request_id: 0,
             pending_memory_detail_memory_id: None,
+            memory_detail_prefetch: MemoryDetailPrefetchState::default(),
         }
     }
 
@@ -885,7 +1003,8 @@ impl KinicProvider {
         self.loaded_memory_details.clear();
         reset_request_task(&mut self.pending_memory_detail);
         self.pending_memory_detail_memory_id = None;
-        self.active_memory_id = None;
+        self.memory_detail_prefetch.reset();
+        self.cursor_memory_id = None;
         self.active_chat_thread = None;
         self.initial_memories_in_flight = true;
         let auth = self.config.auth.clone();
@@ -960,22 +1079,11 @@ impl KinicProvider {
         self.current_records()
     }
 
-    fn sync_active_memory_to_visible_records(&mut self) {
+    fn sync_memory_browser_selection(&mut self) -> bool {
         if self.memories_mode != MemoriesMode::Browser {
-            return;
+            return false;
         }
-
-        let previous_active_memory_id = self.active_memory_id.clone();
-        if self.query.is_empty() {
-            if self.active_memory_id.is_none() {
-                self.active_memory_id = self.memory_records.first().map(|record| record.id.clone());
-            }
-            if self.active_memory_id != previous_active_memory_id {
-                self.invalidate_pending_search();
-                self.start_active_memory_detail_load();
-            }
-            return;
-        }
+        let previous_cursor_memory_id = self.cursor_memory_id.clone();
 
         let visible_ids = self
             .visible_memory_records()
@@ -984,74 +1092,76 @@ impl KinicProvider {
             .collect::<Vec<_>>();
 
         if visible_ids.is_empty() {
-            self.active_memory_id = None;
-            if self.active_memory_id != previous_active_memory_id {
-                self.invalidate_pending_search();
-            }
-            return;
+            self.cursor_memory_id = None;
+            return self.cursor_memory_id != previous_cursor_memory_id;
         }
 
-        if self
-            .active_memory_id
+        if !self
+            .cursor_memory_id
             .as_ref()
-            .is_some_and(|active_id| visible_ids.iter().any(|id| id == active_id))
+            .is_some_and(|memory_id| visible_ids.iter().any(|id| id == memory_id))
         {
-            return;
+            self.cursor_memory_id = visible_ids.first().cloned();
         }
 
-        self.active_memory_id = visible_ids.first().cloned();
-        self.invalidate_pending_search();
-        self.start_active_memory_detail_load();
+        self.cursor_memory_id != previous_cursor_memory_id
     }
 
-    fn active_visible_memory_record(&self) -> Option<&KinicRecord> {
-        let active_id = self.active_memory_id.as_deref()?;
-        self.visible_memory_records()
-            .into_iter()
-            .find(|record| record.id == active_id)
-    }
-
-    fn active_visible_memory_index(&self) -> Option<usize> {
-        let active_id = self.active_memory_id.as_deref()?;
+    fn cursor_visible_memory_index(&self) -> Option<usize> {
+        let active_id = self.cursor_memory_id.as_deref()?;
         self.visible_memory_records()
             .into_iter()
             .position(|record| record.id == active_id)
     }
 
-    fn visible_memory_count(&self) -> usize {
-        self.visible_memory_records().len()
-    }
-
-    fn move_active_memory(&mut self, delta: isize) {
-        if self.memories_mode != MemoriesMode::Browser || self.visible_memory_count() == 0 {
+    fn navigate_memory_cursor(&mut self, state: &CoreState, action: &CoreAction) {
+        if !self.should_handle_memory_navigation(state) || self.is_add_memory_action_selected(state)
+        {
             return;
         }
 
         let visible_records = self.visible_memory_records();
-        let current = self.active_visible_memory_index().unwrap_or(0) as isize;
-        let len = visible_records.len() as isize;
-        let last = len.saturating_sub(1);
-        let next = if delta == 1 || delta == -1 {
-            (current + delta).rem_euclid(len)
+        if visible_records.is_empty() {
+            return;
+        }
+
+        let target_index = if let Some(index) = state.selected_index
+            && visible_records.get(index).is_some()
+        {
+            index
         } else {
-            (current + delta).clamp(0, last)
-        } as usize;
-        self.active_memory_id = Some(visible_records[next].id.clone());
-        self.invalidate_pending_search();
-        self.start_active_memory_detail_load();
-    }
+            let visible_count = visible_records.len();
+            let current = self.cursor_visible_memory_index().unwrap_or(0);
+            let last = visible_count.saturating_sub(1);
+            match action {
+                CoreAction::MoveNext => {
+                    if visible_count == 1 {
+                        0
+                    } else {
+                        (current + 1) % visible_count
+                    }
+                }
+                CoreAction::MovePrev => {
+                    if visible_count == 1 {
+                        0
+                    } else if current == 0 {
+                        last
+                    } else {
+                        current - 1
+                    }
+                }
+                CoreAction::MoveHome => 0,
+                CoreAction::MoveEnd => last,
+                CoreAction::MovePageDown => (current + 10).min(last),
+                CoreAction::MovePageUp => current.saturating_sub(10),
+                _ => current,
+            }
+        };
 
-    fn set_active_memory(&mut self, index: usize) {
-        if self.memories_mode != MemoriesMode::Browser {
-            return;
-        }
-        let visible_records = self.visible_memory_records();
-        let Some(record) = visible_records.get(index) else {
+        let Some(record) = visible_records.get(target_index) else {
             return;
         };
-        self.active_memory_id = Some(record.id.clone());
-        self.invalidate_pending_search();
-        self.start_active_memory_detail_load();
+        self.cursor_memory_id = Some(record.id.clone());
     }
 
     fn network_label(&self) -> &str {
@@ -1178,7 +1288,7 @@ impl KinicProvider {
     fn chat_history_thread_key(&self, state: &CoreState) -> Option<String> {
         match state.chat_scope {
             ChatScope::All => Some(ALL_MEMORIES_CHAT_THREAD_KEY.to_string()),
-            ChatScope::Selected => self.active_memory_id.clone(),
+            ChatScope::Selected => self.cursor_memory_id.clone(),
         }
     }
 
@@ -1236,7 +1346,7 @@ impl KinicProvider {
             }
             ChatScope::Selected => {
                 let active_memory_id = self
-                    .active_memory_id
+                    .cursor_memory_id
                     .as_deref()
                     .ok_or_else(|| "Select a memory before asking AI.".to_string())?;
                 let record = self
@@ -1368,11 +1478,18 @@ impl KinicProvider {
         self.snapshot_output(state, vec![effect])
     }
 
-    fn active_memory_summary(&self) -> Option<&MemorySummary> {
-        let active_id = self.active_memory_id.as_deref()?;
+    fn selected_memory_summary(&self) -> Option<&MemorySummary> {
+        let active_id = self.cursor_memory_id.as_deref()?;
         self.memory_summaries
             .iter()
             .find(|summary| summary.id == active_id)
+    }
+
+    fn selected_memory_record(&self) -> Option<&KinicRecord> {
+        let selected_id = self.cursor_memory_id.as_deref()?;
+        self.memory_records
+            .iter()
+            .find(|record| record.id == selected_id)
     }
 
     fn active_rename_target(&self, state: &CoreState) -> Option<(&MemorySummary, String)> {
@@ -1382,7 +1499,7 @@ impl KinicProvider {
         if self.is_add_memory_action_selected(state) {
             return None;
         }
-        let summary = self.active_memory_summary()?;
+        let summary = self.selected_memory_summary()?;
         summary.searchable_memory_id.as_ref().map(|_| {
             (
                 summary,
@@ -1392,7 +1509,7 @@ impl KinicProvider {
     }
 
     fn active_memory_is_manual(&self) -> bool {
-        let Some(active_id) = self.active_memory_id.as_deref() else {
+        let Some(active_id) = self.cursor_memory_id.as_deref() else {
             return false;
         };
         self.user_preferences
@@ -1401,60 +1518,41 @@ impl KinicProvider {
             .any(|memory_id| memory_id == active_id)
     }
 
-    fn access_selection<'a>(&'a self, state: &CoreState) -> Option<AccessSelection<'a>> {
-        let summary = self.active_memory_summary()?;
-        let user_count = summary.users.as_ref().map_or(0, Vec::len);
-        let add_user_index = user_count;
-        let remove_index = add_user_index + usize::from(self.active_memory_is_manual());
-        let selected_index = state.memory_content_action_index.min(remove_index);
-
-        if selected_index < user_count {
-            return summary
-                .users
-                .as_ref()
-                .and_then(|users| users.get(selected_index))
-                .map(AccessSelection::User);
+    fn memory_content_selections<'a>(
+        &'a self,
+        state: &CoreState,
+    ) -> Vec<MemoryContentSelection<'a>> {
+        let Some(summary) = self.selected_memory_summary() else {
+            return vec![MemoryContentSelection::AddUser];
+        };
+        let mut selections = Vec::new();
+        if self.active_rename_target(state).is_some() {
+            selections.push(MemoryContentSelection::RenameMemory);
         }
-
-        if selected_index == add_user_index {
-            return Some(AccessSelection::AddUser);
+        if let Some(users) = summary.users.as_ref() {
+            selections.extend(users.iter().map(MemoryContentSelection::User));
         }
-
-        self.active_memory_is_manual()
-            .then_some(AccessSelection::RemoveManualMemory)
+        selections.push(MemoryContentSelection::AddUser);
+        if self.active_memory_is_manual() {
+            selections.push(MemoryContentSelection::RemoveManualMemory);
+        }
+        selections
     }
 
-    fn next_access_index(&self, state: &CoreState, delta: isize) -> usize {
-        let selectable_len = self
-            .active_memory_summary()
-            .map(|summary| {
-                summary.users.as_ref().map_or(0, Vec::len)
-                    + 1
-                    + usize::from(self.active_memory_is_manual())
-            })
-            .unwrap_or(1);
+    fn content_selection<'a>(&'a self, state: &CoreState) -> Option<MemoryContentSelection<'a>> {
+        let selections = self.memory_content_selections(state);
+        let selected_index = state
+            .memory_content_action_index
+            .min(selections.len().saturating_sub(1));
+        selections.get(selected_index).cloned()
+    }
+
+    fn next_content_index(&self, state: &CoreState, delta: isize) -> usize {
+        let selectable_len = self.memory_content_selections(state).len().max(1);
         let current = state
             .memory_content_action_index
             .min(selectable_len.saturating_sub(1)) as isize;
-        (current + delta).clamp(0, selectable_len.saturating_sub(1) as isize) as usize
-    }
-
-    fn jump_access_index(&self, state: &CoreState, forward: bool) -> usize {
-        let user_count = self
-            .active_memory_summary()
-            .and_then(|summary| summary.users.as_ref())
-            .map_or(0, Vec::len);
-        let add_user_index = user_count;
-        let remove_index = add_user_index + usize::from(self.active_memory_is_manual());
-        let current = state.memory_content_action_index.min(remove_index);
-
-        if self.active_memory_is_manual() && forward {
-            return remove_index;
-        }
-        if self.active_memory_is_manual() && current == remove_index {
-            return add_user_index;
-        }
-        add_user_index
+        (current + delta).rem_euclid(selectable_len as isize) as usize
     }
 
     fn access_role_from_user(user: &bridge::MemoryUser) -> AccessControlRole {
@@ -1466,6 +1564,20 @@ impl KinicProvider {
     }
 
     fn apply_access_content(&self, content: &mut tui_kit_model::UiItemContent, state: &CoreState) {
+        let current_selection = self.content_selection(state);
+        for section in &mut content.sections {
+            for row in &mut section.rows {
+                let label = row.label.trim_start().to_string();
+                let selected = section.heading == "Overview"
+                    && label == "Name"
+                    && matches!(
+                        current_selection,
+                        Some(MemoryContentSelection::RenameMemory)
+                    );
+                row.label = marker_label(selected, label.as_str());
+            }
+        }
+
         let Some(section) = content
             .sections
             .iter_mut()
@@ -1474,23 +1586,23 @@ impl KinicProvider {
             return;
         };
         let users = self
-            .active_memory_summary()
+            .selected_memory_summary()
             .and_then(|summary| summary.users.as_ref());
-        section.body_lines = render_access_lines(users, state.memory_content_action_index, false);
+        section.body_lines = render_access_lines(users, current_selection.as_ref());
 
         content
             .sections
             .retain(|section| section.heading != "Actions");
         if self.active_memory_is_manual() {
-            let user_count = users.map_or(0, Vec::len);
-            let action_index = user_count + 1;
-            let selected = state.memory_content_action_index.min(action_index) == action_index;
             content.sections.push(tui_kit_model::UiSection {
                 heading: "Actions".to_string(),
                 rows: Vec::new(),
-                body_lines: vec![format!(
-                    "{} Remove from list",
-                    if selected { ">" } else { " " }
+                body_lines: vec![marker_line(
+                    matches!(
+                        current_selection,
+                        Some(MemoryContentSelection::RemoveManualMemory)
+                    ),
+                    "Remove from list",
                 )],
             });
         }
@@ -1575,14 +1687,147 @@ impl KinicProvider {
         }
     }
 
-    fn start_active_memory_detail_load(&mut self) {
+    fn memory_detail_in_flight(&self, memory_id: &str) -> bool {
+        self.pending_memory_detail_memory_id.as_deref() == Some(memory_id)
+            || self
+                .memory_detail_prefetch
+                .in_flight_memory_ids
+                .contains(memory_id)
+    }
+
+    fn ensure_memory_detail_prefetch_channel(&mut self) {
+        if self.memory_detail_prefetch.sender.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.memory_detail_prefetch.sender = Some(tx);
+        self.memory_detail_prefetch.receiver = Some(rx);
+    }
+
+    fn spawn_memory_detail_prefetch_worker(&mut self, memory_id: String) {
+        let Some(tx) = self.memory_detail_prefetch.sender.clone() else {
+            return;
+        };
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        self.memory_detail_prefetch
+            .in_flight_memory_ids
+            .insert(memory_id.clone());
+        thread::spawn(move || {
+            let result = load_memory_details_task_result(use_mainnet, auth, memory_id.clone());
+            let _ = tx.send(PrefetchMemoryDetailTaskOutput { memory_id, result });
+        });
+    }
+
+    fn pump_memory_detail_prefetch_workers(&mut self) {
+        while self.memory_detail_prefetch.in_flight_memory_ids.len()
+            < MAX_CONCURRENT_MEMORY_DETAIL_PREFETCHES
+        {
+            let Some(memory_id) = self.memory_detail_prefetch.queued_memory_ids.pop_front() else {
+                break;
+            };
+            if self.loaded_memory_details.contains(memory_id.as_str())
+                || self.memory_detail_in_flight(memory_id.as_str())
+            {
+                continue;
+            }
+            self.spawn_memory_detail_prefetch_worker(memory_id);
+        }
+    }
+
+    fn enqueue_memory_detail_prefetch(&mut self, memory_ids: impl IntoIterator<Item = String>) {
+        self.ensure_memory_detail_prefetch_channel();
+        for memory_id in memory_ids {
+            if self.loaded_memory_details.contains(memory_id.as_str())
+                || self.memory_detail_in_flight(memory_id.as_str())
+                || self
+                    .memory_detail_prefetch
+                    .queued_memory_ids
+                    .iter()
+                    .any(|queued_memory_id| queued_memory_id == &memory_id)
+            {
+                continue;
+            }
+            self.memory_detail_prefetch
+                .queued_memory_ids
+                .push_back(memory_id);
+        }
+        self.pump_memory_detail_prefetch_workers();
+    }
+
+    fn start_memory_detail_prefetch_for_records(&mut self) {
+        let memory_ids = self
+            .memory_records
+            .iter()
+            .map(|record| record.id.clone())
+            .collect::<Vec<_>>();
+        self.enqueue_memory_detail_prefetch(memory_ids);
+    }
+
+    fn apply_memory_detail_result(
+        &mut self,
+        memory_id: String,
+        result: Result<bridge::MemoryDetails, String>,
+        notify: bool,
+    ) -> Vec<CoreEffect> {
+        let mut effects = Vec::new();
+        match result {
+            Ok(details) => {
+                if let Some(summary) = self
+                    .memory_summaries
+                    .iter_mut()
+                    .find(|summary| summary.id == memory_id)
+                {
+                    summary.name = details.name;
+                    summary.version = details.version;
+                    summary.dim = details.dim;
+                    summary.owners = Some(details.owners);
+                    summary.stable_memory_size = details.stable_memory_size;
+                    summary.cycle_amount = details.cycle_amount;
+                    summary.users = Some(details.users);
+                    self.loaded_memory_details.insert(memory_id);
+                    self.refresh_memory_records_from_summaries();
+                }
+                if notify && let Some(message) = details.users_load_error.as_ref() {
+                    effects.push(CoreEffect::Notify(format!(
+                        "Could not load memory access list: {message}"
+                    )));
+                }
+            }
+            Err(message) => {
+                if notify {
+                    effects.push(CoreEffect::Notify(format!(
+                        "Could not load memory details: {message}"
+                    )));
+                }
+            }
+        }
+        effects
+    }
+
+    fn start_cursor_memory_detail_load(&mut self) {
         if self.memories_mode != MemoriesMode::Browser {
             return;
         }
-        let Some(memory_id) = self.active_memory_id.clone() else {
+        let Some(memory_id) = self.cursor_memory_id.clone() else {
             return;
         };
         if self.loaded_memory_details.contains(memory_id.as_str()) {
+            return;
+        }
+        if let Some(index) = self
+            .memory_detail_prefetch
+            .queued_memory_ids
+            .iter()
+            .position(|queued_memory_id| queued_memory_id == &memory_id)
+        {
+            self.memory_detail_prefetch.queued_memory_ids.remove(index);
+        }
+        if self
+            .memory_detail_prefetch
+            .in_flight_memory_ids
+            .contains(memory_id.as_str())
+        {
             return;
         }
         if self.pending_memory_detail_memory_id.as_deref() == Some(memory_id.as_str()) {
@@ -1596,15 +1841,7 @@ impl KinicProvider {
             &mut self.next_memory_detail_request_id,
             &mut self.pending_memory_detail,
             move |request_id, tx| {
-                let runtime =
-                    Runtime::new().expect("failed to create tokio runtime for memory detail load");
-                let result = runtime
-                    .block_on(bridge::load_memory_details(
-                        use_mainnet,
-                        auth,
-                        memory_id.clone(),
-                    ))
-                    .map_err(|error| error.to_string());
+                let result = load_memory_details_task_result(use_mainnet, auth, memory_id.clone());
                 let _ = tx.send(MemoryDetailTaskOutput {
                     request_id,
                     memory_id,
@@ -1707,13 +1944,11 @@ impl KinicProvider {
         }
         let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
-        } else if self.is_add_memory_action_selected(state) {
-            Some(adapter::to_content(&add_memory_action_record()))
         } else if self.memories_mode == MemoriesMode::Browser {
-            if self.memory_records.is_empty() {
+            if self.cursor_memory_id.is_none() && self.memory_records.is_empty() {
                 filtered.first().copied().map(adapter::to_content)
             } else {
-                self.active_visible_memory_record().map(|record| {
+                self.selected_memory_record().map(|record| {
                     let mut content = adapter::to_content(record);
                     if record.group == "memories" {
                         self.apply_access_content(&mut content, state);
@@ -1725,15 +1960,28 @@ impl KinicProvider {
             let sel = state.selected_index.unwrap_or(0);
             filtered.get(sel).map(|r| adapter::to_content(r))
         };
+        let selected_index = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
+            None
+        } else if self.is_add_memory_action_selected(state) {
+            Some(filtered.len())
+        } else if self.memories_mode == MemoriesMode::Browser {
+            self.cursor_visible_memory_index()
+                .or_else(|| (!filtered.is_empty()).then_some(0))
+        } else {
+            let current = state.selected_index.unwrap_or(0);
+            (!filtered.is_empty()).then_some(current.min(filtered.len().saturating_sub(1)))
+        };
         let insert_current_dim = self.insert_current_dim(state);
         let insert_validation_message = self.insert_validation_message(state);
 
         ProviderSnapshot {
             items,
+            selected_index,
             selected_content,
             selected_context: None,
             total_count: filtered.len(),
             status_message: Some(self.status_message(state, filtered.len())),
+            selected_memory_label: self.selected_memory_label(),
             create_cost_state: self.create_cost_state.clone(),
             create_submit_state: state.create_submit_state.clone(),
             settings: settings::build_settings_snapshot(
@@ -1776,6 +2024,24 @@ impl KinicProvider {
                 Err(_) => "invalid".to_string(),
             },
         )
+    }
+
+    fn selected_memory_label(&self) -> Option<String> {
+        self.selected_memory_record()
+            .map(|record| {
+                let title = record.title.trim();
+                if title.is_empty() {
+                    record.id.clone()
+                } else {
+                    title.to_string()
+                }
+            })
+            .or_else(|| {
+                self.cursor_memory_id
+                    .as_deref()
+                    .and_then(|memory_id| self.default_memory_selection().title_for_id(memory_id))
+            })
+            .or_else(|| self.cursor_memory_id.clone())
     }
 
     fn insert_validation_message(&self, state: &CoreState) -> Option<String> {
@@ -2281,6 +2547,12 @@ impl KinicProvider {
             reset_request_task(&mut self.pending_memory_detail);
             self.pending_memory_detail_memory_id = None;
         }
+        self.memory_detail_prefetch
+            .queued_memory_ids
+            .retain(|queued_memory_id| queued_memory_id != memory_id);
+        self.memory_detail_prefetch
+            .in_flight_memory_ids
+            .remove(memory_id);
         self.refresh_memory_records_from_summaries();
     }
 
@@ -2381,16 +2653,7 @@ impl KinicProvider {
             return "Market is not implemented yet.".to_string();
         }
         let base = match self.memories_mode {
-            MemoriesMode::Browser => {
-                let scope = match state.search_scope {
-                    SearchScope::All => "all memories",
-                    SearchScope::Selected => "selected memory",
-                };
-                match self.active_memory_id.as_deref() {
-                    Some(memory_id) => format!("Target {memory_id} | Search scope {scope}"),
-                    None => format!("Search scope {scope}"),
-                }
-            }
+            MemoriesMode::Browser => self.browser_status_message(state),
             MemoriesMode::Results => match self.last_search_state.as_ref() {
                 Some(last) if last.scope == SearchScope::All => format!(
                     "{visible_count} search results across {} memories",
@@ -2422,6 +2685,26 @@ impl KinicProvider {
             return format!("{base} | preferences load failed: {error}");
         }
         base
+    }
+
+    fn browser_status_message(&self, state: &CoreState) -> String {
+        match state.focus {
+            PaneFocus::Search => {
+                let scope = match state.search_scope {
+                    SearchScope::All => "all memories",
+                    SearchScope::Selected => "selected memory",
+                };
+                format!("Search scope {scope}")
+            }
+            PaneFocus::Extra => {
+                let scope = match state.chat_scope {
+                    ChatScope::All => "all memories",
+                    ChatScope::Selected => "selected memory",
+                };
+                format!("Chat scope {scope}")
+            }
+            _ => "Browse memories".to_string(),
+        }
     }
 
     fn invalidate_pending_search(&mut self) {
@@ -2561,8 +2844,8 @@ impl KinicProvider {
                 effects.push(CoreEffect::CloseAccessControl);
                 effects.push(CoreEffect::Notify("Access updated.".to_string()));
                 self.loaded_memory_details.remove(&output.memory_id);
-                if self.active_memory_id.as_deref() == Some(output.memory_id.as_str()) {
-                    self.start_active_memory_detail_load();
+                if self.cursor_memory_id.as_deref() == Some(output.memory_id.as_str()) {
+                    self.start_cursor_memory_detail_load();
                 }
             }
             Err(error) => {
@@ -2653,8 +2936,8 @@ impl KinicProvider {
                 }
                 self.refresh_memory_records_from_summaries();
                 self.loaded_memory_details.remove(&output.memory_id);
-                if self.active_memory_id.as_deref() == Some(output.memory_id.as_str()) {
-                    self.start_active_memory_detail_load();
+                if self.cursor_memory_id.as_deref() == Some(output.memory_id.as_str()) {
+                    self.start_cursor_memory_detail_load();
                 }
                 effects.push(CoreEffect::CloseRenameMemory);
                 effects.push(CoreEffect::Notify(format!(
@@ -2703,42 +2986,36 @@ impl KinicProvider {
             });
         }
 
-        let mut effects = Vec::new();
-        match output.result {
-            Ok(details) => {
-                if let Some(summary) = self
-                    .memory_summaries
-                    .iter_mut()
-                    .find(|summary| summary.id == output.memory_id)
-                {
-                    summary.name = details.name;
-                    summary.detail = details.content_preview;
-                    summary.version = details.version;
-                    summary.dim = details.dim;
-                    summary.owners = Some(details.owners);
-                    summary.stable_memory_size = details.stable_memory_size;
-                    summary.cycle_amount = details.cycle_amount;
-                    summary.users = Some(details.users);
-                    self.loaded_memory_details.insert(output.memory_id);
-                    self.refresh_memory_records_from_summaries();
-                }
-                if let Some(message) = details.users_load_error.as_ref() {
-                    effects.push(CoreEffect::Notify(format!(
-                        "Could not load memory access list: {message}"
-                    )));
-                }
-                if let Some(message) = details.content_preview_error.as_ref() {
-                    effects.push(CoreEffect::Notify(format!(
-                        "Could not load content preview: {message}"
-                    )));
-                }
+        let effects = self.apply_memory_detail_result(output.memory_id, output.result, true);
+
+        Some(ProviderOutput {
+            snapshot: Some(self.build_snapshot(state)),
+            effects,
+        })
+    }
+
+    fn poll_memory_detail_prefetch_background(
+        &mut self,
+        state: &CoreState,
+    ) -> Option<ProviderOutput> {
+        let receiver = self.memory_detail_prefetch.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                self.memory_detail_prefetch.reset();
+                return Some(ProviderOutput {
+                    snapshot: Some(self.build_snapshot(state)),
+                    effects: Vec::new(),
+                });
             }
-            Err(message) => {
-                effects.push(CoreEffect::Notify(format!(
-                    "Could not load memory details: {message}"
-                )));
-            }
-        }
+        };
+
+        self.memory_detail_prefetch
+            .in_flight_memory_ids
+            .remove(output.memory_id.as_str());
+        self.pump_memory_detail_prefetch_workers();
+        let effects = self.apply_memory_detail_result(output.memory_id, output.result, false);
 
         Some(ProviderOutput {
             snapshot: Some(self.build_snapshot(state)),
@@ -2914,7 +3191,7 @@ impl KinicProvider {
                 if self.is_add_memory_action_selected(state) {
                     None
                 } else {
-                    self.active_memory_id.clone()
+                    self.cursor_memory_id.clone()
                 }
             }
             MemoriesMode::Results => self
@@ -2939,7 +3216,7 @@ impl KinicProvider {
                 }
             }
             SearchScope::Selected => {
-                let active_memory_id = self.active_memory_id.as_deref().ok_or_else(|| {
+                let active_memory_id = self.cursor_memory_id.as_deref().ok_or_else(|| {
                     "Select a memory in the list before running search.".to_string()
                 })?;
                 let record = self
@@ -3042,9 +3319,8 @@ impl KinicProvider {
                     });
                 }
 
-                let mut items = Vec::new();
-                let mut failed_memory_ids = Vec::new();
-                let mut first_error = None;
+                let mut batch_results = Vec::new();
+                let mut join_errors = Vec::new();
                 while !tasks.is_empty() {
                     let task: NextMemorySearchTask = tokio::select! {
                         _ = worker_cancellation.cancelled() => {
@@ -3058,37 +3334,16 @@ impl KinicProvider {
                         break;
                     };
                     match task {
-                        Ok((_, Ok(mut search_items))) => items.append(&mut search_items),
-                        Ok((memory_id, Err(error))) => {
-                            if first_error.is_none() {
-                                first_error = Some(error.to_string());
-                            }
-                            failed_memory_ids.push(memory_id);
-                        }
-                        Err(error) => {
-                            if first_error.is_none() {
-                                first_error = Some(error.to_string());
-                            }
-                        }
+                        Ok(result) => batch_results.push(result),
+                        Err(error) => join_errors.push(error),
                     }
                 }
 
-                items.sort_by(|left, right| {
-                    right
-                        .score
-                        .partial_cmp(&left.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-                if failed_memory_ids.len() == target_memory_ids.len() {
-                    Some(Err(first_error.unwrap_or_else(|| {
-                        "Search failed before any memory returned results.".to_string()
-                    })))
-                } else {
-                    Some(Ok(SearchBatchResult {
-                        items,
-                        failed_memory_ids,
-                    }))
-                }
+                Some(fold_live_search_results(
+                    target_memory_ids.len(),
+                    batch_results,
+                    join_errors,
+                ))
             });
             if let Some(result) = result {
                 let _ = tx.send(SearchTaskOutput {
@@ -3217,10 +3472,10 @@ impl KinicProvider {
         self.initial_memories_in_flight = false;
         match output.result {
             Ok(memories) => {
-                let previous_active_memory_id = self.active_memory_id.clone();
+                let previous_cursor_memory_id = self.cursor_memory_id.clone();
                 self.memory_summaries = memories;
                 self.refresh_memory_records_from_summaries();
-                self.active_memory_id = self
+                let initial_memory_id = self
                     .preferred_memory_after_refresh
                     .take()
                     .filter(|memory_id| {
@@ -3233,11 +3488,23 @@ impl KinicProvider {
                             .preferred_initial_memory_id()
                     })
                     .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
+                if self.cursor_memory_id.is_none()
+                    || self.cursor_memory_id.as_ref().is_some_and(|memory_id| {
+                        !self
+                            .memory_records
+                            .iter()
+                            .any(|record| &record.id == memory_id)
+                    })
+                {
+                    self.cursor_memory_id = initial_memory_id.clone();
+                }
                 self.last_search_state = None;
-                self.start_active_memory_detail_load();
+                self.start_memory_detail_prefetch_for_records();
+                self.start_cursor_memory_detail_load();
                 self.start_insert_dim_load(state);
                 let mut effects = Vec::new();
-                if self.active_memory_id != previous_active_memory_id {
+                if self.cursor_memory_id != previous_cursor_memory_id {
+                    self.invalidate_pending_search();
                     effects.extend(self.load_active_chat_history_effects(state));
                 }
                 Some(ProviderOutput {
@@ -3246,15 +3513,16 @@ impl KinicProvider {
                 })
             }
             Err(error) => {
-                let previous_active_memory_id = self.active_memory_id.clone();
+                let previous_cursor_memory_id = self.cursor_memory_id.clone();
                 self.memory_records.clear();
                 self.result_records.clear();
                 self.memories_mode = MemoriesMode::Browser;
                 self.all = vec![load_error_record(error)];
-                self.active_memory_id = None;
+                self.cursor_memory_id = None;
                 self.last_search_state = None;
                 let mut effects = vec![CoreEffect::Notify("Unable to load memories.".to_string())];
-                if self.active_memory_id != previous_active_memory_id {
+                if self.cursor_memory_id != previous_cursor_memory_id {
+                    self.invalidate_pending_search();
                     effects.extend(self.load_active_chat_history_effects(state));
                 }
                 Some(ProviderOutput {
@@ -3396,14 +3664,15 @@ impl KinicProvider {
             return Some(self.stale_request_output(state));
         }
 
-        let previous_active_memory_id = self.active_memory_id.clone();
+        let previous_cursor_memory_id = self.cursor_memory_id.clone();
         let mut effects = Vec::new();
         match output.result {
             Ok(success) => {
-                self.active_memory_id = Some(success.id.clone());
+                self.cursor_memory_id = Some(success.id.clone());
                 if let Some(memories) = success.memories {
                     self.memory_summaries = memories;
                     self.loaded_memory_details.clear();
+                    self.memory_detail_prefetch.reset();
                     self.refresh_memory_records_from_summaries();
                     if let Some(index) = self.memory_records.iter().position(|r| r.id == success.id)
                     {
@@ -3424,7 +3693,8 @@ impl KinicProvider {
                 self.result_records.clear();
                 self.invalidate_pending_search();
                 self.last_search_state = None;
-                self.start_active_memory_detail_load();
+                self.start_memory_detail_prefetch_for_records();
+                self.start_cursor_memory_detail_load();
                 let _ = self.start_create_cost_refresh();
                 effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
                 effects.push(CoreEffect::SelectFirstListItem);
@@ -3445,7 +3715,8 @@ impl KinicProvider {
                 )));
             }
         }
-        if self.active_memory_id != previous_active_memory_id {
+        if self.cursor_memory_id != previous_cursor_memory_id {
+            effects.push(CoreEffect::SetMemoryContentActionIndex(0));
             effects.extend(self.load_active_chat_history_effects(state));
         }
 
@@ -3700,13 +3971,13 @@ impl DataProvider for KinicProvider {
         action: &CoreAction,
         state: &CoreState,
     ) -> CoreResult<ProviderOutput> {
-        let previous_active_memory_id = self.active_memory_id.clone();
+        let previous_cursor_memory_id = self.cursor_memory_id.clone();
         let mut effects = Vec::new();
         let mut close_picker_after_submit = false;
         match action {
             CoreAction::SetQuery(q) => {
                 self.query = q.clone();
-                self.sync_active_memory_to_visible_records();
+                let _ = self.sync_memory_browser_selection();
                 self.invalidate_pending_search();
                 if self.tab_id == KINIC_MEMORIES_TAB_ID && q.is_empty() {
                     self.reset_memories_browser();
@@ -3714,12 +3985,12 @@ impl DataProvider for KinicProvider {
             }
             CoreAction::SearchInput(c) => {
                 self.query.push(*c);
-                self.sync_active_memory_to_visible_records();
+                let _ = self.sync_memory_browser_selection();
                 self.invalidate_pending_search();
             }
             CoreAction::SearchBackspace => {
                 self.query.pop();
-                self.sync_active_memory_to_visible_records();
+                let _ = self.sync_memory_browser_selection();
                 self.invalidate_pending_search();
                 if self.query.is_empty() {
                     self.reset_memories_browser();
@@ -3764,25 +4035,22 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::MoveNext if self.should_handle_memory_navigation(state) => {
-                self.move_active_memory(1)
+                self.navigate_memory_cursor(state, action)
             }
             CoreAction::MovePrev if self.should_handle_memory_navigation(state) => {
-                self.move_active_memory(-1)
+                self.navigate_memory_cursor(state, action)
             }
             CoreAction::MoveHome if self.should_handle_memory_navigation(state) => {
-                self.set_active_memory(0)
+                self.navigate_memory_cursor(state, action)
             }
             CoreAction::MoveEnd if self.should_handle_memory_navigation(state) => {
-                let visible_count = self.visible_memory_count();
-                if visible_count != 0 {
-                    self.set_active_memory(visible_count - 1);
-                }
+                self.navigate_memory_cursor(state, action)
             }
             CoreAction::MovePageDown if self.should_handle_memory_navigation(state) => {
-                self.move_active_memory(10)
+                self.navigate_memory_cursor(state, action)
             }
             CoreAction::MovePageUp if self.should_handle_memory_navigation(state) => {
-                self.move_active_memory(-10)
+                self.navigate_memory_cursor(state, action)
             }
             CoreAction::OpenSelected => {
                 if self.is_add_memory_action_selected(state) {
@@ -3909,7 +4177,7 @@ impl DataProvider for KinicProvider {
             | CoreAction::PickerInput(_)
             | CoreAction::PickerBackspace => {}
             CoreAction::MemoryContentMoveNext => {
-                let next_index = self.next_access_index(state, 1);
+                let next_index = self.next_content_index(state, 1);
                 effects.push(CoreEffect::SetMemoryContentActionIndex(next_index));
                 let mut preview_state = state.clone();
                 preview_state.memory_content_action_index = next_index;
@@ -3919,7 +4187,7 @@ impl DataProvider for KinicProvider {
                 });
             }
             CoreAction::MemoryContentMovePrev => {
-                let next_index = self.next_access_index(state, -1);
+                let next_index = self.next_content_index(state, -1);
                 effects.push(CoreEffect::SetMemoryContentActionIndex(next_index));
                 let mut preview_state = state.clone();
                 preview_state.memory_content_action_index = next_index;
@@ -3929,7 +4197,18 @@ impl DataProvider for KinicProvider {
                 });
             }
             CoreAction::MemoryContentJumpNext => {
-                let next_index = self.jump_access_index(state, true);
+                let selections = self.memory_content_selections(state);
+                let current = state
+                    .memory_content_action_index
+                    .min(selections.len().saturating_sub(1));
+                if current + 1 >= selections.len().max(1) {
+                    effects.push(CoreEffect::FocusPane(PaneFocus::Search));
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                }
+                let next_index = current + 1;
                 effects.push(CoreEffect::SetMemoryContentActionIndex(next_index));
                 let mut preview_state = state.clone();
                 preview_state.memory_content_action_index = next_index;
@@ -3939,7 +4218,14 @@ impl DataProvider for KinicProvider {
                 });
             }
             CoreAction::MemoryContentJumpPrev => {
-                let next_index = self.jump_access_index(state, false);
+                if state.memory_content_action_index == 0 {
+                    effects.push(CoreEffect::FocusPane(PaneFocus::Items));
+                    return Ok(ProviderOutput {
+                        snapshot: Some(self.build_snapshot(state)),
+                        effects,
+                    });
+                }
+                let next_index = state.memory_content_action_index - 1;
                 effects.push(CoreEffect::SetMemoryContentActionIndex(next_index));
                 let mut preview_state = state.clone();
                 preview_state.memory_content_action_index = next_index;
@@ -3949,7 +4235,7 @@ impl DataProvider for KinicProvider {
                 });
             }
             CoreAction::MemoryContentOpenSelected => {
-                let Some(memory_id) = self.active_memory_id.clone() else {
+                let Some(memory_id) = self.cursor_memory_id.clone() else {
                     effects.push(CoreEffect::Notify(
                         "Select a memory before running this action.".to_string(),
                     ));
@@ -3958,18 +4244,33 @@ impl DataProvider for KinicProvider {
                         effects,
                     });
                 };
-                match self.access_selection(state) {
-                    Some(AccessSelection::User(user)) => {
+                match self.content_selection(state) {
+                    Some(MemoryContentSelection::RenameMemory) => {
+                        let Some((summary, current_name)) = self.active_rename_target(state) else {
+                            effects.push(CoreEffect::Notify(
+                                "Select a memory before renaming.".to_string(),
+                            ));
+                            return Ok(ProviderOutput {
+                                snapshot: Some(self.build_snapshot(state)),
+                                effects,
+                            });
+                        };
+                        effects.push(CoreEffect::OpenRenameMemory {
+                            memory_id: summary.id.clone(),
+                            current_name,
+                        });
+                    }
+                    Some(MemoryContentSelection::User(user)) => {
                         effects.push(CoreEffect::OpenAccessAction {
                             memory_id,
                             principal_id: user.principal_id.clone(),
                             role: Self::access_role_from_user(user),
                         });
                     }
-                    Some(AccessSelection::AddUser) | None => {
+                    Some(MemoryContentSelection::AddUser) | None => {
                         effects.push(CoreEffect::OpenAccessAdd { memory_id });
                     }
-                    Some(AccessSelection::RemoveManualMemory) => {
+                    Some(MemoryContentSelection::RemoveManualMemory) => {
                         effects.push(CoreEffect::OpenRemoveMemory);
                     }
                 }
@@ -4083,7 +4384,7 @@ impl DataProvider for KinicProvider {
                     });
                 }
 
-                let Some(memory_id) = self.active_memory_id.clone() else {
+                let Some(memory_id) = self.cursor_memory_id.clone() else {
                     effects.push(CoreEffect::RemoveMemoryFormError(Some(
                         "Select a memory before removing it.".to_string(),
                     )));
@@ -4106,10 +4407,10 @@ impl DataProvider for KinicProvider {
                 match self.remove_manual_memory_from_preferences(memory_id.as_str()) {
                     Ok(()) => {
                         self.remove_manual_memory_locally(memory_id.as_str());
-                        self.active_memory_id = next_memory_id;
-                        self.sync_active_memory_to_visible_records();
+                        self.cursor_memory_id = next_memory_id;
+                        let _ = self.sync_memory_browser_selection();
                         self.invalidate_pending_search();
-                        self.start_active_memory_detail_load();
+                        self.start_cursor_memory_detail_load();
                         effects.push(CoreEffect::CloseRemoveMemory);
                         effects.push(CoreEffect::SetMemoryContentActionIndex(0));
                         effects.push(CoreEffect::Notify(format!(
@@ -4321,7 +4622,10 @@ impl DataProvider for KinicProvider {
             }
             _ => self.build_snapshot(state),
         };
-        if self.active_memory_id != previous_active_memory_id {
+        if self.cursor_memory_id != previous_cursor_memory_id {
+            self.invalidate_pending_search();
+            self.start_cursor_memory_detail_load();
+            effects.push(CoreEffect::SetMemoryContentActionIndex(0));
             effects.extend(self.load_active_chat_history_effects(state));
         }
 
@@ -4333,6 +4637,8 @@ impl DataProvider for KinicProvider {
 
     fn poll_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
         self.poll_initial_memories_background(state)
+            .or_else(|| self.poll_memory_detail_background(state))
+            .or_else(|| self.poll_memory_detail_prefetch_background(state))
             .or_else(|| self.poll_chat_submit_background(state))
             .or_else(|| self.poll_create_submit_background(state))
             .or_else(|| self.poll_access_submit_background(state))
@@ -4452,15 +4758,24 @@ fn manual_memory_summary(id: &str) -> MemorySummary {
     }
 }
 
+fn marker_prefix(selected: bool) -> &'static str {
+    if selected { ">" } else { " " }
+}
+
+fn marker_label(selected: bool, label: &str) -> String {
+    format!("{} {}", marker_prefix(selected), label)
+}
+
+fn marker_line(selected: bool, label: &str) -> String {
+    format!("{} {}", marker_prefix(selected), label)
+}
+
 fn render_access_lines(
     users: Option<&Vec<bridge::MemoryUser>>,
-    selected_index: usize,
-    show_remove_manual_memory: bool,
+    current_selection: Option<&MemoryContentSelection<'_>>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     let user_list = users.cloned().unwrap_or_default();
-    let add_user_index = user_list.len();
-    let remove_index = add_user_index + usize::from(show_remove_manual_memory);
 
     match users {
         None => lines.push("unavailable".to_string()),
@@ -4468,36 +4783,29 @@ fn render_access_lines(
         Some(_) => {}
     }
 
-    for (index, user) in user_list.iter().enumerate() {
-        let marker = if selected_index.min(remove_index) == index {
-            ">"
-        } else {
-            " "
-        };
-        lines.push(format!(
-            "{marker} {}   {}",
-            adapter::short_id(user.principal_id.as_str()),
-            user.role
+    for user in &user_list {
+        let selected = matches!(
+            current_selection,
+            Some(MemoryContentSelection::User(candidate)) if *candidate == user
+        );
+        lines.push(marker_line(
+            selected,
+            format!(
+                "{}   {}",
+                adapter::short_id(user.principal_id.as_str()),
+                user.role
+            )
+            .as_str(),
         ));
     }
 
-    let add_marker = if selected_index.min(remove_index) == add_user_index {
-        ">"
-    } else {
-        " "
-    };
     if !lines.is_empty() {
         lines.push(String::new());
     }
-    lines.push(format!("{add_marker} + Add User"));
-    if show_remove_manual_memory {
-        let remove_marker = if selected_index.min(remove_index) == remove_index {
-            ">"
-        } else {
-            " "
-        };
-        lines.push(format!("{remove_marker} Remove from list"));
-    }
+    lines.push(marker_line(
+        matches!(current_selection, Some(MemoryContentSelection::AddUser)),
+        "+ Add User",
+    ));
     lines
 }
 
@@ -4553,7 +4861,7 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         "memories",
         summary,
         format!(
-            "## Memory\n\n- Id: `{}`\n- Status: `{}`\n- Name: `{}`\n{}- Version: `{}`\n- Dimension: `{}`\n- Stable Memory Size: `{}`\n- Cycle Amount: `{}`\n\n### Content\n{}\n\n### Search\nSelect this item, then type a query and press Enter in the search box.\n\n### Users\n{}\n",
+            "## Memory\n\n- Id: `{}`\n- Status: `{}`\n- Name: `{}`\n{}- Version: `{}`\n- Dimension: `{}`\n- Stable Memory Size: `{}`\n- Cycle Amount: `{}`\n\n### Search\nSelect this item, then type a query and press Enter in the search box.\n\n### Users\n{}\n",
             memory.id,
             memory.status,
             display_memory_name(memory.name.as_str(), resolved_name.as_deref()),
@@ -4562,7 +4870,6 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
             dim,
             stable_memory_size,
             cycle_amount,
-            detail.content,
             users_section
         ),
     )
@@ -4627,7 +4934,6 @@ fn format_multiline_metadata_field(label: &str, value: &str) -> String {
 struct ParsedMemoryDetail {
     name: Option<String>,
     description: Option<String>,
-    content: String,
 }
 
 fn parse_memory_detail(detail: &str) -> ParsedMemoryDetail {
@@ -4636,22 +4942,16 @@ fn parse_memory_detail(detail: &str) -> ParsedMemoryDetail {
         return ParsedMemoryDetail {
             name: None,
             description: None,
-            content: "No additional content available.".to_string(),
         };
     }
 
     if let Some((name, description)) = parse_detail_object(trimmed) {
-        return ParsedMemoryDetail {
-            name,
-            description,
-            content: "No additional content available.".to_string(),
-        };
+        return ParsedMemoryDetail { name, description };
     }
 
     ParsedMemoryDetail {
         name: None,
         description: None,
-        content: trimmed.to_string(),
     }
 }
 

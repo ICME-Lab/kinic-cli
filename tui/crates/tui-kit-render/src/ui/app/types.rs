@@ -45,7 +45,8 @@ pub struct HeaderText {
     pub visible_icon: String,
     pub visible_suffix: String,
     pub contexts_icon: String,
-    pub contexts_suffix: String,
+    pub memory_prefix: String,
+    pub memory_empty_label: String,
     pub data_label: String,
 }
 
@@ -152,7 +153,8 @@ impl Default for UiConfig {
                 visible_icon: "📦".to_string(),
                 visible_suffix: "visible items".to_string(),
                 contexts_icon: "📚".to_string(),
-                contexts_suffix: "contexts".to_string(),
+                memory_prefix: "memory".to_string(),
+                memory_empty_label: "no memory selected".to_string(),
                 data_label: "data".to_string(),
             },
             chat: ChatPanelText {

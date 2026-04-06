@@ -241,7 +241,7 @@ mod global_commands {
                 PaneFocus::Items,
                 KINIC_MEMORIES_TAB_ID,
                 false,
-                HostGlobalCommand::ClearQuery,
+                HostGlobalCommand::BackFromItems,
             ),
             (
                 KeyCode::Char('n'),
@@ -289,7 +289,15 @@ mod global_commands {
                 PaneFocus::Items,
                 KINIC_MEMORIES_TAB_ID,
                 true,
-                HostGlobalCommand::BackToTabs,
+                HostGlobalCommand::BackFromItems,
+            ),
+            (
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+                PaneFocus::Search,
+                KINIC_MEMORIES_TAB_ID,
+                false,
+                HostGlobalCommand::ClearQuery,
             ),
             (
                 KeyCode::Esc,
@@ -331,7 +339,7 @@ mod global_commands {
             (
                 PaneFocus::Items,
                 KINIC_MEMORIES_TAB_ID,
-                HostGlobalCommand::BackToTabs,
+                HostGlobalCommand::BackFromItems,
             ),
             (
                 PaneFocus::Search,

@@ -69,9 +69,7 @@ pub struct MemoryDetails {
     pub stable_memory_size: Option<u32>,
     pub cycle_amount: Option<u64>,
     pub users: Vec<MemoryUser>,
-    pub content_preview: String,
     pub users_load_error: Option<String>,
-    pub content_preview_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -404,19 +402,8 @@ pub async fn load_memory_details(
     let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
     let client = MemoryClient::new(agent, memory);
     let metadata = client.get_metadata().await?;
-    let (dim, users, exported_chunks) =
-        tokio::join!(client.get_dim(), client.get_users(), client.export_all());
+    let (dim, users) = tokio::join!(client.get_dim(), client.get_users());
     let (users, users_load_error) = memory_users_from_query(users, &launcher_id);
-    let (content_preview, content_preview_error) = match exported_chunks {
-        Ok(chunks) => (
-            render_content_preview(chunks.into_iter().map(|chunk| chunk.text).collect()),
-            None,
-        ),
-        Err(err) => (
-            "No additional content available.".to_string(),
-            Some(short_error(&err.to_string())),
-        ),
-    };
 
     Ok(MemoryDetails {
         name: metadata.name,
@@ -426,44 +413,8 @@ pub async fn load_memory_details(
         stable_memory_size: Some(metadata.stable_memory_size),
         cycle_amount: Some(metadata.cycle_amount),
         users,
-        content_preview,
         users_load_error,
-        content_preview_error,
     })
-}
-
-fn render_content_preview(chunks: Vec<String>) -> String {
-    const MAX_CHUNKS: usize = 3;
-    const MAX_CHARS: usize = 300;
-
-    if chunks.is_empty() {
-        return "No additional content available.".to_string();
-    }
-
-    let total = chunks.len();
-    let mut lines = vec![format!(
-        "Previewing {} of {total} chunks.",
-        total.min(MAX_CHUNKS)
-    )];
-    for (index, chunk) in chunks.into_iter().take(MAX_CHUNKS).enumerate() {
-        lines.push(String::new());
-        lines.push(format!(
-            "{}. {}",
-            index + 1,
-            truncate_chars(chunk.trim(), MAX_CHARS)
-        ));
-    }
-    lines.join("\n")
-}
-
-fn truncate_chars(value: &str, max_chars: usize) -> String {
-    let char_count = value.chars().count();
-    if char_count <= max_chars {
-        return value.to_string();
-    }
-
-    let truncated = value.chars().take(max_chars).collect::<String>();
-    format!("{truncated}...")
 }
 
 pub async fn manage_memory_access(
@@ -750,30 +701,6 @@ mod tests {
     use ic_agent::identity::AnonymousIdentity;
     use std::sync::Arc;
     use tokio::runtime::Runtime;
-
-    #[test]
-    fn render_content_preview_limits_chunks_and_preserves_order() {
-        let preview = render_content_preview(vec![
-            "first chunk".to_string(),
-            "second chunk".to_string(),
-            "third chunk".to_string(),
-            "fourth chunk".to_string(),
-        ]);
-
-        assert!(preview.contains("Previewing 3 of 4 chunks."));
-        assert!(preview.contains("1. first chunk"));
-        assert!(preview.contains("2. second chunk"));
-        assert!(preview.contains("3. third chunk"));
-        assert!(!preview.contains("fourth chunk"));
-    }
-
-    #[test]
-    fn render_content_preview_truncates_long_chunk_text() {
-        let preview = render_content_preview(vec!["x".repeat(301)]);
-
-        assert!(preview.contains("Previewing 1 of 1 chunks."));
-        assert!(preview.contains(&format!("1. {}...", "x".repeat(300))));
-    }
 
     #[test]
     fn resolve_agent_factory_accepts_resolved_identity() {

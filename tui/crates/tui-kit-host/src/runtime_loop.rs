@@ -163,6 +163,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .current_tab_id(TabId::new(state.current_tab_id.clone()))
                     .focus(focus)
                     .status_message(state.status_message.as_deref().unwrap_or("ready"))
+                    .selected_memory_label(state.selected_memory_label.as_deref())
                     .show_help(show_help)
                     .show_settings(show_settings)
                     .show_create_modal(false)
@@ -356,6 +357,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 }
                 HostGlobalCommand::BackFromContent => {
                     state.focus = PaneFocus::Items;
+                    continue;
+                }
+                HostGlobalCommand::BackFromItems => {
+                    state.focus = PaneFocus::Search;
                     continue;
                 }
                 HostGlobalCommand::RefreshCurrentView => {
@@ -561,6 +566,7 @@ fn build_ui<'a>(
         .current_tab_id(TabId::new(state.current_tab_id.clone()))
         .focus(focus)
         .status_message(state.status_message.as_deref().unwrap_or("ready"))
+        .selected_memory_label(state.selected_memory_label.as_deref())
         .show_help(show_help)
         .show_settings(show_settings)
         .show_create_modal(false)
