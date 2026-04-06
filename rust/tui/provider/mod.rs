@@ -160,7 +160,8 @@ pub struct KinicProvider {
     transfer_submit_task: TaskState<TransferSubmitTaskOutput>,
     preferred_memory_after_refresh: Option<String>,
     loaded_memory_details: HashSet<String>,
-    pending_memory_detail: Option<mpsc::Receiver<MemoryDetailTaskOutput>>,
+    pending_memory_detail: RequestTaskState<MemoryDetailTaskOutput>,
+    next_memory_detail_request_id: u64,
     pending_memory_detail_memory_id: Option<String>,
 }
 
@@ -317,7 +318,6 @@ fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> 
         | PickerContext::AddTag
         | PickerContext::ChatResultLimit
         | PickerContext::ChatPerMemoryLimit
-        | PickerContext::ChatCandidatePool
         | PickerContext::ChatDiversity => None,
     }
 }
@@ -340,9 +340,6 @@ fn picker_selected_id_for_context(
         PickerContext::TagManagement | PickerContext::AddTag => None,
         PickerContext::ChatResultLimit => Some(user_preferences.chat_overall_top_k.to_string()),
         PickerContext::ChatPerMemoryLimit => Some(user_preferences.chat_per_memory_cap.to_string()),
-        PickerContext::ChatCandidatePool => {
-            Some(user_preferences.chat_candidate_pool_size.to_string())
-        }
         PickerContext::ChatDiversity => Some(user_preferences.chat_mmr_lambda.to_string()),
     }
 }
@@ -415,16 +412,6 @@ fn picker_items_for_context(
                 )
             })
             .collect(),
-        PickerContext::ChatCandidatePool => settings::chat_candidate_pool_options()
-            .iter()
-            .map(|value| {
-                PickerItem::option(
-                    value.to_string(),
-                    settings::chat_candidate_pool_display(*value),
-                    user_preferences.chat_candidate_pool_size == *value,
-                )
-            })
-            .collect(),
         PickerContext::ChatDiversity => settings::chat_diversity_options()
             .iter()
             .map(|value| {
@@ -475,7 +462,6 @@ impl<'a> DefaultMemoryController<'a> {
             manual_memory_ids: self.user_preferences.manual_memory_ids.clone(),
             chat_overall_top_k: self.user_preferences.chat_overall_top_k,
             chat_per_memory_cap: self.user_preferences.chat_per_memory_cap,
-            chat_candidate_pool_size: self.user_preferences.chat_candidate_pool_size,
             chat_mmr_lambda: self.user_preferences.chat_mmr_lambda,
         };
         #[cfg(test)]
@@ -666,6 +652,7 @@ struct InsertDimTaskOutput {
 }
 
 struct MemoryDetailTaskOutput {
+    request_id: u64,
     memory_id: String,
     result: Result<bridge::MemoryDetails, String>,
 }
@@ -866,7 +853,8 @@ impl KinicProvider {
             transfer_submit_task: TaskState::default(),
             preferred_memory_after_refresh: None,
             loaded_memory_details: HashSet::new(),
-            pending_memory_detail: None,
+            pending_memory_detail: RequestTaskState::default(),
+            next_memory_detail_request_id: 0,
             pending_memory_detail_memory_id: None,
         }
     }
@@ -895,7 +883,7 @@ impl KinicProvider {
         self.memory_summaries.clear();
         self.memory_records.clear();
         self.loaded_memory_details.clear();
-        self.pending_memory_detail = None;
+        reset_request_task(&mut self.pending_memory_detail);
         self.pending_memory_detail_memory_id = None;
         self.active_memory_id = None;
         self.active_chat_thread = None;
@@ -957,6 +945,7 @@ impl KinicProvider {
                     || r.summary.to_lowercase().contains(&q)
                     || r.group.to_lowercase().contains(&q)
                     || r.id.to_lowercase().contains(&q)
+                    || (r.group == "memories" && r.content_md.to_lowercase().contains(&q))
             })
             .collect()
     }
@@ -1065,12 +1054,25 @@ impl KinicProvider {
         self.start_active_memory_detail_load();
     }
 
-    fn identity_label(&self) -> &str {
-        self.session_overview.session.identity_name.as_str()
-    }
-
     fn network_label(&self) -> &str {
         self.session_overview.session.network.as_str()
+    }
+
+    fn chat_history_principal_id(&self) -> Result<String, String> {
+        self.config
+            .auth
+            .principal_text()
+            .or_else(|_| {
+                let principal_id = self.session_overview.session.principal_id.as_str();
+                if principal_id.is_empty() || principal_id == "unavailable" {
+                    Err(anyhow::anyhow!(
+                        "Could not determine principal for chat history"
+                    ))
+                } else {
+                    Ok(principal_id.to_string())
+                }
+            })
+            .map_err(|error| error.to_string())
     }
 
     fn load_chat_history_messages(
@@ -1078,11 +1080,13 @@ impl KinicProvider {
         history_thread_key: &str,
     ) -> Result<Vec<(String, String)>, String> {
         let network = self.network_label().to_string();
-        let identity = self.identity_label().to_string();
+        let principal_id = self.chat_history_principal_id()?;
+        let identity_label = self.config.auth.identity_label().to_string();
         let active_thread = self.with_settings_io(move || {
             settings::load_or_create_active_chat_thread(
                 network.as_str(),
-                identity.as_str(),
+                principal_id.as_str(),
+                identity_label.as_str(),
                 history_thread_key,
             )
         })?;
@@ -1095,9 +1099,15 @@ impl KinicProvider {
 
     fn create_chat_thread(&mut self, history_thread_key: &str) -> Result<String, String> {
         let network = self.network_label().to_string();
-        let identity = self.identity_label().to_string();
+        let principal_id = self.chat_history_principal_id()?;
+        let identity_label = self.config.auth.identity_label().to_string();
         let thread_id = self.with_settings_io(move || {
-            settings::create_chat_thread(network.as_str(), identity.as_str(), history_thread_key)
+            settings::create_chat_thread(
+                network.as_str(),
+                principal_id.as_str(),
+                identity_label.as_str(),
+                history_thread_key,
+            )
         })?;
         self.active_chat_thread = Some(ActiveChatThreadRef {
             thread_key: history_thread_key.to_string(),
@@ -1111,11 +1121,13 @@ impl KinicProvider {
             return Ok(thread.thread_id.clone());
         }
         let network = self.network_label().to_string();
-        let identity = self.identity_label().to_string();
+        let principal_id = self.chat_history_principal_id()?;
+        let identity_label = self.config.auth.identity_label().to_string();
         let active_thread = self.with_settings_io(move || {
             settings::load_or_create_active_chat_thread(
                 network.as_str(),
-                identity.as_str(),
+                principal_id.as_str(),
+                identity_label.as_str(),
                 history_thread_key,
             )
         })?;
@@ -1135,12 +1147,14 @@ impl KinicProvider {
         content: &str,
     ) -> Result<(), String> {
         let network = self.network_label().to_string();
-        let identity = self.identity_label().to_string();
+        let principal_id = self.chat_history_principal_id()?;
+        let identity_label = self.config.auth.identity_label().to_string();
         let saved_at = settings::current_chat_saved_at();
         self.with_settings_io(move || {
             settings::append_chat_history_message(
                 network.as_str(),
-                identity.as_str(),
+                principal_id.as_str(),
+                identity_label.as_str(),
                 history_thread_key,
                 thread_id,
                 role,
@@ -1246,7 +1260,6 @@ impl KinicProvider {
         bridge::ChatRetrievalConfig {
             overall_top_k: self.user_preferences.chat_overall_top_k,
             per_memory_cap: self.user_preferences.chat_per_memory_cap,
-            candidate_pool_size: self.user_preferences.chat_candidate_pool_size,
             mmr_lambda: f32::from(self.user_preferences.chat_mmr_lambda) / 100.0,
         }
     }
@@ -1318,7 +1331,7 @@ impl KinicProvider {
     }
 
     fn prompt_history_messages(&self, state: &CoreState) -> Vec<(String, String)> {
-        let recent = state
+        let mut recent = state
             .chat_messages
             .iter()
             .filter(|(role, content)| {
@@ -1326,6 +1339,12 @@ impl KinicProvider {
             })
             .cloned()
             .collect::<Vec<_>>();
+        if recent
+            .last()
+            .is_some_and(|(role, _)| role.as_str() == "user")
+        {
+            recent.pop();
+        }
         let start = recent.len().saturating_sub(8);
         recent.into_iter().skip(start).collect()
     }
@@ -1572,22 +1591,27 @@ impl KinicProvider {
 
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
-        let (tx, rx) = mpsc::channel();
-        self.pending_memory_detail = Some(rx);
         self.pending_memory_detail_memory_id = Some(memory_id.clone());
-
-        thread::spawn(move || {
-            let runtime =
-                Runtime::new().expect("failed to create tokio runtime for memory detail load");
-            let result = runtime
-                .block_on(bridge::load_memory_details(
-                    use_mainnet,
-                    auth,
-                    memory_id.clone(),
-                ))
-                .map_err(|error| error.to_string());
-            let _ = tx.send(MemoryDetailTaskOutput { memory_id, result });
-        });
+        spawn_request_task(
+            &mut self.next_memory_detail_request_id,
+            &mut self.pending_memory_detail,
+            move |request_id, tx| {
+                let runtime =
+                    Runtime::new().expect("failed to create tokio runtime for memory detail load");
+                let result = runtime
+                    .block_on(bridge::load_memory_details(
+                        use_mainnet,
+                        auth,
+                        memory_id.clone(),
+                    ))
+                    .map_err(|error| error.to_string());
+                let _ = tx.send(MemoryDetailTaskOutput {
+                    request_id,
+                    memory_id,
+                    result,
+                });
+            },
+        );
     }
 
     fn should_handle_memory_navigation(&self, state: &CoreState) -> bool {
@@ -1948,15 +1972,6 @@ impl KinicProvider {
                 .unwrap_or_else(|_| {
                     vec![CoreEffect::Notify("Invalid per-memory limit.".to_string())]
                 }),
-            PickerContext::ChatCandidatePool => item
-                .id
-                .parse::<usize>()
-                .map(|value| vec![self.set_chat_candidate_pool_preference(value)])
-                .unwrap_or_else(|_| {
-                    vec![CoreEffect::Notify(
-                        "Invalid chat candidate pool.".to_string(),
-                    )]
-                }),
             PickerContext::ChatDiversity => item
                 .id
                 .parse::<u8>()
@@ -2193,24 +2208,6 @@ impl KinicProvider {
         }
     }
 
-    fn set_chat_candidate_pool_preference(&mut self, value: usize) -> CoreEffect {
-        if self.user_preferences.chat_candidate_pool_size == value {
-            return CoreEffect::Notify(format!(
-                "Chat candidate pool already set to {}",
-                settings::chat_candidate_pool_display(value)
-            ));
-        }
-        match self.update_user_preferences(|preferences| {
-            preferences.chat_candidate_pool_size = value;
-        }) {
-            Ok(()) => CoreEffect::Notify(format!(
-                "Chat candidate pool set to {}",
-                settings::chat_candidate_pool_display(value)
-            )),
-            Err(error) => CoreEffect::Notify(format!("Chat candidate pool save failed: {error}")),
-        }
-    }
-
     fn set_chat_diversity_preference(&mut self, value: u8) -> CoreEffect {
         if self.user_preferences.chat_mmr_lambda == value {
             return CoreEffect::Notify(format!(
@@ -2281,7 +2278,7 @@ impl KinicProvider {
         self.all.retain(|record| record.id != memory_id);
         self.loaded_memory_details.remove(memory_id);
         if self.pending_memory_detail_memory_id.as_deref() == Some(memory_id) {
-            self.pending_memory_detail = None;
+            reset_request_task(&mut self.pending_memory_detail);
             self.pending_memory_detail_memory_id = None;
         }
         self.refresh_memory_records_from_summaries();
@@ -2330,7 +2327,7 @@ impl KinicProvider {
     }
 
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
-        let memory_id = state.insert_memory_id.trim().to_string();
+        let memory_id = self.selected_insert_memory_id(state).unwrap_or_default();
         let tag = state.insert_tag.trim().to_string();
         let file_path = resolved_insert_file_path(state);
 
@@ -2680,12 +2677,12 @@ impl KinicProvider {
     }
 
     fn poll_memory_detail_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
-        let receiver = self.pending_memory_detail.as_ref()?;
-        let output = match receiver.try_recv() {
-            Ok(output) => output,
-            Err(mpsc::TryRecvError::Empty) => return None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.pending_memory_detail = None;
+        let receiver = self.pending_memory_detail.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                reset_request_task(&mut self.pending_memory_detail);
                 self.pending_memory_detail_memory_id = None;
                 return Some(ProviderOutput {
                     snapshot: Some(self.build_snapshot(state)),
@@ -2694,9 +2691,10 @@ impl KinicProvider {
             }
         };
 
-        self.pending_memory_detail = None;
-        let is_current =
-            self.pending_memory_detail_memory_id.as_deref() == Some(output.memory_id.as_str());
+        let is_current_request =
+            finish_request_task(&mut self.pending_memory_detail, output.request_id);
+        let is_current = is_current_request
+            && self.pending_memory_detail_memory_id.as_deref() == Some(output.memory_id.as_str());
         self.pending_memory_detail_memory_id = None;
         if !is_current {
             return Some(ProviderOutput {
@@ -3747,9 +3745,8 @@ impl DataProvider for KinicProvider {
                         Ok(_) => {
                             effects.push(CoreEffect::ReplaceChatMessages(Vec::new()));
                             effects.push(CoreEffect::SetChatLoading(false));
-                            effects.push(CoreEffect::Notify(
-                                "Started a new chat thread.".to_string(),
-                            ));
+                            effects
+                                .push(CoreEffect::Notify("Started a new chat thread.".to_string()));
                         }
                         Err(error) => effects.push(CoreEffect::Notify(format!(
                             "Chat thread create failed: {error}"
@@ -4310,7 +4307,6 @@ impl DataProvider for KinicProvider {
                             | PickerContext::TagManagement
                             | PickerContext::ChatResultLimit
                             | PickerContext::ChatPerMemoryLimit
-                            | PickerContext::ChatCandidatePool
                             | PickerContext::ChatDiversity
                     ) =>
             {
@@ -4554,11 +4550,13 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         .as_deref()
         .map(|description| format_multiline_metadata_field("Description", description))
         .unwrap_or_default();
+    let display_name = display_memory_name(memory.name.as_str(), resolved_name.as_deref());
+    let summary = format!("Id: {} | Status: {}", memory.id, memory.status);
     KinicRecord::new(
         memory.id.clone(),
-        memory.id.clone(),
+        display_name,
         "memories",
-        format!("Status: {}", memory.status),
+        summary,
         format!(
             "## Memory\n\n- Id: `{}`\n- Status: `{}`\n- Name: `{}`\n{}- Version: `{}`\n- Owners: `{}`\n- Dimension: `{}`\n- Stable Memory Size: `{}`\n- Cycle Amount: `{}`\n\n### Content\n{}\n\n### Search\nSelect this item, then type a query and press Enter in the search box.\n\n### Users\n{}\n",
             memory.id,

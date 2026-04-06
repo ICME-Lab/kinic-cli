@@ -252,6 +252,46 @@ fn poll_background_cleans_pending_search_state_for_failure_and_disconnect() {
 }
 
 #[test]
+fn poll_background_ignores_stale_memory_detail_results() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "old detail")];
+    provider.refresh_memory_records_from_summaries();
+    provider.active_memory_id = Some("aaaaa-aa".to_string());
+    provider.pending_memory_detail_memory_id = Some("aaaaa-aa".to_string());
+    provider.pending_memory_detail.in_flight = true;
+    provider.pending_memory_detail.request_id = Some(2);
+    let (tx, rx) = mpsc::channel();
+    provider.pending_memory_detail.receiver = Some(rx);
+    tx.send(MemoryDetailTaskOutput {
+        request_id: 1,
+        memory_id: "aaaaa-aa".to_string(),
+        result: Ok(bridge::MemoryDetails {
+            name: "Updated".to_string(),
+            version: "1.0.0".to_string(),
+            dim: Some(8),
+            owners: vec![],
+            stable_memory_size: Some(1),
+            cycle_amount: Some(1),
+            users: vec![],
+            content_preview: "new detail".to_string(),
+            users_load_error: None,
+            content_preview_error: None,
+        }),
+    })
+    .expect("memory detail result should send");
+
+    let output = provider
+        .poll_background(&CoreState::default())
+        .expect("stale memory detail output");
+
+    assert!(output.effects.is_empty());
+    assert_eq!(provider.memory_summaries[0].name, "unknown");
+    assert_eq!(provider.memory_summaries[0].detail, "old detail");
+    assert!(provider.pending_memory_detail.receiver.is_none());
+    assert!(!provider.pending_memory_detail.in_flight);
+}
+
+#[test]
 fn invalidate_pending_search_cancels_worker_and_clears_receiver() {
     let mut provider = KinicProvider::new(live_config());
     let _tx = install_pending_search(

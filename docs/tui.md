@@ -140,7 +140,7 @@ PDFs are converted to Markdown before insertion. This will fail if `pdftotext` i
 ## Memories Tab
 
 In the `Memories` tab, you work with memories using the search field, list, and detail pane.
-The chat panel asks AI against either the selected memory or all searchable memories, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` narrows candidates with reranking and diversity-aware selection before building the final answer prompt. The reranking step uses both token matches and short character-fragment matches so Japanese or other low-whitespace text can still influence retrieval. Chat history is now stored per `network + identity + chat context + thread`, so each selected memory and the `all memories` scope can keep multiple local threads.
+The chat panel asks AI against either the selected memory or all searchable memories, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` reranks search hits before diversity-aware selection builds the final answer prompt. The reranking step uses both token matches and short character-fragment matches so Japanese or other low-whitespace text can still influence retrieval. Chat history is now stored per `network + identity + chat context + thread`, so each selected memory and the `all memories` scope can keep multiple local threads.
 
 ![Memories tab screenshot](./images/tui-memories.png)
 
@@ -246,7 +246,6 @@ The `Chat retrieval` section controls how `all memories` chat narrows cross-memo
 
 - `Chat result limit`: final number of documents passed into the answer prompt
 - `Per-memory limit`: maximum number of documents kept from any one memory
-- `Chat candidate pool`: larger preselection pool before reranking and diversity selection
 - `Chat diversity`: balance between highest-score results and less-overlapping evidence
 
 ![Settings tab screenshot](./images/tui-settings.png)

@@ -21,7 +21,6 @@ pub const SETTINGS_ENTRY_KINIC_BALANCE_ID: &str = "kinic_balance";
 pub const SETTINGS_ENTRY_SAVED_TAGS_ID: &str = "saved_tags";
 pub const SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID: &str = "chat_result_limit";
 pub const SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID: &str = "chat_per_memory_limit";
-pub const SETTINGS_ENTRY_CHAT_CANDIDATE_POOL_ID: &str = "chat_candidate_pool";
 pub const SETTINGS_ENTRY_CHAT_DIVERSITY_ID: &str = "chat_diversity";
 pub const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
     "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
@@ -171,7 +170,6 @@ pub enum PickerContext {
     AddTag,
     ChatResultLimit,
     ChatPerMemoryLimit,
-    ChatCandidatePool,
     ChatDiversity,
 }
 
@@ -2463,10 +2461,6 @@ pub fn settings_row_behavior_for_index(
             Some(CoreAction::OpenPicker(PickerContext::ChatPerMemoryLimit)),
             " adjust per-memory limit ",
         ),
-        SETTINGS_ENTRY_CHAT_CANDIDATE_POOL_ID => SettingsRowBehavior::new(
-            Some(CoreAction::OpenPicker(PickerContext::ChatCandidatePool)),
-            " adjust candidate pool ",
-        ),
         SETTINGS_ENTRY_CHAT_DIVERSITY_ID => SettingsRowBehavior::new(
             Some(CoreAction::OpenPicker(PickerContext::ChatDiversity)),
             " adjust chat diversity ",
@@ -2611,7 +2605,6 @@ fn picker_selected_index(
                 | PickerContext::AddTag
                 | PickerContext::ChatResultLimit
                 | PickerContext::ChatPerMemoryLimit
-                | PickerContext::ChatCandidatePool
                 | PickerContext::ChatDiversity => None,
             });
 
@@ -3320,14 +3313,20 @@ mod tests {
         };
 
         apply_core_action(&mut state, &CoreAction::ChatNewThread);
-        assert_eq!(state.chat_messages, vec![("user".to_string(), "hello".to_string())]);
+        assert_eq!(
+            state.chat_messages,
+            vec![("user".to_string(), "hello".to_string())]
+        );
         assert!(state.chat_loading);
         assert_eq!(state.chat_scroll, 7);
 
         state.current_tab_id = kinic_tabs::KINIC_CREATE_TAB_ID.to_string();
         state.chat_messages = vec![("user".to_string(), "keep".to_string())];
         apply_core_action(&mut state, &CoreAction::ChatNewThread);
-        assert_eq!(state.chat_messages, vec![("user".to_string(), "keep".to_string())]);
+        assert_eq!(
+            state.chat_messages,
+            vec![("user".to_string(), "keep".to_string())]
+        );
     }
 
     #[test]

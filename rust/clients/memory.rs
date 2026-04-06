@@ -76,18 +76,6 @@ impl MemoryClient {
         Ok(results)
     }
 
-    pub async fn export_all(&self) -> Result<Vec<ExportedChunk>> {
-        let response = self
-            .agent
-            .query(&self.canister_id, "export_all")
-            .call()
-            .await
-            .context("Failed to call export_all on memory canister")?;
-
-        let results = decode_export_all_response(&response)?;
-        Ok(results)
-    }
-
     pub async fn get_dim(&self) -> Result<u64> {
         let response = self
             .agent
@@ -119,6 +107,17 @@ impl MemoryClient {
             .context("Failed to call get_users on memory canister")?;
 
         decode_get_users_response(&response)
+    }
+
+    pub async fn export_all(&self) -> Result<Vec<ExportedChunk>> {
+        let response = self
+            .agent
+            .query(&self.canister_id, "export_all")
+            .call()
+            .await
+            .context("Failed to call export_all on memory canister")?;
+
+        decode_export_all_response(&response)
     }
 
     pub async fn add_new_user(&self, principal: Principal, role: u8) -> Result<()> {

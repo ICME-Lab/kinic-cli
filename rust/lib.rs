@@ -10,6 +10,7 @@ pub(crate) mod insert_service;
 mod ledger;
 pub(crate) mod memory_client_builder;
 mod operation_timeout;
+mod prompt_utils;
 #[cfg(feature = "python-bindings")]
 mod python;
 pub mod tui;

@@ -147,7 +147,6 @@ struct AccessControlRequest {
 pub struct ChatRetrievalConfig {
     pub overall_top_k: usize,
     pub per_memory_cap: usize,
-    pub candidate_pool_size: usize,
     pub mmr_lambda: f32,
 }
 
@@ -406,7 +405,7 @@ pub async fn load_memory_details(
     let client = MemoryClient::new(agent, memory);
     let metadata = client.get_metadata().await?;
     let (dim, users, exported_chunks) =
-        tokio::join!(client.get_dim(), client.get_users(), client.export_all(),);
+        tokio::join!(client.get_dim(), client.get_users(), client.export_all());
     let (users, users_load_error) = memory_users_from_query(users, &launcher_id);
     let (content_preview, content_preview_error) = match exported_chunks {
         Ok(chunks) => (
@@ -751,6 +750,30 @@ mod tests {
     use ic_agent::identity::AnonymousIdentity;
     use std::sync::Arc;
     use tokio::runtime::Runtime;
+
+    #[test]
+    fn render_content_preview_limits_chunks_and_preserves_order() {
+        let preview = render_content_preview(vec![
+            "first chunk".to_string(),
+            "second chunk".to_string(),
+            "third chunk".to_string(),
+            "fourth chunk".to_string(),
+        ]);
+
+        assert!(preview.contains("Previewing 3 of 4 chunks."));
+        assert!(preview.contains("1. first chunk"));
+        assert!(preview.contains("2. second chunk"));
+        assert!(preview.contains("3. third chunk"));
+        assert!(!preview.contains("fourth chunk"));
+    }
+
+    #[test]
+    fn render_content_preview_truncates_long_chunk_text() {
+        let preview = render_content_preview(vec!["x".repeat(301)]);
+
+        assert!(preview.contains("Previewing 1 of 1 chunks."));
+        assert!(preview.contains(&format!("1. {}...", "x".repeat(300))));
+    }
 
     #[test]
     fn resolve_agent_factory_accepts_resolved_identity() {

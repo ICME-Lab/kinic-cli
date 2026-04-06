@@ -92,42 +92,13 @@ fn select_multi_memory_prompt_documents(
         })
         .collect::<Vec<_>>();
     documents.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-    let candidate_pool = limit_candidate_pool(
-        documents,
-        retrieval_config.candidate_pool_size,
-        retrieval_config.per_memory_cap,
-    );
-    let reranked = heuristic_rerank(candidate_pool, latest_query, rewritten_query);
+    let reranked = heuristic_rerank(documents, latest_query, rewritten_query);
     select_with_mmr(
         reranked,
         retrieval_config.overall_top_k,
         retrieval_config.per_memory_cap,
         retrieval_config.mmr_lambda,
     )
-}
-
-fn limit_candidate_pool(
-    documents: Vec<PromptDocument>,
-    candidate_pool_size: usize,
-    per_memory_cap: usize,
-) -> Vec<PromptDocument> {
-    let mut per_memory_counts = HashMap::<String, usize>::new();
-    let mut limited = Vec::new();
-    for document in documents {
-        let next_count = per_memory_counts
-            .get(document.memory_id.as_str())
-            .copied()
-            .unwrap_or(0);
-        if next_count >= per_memory_cap.max(1) {
-            continue;
-        }
-        per_memory_counts.insert(document.memory_id.clone(), next_count + 1);
-        limited.push(document);
-        if limited.len() >= candidate_pool_size.max(1) {
-            break;
-        }
-    }
-    limited
 }
 
 fn heuristic_rerank(

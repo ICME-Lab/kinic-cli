@@ -61,6 +61,27 @@ fn build_insert_request_prefers_explicit_memory_over_saved_default() {
 }
 
 #[test]
+fn build_insert_request_uses_saved_default_memory_when_insert_target_is_blank() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.all = provider.memory_records.clone();
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+
+    let request = provider.build_insert_request(&CoreState {
+        insert_mode: InsertMode::ManualEmbedding,
+        insert_tag: "docs".to_string(),
+        insert_text: "payload".to_string(),
+        insert_embedding: "[0.1]".to_string(),
+        ..CoreState::default()
+    });
+
+    assert!(matches!(
+        request,
+        InsertRequest::Raw { memory_id, .. } if memory_id == "aaaaa-aa"
+    ));
+}
+
+#[test]
 fn build_insert_request_uses_inline_text_mode_without_file_path() {
     let provider = KinicProvider::new(live_config());
     let request = provider.build_insert_request(&CoreState {

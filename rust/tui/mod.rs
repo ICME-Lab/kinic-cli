@@ -92,6 +92,13 @@ impl TuiAuth {
             .map_err(anyhow::Error::msg)
     }
 
+    pub(crate) fn identity_label(&self) -> &str {
+        match self {
+            Self::DeferredIdentity { identity_name, .. } => identity_name.as_str(),
+            Self::ResolvedIdentity(_) => "provided",
+        }
+    }
+
     pub(crate) fn agent_factory(&self, use_mainnet: bool) -> Result<crate::agent::AgentFactory> {
         Ok(crate::agent::AgentFactory::new_with_arc_identity(
             use_mainnet,

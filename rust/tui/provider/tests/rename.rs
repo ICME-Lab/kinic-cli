@@ -160,6 +160,8 @@ fn poll_rename_submit_background_updates_memory_name_and_closes_overlay() {
         effect,
         CoreEffect::Notify(message) if message == "Renamed memory to New Name."
     )));
+    assert_eq!(provider.memory_records[0].title, "New Name");
+    assert!(provider.memory_records[0].summary.contains("aaaaa-aa"));
 }
 
 #[test]
@@ -181,4 +183,29 @@ fn poll_rename_submit_background_resets_task_when_worker_disconnects() {
     ));
     assert!(provider.rename_submit_task.receiver.is_none());
     assert!(!provider.rename_submit_task.in_flight);
+}
+
+#[test]
+fn renamed_memory_is_searchable_by_name_in_browser_filter() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![MemorySummary {
+        id: "aaaaa-aa".to_string(),
+        status: "running".to_string(),
+        detail: "{\"description\":\"Quarterly goals\",\"name\":\"Alpha Memory\"}".to_string(),
+        searchable_memory_id: Some("aaaaa-aa".to_string()),
+        name: "Alpha Memory".to_string(),
+        version: "1.0.0".to_string(),
+        dim: None,
+        owners: None,
+        stable_memory_size: None,
+        cycle_amount: None,
+        users: None,
+    }];
+    provider.refresh_memory_records_from_summaries();
+    provider.query = "alpha".to_string();
+
+    let visible = provider.current_records();
+
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].title, "Alpha Memory");
 }

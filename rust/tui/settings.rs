@@ -10,10 +10,10 @@ use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 use tui_kit_runtime::{
-    SETTINGS_ENTRY_CHAT_CANDIDATE_POOL_ID, SETTINGS_ENTRY_CHAT_DIVERSITY_ID,
-    SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID, SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID,
-    SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview, SessionSettingsSnapshot,
-    SettingsEntry, SettingsSection, SettingsSnapshot, format_e8s_to_kinic_string_u128,
+    SETTINGS_ENTRY_CHAT_DIVERSITY_ID, SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID,
+    SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID, SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview,
+    SessionSettingsSnapshot, SettingsEntry, SettingsSection, SettingsSnapshot,
+    format_e8s_to_kinic_string_u128,
 };
 
 use crate::tui::TuiAuth;
@@ -30,11 +30,9 @@ const CHAT_HISTORY_MAX_MESSAGES: usize = 40;
 const CHAT_MESSAGE_MAX_CONTENT_LEN: usize = 4096;
 pub const DEFAULT_CHAT_OVERALL_TOP_K: usize = 8;
 pub const DEFAULT_CHAT_PER_MEMORY_CAP: usize = 3;
-pub const DEFAULT_CHAT_CANDIDATE_POOL_SIZE: usize = 24;
 pub const DEFAULT_CHAT_MMR_LAMBDA: u8 = 70;
 const CHAT_RESULT_LIMIT_OPTIONS: &[usize] = &[4, 6, 8, 10, 12];
 const CHAT_PER_MEMORY_LIMIT_OPTIONS: &[usize] = &[1, 2, 3, 4];
-const CHAT_CANDIDATE_POOL_OPTIONS: &[usize] = &[12, 16, 24, 32, 48];
 const CHAT_DIVERSITY_OPTIONS: &[u8] = &[60, 70, 80, 90];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,8 +45,6 @@ pub struct UserPreferences {
     pub chat_overall_top_k: usize,
     #[serde(default = "default_chat_per_memory_cap")]
     pub chat_per_memory_cap: usize,
-    #[serde(default = "default_chat_candidate_pool_size")]
-    pub chat_candidate_pool_size: usize,
     #[serde(default = "default_chat_mmr_lambda")]
     pub chat_mmr_lambda: u8,
 }
@@ -61,7 +57,6 @@ impl Default for UserPreferences {
             manual_memory_ids: Vec::new(),
             chat_overall_top_k: DEFAULT_CHAT_OVERALL_TOP_K,
             chat_per_memory_cap: DEFAULT_CHAT_PER_MEMORY_CAP,
-            chat_candidate_pool_size: DEFAULT_CHAT_CANDIDATE_POOL_SIZE,
             chat_mmr_lambda: DEFAULT_CHAT_MMR_LAMBDA,
         }
     }
@@ -82,6 +77,9 @@ pub struct ChatHistoryStore {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatContext {
     pub network: String,
+    #[serde(default)]
+    pub principal_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub identity_label: String,
     pub thread_key: String,
     pub active_thread_id: String,
@@ -115,10 +113,6 @@ pub fn default_chat_overall_top_k() -> usize {
 
 pub fn default_chat_per_memory_cap() -> usize {
     DEFAULT_CHAT_PER_MEMORY_CAP
-}
-
-pub fn default_chat_candidate_pool_size() -> usize {
-    DEFAULT_CHAT_CANDIDATE_POOL_SIZE
 }
 
 pub fn default_chat_mmr_lambda() -> u8 {
@@ -160,6 +154,7 @@ pub fn current_chat_saved_at() -> u64 {
 #[cfg(test)]
 pub fn load_or_create_active_chat_thread(
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
 ) -> Result<ActiveChatThread, SettingsError> {
@@ -169,6 +164,7 @@ pub fn load_or_create_active_chat_thread(
     Ok(load_or_create_active_chat_thread_in_store(
         &mut store,
         network,
+        principal_id,
         identity_label,
         thread_key,
     ))
@@ -177,12 +173,18 @@ pub fn load_or_create_active_chat_thread(
 #[cfg(not(test))]
 pub fn load_or_create_active_chat_thread(
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
 ) -> Result<ActiveChatThread, SettingsError> {
     let mut store: ChatHistoryStore = load_yaml_or_default(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME)?;
-    let active_thread =
-        load_or_create_active_chat_thread_in_store(&mut store, network, identity_label, thread_key);
+    let active_thread = load_or_create_active_chat_thread_in_store(
+        &mut store,
+        network,
+        principal_id,
+        identity_label,
+        thread_key,
+    );
     save_yaml(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME, &store)?;
     Ok(active_thread)
 }
@@ -190,6 +192,7 @@ pub fn load_or_create_active_chat_thread(
 #[cfg(test)]
 pub fn create_chat_thread(
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
 ) -> Result<String, SettingsError> {
@@ -199,6 +202,7 @@ pub fn create_chat_thread(
     Ok(create_chat_thread_in_store(
         &mut store,
         network,
+        principal_id,
         identity_label,
         thread_key,
         next_chat_thread_id(),
@@ -208,6 +212,7 @@ pub fn create_chat_thread(
 #[cfg(not(test))]
 pub fn create_chat_thread(
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
 ) -> Result<String, SettingsError> {
@@ -215,6 +220,7 @@ pub fn create_chat_thread(
     let thread_id = create_chat_thread_in_store(
         &mut store,
         network,
+        principal_id,
         identity_label,
         thread_key,
         next_chat_thread_id(),
@@ -224,8 +230,10 @@ pub fn create_chat_thread(
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub fn append_chat_history_message(
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
     thread_id: &str,
@@ -239,6 +247,7 @@ pub fn append_chat_history_message(
     append_chat_history_message_to_store(
         &mut guard,
         network,
+        principal_id,
         identity_label,
         thread_key,
         thread_id,
@@ -250,8 +259,10 @@ pub fn append_chat_history_message(
 }
 
 #[cfg(not(test))]
+#[allow(clippy::too_many_arguments)]
 pub fn append_chat_history_message(
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
     thread_id: &str,
@@ -263,6 +274,7 @@ pub fn append_chat_history_message(
     append_chat_history_message_to_store(
         &mut store,
         network,
+        principal_id,
         identity_label,
         thread_key,
         thread_id,
@@ -273,9 +285,11 @@ pub fn append_chat_history_message(
     save_yaml(APP_NAMESPACE, CHAT_HISTORY_FILE_NAME, &store)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_chat_history_message_to_store(
     store: &mut ChatHistoryStore,
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
     thread_id: &str,
@@ -288,7 +302,14 @@ fn append_chat_history_message_to_store(
         return;
     }
 
-    let thread = ensure_chat_thread_mut(store, network, identity_label, thread_key, thread_id);
+    let thread = ensure_chat_thread_mut(
+        store,
+        network,
+        principal_id,
+        identity_label,
+        thread_key,
+        thread_id,
+    );
     if let Some(last) = thread.messages.last()
         && last.role == role
         && last.content == normalized_content
@@ -307,17 +328,25 @@ fn append_chat_history_message_to_store(
 fn load_or_create_active_chat_thread_in_store(
     store: &mut ChatHistoryStore,
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
 ) -> ActiveChatThread {
-    let context_index = ensure_chat_context_index(store, network, identity_label, thread_key);
+    let context_index =
+        ensure_chat_context_index(store, network, principal_id, identity_label, thread_key);
     let context = store
         .contexts
         .get_mut(context_index)
         .expect("chat context should exist after upsert");
-    if context.active_thread_id.is_empty() || !context.threads.iter().any(|thread| thread.thread_id == context.active_thread_id) {
-        context.active_thread_id =
-            create_chat_thread_for_context(context, next_chat_thread_id()).thread_id.clone();
+    if context.active_thread_id.is_empty()
+        || !context
+            .threads
+            .iter()
+            .any(|thread| thread.thread_id == context.active_thread_id)
+    {
+        context.active_thread_id = create_chat_thread_for_context(context, next_chat_thread_id())
+            .thread_id
+            .clone();
     }
     project_active_chat_thread(context)
 }
@@ -325,17 +354,23 @@ fn load_or_create_active_chat_thread_in_store(
 fn create_chat_thread_in_store(
     store: &mut ChatHistoryStore,
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
     thread_id: String,
 ) -> String {
-    let context_index = ensure_chat_context_index(store, network, identity_label, thread_key);
+    let context_index =
+        ensure_chat_context_index(store, network, principal_id, identity_label, thread_key);
     let context = store
         .contexts
         .get_mut(context_index)
         .expect("chat context should exist after upsert");
     context.active_thread_id = thread_id.clone();
-    if !context.threads.iter().any(|thread| thread.thread_id == thread_id) {
+    if !context
+        .threads
+        .iter()
+        .any(|thread| thread.thread_id == thread_id)
+    {
         create_chat_thread_for_context(context, thread_id.clone());
     }
     thread_id
@@ -344,11 +379,13 @@ fn create_chat_thread_in_store(
 fn ensure_chat_thread_mut<'a>(
     store: &'a mut ChatHistoryStore,
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
     thread_id: &str,
 ) -> &'a mut ChatThread {
-    let context_index = ensure_chat_context_index(store, network, identity_label, thread_key);
+    let context_index =
+        ensure_chat_context_index(store, network, principal_id, identity_label, thread_key);
     let context = store
         .contexts
         .get_mut(context_index)
@@ -371,33 +408,45 @@ fn ensure_chat_thread_mut<'a>(
 fn ensure_chat_context_index(
     store: &mut ChatHistoryStore,
     network: &str,
+    principal_id: &str,
     identity_label: &str,
     thread_key: &str,
 ) -> usize {
-    store
-        .contexts
-        .iter()
-        .position(|context| {
-            context.network == network
-                && context.identity_label == identity_label
-                && context.thread_key == thread_key
-        })
-        .unwrap_or_else(|| {
-            store.contexts.push(ChatContext {
-                network: network.to_string(),
-                identity_label: identity_label.to_string(),
-                thread_key: thread_key.to_string(),
-                active_thread_id: String::new(),
-                threads: Vec::new(),
-            });
-            store.contexts.len().saturating_sub(1)
-        })
+    if let Some(index) = store.contexts.iter().position(|context| {
+        context.network == network
+            && context.principal_id == principal_id
+            && context.thread_key == thread_key
+    }) {
+        return index;
+    }
+
+    if let Some(index) = store.contexts.iter().position(|context| {
+        context.network == network
+            && context.principal_id.is_empty()
+            && context.identity_label == identity_label
+            && context.thread_key == thread_key
+    }) {
+        let context = store
+            .contexts
+            .get_mut(index)
+            .expect("legacy chat context should exist after lookup");
+        context.principal_id = principal_id.to_string();
+        context.identity_label.clear();
+        return index;
+    }
+
+    store.contexts.push(ChatContext {
+        network: network.to_string(),
+        principal_id: principal_id.to_string(),
+        identity_label: String::new(),
+        thread_key: thread_key.to_string(),
+        active_thread_id: String::new(),
+        threads: Vec::new(),
+    });
+    store.contexts.len().saturating_sub(1)
 }
 
-fn create_chat_thread_for_context(
-    context: &mut ChatContext,
-    thread_id: String,
-) -> &mut ChatThread {
+fn create_chat_thread_for_context(context: &mut ChatContext, thread_id: String) -> &mut ChatThread {
     context.threads.push(ChatThread {
         thread_id,
         messages: Vec::new(),
@@ -477,8 +526,6 @@ pub fn build_settings_snapshot(
     let chat_result_limit_display = chat_result_limit_display(preferences.chat_overall_top_k);
     let chat_per_memory_limit_display =
         chat_per_memory_limit_display(preferences.chat_per_memory_cap);
-    let chat_candidate_pool_display =
-        chat_candidate_pool_display(preferences.chat_candidate_pool_size);
     let chat_diversity_display = chat_diversity_display(preferences.chat_mmr_lambda);
 
     SettingsSnapshot {
@@ -552,12 +599,6 @@ pub fn build_settings_snapshot(
                         id: SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID.to_string(),
                         label: "Per-memory limit".to_string(),
                         value: chat_per_memory_limit_display,
-                        note: None,
-                    },
-                    SettingsEntry {
-                        id: SETTINGS_ENTRY_CHAT_CANDIDATE_POOL_ID.to_string(),
-                        label: "Chat candidate pool".to_string(),
-                        value: chat_candidate_pool_display,
                         note: None,
                     },
                     SettingsEntry {
@@ -753,8 +794,6 @@ pub fn normalize_user_preferences(mut preferences: UserPreferences) -> UserPrefe
     preferences.chat_overall_top_k = normalize_chat_overall_top_k(preferences.chat_overall_top_k);
     preferences.chat_per_memory_cap =
         normalize_chat_per_memory_cap(preferences.chat_per_memory_cap);
-    preferences.chat_candidate_pool_size =
-        normalize_chat_candidate_pool_size(preferences.chat_candidate_pool_size);
     preferences.chat_mmr_lambda = normalize_chat_mmr_lambda(preferences.chat_mmr_lambda);
     preferences
 }
@@ -775,14 +814,6 @@ pub fn normalize_chat_per_memory_cap(value: usize) -> usize {
     }
 }
 
-pub fn normalize_chat_candidate_pool_size(value: usize) -> usize {
-    if CHAT_CANDIDATE_POOL_OPTIONS.contains(&value) {
-        value
-    } else {
-        DEFAULT_CHAT_CANDIDATE_POOL_SIZE
-    }
-}
-
 pub fn normalize_chat_mmr_lambda(value: u8) -> u8 {
     if CHAT_DIVERSITY_OPTIONS.contains(&value) {
         value
@@ -799,10 +830,6 @@ pub fn chat_per_memory_limit_options() -> &'static [usize] {
     CHAT_PER_MEMORY_LIMIT_OPTIONS
 }
 
-pub fn chat_candidate_pool_options() -> &'static [usize] {
-    CHAT_CANDIDATE_POOL_OPTIONS
-}
-
 pub fn chat_diversity_options() -> &'static [u8] {
     CHAT_DIVERSITY_OPTIONS
 }
@@ -813,10 +840,6 @@ pub fn chat_result_limit_display(value: usize) -> String {
 
 pub fn chat_per_memory_limit_display(value: usize) -> String {
     format!("{value} per memory")
-}
-
-pub fn chat_candidate_pool_display(value: usize) -> String {
-    format!("{value} candidates")
 }
 
 pub fn chat_diversity_display(value: u8) -> String {

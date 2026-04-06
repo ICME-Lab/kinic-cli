@@ -7,6 +7,8 @@ use anyhow::Result;
 use tokio::{sync::Semaphore, task::JoinSet};
 use tui_kit_runtime::ChatScope;
 
+use crate::prompt_utils::detect_language;
+
 use super::{
     bridge::{
         AskMemoriesOutput, ChatTarget, SearchResultItem, build_search_agent,
@@ -44,7 +46,11 @@ pub(crate) async fn ask_memories(
         .into_iter()
         .map(|(role, content)| PromptHistoryMessage { role, content })
         .collect::<Vec<_>>();
-    let rewrite_prompt = build_search_rewrite_prompt(&query, &history, "en");
+    let language = detect_language(
+        &query,
+        history.iter().map(|message| message.content.as_str()),
+    );
+    let rewrite_prompt = build_search_rewrite_prompt(&query, &history, language);
     let search_query = call_chat_endpoint(&rewrite_prompt)
         .await?
         .trim()
@@ -71,7 +77,7 @@ pub(crate) async fn ask_memories(
         &search_query,
         &history,
         &prompt_documents,
-        "en",
+        language,
         failed_memory_ids.len(),
     );
     let response = call_chat_endpoint(&prompt).await?;

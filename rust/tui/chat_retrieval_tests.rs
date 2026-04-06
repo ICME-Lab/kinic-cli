@@ -29,7 +29,6 @@ fn selected_scope_uses_overall_top_k() {
         ChatRetrievalConfig {
             overall_top_k: 1,
             per_memory_cap: 2,
-            candidate_pool_size: 8,
             mmr_lambda: 0.7,
         },
     );
@@ -71,7 +70,6 @@ fn multi_memory_selection_applies_candidate_and_final_caps() {
         ChatRetrievalConfig {
             overall_top_k: 8,
             per_memory_cap: 2,
-            candidate_pool_size: 24,
             mmr_lambda: 0.70,
         },
     );
@@ -122,7 +120,6 @@ fn multi_memory_selection_preserves_diversity_for_japanese_content() {
         ChatRetrievalConfig {
             overall_top_k: 2,
             per_memory_cap: 2,
-            candidate_pool_size: 8,
             mmr_lambda: 0.70,
         },
     );

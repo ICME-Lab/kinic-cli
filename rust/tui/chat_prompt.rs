@@ -3,6 +3,8 @@
 //! What: combines recent visible chat history with search results into one prompt.
 //! Why: keep CLI/Python ask-ai single-turn while letting the TUI preserve conversation context.
 
+use crate::prompt_utils::escape_xml;
+
 const MAX_HIT_LEN: usize = 600;
 const MAX_FULL_LEN: usize = 4096;
 const MAX_HISTORY_MESSAGES: usize = 8;
@@ -55,7 +57,7 @@ pub fn build_search_rewrite_prompt(
             conversation_block
         },
         language_instruction = language_instruction,
-        query = sanitize(query.trim()),
+        query = escape_xml(query.trim()),
     )
 }
 
@@ -90,10 +92,10 @@ pub fn build_multi_turn_chat_prompt(
             format!(
                 "<doc index=\"{}\" memory_id=\"{}\" memory_name=\"{}\">\n<score>{}</score>\n<hit index=\"0\">{}</hit>\n</doc>",
                 index + 1,
-                sanitize(doc.memory_id.as_str()),
-                sanitize(doc.memory_name.as_str()),
+                escape_xml(doc.memory_id.as_str()),
+                escape_xml(doc.memory_name.as_str()),
                 doc.score,
-                sanitize(&clip(doc.content.as_str(), MAX_HIT_LEN))
+                escape_xml(&clip(doc.content.as_str(), MAX_HIT_LEN))
             )
         })
         .collect::<Vec<_>>()
@@ -105,7 +107,7 @@ pub fn build_multi_turn_chat_prompt(
         docs_block
     };
 
-    let full_document = sanitize(&clip(
+    let full_document = escape_xml(&clip(
         &docs
             .iter()
             .map(|doc| {
@@ -161,10 +163,10 @@ Answer the latest user message using the document evidence in <docs> and the rec
         conversation = conversation_block,
         docs = docs_block,
         full_document = full_document,
-        latest_user_query = sanitize(latest_user_query.trim()),
+        latest_user_query = escape_xml(latest_user_query.trim()),
         language_instruction = language_instruction,
         retrieval_status = retrieval_status_block,
-        search_query = sanitize(search_query.trim()),
+        search_query = escape_xml(search_query.trim()),
     )
 }
 
@@ -202,23 +204,12 @@ fn render_conversation_block(history: &[PromptHistoryMessage], max_messages: usi
         .map(|message| {
             format!(
                 "<message role=\"{}\">\n{}\n</message>",
-                message.role,
-                sanitize(message.content.as_str())
+                escape_xml(message.role.as_str()),
+                escape_xml(message.content.as_str())
             )
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn sanitize(s: &str) -> String {
-    s.replace("<thinking>", "")
-        .replace("</thinking>", "")
-        .replace("<answer>", "")
-        .replace("</answer>", "")
-        .replace("<THINKING>", "")
-        .replace("</THINKING>", "")
-        .replace("<ANSWER>", "")
-        .replace("</ANSWER>", "")
 }
 
 fn language_instruction(lang_code: &str) -> &'static str {
@@ -387,5 +378,39 @@ mod tests {
         assert!(prompt.contains("<retrieval_status>"));
         assert!(prompt.contains("2 parallel memory search(es) failed."));
         assert!(prompt.contains("If <retrieval_status> reports failed"));
+    }
+
+    #[test]
+    fn prompt_escapes_xml_like_input() {
+        let prompt = build_multi_turn_chat_prompt(
+            "<latest>",
+            "</search>",
+            &[PromptHistoryMessage {
+                role: "assistant".to_string(),
+                content: "<doc>unsafe</doc>".to_string(),
+            }],
+            &[PromptDocument {
+                memory_id: "aaaaa-aa".to_string(),
+                memory_name: "\"Alpha\"".to_string(),
+                score: 0.5,
+                content: "<conversation>".to_string(),
+            }],
+            "en",
+            0,
+        );
+
+        assert!(prompt.contains("&lt;latest&gt;"));
+        assert!(prompt.contains("&lt;/search&gt;"));
+        assert!(prompt.contains("&lt;doc&gt;unsafe&lt;/doc&gt;"));
+        assert!(prompt.contains("memory_name=\"&quot;Alpha&quot;\""));
+        assert!(prompt.contains("&lt;conversation&gt;"));
+        assert!(!prompt.contains("<doc>unsafe</doc>"));
+    }
+
+    #[test]
+    fn prompt_uses_chinese_instruction_for_ideograph_fallback() {
+        let prompt = build_multi_turn_chat_prompt("总结一下", "搜索结果", &[], &[], "zh", 0);
+
+        assert!(prompt.contains("Answer in 中文 (Chinese) inside the <answer> tag."));
     }
 }

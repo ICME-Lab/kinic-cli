@@ -186,7 +186,6 @@ pub(crate) fn picker_hint(context: PickerContext) -> &'static str {
         PickerContext::AddTag => " Enter: save tag  Esc: close",
         PickerContext::ChatResultLimit
         | PickerContext::ChatPerMemoryLimit
-        | PickerContext::ChatCandidatePool
         | PickerContext::ChatDiversity => " Enter: save  ↑/↓: move  Esc: close",
     }
 }
@@ -200,7 +199,6 @@ pub(crate) fn picker_input_placeholder(context: PickerContext) -> &'static str {
         | PickerContext::TagManagement
         | PickerContext::ChatResultLimit
         | PickerContext::ChatPerMemoryLimit
-        | PickerContext::ChatCandidatePool
         | PickerContext::ChatDiversity => "",
     }
 }
@@ -221,7 +219,6 @@ fn picker_context_title(context: PickerContext) -> &'static str {
         PickerContext::AddTag => "Add tag",
         PickerContext::ChatResultLimit => "Chat result limit",
         PickerContext::ChatPerMemoryLimit => "Per-memory limit",
-        PickerContext::ChatCandidatePool => "Chat candidate pool",
         PickerContext::ChatDiversity => "Chat diversity",
     }
 }
@@ -257,7 +254,6 @@ fn picker_empty_message(context: PickerContext) -> &'static str {
         }
         PickerContext::ChatResultLimit
         | PickerContext::ChatPerMemoryLimit
-        | PickerContext::ChatCandidatePool
         | PickerContext::ChatDiversity => " No options available yet.",
     }
 }
