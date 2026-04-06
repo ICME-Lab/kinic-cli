@@ -757,22 +757,12 @@ struct TaskState<T> {
     in_flight: bool,
 }
 
+#[derive(Default)]
 struct MemoryDetailPrefetchState {
     sender: Option<mpsc::Sender<PrefetchMemoryDetailTaskOutput>>,
     receiver: Option<mpsc::Receiver<PrefetchMemoryDetailTaskOutput>>,
     queued_memory_ids: VecDeque<String>,
     in_flight_memory_ids: HashSet<String>,
-}
-
-impl Default for MemoryDetailPrefetchState {
-    fn default() -> Self {
-        Self {
-            sender: None,
-            receiver: None,
-            queued_memory_ids: VecDeque::new(),
-            in_flight_memory_ids: HashSet::new(),
-        }
-    }
 }
 
 impl MemoryDetailPrefetchState {
@@ -857,10 +847,14 @@ fn finish_task<T>(task_state: &mut TaskState<T>) {
 }
 
 #[cfg(test)]
-fn test_memory_detail_results()
--> &'static Mutex<Vec<(String, Result<bridge::MemoryDetails, String>)>> {
-    static RESULTS: OnceLock<Mutex<Vec<(String, Result<bridge::MemoryDetails, String>)>>> =
-        OnceLock::new();
+type TestMemoryDetailResult = (String, Result<bridge::MemoryDetails, String>);
+
+#[cfg(test)]
+type TestMemoryDetailResults = Vec<TestMemoryDetailResult>;
+
+#[cfg(test)]
+fn test_memory_detail_results() -> &'static Mutex<TestMemoryDetailResults> {
+    static RESULTS: OnceLock<Mutex<TestMemoryDetailResults>> = OnceLock::new();
     RESULTS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
