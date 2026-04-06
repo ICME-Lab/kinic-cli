@@ -68,6 +68,7 @@ pub struct SearchBar<'a> {
     theme: &'a Theme,
     focused: bool,
     placeholder: &'a str,
+    title: &'a str,
 }
 
 impl<'a> SearchBar<'a> {
@@ -78,6 +79,7 @@ impl<'a> SearchBar<'a> {
             theme,
             focused: true,
             placeholder: "Search...",
+            title: " Search ",
         }
     }
 
@@ -95,6 +97,11 @@ impl<'a> SearchBar<'a> {
         self.placeholder = placeholder;
         self
     }
+
+    pub fn title(mut self, title: &'a str) -> Self {
+        self.title = title;
+        self
+    }
 }
 
 impl Widget for SearchBar<'_> {
@@ -109,7 +116,7 @@ impl Widget for SearchBar<'_> {
             .borders(Borders::ALL)
             .border_style(border_style)
             .style(Style::default().bg(self.theme.bg_panel))
-            .title(" Search ");
+            .title(self.title);
 
         let inner = block.inner(area);
         block.render(area, buf);

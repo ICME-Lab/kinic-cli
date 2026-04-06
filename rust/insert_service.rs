@@ -2,7 +2,11 @@
 // What: centralizes insert/insert-raw/insert-pdf preparation and execution.
 // Why: keep the actual insert path in one place so UI additions do not duplicate logic.
 
-use std::{fs, fs::File, path::PathBuf};
+use std::{
+    fs,
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
 use ic_agent::export::Principal;
@@ -46,6 +50,7 @@ pub struct InsertExecutionResult {
     pub memory_id: String,
     pub tag: String,
     pub inserted_count: usize,
+    pub source_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +88,7 @@ pub async fn execute_insert_request(
     let validated = validate_and_transform_insert_request(request)?;
     let prepared = prepare_insert_request(&validated).await?;
     let inserted_count = prepared.len();
+    let source_name = validated.source_name();
 
     for item in prepared {
         client.insert(item.embedding, &item.payload).await?;
@@ -93,6 +99,7 @@ pub async fn execute_insert_request(
         memory_id: validated.memory_id().to_string(),
         tag: validated.tag().to_string(),
         inserted_count,
+        source_name,
     })
 }
 
@@ -169,7 +176,7 @@ fn validate_and_transform_insert_request(
                 let path = file_path
                     .as_ref()
                     .expect("normal insert should have file path when text is absent");
-                validate_file_path(path)?;
+                validate_text_file_path(path)?;
             }
 
             Ok(ValidatedInsertRequest::Normal {
@@ -305,6 +312,13 @@ fn validate_file_path(path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn validate_text_file_path(path: &PathBuf) -> Result<()> {
+    validate_file_path(path)?;
+    fs::read_to_string(path)
+        .map(|_| ())
+        .with_context(|| format!("File path is not valid UTF-8 text: {}", path.display()))
+}
+
 fn normalized_optional_text(text: Option<String>) -> Option<String> {
     text.filter(|value| !value.trim().is_empty())
 }
@@ -359,6 +373,28 @@ impl ValidatedInsertRequest {
             }
         }
     }
+
+    fn source_name(&self) -> Option<String> {
+        match self {
+            Self::Normal {
+                file_path: Some(file_path),
+                ..
+            }
+            | Self::Pdf { file_path, .. } => Some(display_source_name(file_path)),
+            Self::Normal {
+                file_path: None, ..
+            }
+            | Self::Raw { .. } => None,
+        }
+    }
+}
+
+fn display_source_name(file_path: &Path) -> String {
+    file_path
+        .file_name()
+        .unwrap_or(file_path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]
@@ -377,6 +413,16 @@ mod tests {
             .as_nanos();
         let path = env::temp_dir().join(format!("kinic-insert-test-{unique_suffix}.md"));
         fs::write(&path, contents).expect("temporary markdown file should be writable");
+        path
+    }
+
+    fn write_temp_bytes_file(extension: &str, contents: &[u8]) -> PathBuf {
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let path = env::temp_dir().join(format!("kinic-insert-test-{unique_suffix}.{extension}"));
+        fs::write(&path, contents).expect("temporary bytes file should be writable");
         path
     }
 
@@ -410,6 +456,30 @@ mod tests {
         let payload = payload_for("docs", "hello");
 
         assert_eq!(payload, "{\"sentence\":\"hello\",\"tag\":\"docs\"}");
+    }
+
+    #[test]
+    fn validated_insert_request_source_name_uses_file_name() {
+        let request = ValidatedInsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: None,
+            file_path: Some(PathBuf::from("/tmp/nested/doc.md")),
+        };
+
+        assert_eq!(request.source_name(), Some("doc.md".to_string()));
+    }
+
+    #[test]
+    fn validated_insert_request_source_name_is_none_for_inline_text() {
+        let request = ValidatedInsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("payload".to_string()),
+            file_path: None,
+        };
+
+        assert_eq!(request.source_name(), None);
     }
 
     #[test]
@@ -542,6 +612,26 @@ mod tests {
             err.to_string()
                 .contains("File path does not exist: /path/that/does/not/need/to/exist.md")
         );
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_rejects_non_utf8_normal_file_path() {
+        let path = write_temp_bytes_file("md", &[0xff, 0xfe, 0xfd]);
+
+        let err = validate_insert_request_for_submit(&InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("   ".to_string()),
+            file_path: Some(path.clone()),
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains(&format!(
+            "File path is not valid UTF-8 text: {}",
+            path.display()
+        )));
+
+        fs::remove_file(path).expect("temporary bytes file should be removable");
     }
 
     #[test]

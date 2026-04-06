@@ -80,6 +80,7 @@ pub struct UiSection {
 pub struct UiItemContent {
     pub id: String,
     pub title: String,
+    pub subtitle: Option<String>,
     pub kind: UiItemKind,
     pub definition: String,
     pub location: Option<UiSourceLocation>,

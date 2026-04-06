@@ -4,8 +4,9 @@ use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
-    CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus, InsertMode,
-    MemorySelectorItem, SettingsSnapshot,
+    AccessControlModalState, CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus,
+    InsertMode, PickerState, RemoveMemoryModalState, RenameMemoryModalState, SearchScope,
+    SettingsSnapshot, TextInputModalState, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -102,6 +103,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn search_scope(mut self, scope: SearchScope) -> Self {
+        self.search_scope = scope;
+        self
+    }
+
+    #[must_use]
     pub fn current_tab_id(mut self, tab_id: TabId) -> Self {
         self.current_tab_id = tab_id;
         self
@@ -169,6 +176,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn create_description_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.create_description_cursor = value;
+        self
+    }
+
+    #[must_use]
     pub fn create_submit_state(mut self, value: CreateSubmitState) -> Self {
         self.create_submit_state = value;
         self
@@ -205,35 +218,14 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn default_memory_selector_open(mut self, value: bool) -> Self {
-        self.default_memory_selector_open = value;
+    pub fn picker(mut self, value: &'a PickerState) -> Self {
+        self.picker = value;
         self
     }
 
     #[must_use]
-    pub fn default_memory_selector_index(mut self, value: usize) -> Self {
-        self.default_memory_selector_index = value;
-        self
-    }
-
-    #[must_use]
-    pub fn default_memory_selector_items(mut self, value: &'a [MemorySelectorItem]) -> Self {
-        self.default_memory_selector_items = value;
-        self
-    }
-
-    #[must_use]
-    pub fn default_memory_selector_selected_id(mut self, value: Option<&'a str>) -> Self {
-        self.default_memory_selector_selected_id = value;
-        self
-    }
-
-    #[must_use]
-    pub fn default_memory_selector_context(
-        mut self,
-        value: tui_kit_runtime::MemorySelectorContext,
-    ) -> Self {
-        self.default_memory_selector_context = value;
+    pub fn saved_default_memory_id(mut self, value: Option<&'a str>) -> Self {
+        self.saved_default_memory_id = value;
         self
     }
 
@@ -256,6 +248,30 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn insert_expected_dim(mut self, value: Option<u64>) -> Self {
+        self.insert_expected_dim = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_expected_dim_loading(mut self, value: bool) -> Self {
+        self.insert_expected_dim_loading = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_current_dim(mut self, value: Option<&'a str>) -> Self {
+        self.insert_current_dim = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_validation_message(mut self, value: Option<&'a str>) -> Self {
+        self.insert_validation_message = value;
+        self
+    }
+
+    #[must_use]
     pub fn insert_tag(mut self, value: &'a str) -> Self {
         self.insert_tag = value;
         self
@@ -264,6 +280,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn insert_text(mut self, value: &'a str) -> Self {
         self.insert_text = value;
+        self
+    }
+
+    #[must_use]
+    pub fn insert_text_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.insert_text_cursor = value;
         self
     }
 
@@ -304,8 +326,44 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn access_control_modal(mut self, value: AccessControlModalState) -> Self {
+        self.access_control = value;
+        self
+    }
+
+    #[must_use]
+    pub fn add_memory_modal(mut self, value: TextInputModalState) -> Self {
+        self.add_memory = value;
+        self
+    }
+
+    #[must_use]
+    pub fn remove_memory_modal(mut self, value: &'a RemoveMemoryModalState) -> Self {
+        self.remove_memory = value.clone();
+        self
+    }
+
+    #[must_use]
+    pub fn rename_memory_modal(mut self, value: RenameMemoryModalState) -> Self {
+        self.rename_memory = value;
+        self
+    }
+
+    #[must_use]
+    pub fn transfer_modal(mut self, value: TransferModalState) -> Self {
+        self.transfer_modal = value;
+        self
+    }
+
+    #[must_use]
     pub fn status_message(mut self, msg: &'a str) -> Self {
         self.status_message = msg;
+        self
+    }
+
+    #[must_use]
+    pub fn selected_memory_label(mut self, value: Option<&'a str>) -> Self {
+        self.selected_memory_label = value;
         self
     }
 
@@ -348,6 +406,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn chat_scroll(mut self, scroll: usize) -> Self {
         self.chat_scroll = scroll;
+        self
+    }
+
+    #[must_use]
+    pub fn chat_scope(mut self, scope: tui_kit_runtime::ChatScope) -> Self {
+        self.chat_scope = scope;
         self
     }
 }

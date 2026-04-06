@@ -207,34 +207,39 @@ fn create_cursor_uses_visible_suffix_for_long_name() {
 
     assert_eq!(
         cursor.0,
-        (screen.layout.field_x() + screen.form_lines.name_display_width)
-            .min(screen.layout.max_field_x())
+        (screen.layout.field_x()
+            + screen
+                .form_lines
+                .focus_display_width(CreateModalFocus::Name))
+        .min(screen.layout.max_field_x())
     );
     assert!(fit_single_line(long_name, screen.layout.input_width(0), true) != long_name);
 }
 
 #[test]
-fn create_cursor_uses_visible_suffix_for_long_description() {
-    let area = Rect::new(0, 0, 30, 20);
+fn create_cursor_tracks_multiline_description_rows() {
+    let area = Rect::new(0, 0, 40, 20);
     let theme = Theme::default();
-    let long_description = "description text that is intentionally too wide";
     let ui = TuiKitUi::new(&theme)
         .focus(Focus::Form)
-        .create_description(long_description)
+        .create_description("first\nsecond\nthird")
+        .create_description_cursor(Some((1, 3)))
         .create_focus(CreateModalFocus::Description);
     let screen = super::CreateScreenState::from_root_area(&ui, area);
     let cursor = ui
         .create_cursor_position_for_area(area)
         .expect("description cursor");
 
+    let description_row = screen
+        .form_lines
+        .focus_row_index(CreateModalFocus::Description)
+        .expect("description row");
+
     assert_eq!(
-        cursor.0,
-        (screen.layout.field_x() + screen.form_lines.description_display_width)
-            .min(screen.layout.max_field_x())
+        cursor.1,
+        screen.layout.form_inner_area.expect("inner").y + description_row + 1
     );
-    assert!(
-        fit_single_line(long_description, screen.layout.input_width(0), true) != long_description
-    );
+    assert!(cursor.0 >= screen.layout.field_x());
 }
 
 #[test]
@@ -440,6 +445,25 @@ fn create_screen_aligns_account_cost_value_columns() {
             .windows(2)
             .all(|pair| pair[0] == pair[1])
     );
+}
+
+#[test]
+fn create_submit_row_sits_directly_after_description_block() {
+    let area = Rect::new(0, 0, 100, 28);
+    let theme = Theme::default();
+    let layout = CreateScreenLayout::from_root_area(area, true);
+    let ui = TuiKitUi::new(&theme)
+        .focus(Focus::Form)
+        .create_cost_state(&CreateCostState::Loading);
+    let lines = create_form_lines(&ui, layout);
+    let description_row = lines
+        .focus_row_index(CreateModalFocus::Description)
+        .expect("description row");
+    let submit_row = lines
+        .focus_row_index(CreateModalFocus::Submit)
+        .expect("submit row");
+
+    assert_eq!(submit_row, description_row + 5);
 }
 
 #[test]

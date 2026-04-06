@@ -7,6 +7,7 @@ use ratatui::{
     style::Style,
     widgets::{Block, Borders, Widget, block::BorderType},
 };
+use tui_kit_runtime::PickerState;
 use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
 
 use crate::ui::components::TabBar;
@@ -34,9 +35,24 @@ impl<'a> TuiKitUi<'a> {
         if self.show_help
             || self.show_settings
             || self.show_create_modal
-            || self.default_memory_selector_open
+            || !matches!(self.picker, PickerState::Closed)
         {
             return None;
+        }
+        if self.transfer_modal.open {
+            return self.transfer_cursor_position_for_area(area);
+        }
+        if self.add_memory.open {
+            return self.add_memory_cursor_position_for_area(area);
+        }
+        if self.remove_memory.open {
+            return None;
+        }
+        if self.rename_memory.form.open {
+            return self.rename_memory_cursor_position_for_area(area);
+        }
+        if self.access_control.open {
+            return self.access_control_cursor_position_for_area(area);
         }
         match tab_kind(self.current_tab_id.0.as_str()) {
             TabKind::CreateForm => return self.create_cursor_position_for_area(area),
@@ -93,7 +109,13 @@ impl Widget for TuiKitUi<'_> {
         self.render_status(chunks[3], buf);
         self.render_create_overlay(area, buf);
         self.render_settings_overlay(area, buf);
-        self.render_default_memory_selector_overlay(area, buf);
+        self.render_picker_overlay(area, buf);
+        self.render_access_control_overlay(area, buf);
+        self.render_add_memory_overlay(area, buf);
+        self.render_remove_memory_overlay(area, buf);
+        self.render_rename_memory_overlay(area, buf);
+        self.render_transfer_overlay(area, buf);
+        self.render_picker_overlay(area, buf);
         self.render_help_overlay(area, buf);
     }
 }

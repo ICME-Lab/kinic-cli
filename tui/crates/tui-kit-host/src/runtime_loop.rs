@@ -1,22 +1,26 @@
 #[path = "form_tab_flow.rs"]
 mod form_tab_flow;
 
+use ratatui_textarea::{Input as TextAreaInput, Key as TextAreaKey, TextArea};
 use std::{io, time::Duration};
 use tui_kit_render::theme::Theme;
 use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, apply_snapshot, dispatch_action,
-    is_insert_form_locked, kinic_tabs::{
+    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, PickerState, apply_snapshot,
+    dispatch_action, is_insert_form_locked,
+    kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
-    should_open_default_memory_picker,
+    selected_settings_row_behavior,
 };
 
 use crate::{
     HostGlobalCommand, HostInputEvent, action_from_keycode, execute_effects_to_status,
-    global_command_for_key, poll_host_input, resolve_tab_action_with_current,
-    terminal::{FilePickerFn, PickFilePathError, pick_file_path, with_terminal},
+    global_command_for_key,
+    picker::PickerBackend,
+    poll_host_input, resolve_tab_action_with_current,
+    terminal::{PickFilePathError, pick_file_path, with_terminal},
 };
 use form_tab_flow::{form_tab_action_from_key, reset_form_focus, reset_form_state_for_tab};
 
@@ -25,7 +29,7 @@ pub struct RuntimeLoopConfig {
     pub tab_ids: &'static [&'static str],
     pub initial_focus: PaneFocus,
     pub ui_config: fn() -> UiConfig,
-    pub file_picker: Option<FilePickerFn>,
+    pub file_picker: Option<Box<dyn PickerBackend>>,
 }
 
 pub trait RuntimeLoopHooks<P: DataProvider> {
@@ -56,6 +60,26 @@ enum OverlayInputResult {
     ApplyEffects(Vec<CoreEffect>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveTextarea {
+    CreateDescription,
+    InsertText,
+}
+
+struct FormTextareas {
+    create_description: TextArea<'static>,
+    insert_text: TextArea<'static>,
+}
+
+impl Default for FormTextareas {
+    fn default() -> Self {
+        Self {
+            create_description: textarea_from_text(""),
+            insert_text: textarea_from_text(""),
+        }
+    }
+}
+
 pub fn run_provider_app<P: DataProvider>(
     provider: &mut P,
     cfg: RuntimeLoopConfig,
@@ -69,10 +93,18 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
     hooks: &mut H,
 ) -> Result<(), Box<dyn std::error::Error>> {
     with_terminal(|terminal| {
+        let RuntimeLoopConfig {
+            initial_tab_id,
+            tab_ids,
+            initial_focus,
+            ui_config,
+            file_picker,
+        } = cfg;
+        let mut file_picker = file_picker;
         let theme = Theme::default();
         let mut state = CoreState {
-            current_tab_id: cfg.initial_tab_id.to_string(),
-            focus: cfg.initial_focus,
+            current_tab_id: initial_tab_id.to_string(),
+            focus: initial_focus,
             ..CoreState::default()
         };
         let mut inspector_scroll: usize = 0;
@@ -82,19 +114,22 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
         let mut last_selected_index: Option<usize> = None;
         let mut last_tab_id = state.current_tab_id.clone();
         let mut list_scroll_offset: usize = 0;
+        let mut textareas = FormTextareas::default();
 
         if let Ok(snapshot) = provider.initialize() {
             apply_snapshot(&mut state, snapshot);
         }
+        sync_form_textareas_from_state(&mut textareas, &state);
 
         loop {
             hooks.on_tick(provider, &mut state);
             animation.update();
+            sync_form_textareas_from_state(&mut textareas, &state);
 
             if let Ok(size) = terminal.size() {
                 let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
                 let visible_height =
-                    list_viewport_height_for_area_with_tabs(area, !cfg.tab_ids.is_empty());
+                    list_viewport_height_for_area_with_tabs(area, !tab_ids.is_empty());
                 list_scroll_offset = keep_selection_visible_scroll(
                     list_scroll_offset,
                     state.selected_index,
@@ -117,45 +152,61 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 let focus = ui_focus_from_pane(state.focus);
                 let insert_file_path_display = insert_file_path_display(&state);
                 let ui = TuiKitUi::new(&theme)
-                    .ui_config((cfg.ui_config)())
+                    .ui_config(ui_config())
                     .ui_summaries(&state.list_items)
                     .ui_selected_content(state.selected_content.as_ref())
                     .ui_total_count(state.total_count)
                     .list_selected(state.selected_index)
                     .list_scroll(list_scroll_offset)
                     .search_input(&state.query)
+                    .search_scope(state.search_scope)
                     .current_tab_id(TabId::new(state.current_tab_id.clone()))
                     .focus(focus)
                     .status_message(state.status_message.as_deref().unwrap_or("ready"))
+                    .selected_memory_label(state.selected_memory_label.as_deref())
                     .show_help(show_help)
                     .show_settings(show_settings)
                     .show_create_modal(false)
                     .create_name(&state.create_name)
                     .create_description(&state.create_description)
+                    .create_description_cursor(textarea_cursor(
+                        active_textarea(&state),
+                        ActiveTextarea::CreateDescription,
+                        &textareas.create_description,
+                    ))
                     .create_submit_state(state.create_submit_state.clone())
                     .create_spinner_frame(state.create_spinner_frame)
                     .create_error(state.create_error.as_deref())
                     .create_focus(state.create_focus)
                     .create_cost_state(&state.create_cost_state)
                     .settings_snapshot(Some(&state.settings))
-                    .default_memory_selector_open(state.default_memory_selector_open)
-                    .default_memory_selector_index(state.default_memory_selector_index)
-                    .default_memory_selector_items(&state.default_memory_selector_items)
-                    .default_memory_selector_selected_id(
-                        state.default_memory_selector_selected_id.as_deref(),
-                    )
-                    .default_memory_selector_context(state.default_memory_selector_context)
+                    .picker(&state.picker)
+                    .saved_default_memory_id(state.saved_default_memory_id.as_deref())
                     .insert_mode(state.insert_mode)
                     .insert_memory_id(&state.insert_memory_id)
                     .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())
+                    .insert_expected_dim(state.insert_expected_dim)
+                    .insert_expected_dim_loading(state.insert_expected_dim_loading)
+                    .insert_current_dim(state.insert_current_dim.as_deref())
+                    .insert_validation_message(state.insert_validation_message.as_deref())
                     .insert_tag(&state.insert_tag)
                     .insert_text(&state.insert_text)
+                    .insert_text_cursor(textarea_cursor(
+                        active_textarea(&state),
+                        ActiveTextarea::InsertText,
+                        &textareas.insert_text,
+                    ))
                     .insert_file_path(insert_file_path_display.as_str())
                     .insert_embedding(&state.insert_embedding)
                     .insert_submit_state(state.insert_submit_state.clone())
                     .insert_spinner_frame(state.insert_spinner_frame)
                     .insert_error(state.insert_error.as_deref())
                     .insert_focus(state.insert_focus)
+                    .access_control_modal(state.access_control.clone())
+                    .add_memory_modal(state.add_memory.clone())
+                    .remove_memory_modal(&state.remove_memory)
+                    .rename_memory_modal(state.rename_memory.clone())
+                    .transfer_modal(state.transfer_modal.clone())
                     .show_completion(false)
                     .context_details_loading(false)
                     .context_details_failed(false)
@@ -166,6 +217,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .chat_input(&state.chat_input)
                     .chat_loading(state.chat_loading)
                     .chat_scroll(state.chat_scroll)
+                    .chat_scope(state.chat_scope)
                     .completion_selected(0)
                     .inspector_scroll(inspector_scroll)
                     .animation_state(&animation)
@@ -183,7 +235,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             let Some(input) = poll_host_input(poll_duration)? else {
                 continue;
             };
-            let HostInputEvent { code, modifiers } = input;
+            let HostInputEvent {
+                key_event,
+                code,
+                modifiers,
+            } = input;
 
             match handle_overlay_input(provider, &mut state, show_settings, code, modifiers) {
                 OverlayInputResult::NotHandled => {}
@@ -201,6 +257,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     execute_effects_to_status(&mut state, effects);
                     continue;
                 }
+            }
+
+            if handle_textarea_input(provider, &mut state, hooks, &mut textareas, &key_event)? {
+                continue;
             }
 
             match global_command_for_key(
@@ -284,8 +344,23 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     }
                     continue;
                 }
+                HostGlobalCommand::OpenRenameMemory => {
+                    if let Err(error) = dispatch_with_effects(
+                        provider,
+                        &mut state,
+                        hooks,
+                        &CoreAction::OpenRenameMemory,
+                    ) {
+                        state.status_message = Some(error);
+                    }
+                    continue;
+                }
                 HostGlobalCommand::BackFromContent => {
                     state.focus = PaneFocus::Items;
+                    continue;
+                }
+                HostGlobalCommand::BackFromItems => {
+                    state.focus = PaneFocus::Search;
                     continue;
                 }
                 HostGlobalCommand::RefreshCurrentView => {
@@ -314,16 +389,18 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             }
 
             let action = form_tab_action_from_key(code, &mut state).or_else(|| {
-                if code == crossterm::event::KeyCode::Enter
-                    && should_open_default_memory_picker(&state)
-                {
-                    return Some(CoreAction::OpenDefaultMemoryPicker);
+                if code == crossterm::event::KeyCode::Enter {
+                    if let Some(action) = selected_settings_row_behavior(&state)
+                        .and_then(|behavior| behavior.enter_action)
+                    {
+                        return Some(action);
+                    }
                 }
                 action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
                     |a| {
                         resolve_tab_action_with_current(
                             a,
-                            cfg.tab_ids,
+                            tab_ids,
                             Some(state.current_tab_id.as_str()),
                         )
                     },
@@ -351,16 +428,13 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         | CoreAction::OpenSelected
                 );
                 if should_open_insert_file_dialog(&action, &state) {
-                    match open_insert_file_dialog(&mut state, terminal, cfg.file_picker) {
+                    match open_insert_file_dialog(&mut state, terminal, &mut file_picker) {
                         Ok(effects) => {
                             hooks.on_effects(provider, &mut state, &effects);
                             execute_effects_to_status(&mut state, effects);
                         }
                         Err(PickFilePathError::Picker(error)) => {
-                            execute_effects_to_status(
-                                &mut state,
-                                vec![CoreEffect::Notify(error)],
-                            );
+                            execute_effects_to_status(&mut state, vec![CoreEffect::Notify(error)]);
                         }
                         Err(PickFilePathError::TerminalState(error)) => {
                             return Err(Box::new(io::Error::other(error)));
@@ -386,7 +460,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 && hooks.on_unhandled_input(
                     provider,
                     &mut state,
-                    HostInputEvent { code, modifiers },
+                    HostInputEvent {
+                        key_event,
+                        code,
+                        modifiers,
+                    },
                 )
             {
                 continue;
@@ -398,14 +476,16 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 fn open_insert_file_dialog(
     state: &mut CoreState,
     terminal: &mut crate::terminal::HostTerminal,
-    file_picker: Option<FilePickerFn>,
+    file_picker: &mut Option<Box<dyn PickerBackend>>,
 ) -> Result<Vec<CoreEffect>, PickFilePathError> {
-    let Some(file_picker) = file_picker else {
+    let Some(file_picker) = file_picker.as_deref_mut() else {
         return Ok(vec![CoreEffect::Notify(
             "File picker is unavailable in this build.".to_string(),
         )]);
     };
-    let selection = pick_file_path(terminal, file_picker, state.insert_mode)?;
+    let cwd =
+        std::env::current_dir().map_err(|error| PickFilePathError::Picker(error.to_string()))?;
+    let selection = pick_file_path(terminal, file_picker, cwd.as_path(), state.insert_mode)?;
     Ok(apply_insert_file_dialog_selection(state, selection))
 }
 
@@ -420,6 +500,7 @@ fn apply_insert_file_dialog_selection(
     let display_path = path.display().to_string();
     state.insert_file_path_input = display_path.clone();
     state.insert_selected_file_path = Some(path);
+    state.insert_focus = tui_kit_runtime::InsertFormFocus::Submit;
     state.insert_error = None;
     if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
         state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
@@ -460,6 +541,93 @@ fn ui_focus_from_pane(focus: PaneFocus) -> Focus {
     }
 }
 
+#[cfg(test)]
+fn build_ui<'a>(
+    theme: &'a Theme,
+    cfg: &RuntimeLoopConfig,
+    state: &'a CoreState,
+    textareas: &FormTextareas,
+    list_scroll_offset: usize,
+    inspector_scroll: usize,
+    show_help: bool,
+    show_settings: bool,
+    animation: &'a AnimationState,
+) -> TuiKitUi<'a> {
+    let focus = ui_focus_from_pane(state.focus);
+    TuiKitUi::new(theme)
+        .ui_config((cfg.ui_config)())
+        .ui_summaries(&state.list_items)
+        .ui_selected_content(state.selected_content.as_ref())
+        .ui_total_count(state.total_count)
+        .list_selected(state.selected_index)
+        .list_scroll(list_scroll_offset)
+        .search_input(&state.query)
+        .search_scope(state.search_scope)
+        .current_tab_id(TabId::new(state.current_tab_id.clone()))
+        .focus(focus)
+        .status_message(state.status_message.as_deref().unwrap_or("ready"))
+        .selected_memory_label(state.selected_memory_label.as_deref())
+        .show_help(show_help)
+        .show_settings(show_settings)
+        .show_create_modal(false)
+        .create_name(&state.create_name)
+        .create_description(&state.create_description)
+        .create_description_cursor(textarea_cursor(
+            active_textarea(state),
+            ActiveTextarea::CreateDescription,
+            &textareas.create_description,
+        ))
+        .create_submit_state(state.create_submit_state.clone())
+        .create_spinner_frame(state.create_spinner_frame)
+        .create_error(state.create_error.as_deref())
+        .create_focus(state.create_focus)
+        .create_cost_state(&state.create_cost_state)
+        .settings_snapshot(Some(&state.settings))
+        .picker(&state.picker)
+        .saved_default_memory_id(state.saved_default_memory_id.as_deref())
+        .insert_mode(state.insert_mode)
+        .insert_memory_id(&state.insert_memory_id)
+        .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())
+        .insert_expected_dim(state.insert_expected_dim)
+        .insert_expected_dim_loading(state.insert_expected_dim_loading)
+        .insert_current_dim(state.insert_current_dim.as_deref())
+        .insert_validation_message(state.insert_validation_message.as_deref())
+        .insert_tag(&state.insert_tag)
+        .insert_text(&state.insert_text)
+        .insert_text_cursor(textarea_cursor(
+            active_textarea(state),
+            ActiveTextarea::InsertText,
+            &textareas.insert_text,
+        ))
+        .insert_file_path(&state.insert_file_path_input)
+        .insert_embedding(&state.insert_embedding)
+        .insert_submit_state(state.insert_submit_state.clone())
+        .insert_spinner_frame(state.insert_spinner_frame)
+        .insert_error(state.insert_error.as_deref())
+        .insert_focus(state.insert_focus)
+        .access_control_modal(state.access_control.clone())
+        .add_memory_modal(state.add_memory.clone())
+        .remove_memory_modal(&state.remove_memory)
+        .rename_memory_modal(state.rename_memory.clone())
+        .transfer_modal(state.transfer_modal.clone())
+        .show_completion(false)
+        .context_details_loading(false)
+        .context_details_failed(false)
+        .context_tree(&[])
+        .filtered_context_indices(&[])
+        .candidates(&[])
+        .chat_messages(&state.chat_messages)
+        .chat_input(&state.chat_input)
+        .chat_loading(state.chat_loading)
+        .chat_scroll(state.chat_scroll)
+        .chat_scope(state.chat_scope)
+        .completion_selected(0)
+        .inspector_scroll(inspector_scroll)
+        .animation_state(animation)
+        .show_chat(state.chat_open)
+        .in_context_items_view(false)
+}
+
 fn handle_overlay_input<P: DataProvider>(
     provider: &mut P,
     state: &mut CoreState,
@@ -467,14 +635,58 @@ fn handle_overlay_input<P: DataProvider>(
     code: crossterm::event::KeyCode,
     modifiers: crossterm::event::KeyModifiers,
 ) -> OverlayInputResult {
-    if state.default_memory_selector_open {
-        let Some(action) = selector_overlay_action(code, modifiers) else {
-            return OverlayInputResult::Consumed;
-        };
-        return match dispatch_action_with_persistent_clear(provider, state, &action) {
-            Ok(effects) => OverlayInputResult::ApplyEffects(effects),
-            Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
-        };
+    if state.access_control.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            access_control_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if state.add_memory.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            add_memory_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if state.remove_memory.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            remove_memory_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if state.rename_memory.form.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            rename_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if state.transfer_modal.open {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            transfer_overlay_action(code, modifiers, state),
+            false,
+        );
+    }
+
+    if !matches!(state.picker, PickerState::Closed) {
+        return dispatch_overlay_action(
+            provider,
+            state,
+            picker_overlay_action(&state.picker, code, modifiers),
+            true,
+        );
     }
 
     if show_settings && matches!(code, crossterm::event::KeyCode::Esc) {
@@ -484,17 +696,474 @@ fn handle_overlay_input<P: DataProvider>(
     OverlayInputResult::NotHandled
 }
 
-fn selector_overlay_action(
+fn dispatch_overlay_action<P: DataProvider>(
+    provider: &mut P,
+    state: &mut CoreState,
+    action: Option<CoreAction>,
+    clear_persistent: bool,
+) -> OverlayInputResult {
+    let Some(action) = action else {
+        return OverlayInputResult::Consumed;
+    };
+    let result = if clear_persistent {
+        dispatch_action_with_persistent_clear(provider, state, &action)
+    } else {
+        dispatch_action(provider, state, &action)
+    };
+    match result {
+        Ok(effects) => OverlayInputResult::ApplyEffects(effects),
+        Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
+    }
+}
+
+fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    textareas: &mut FormTextareas,
+    key_event: &crossterm::event::KeyEvent,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let Some(target) = active_textarea(state) else {
+        return Ok(false);
+    };
+    let textarea = textarea_mut(textareas, target);
+    let action = textarea_navigation_action(target, key_event.code, textarea);
+
+    let Some(action) = action else {
+        if key_event.code == crossterm::event::KeyCode::Esc {
+            return Ok(false);
+        }
+        textarea.input(textarea_input_from_key_event(*key_event));
+        sync_state_from_textareas(state, textareas);
+        return Ok(true);
+    };
+
+    match dispatch_with_effects(provider, state, hooks, &action) {
+        Ok(()) => Ok(true),
+        Err(error) => {
+            state.status_message = Some(error);
+            Ok(true)
+        }
+    }
+}
+
+fn textarea_navigation_action(
+    target: ActiveTextarea,
+    code: crossterm::event::KeyCode,
+    textarea: &TextArea<'static>,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Tab => Some(textarea_next_field_action(target)),
+        crossterm::event::KeyCode::BackTab => Some(textarea_prev_field_action(target)),
+        crossterm::event::KeyCode::Up if textarea_is_at_first_row(textarea) => {
+            Some(textarea_prev_field_action(target))
+        }
+        crossterm::event::KeyCode::Down if textarea_is_at_last_row(textarea) => {
+            Some(textarea_next_field_action(target))
+        }
+        _ => None,
+    }
+}
+
+fn textarea_next_field_action(target: ActiveTextarea) -> CoreAction {
+    match target {
+        ActiveTextarea::CreateDescription => CoreAction::CreateNextField,
+        ActiveTextarea::InsertText => CoreAction::InsertNextField,
+    }
+}
+
+fn textarea_prev_field_action(target: ActiveTextarea) -> CoreAction {
+    match target {
+        ActiveTextarea::CreateDescription => CoreAction::CreatePrevField,
+        ActiveTextarea::InsertText => CoreAction::InsertPrevField,
+    }
+}
+
+fn textarea_is_at_first_row(textarea: &TextArea<'static>) -> bool {
+    textarea.cursor().0 == 0
+}
+
+fn textarea_is_at_last_row(textarea: &TextArea<'static>) -> bool {
+    textarea.cursor().0 + 1 >= textarea.lines().len()
+}
+
+fn active_textarea(state: &CoreState) -> Option<ActiveTextarea> {
+    if state.focus != PaneFocus::Form {
+        return None;
+    }
+
+    if state.current_tab_id == KINIC_CREATE_TAB_ID
+        && state.create_focus == tui_kit_runtime::CreateModalFocus::Description
+    {
+        return Some(ActiveTextarea::CreateDescription);
+    }
+
+    if state.current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_INSERT_TAB_ID
+        && state.insert_focus == tui_kit_runtime::InsertFormFocus::Text
+        && matches!(
+            state.insert_mode,
+            tui_kit_runtime::InsertMode::InlineText | tui_kit_runtime::InsertMode::ManualEmbedding
+        )
+    {
+        return Some(ActiveTextarea::InsertText);
+    }
+
+    None
+}
+
+fn textarea_mut(textareas: &mut FormTextareas, target: ActiveTextarea) -> &mut TextArea<'static> {
+    match target {
+        ActiveTextarea::CreateDescription => &mut textareas.create_description,
+        ActiveTextarea::InsertText => &mut textareas.insert_text,
+    }
+}
+
+fn sync_form_textareas_from_state(textareas: &mut FormTextareas, state: &CoreState) {
+    sync_textarea_from_string(
+        &mut textareas.create_description,
+        state.create_description.as_str(),
+    );
+    sync_textarea_from_string(&mut textareas.insert_text, state.insert_text.as_str());
+}
+
+fn sync_textarea_from_string(textarea: &mut TextArea<'static>, value: &str) {
+    if textarea.lines().join("\n") == value {
+        return;
+    }
+    *textarea = textarea_from_text(value);
+}
+
+fn textarea_from_text(value: &str) -> TextArea<'static> {
+    TextArea::from(value.split('\n'))
+}
+
+fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
+    let create_description = textareas.create_description.lines().join("\n");
+    if state.create_description != create_description {
+        state.create_description = create_description;
+        state.create_error = None;
+        if state.create_submit_state == tui_kit_runtime::CreateSubmitState::Error {
+            state.create_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+        }
+    }
+
+    let insert_text = textareas.insert_text.lines().join("\n");
+    if state.insert_text != insert_text {
+        state.insert_text = insert_text;
+        state.insert_error = None;
+        if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
+            state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+        }
+    }
+}
+
+fn textarea_cursor(
+    active: Option<ActiveTextarea>,
+    target: ActiveTextarea,
+    textarea: &TextArea<'static>,
+) -> Option<(usize, usize)> {
+    if active != Some(target) {
+        return None;
+    }
+    Some(textarea.cursor())
+}
+
+fn textarea_input_from_key_event(key_event: crossterm::event::KeyEvent) -> TextAreaInput {
+    let key = match key_event.code {
+        crossterm::event::KeyCode::Char(c) => TextAreaKey::Char(c),
+        crossterm::event::KeyCode::Backspace => TextAreaKey::Backspace,
+        crossterm::event::KeyCode::Enter => TextAreaKey::Enter,
+        crossterm::event::KeyCode::Left => TextAreaKey::Left,
+        crossterm::event::KeyCode::Right => TextAreaKey::Right,
+        crossterm::event::KeyCode::Up => TextAreaKey::Up,
+        crossterm::event::KeyCode::Down => TextAreaKey::Down,
+        crossterm::event::KeyCode::Tab => TextAreaKey::Tab,
+        crossterm::event::KeyCode::Delete => TextAreaKey::Delete,
+        crossterm::event::KeyCode::Home => TextAreaKey::Home,
+        crossterm::event::KeyCode::End => TextAreaKey::End,
+        crossterm::event::KeyCode::PageUp => TextAreaKey::PageUp,
+        crossterm::event::KeyCode::PageDown => TextAreaKey::PageDown,
+        crossterm::event::KeyCode::Esc => TextAreaKey::Esc,
+        crossterm::event::KeyCode::F(value) => TextAreaKey::F(value),
+        _ => TextAreaKey::Null,
+    };
+    TextAreaInput {
+        key,
+        ctrl: key_event
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL),
+        alt: key_event
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::ALT),
+        shift: key_event
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::SHIFT),
+    }
+}
+
+fn access_control_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    state: &CoreState,
+) -> Option<CoreAction> {
+    use tui_kit_runtime::{AccessControlFocus, AccessControlMode};
+
+    if state.access_control.mode == AccessControlMode::Confirm {
+        return confirm_overlay_action(
+            code,
+            CoreAction::CloseAccessControl,
+            CoreAction::AccessSubmit,
+            CoreAction::AccessCycleAction,
+        );
+    }
+
+    if let Some(action) = match code {
+        crossterm::event::KeyCode::Esc => Some(CoreAction::CloseAccessControl),
+        crossterm::event::KeyCode::Tab if state.access_control.mode == AccessControlMode::Add => {
+            Some(CoreAction::AccessNextField)
+        }
+        crossterm::event::KeyCode::BackTab
+            if state.access_control.mode == AccessControlMode::Add =>
+        {
+            Some(CoreAction::AccessPrevField)
+        }
+        _ => None,
+    } {
+        return Some(action);
+    }
+
+    let directional_action = match state.access_control.mode {
+        AccessControlMode::Action | AccessControlMode::Confirm => overlay_directional_action(
+            code,
+            CoreAction::AccessCycleActionPrev,
+            CoreAction::AccessCycleAction,
+        ),
+        AccessControlMode::Add if state.access_control.focus == AccessControlFocus::Role => {
+            overlay_directional_action(
+                code,
+                CoreAction::AccessCycleRolePrev,
+                CoreAction::AccessCycleRole,
+            )
+        }
+        _ => None,
+    };
+    if directional_action.is_some() {
+        return directional_action;
+    }
+
+    match code {
+        crossterm::event::KeyCode::Backspace
+            if state.access_control.mode == AccessControlMode::Add =>
+        {
+            Some(CoreAction::AccessBackspace)
+        }
+        crossterm::event::KeyCode::Enter => Some(CoreAction::AccessSubmit),
+        crossterm::event::KeyCode::Char(c)
+            if !c.is_control()
+                && state.access_control.mode == AccessControlMode::Add
+                && state.access_control.focus == AccessControlFocus::Principal =>
+        {
+            Some(CoreAction::AccessInput(c))
+        }
+        _ => None,
+    }
+}
+
+fn picker_overlay_action(
+    picker: &PickerState,
     code: crossterm::event::KeyCode,
     _modifiers: crossterm::event::KeyModifiers,
 ) -> Option<CoreAction> {
+    match picker {
+        PickerState::Closed => None,
+        PickerState::List { .. } => match code {
+            crossterm::event::KeyCode::Esc => Some(CoreAction::ClosePicker),
+            crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitPicker),
+            crossterm::event::KeyCode::Down => Some(CoreAction::MovePickerNext),
+            crossterm::event::KeyCode::Up => Some(CoreAction::MovePickerPrev),
+            crossterm::event::KeyCode::Char('d') => Some(CoreAction::DeleteSelectedPickerItem),
+            _ => None,
+        },
+        PickerState::Input { .. } => match code {
+            crossterm::event::KeyCode::Esc => Some(CoreAction::ClosePicker),
+            crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitPicker),
+            crossterm::event::KeyCode::Backspace => Some(CoreAction::PickerBackspace),
+            crossterm::event::KeyCode::Char(c) if !c.is_control() => {
+                Some(CoreAction::PickerInput(c))
+            }
+            _ => None,
+        },
+    }
+}
+
+fn simple_text_overlay_action(
+    code: crossterm::event::KeyCode,
+    close_action: CoreAction,
+    submit_action: CoreAction,
+    backspace_action: CoreAction,
+    input_action: impl Fn(char) -> CoreAction,
+) -> Option<CoreAction> {
     match code {
-        crossterm::event::KeyCode::Esc => Some(CoreAction::CloseDefaultMemoryPicker),
-        crossterm::event::KeyCode::Enter => Some(CoreAction::SubmitDefaultMemoryPicker),
-        crossterm::event::KeyCode::Down => Some(CoreAction::MoveDefaultMemoryPickerNext),
-        crossterm::event::KeyCode::Up => Some(CoreAction::MoveDefaultMemoryPickerPrev),
+        crossterm::event::KeyCode::Esc => Some(close_action),
+        crossterm::event::KeyCode::Enter => Some(submit_action),
+        crossterm::event::KeyCode::Backspace => Some(backspace_action),
+        crossterm::event::KeyCode::Char(c) if !c.is_control() => Some(input_action(c)),
         _ => None,
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn focusable_text_overlay_action(
+    code: crossterm::event::KeyCode,
+    editable: bool,
+    close_action: CoreAction,
+    submit_action: CoreAction,
+    next_action: CoreAction,
+    prev_action: CoreAction,
+    backspace_action: CoreAction,
+    input_action: impl Fn(char) -> CoreAction,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Esc => Some(close_action),
+        crossterm::event::KeyCode::Tab => Some(next_action),
+        crossterm::event::KeyCode::BackTab => Some(prev_action),
+        crossterm::event::KeyCode::Left | crossterm::event::KeyCode::Up => Some(prev_action),
+        crossterm::event::KeyCode::Right | crossterm::event::KeyCode::Down => Some(next_action),
+        crossterm::event::KeyCode::Backspace if editable => Some(backspace_action),
+        crossterm::event::KeyCode::Enter if editable => Some(next_action),
+        crossterm::event::KeyCode::Enter => Some(submit_action),
+        crossterm::event::KeyCode::Char(c) if editable && !c.is_control() => Some(input_action(c)),
+        _ => None,
+    }
+}
+
+fn confirm_overlay_action(
+    code: crossterm::event::KeyCode,
+    close_action: CoreAction,
+    submit_action: CoreAction,
+    toggle_action: CoreAction,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Esc => Some(close_action),
+        crossterm::event::KeyCode::Enter => Some(submit_action),
+        crossterm::event::KeyCode::Tab
+        | crossterm::event::KeyCode::BackTab
+        | crossterm::event::KeyCode::Left
+        | crossterm::event::KeyCode::Right
+        | crossterm::event::KeyCode::Up
+        | crossterm::event::KeyCode::Down => Some(toggle_action),
+        _ => None,
+    }
+}
+
+fn overlay_directional_action(
+    code: crossterm::event::KeyCode,
+    prev_action: CoreAction,
+    next_action: CoreAction,
+) -> Option<CoreAction> {
+    match code {
+        crossterm::event::KeyCode::Left | crossterm::event::KeyCode::Up => Some(prev_action),
+        crossterm::event::KeyCode::Right | crossterm::event::KeyCode::Down => Some(next_action),
+        _ => None,
+    }
+}
+
+fn add_memory_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    _state: &CoreState,
+) -> Option<CoreAction> {
+    simple_text_overlay_action(
+        code,
+        CoreAction::CloseAddMemory,
+        CoreAction::AddMemorySubmit,
+        CoreAction::AddMemoryBackspace,
+        CoreAction::AddMemoryInput,
+    )
+}
+
+fn remove_memory_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    _state: &CoreState,
+) -> Option<CoreAction> {
+    confirm_overlay_action(
+        code,
+        CoreAction::CloseRemoveMemory,
+        CoreAction::RemoveMemorySubmit,
+        CoreAction::RemoveMemoryToggleConfirm,
+    )
+}
+
+fn transfer_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    state: &CoreState,
+) -> Option<CoreAction> {
+    use tui_kit_runtime::{TransferModalFocus, TransferModalMode};
+
+    if state.transfer_modal.mode == TransferModalMode::Confirm {
+        return confirm_overlay_action(
+            code,
+            CoreAction::CloseTransferModal,
+            CoreAction::TransferSubmit,
+            CoreAction::TransferConfirmToggle,
+        );
+    }
+
+    if let Some(action) = match code {
+        crossterm::event::KeyCode::Esc => Some(CoreAction::CloseTransferModal),
+        crossterm::event::KeyCode::Tab => Some(CoreAction::TransferNextField),
+        crossterm::event::KeyCode::BackTab => Some(CoreAction::TransferPrevField),
+        _ => None,
+    } {
+        return Some(action);
+    }
+
+    if let Some(action) = overlay_directional_action(
+        code,
+        CoreAction::TransferPrevField,
+        CoreAction::TransferNextField,
+    ) {
+        return Some(action);
+    }
+
+    match code {
+        crossterm::event::KeyCode::Backspace => Some(CoreAction::TransferBackspace),
+        crossterm::event::KeyCode::Enter => match state.transfer_modal.focus {
+            TransferModalFocus::Max => Some(CoreAction::TransferApplyMax),
+            TransferModalFocus::Submit => Some(CoreAction::TransferSubmit),
+            TransferModalFocus::Principal | TransferModalFocus::Amount => {
+                Some(CoreAction::TransferNextField)
+            }
+        },
+        crossterm::event::KeyCode::Char(c) if !c.is_control() => match state.transfer_modal.focus {
+            TransferModalFocus::Principal | TransferModalFocus::Amount => {
+                Some(CoreAction::TransferInput(c))
+            }
+            TransferModalFocus::Max | TransferModalFocus::Submit => None,
+        },
+        _ => None,
+    }
+}
+
+fn rename_overlay_action(
+    code: crossterm::event::KeyCode,
+    _modifiers: crossterm::event::KeyModifiers,
+    state: &CoreState,
+) -> Option<CoreAction> {
+    use tui_kit_runtime::RenameModalFocus;
+
+    focusable_text_overlay_action(
+        code,
+        state.rename_memory.focus == RenameModalFocus::Name,
+        CoreAction::CloseRenameMemory,
+        CoreAction::RenameMemorySubmit,
+        CoreAction::RenameMemoryNextField,
+        CoreAction::RenameMemoryPrevField,
+        CoreAction::RenameMemoryBackspace,
+        CoreAction::RenameMemoryInput,
+    )
 }
 
 fn open_form_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
@@ -551,14 +1220,35 @@ fn should_clear_persistent_status(action: &CoreAction) -> bool {
         action,
         CoreAction::InsertInput(_)
             | CoreAction::InsertBackspace
-            | CoreAction::InsertCycleModePrev
-            | CoreAction::InsertCycleMode
+            | CoreAction::InsertPrevMode
+            | CoreAction::InsertNextMode
             | CoreAction::InsertSubmit
-            | CoreAction::OpenDefaultMemoryPicker
-            | CoreAction::SubmitDefaultMemoryPicker
+            | CoreAction::OpenPicker(_)
+            | CoreAction::MovePickerNext
+            | CoreAction::MovePickerPrev
+            | CoreAction::DeleteSelectedPickerItem
+            | CoreAction::SubmitPicker
+            | CoreAction::PickerInput(_)
+            | CoreAction::PickerBackspace
             | CoreAction::CreateInput(_)
             | CoreAction::CreateBackspace
             | CoreAction::CreateSubmit
+            | CoreAction::OpenRenameMemory
+            | CoreAction::CloseRenameMemory
+            | CoreAction::RenameMemoryInput(_)
+            | CoreAction::RenameMemoryBackspace
+            | CoreAction::RenameMemoryNextField
+            | CoreAction::RenameMemoryPrevField
+            | CoreAction::RenameMemorySubmit
+            | CoreAction::OpenTransferModal
+            | CoreAction::CloseTransferModal
+            | CoreAction::TransferInput(_)
+            | CoreAction::TransferBackspace
+            | CoreAction::TransferNextField
+            | CoreAction::TransferPrevField
+            | CoreAction::TransferApplyMax
+            | CoreAction::TransferSubmit
+            | CoreAction::TransferConfirmToggle
             | CoreAction::SearchInput(_)
             | CoreAction::SearchBackspace
             | CoreAction::SetQuery(_)

@@ -10,6 +10,7 @@ use crate::{
     cli::AskAiArgs,
     clients::memory::MemoryClient,
     embedding::{embedding_base_url, fetch_embedding},
+    prompt_utils::escape_xml,
 };
 
 use super::CommandContext;
@@ -72,7 +73,7 @@ pub async fn ask_ai_flow(
 
     let limit = top_k.max(1);
     let prompt = build_prompt(query, &results, limit, language);
-    let llm_response = call_llm(&prompt).await?;
+    let llm_response = call_chat_endpoint(&prompt).await?;
 
     Ok(AskAiResult {
         prompt,
@@ -82,7 +83,7 @@ pub async fn ask_ai_flow(
     })
 }
 
-async fn call_llm(prompt: &str) -> Result<String> {
+pub(crate) async fn call_chat_endpoint(prompt: &str) -> Result<String> {
     let url = format!("{}{}", embedding_base_url(), CHAT_PATH);
     let response = Client::new()
         .post(url)
@@ -151,21 +152,18 @@ struct ChatChunk {
 }
 
 fn extract_answer(text: &str) -> String {
-    let lower = text.to_lowercase();
     let start_tag = "<answer>";
     let end_tag = "</answer>";
 
-    if let (Some(start), Some(end)) = (
-        lower.find(start_tag),
-        lower.find(end_tag).map(|i| i + end_tag.len()),
-    ) {
+    if let Some(start) = find_ascii_case_insensitive(text, start_tag) {
         let content_start = start + start_tag.len();
-        let content_end = end - end_tag.len();
-        let snippet = &text[content_start..content_end];
-        snippet.trim().to_string()
-    } else {
-        text.trim().to_string()
+        if let Some(relative_end) = find_ascii_case_insensitive(&text[content_start..], end_tag) {
+            let content_end = content_start + relative_end;
+            return text[content_start..content_end].trim().to_string();
+        }
     }
+
+    text.trim().to_string()
 }
 
 fn build_prompt(
@@ -204,15 +202,12 @@ fn clip(s: &str, max: usize) -> String {
     }
 }
 
-fn strip_tags(s: &str) -> String {
-    s.replace("<thinking>", "")
-        .replace("</thinking>", "")
-        .replace("<answer>", "")
-        .replace("</answer>", "")
-        .replace("<THINKING>", "")
-        .replace("</THINKING>", "")
-        .replace("<ANSWER>", "")
-        .replace("</ANSWER>", "")
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let haystack_bytes = haystack.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    haystack_bytes
+        .windows(needle_bytes.len())
+        .position(|window| window.eq_ignore_ascii_case(needle_bytes))
 }
 
 fn get_language_instruction(lang_code: &str) -> &'static str {
@@ -248,7 +243,7 @@ fn ask_ai_prompt(query: &str, results: &[SearchResult], language: &str) -> Strin
                         "<hit index=\"{}\" score=\"{}\">\n{}\n</hit>",
                         h.index,
                         h.score,
-                        strip_tags(&clip(&h.content, MAX_HIT_LEN))
+                        escape_xml(&clip(&h.content, MAX_HIT_LEN))
                     )
                 })
                 .collect::<Vec<_>>()
@@ -257,8 +252,8 @@ fn ask_ai_prompt(query: &str, results: &[SearchResult], language: &str) -> Strin
             format!(
                 "<doc index=\"{index}\">\n<url>{url}</url>\n<title>{title}</title>\n<score>{score}</score>\n<hits>\n{hits}\n</hits>\n</doc>",
                 index = i + 1,
-                url = r.url,
-                title = strip_tags(&r.title),
+                url = escape_xml(&r.url),
+                title = escape_xml(&r.title),
                 score = r.score,
                 hits = if hits_xml.is_empty() { r#"<hit index="0">(no hits)</hit>"#.to_string() } else { hits_xml },
             )
@@ -273,7 +268,7 @@ fn ask_ai_prompt(query: &str, results: &[SearchResult], language: &str) -> Strin
         formatted_docs
     };
 
-    let full_document = strip_tags(&clip(
+    let full_document = escape_xml(&clip(
         &top_results
             .iter()
             .flat_map(|r| r.hits.iter().take(MAX_HITS_PER_DOC))
@@ -311,6 +306,40 @@ Summarize the main points concisely, taking into account their relevance to the 
         docs = docs_block,
         full_document = full_document,
         language_instruction = language_instruction,
-        query = query,
+        query = escape_xml(query),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SearchHit, SearchResult, ask_ai_prompt, extract_answer};
+
+    #[test]
+    fn extract_answer_is_unicode_safe() {
+        let response = "İstanbul <AnSwEr> done </aNsWeR>";
+        assert_eq!(extract_answer(response), "done");
+    }
+
+    #[test]
+    fn ask_ai_prompt_escapes_xml_payloads() {
+        let prompt = ask_ai_prompt(
+            "<query>",
+            &[SearchResult {
+                url: "memory://1".to_string(),
+                title: "<title>".to_string(),
+                score: 0.9,
+                hits: vec![SearchHit {
+                    index: 0,
+                    score: 0.9,
+                    content: "<doc>unsafe</doc>".to_string(),
+                }],
+            }],
+            "en",
+        );
+
+        assert!(prompt.contains("&lt;query&gt;"));
+        assert!(prompt.contains("&lt;title&gt;"));
+        assert!(prompt.contains("&lt;doc&gt;unsafe&lt;/doc&gt;"));
+        assert!(!prompt.contains("<doc>unsafe</doc>"));
+    }
 }

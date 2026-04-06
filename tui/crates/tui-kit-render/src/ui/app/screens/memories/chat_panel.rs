@@ -10,6 +10,7 @@ use ratatui::{
         Widget, Wrap, block::BorderType,
     },
 };
+use tui_kit_runtime::ChatScope;
 
 use crate::ui::app::{Focus, TuiKitUi};
 use crate::ui::theme::Theme;
@@ -83,11 +84,15 @@ impl<'a> TuiKitUi<'a> {
         } else {
             self.theme.style_border()
         };
+        let title = match self.chat_scope {
+            ChatScope::All => " ◇ Chat [all] ",
+            ChatScope::Selected => " ◇ Chat [selected] ",
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(border_style)
-            .title(self.ui_config.chat.title.as_str());
+            .title(title);
         let inner = block.inner(area);
         block.render(area, buf);
 

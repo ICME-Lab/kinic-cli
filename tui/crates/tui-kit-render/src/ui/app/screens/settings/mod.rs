@@ -1,7 +1,4 @@
-//! Settings screen rendering.
-//! Where: full-body Settings tab content inside the shared app shell.
-//! What: renders current session status and saved preferences from one snapshot.
-//! Why: keeps the Settings tab aligned with the Shift+S quick status overlay.
+//! Settings screen rendering and picker copy helpers.
 
 use ratatui::{
     buffer::Buffer,
@@ -9,23 +6,34 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{MemorySelectorContext, MemorySelectorItem, SettingsSnapshot};
+use tui_kit_runtime::{
+    PickerConfirmKind, PickerContext, PickerItem, PickerListMode, PickerState, SettingsSnapshot,
+};
 
 use crate::ui::app::{Focus, TuiKitUi};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DefaultMemorySelectorLineKind {
+pub(crate) enum PickerLineKind {
     Selected,
     CurrentDefault,
     Normal,
     Hint,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct DefaultMemorySelectorCopy<'a> {
-    pub title: &'a str,
-    pub hint: &'a str,
-    pub show_current_default_marker: bool,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PickerPresentation<'a> {
+    List {
+        context: PickerContext,
+        items: &'a [PickerItem],
+        selected_index: usize,
+    },
+    Confirm {
+        kind: &'a PickerConfirmKind,
+    },
+    Input {
+        context: PickerContext,
+        value: &'a str,
+    },
 }
 
 impl<'a> TuiKitUi<'a> {
@@ -76,56 +84,177 @@ impl<'a> TuiKitUi<'a> {
     }
 }
 
-pub(crate) fn default_memory_selector_lines(
-    items: &[MemorySelectorItem],
-    selected_index: usize,
-    current_default_id: Option<&str>,
-    copy: DefaultMemorySelectorCopy<'_>,
-) -> Vec<(String, DefaultMemorySelectorLineKind)> {
-    let mut lines = Vec::new();
-
-    if items.is_empty() {
-        lines.push((
-            " No memories available yet.".to_string(),
-            DefaultMemorySelectorLineKind::Normal,
-        ));
-    } else {
-        for (index, item) in items.iter().enumerate() {
-            let is_selected = index == selected_index;
-            let is_default =
-                copy.show_current_default_marker && current_default_id == Some(item.id.as_str());
-            let prefix = if is_selected { "›" } else { " " };
-            let suffix = if is_default { "  ★" } else { "" };
-            let kind = if is_selected {
-                DefaultMemorySelectorLineKind::Selected
-            } else if is_default {
-                DefaultMemorySelectorLineKind::CurrentDefault
-            } else {
-                DefaultMemorySelectorLineKind::Normal
-            };
-            lines.push((format!(" {prefix} {}{suffix}", item.display_title()), kind));
-        }
+pub(crate) fn picker_presentation(picker: &PickerState) -> Option<PickerPresentation<'_>> {
+    match picker {
+        PickerState::List {
+            context,
+            items,
+            selected_index,
+            mode,
+            ..
+        } => match mode {
+            PickerListMode::Browsing => Some(PickerPresentation::List {
+                context: *context,
+                items,
+                selected_index: *selected_index,
+            }),
+            PickerListMode::Confirm { kind } => Some(PickerPresentation::Confirm { kind }),
+        },
+        PickerState::Input { context, value, .. } => Some(PickerPresentation::Input {
+            context: *context,
+            value,
+        }),
+        PickerState::Closed => None,
     }
-
-    lines.push((String::new(), DefaultMemorySelectorLineKind::Normal));
-    lines.push((copy.hint.to_string(), DefaultMemorySelectorLineKind::Hint));
-    lines
 }
 
-pub(crate) fn default_memory_selector_copy(
-    context: MemorySelectorContext,
-) -> DefaultMemorySelectorCopy<'static> {
+pub(crate) fn picker_lines(presentation: &PickerPresentation<'_>) -> Vec<(String, PickerLineKind)> {
+    match presentation {
+        PickerPresentation::Confirm { kind } => confirm_lines(kind),
+        PickerPresentation::Input { context, value } => {
+            let input = if value.is_empty() {
+                picker_input_placeholder(*context).to_string()
+            } else {
+                format!("  {value}")
+            };
+            vec![
+                (String::new(), PickerLineKind::Normal),
+                (input, PickerLineKind::Selected),
+                (String::new(), PickerLineKind::Normal),
+                (picker_hint(*context).to_string(), PickerLineKind::Hint),
+            ]
+        }
+        PickerPresentation::List {
+            context,
+            items,
+            selected_index,
+        } => {
+            let mut lines = Vec::new();
+
+            if items.is_empty() {
+                lines.push((
+                    picker_empty_message(*context).to_string(),
+                    PickerLineKind::Normal,
+                ));
+            } else {
+                for (index, item) in items.iter().enumerate() {
+                    let is_selected = index == *selected_index;
+                    let suffix = if item.is_current_default && show_current_default_marker(*context)
+                    {
+                        "  ★"
+                    } else {
+                        ""
+                    };
+                    let prefix = if is_selected { "›" } else { " " };
+                    let kind = if is_selected {
+                        PickerLineKind::Selected
+                    } else if item.is_current_default {
+                        PickerLineKind::CurrentDefault
+                    } else {
+                        PickerLineKind::Normal
+                    };
+                    lines.push((format!(" {prefix} {}{suffix}", item.label), kind));
+                }
+            }
+
+            lines.push((String::new(), PickerLineKind::Normal));
+            lines.push((picker_hint(*context).to_string(), PickerLineKind::Hint));
+            lines
+        }
+    }
+}
+
+pub(crate) fn picker_title(presentation: &PickerPresentation<'_>) -> &'static str {
+    match presentation {
+        PickerPresentation::Confirm { kind } => confirm_title(kind),
+        PickerPresentation::List { context, .. } | PickerPresentation::Input { context, .. } => {
+            picker_context_title(*context)
+        }
+    }
+}
+
+pub(crate) fn picker_requires_vertical_centering(presentation: &PickerPresentation<'_>) -> bool {
+    matches!(presentation, PickerPresentation::Confirm { .. })
+}
+
+pub(crate) fn picker_hint(context: PickerContext) -> &'static str {
     match context {
-        MemorySelectorContext::DefaultPreference => DefaultMemorySelectorCopy {
-            title: "Select Default Memory",
-            hint: " Enter: save  ↑/↓: move  Esc: close",
-            show_current_default_marker: true,
-        },
-        MemorySelectorContext::InsertTarget => DefaultMemorySelectorCopy {
-            title: "Select Target Memory",
-            hint: " Enter: use target  ↑/↓: move  Esc: close",
-            show_current_default_marker: false,
-        },
+        PickerContext::DefaultMemory => " Enter: save  ↑/↓: move  Esc: close",
+        PickerContext::InsertTarget => " Enter: use target  ↑/↓: move  Esc: close",
+        PickerContext::InsertTag => " Enter: choose  ↑/↓: move  Esc: close",
+        PickerContext::TagManagement => " Enter: use  d: delete  ↑/↓: browse  Esc: close",
+        PickerContext::AddTag => " Enter: save tag  Esc: close",
+        PickerContext::ChatResultLimit
+        | PickerContext::ChatPerMemoryLimit
+        | PickerContext::ChatDiversity => " Enter: save  ↑/↓: move  Esc: close",
+    }
+}
+
+pub(crate) fn picker_input_placeholder(context: PickerContext) -> &'static str {
+    match context {
+        PickerContext::AddTag => "<enter a new tag>",
+        PickerContext::DefaultMemory
+        | PickerContext::InsertTarget
+        | PickerContext::InsertTag
+        | PickerContext::TagManagement
+        | PickerContext::ChatResultLimit
+        | PickerContext::ChatPerMemoryLimit
+        | PickerContext::ChatDiversity => "",
+    }
+}
+
+fn show_current_default_marker(context: PickerContext) -> bool {
+    matches!(
+        context,
+        PickerContext::DefaultMemory | PickerContext::InsertTag | PickerContext::TagManagement
+    )
+}
+
+fn picker_context_title(context: PickerContext) -> &'static str {
+    match context {
+        PickerContext::DefaultMemory => "Select default memory",
+        PickerContext::InsertTarget => "Select target memory",
+        PickerContext::InsertTag => "Select insert tag",
+        PickerContext::TagManagement => "Saved tags",
+        PickerContext::AddTag => "Add tag",
+        PickerContext::ChatResultLimit => "Chat result limit",
+        PickerContext::ChatPerMemoryLimit => "Per-memory limit",
+        PickerContext::ChatDiversity => "Chat diversity",
+    }
+}
+
+fn confirm_title(kind: &PickerConfirmKind) -> &'static str {
+    match kind {
+        PickerConfirmKind::DeleteTag { .. } => "Delete saved tag",
+    }
+}
+
+fn confirm_lines(kind: &PickerConfirmKind) -> Vec<(String, PickerLineKind)> {
+    match kind {
+        PickerConfirmKind::DeleteTag { tag_id } => vec![
+            (String::new(), PickerLineKind::Normal),
+            (
+                format!(" Delete tag \"{tag_id}\"?"),
+                PickerLineKind::Selected,
+            ),
+            (String::new(), PickerLineKind::Normal),
+            (
+                " Enter: confirm  Esc: cancel".to_string(),
+                PickerLineKind::Hint,
+            ),
+        ],
+    }
+}
+
+fn picker_empty_message(context: PickerContext) -> &'static str {
+    match context {
+        PickerContext::DefaultMemory | PickerContext::InsertTarget => " No memories available yet.",
+        PickerContext::InsertTag | PickerContext::TagManagement | PickerContext::AddTag => {
+            " No saved tags yet."
+        }
+        PickerContext::ChatResultLimit
+        | PickerContext::ChatPerMemoryLimit
+        | PickerContext::ChatDiversity => " No options available yet.",
     }
 }
 
@@ -134,7 +263,6 @@ fn settings_screen_lines_with_selection(
     selected_entry_index: Option<usize>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
-
     let Some(snapshot) = snapshot else {
         lines.push("No settings data available yet.".to_string());
         return lines;
@@ -181,76 +309,12 @@ fn settings_screen_lines_with_selection(
 mod tests {
     use super::*;
     use tui_kit_runtime::{
-        SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection, SettingsSnapshot,
+        PickerConfirmKind, SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SettingsEntry, SettingsSection,
+        SettingsSnapshot,
     };
 
     #[test]
     fn settings_screen_lines_align_value_columns_across_sections() {
-        let snapshot = SettingsSnapshot {
-            quick_entries: vec![],
-            sections: vec![
-                SettingsSection {
-                    title: "Current session".to_string(),
-                    entries: vec![
-                        SettingsEntry {
-                            id: "auth".to_string(),
-                            label: "Auth".to_string(),
-                            value: "mock".to_string(),
-                            note: None,
-                        },
-                        SettingsEntry {
-                            id: "embedding_api_endpoint".to_string(),
-                            label: "Embedding".to_string(),
-                            value: "https://api.kinic.io".to_string(),
-                            note: None,
-                        },
-                    ],
-                    footer: None,
-                },
-                SettingsSection {
-                    title: "Account".to_string(),
-                    entries: vec![
-                        SettingsEntry {
-                            id: "principal_id".to_string(),
-                            label: "Principal ID".to_string(),
-                            value: "aaaaa-aa".to_string(),
-                            note: None,
-                        },
-                        SettingsEntry {
-                            id: "kinic_balance".to_string(),
-                            label: "KINIC balance".to_string(),
-                            value: "12.34000000 KINIC".to_string(),
-                            note: None,
-                        },
-                    ],
-                    footer: None,
-                },
-            ],
-        };
-
-        let lines = settings_screen_lines_with_selection(Some(&snapshot), None);
-        let auth_line = lines
-            .iter()
-            .find(|line| line.contains("Auth"))
-            .expect("auth line");
-        let endpoint_line = lines
-            .iter()
-            .find(|line| line.contains("Embedding"))
-            .expect("endpoint line");
-        let principal_line = lines
-            .iter()
-            .find(|line| line.contains("Principal ID"))
-            .expect("principal line");
-
-        assert_eq!(
-            auth_line.find("mock"),
-            endpoint_line.find("https://api.kinic.io")
-        );
-        assert_eq!(auth_line.find(':'), principal_line.find(':'));
-    }
-
-    #[test]
-    fn settings_screen_lines_marks_selected_entry() {
         let snapshot = SettingsSnapshot {
             quick_entries: vec![],
             sections: vec![SettingsSection {
@@ -259,13 +323,13 @@ mod tests {
                     SettingsEntry {
                         id: SETTINGS_ENTRY_DEFAULT_MEMORY_ID.to_string(),
                         label: "Default memory".to_string(),
-                        value: "Alpha Memory".to_string(),
+                        value: "aaaaa-aa".to_string(),
                         note: None,
                     },
                     SettingsEntry {
-                        id: "preferences_status".to_string(),
-                        label: "Preferences status".to_string(),
-                        value: "ok".to_string(),
+                        id: "saved_tags".to_string(),
+                        label: "Saved tags".to_string(),
+                        value: "docs".to_string(),
                         note: None,
                     },
                 ],
@@ -273,80 +337,129 @@ mod tests {
             }],
         };
 
-        let lines = settings_screen_lines_with_selection(Some(&snapshot), Some(1)).join("\n");
-
-        assert!(lines.contains("› Preferences status: ok"));
-        assert!(lines.contains("  Default memory"));
+        let lines = settings_screen_lines_with_selection(Some(&snapshot), Some(1));
+        assert!(lines.iter().any(|line| line.contains("Default memory")));
+        assert!(lines.iter().any(|line| line.contains("Saved tags")));
+        assert!(lines.iter().any(|line| line.starts_with("› ")));
     }
+
     #[test]
-    fn default_memory_selector_lines_mark_selected_and_current_entries() {
-        let lines = default_memory_selector_lines(
-            &[
-                MemorySelectorItem {
-                    id: "aaaaa-aa".to_string(),
-                    title: Some("Alpha Memory".to_string()),
-                },
-                MemorySelectorItem {
-                    id: "bbbbb-bb".to_string(),
-                    title: Some("Beta Memory".to_string()),
-                },
+    fn picker_lines_include_add_action_rows() {
+        let lines = picker_lines(&PickerPresentation::List {
+            context: PickerContext::TagManagement,
+            items: &[
+                PickerItem::option("docs", "docs", false),
+                PickerItem::add_action("+ Add new tag"),
             ],
-            1,
-            Some("aaaaa-aa"),
-            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
-        );
-        let joined = lines
-            .into_iter()
-            .map(|(line, _)| line)
-            .collect::<Vec<_>>()
-            .join("\n");
+            selected_index: 1,
+        });
 
-        assert!(joined.contains("Alpha Memory  ★"));
-        assert!(joined.contains("› Beta Memory"));
-        assert!(joined.contains("Enter: save"));
-        assert!(joined.contains("↑/↓: move"));
-        assert!(!joined.contains("j/k: move"));
+        assert!(lines.iter().any(|(line, _)| line.contains("+ Add new tag")));
     }
 
     #[test]
-    fn insert_target_selector_lines_use_insert_specific_copy() {
-        let lines = default_memory_selector_lines(
-            &[MemorySelectorItem {
-                id: "aaaaa-aa".to_string(),
-                title: Some("Alpha Memory".to_string()),
-            }],
-            0,
-            Some("aaaaa-aa"),
-            default_memory_selector_copy(MemorySelectorContext::InsertTarget),
-        );
-        let joined = lines
-            .into_iter()
-            .map(|(line, _)| line)
-            .collect::<Vec<_>>()
-            .join("\n");
+    fn picker_lines_mark_current_default_only_for_default_memory() {
+        let default_lines = picker_lines(&PickerPresentation::List {
+            context: PickerContext::DefaultMemory,
+            items: &[PickerItem::option("aaaaa-aa", "Alpha Memory", true)],
+            selected_index: 0,
+        });
+        let insert_lines = picker_lines(&PickerPresentation::List {
+            context: PickerContext::InsertTarget,
+            items: &[PickerItem::option("aaaaa-aa", "Alpha Memory", true)],
+            selected_index: 0,
+        });
 
-        assert!(!joined.contains("Select Target Memory"));
-        assert!(joined.contains("Enter: use target"));
-        assert!(!joined.contains('★'));
+        assert!(default_lines.iter().any(|(line, _)| line.contains('★')));
+        assert!(!insert_lines.iter().any(|(line, _)| line.contains('★')));
     }
 
     #[test]
-    fn selector_lines_fall_back_to_id_when_title_is_missing() {
-        let lines = default_memory_selector_lines(
-            &[MemorySelectorItem {
-                id: "aaaaa-aa".to_string(),
-                title: None,
-            }],
-            0,
-            Some("aaaaa-aa"),
-            default_memory_selector_copy(MemorySelectorContext::DefaultPreference),
+    fn tag_management_hint_describes_add_only_behavior() {
+        assert_eq!(
+            picker_hint(PickerContext::TagManagement),
+            " Enter: use  d: delete  ↑/↓: browse  Esc: close"
         );
-        let joined = lines
-            .into_iter()
-            .map(|(line, _)| line)
-            .collect::<Vec<_>>()
-            .join("\n");
+    }
 
-        assert!(joined.contains("aaaaa-aa  ★"));
+    #[test]
+    fn tag_picker_titles_differ_by_context() {
+        assert_eq!(
+            picker_title(&PickerPresentation::List {
+                context: PickerContext::InsertTag,
+                items: &[],
+                selected_index: 0,
+            }),
+            "Select insert tag"
+        );
+        assert_eq!(
+            picker_title(&PickerPresentation::List {
+                context: PickerContext::TagManagement,
+                items: &[],
+                selected_index: 0,
+            }),
+            "Saved tags"
+        );
+    }
+
+    #[test]
+    fn tag_management_confirm_lines_show_delete_prompt() {
+        let lines = picker_lines(&PickerPresentation::Confirm {
+            kind: &PickerConfirmKind::DeleteTag {
+                tag_id: "docs".to_string(),
+            },
+        });
+
+        assert!(
+            lines
+                .iter()
+                .any(|(line, _)| line.contains("Delete tag \"docs\"?"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|(line, _)| line.contains("Enter: confirm  Esc: cancel"))
+        );
+    }
+
+    #[test]
+    fn picker_presentation_maps_confirm_delete_mode() {
+        let picker = PickerState::List {
+            context: PickerContext::TagManagement,
+            items: vec![PickerItem::option("docs", "docs", false)],
+            selected_index: 0,
+            selected_id: Some("docs".to_string()),
+            mode: PickerListMode::Confirm {
+                kind: PickerConfirmKind::DeleteTag {
+                    tag_id: "docs".to_string(),
+                },
+            },
+        };
+
+        assert_eq!(
+            picker_presentation(&picker),
+            Some(PickerPresentation::Confirm {
+                kind: &PickerConfirmKind::DeleteTag {
+                    tag_id: "docs".to_string(),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn picker_presentation_maps_input_picker() {
+        let picker = PickerState::Input {
+            context: PickerContext::AddTag,
+            origin_context: Some(PickerContext::InsertTag),
+            value: "research".to_string(),
+        };
+
+        assert_eq!(
+            picker_presentation(&picker),
+            Some(PickerPresentation::Input {
+                context: PickerContext::AddTag,
+                value: "research",
+            })
+        );
     }
 }

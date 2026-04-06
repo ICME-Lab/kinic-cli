@@ -6,7 +6,7 @@ Python bindings for the Kinic CLI core, enabling you to build AI agents with ver
 
 **For the wizards building trustless agents** - no more lobotomized summons that reset on every quest.
 
-Looking for the CLI docs? See `docs/cli.md`.
+Looking for the docs? See `docs/cli.md` for the command-line interface and `docs/tui.md` for the terminal UI.
 
 Made with ❤️ by [ICME Labs](https://blog.icme.io/).
 
@@ -63,6 +63,17 @@ pip install -e .
 # Or with uv
 uv pip install -e .
 ```
+
+### Terminal UI
+
+Kinic also includes a terminal UI for browsing, creating, and inserting memories.
+
+Mainnet example:
+```bash
+kinic-cli --identity <name> --ic tui
+```
+
+See `docs/tui.md` for the TUI quickstart, setup notes, and keyboard workflows.
 
 ---
 

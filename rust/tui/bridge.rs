@@ -1,20 +1,23 @@
 use std::cmp::Ordering;
 
-use anyhow::{Context, Result};
-use ic_agent::export::Principal;
-use tui_kit_runtime::{SessionAccountOverview, format_e8s_to_kinic_string_nat};
-
 use crate::{
     clients::{
         launcher::{LauncherClient, State},
         memory::MemoryClient,
     },
     create_domain::{BalanceDelta, balance_delta, required_balance},
-    embedding::{embedding_base_url, fetch_embedding},
+    embedding::embedding_base_url,
     insert_service::{InsertRequest, execute_insert_request},
-    ledger::fetch_balance,
+    ledger::{fetch_balance, fetch_fee, transfer},
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
+};
+
+use anyhow::{Context, Result};
+use ic_agent::{Agent, export::Principal};
+use tui_kit_runtime::{
+    AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview,
+    format_e8s_to_kinic_string_nat,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,12 +25,51 @@ pub struct MemorySummary {
     pub id: String,
     pub status: String,
     pub detail: String,
+    pub searchable_memory_id: Option<String>,
+    pub name: String,
+    pub version: String,
+    pub dim: Option<u64>,
+    pub owners: Option<Vec<String>>,
+    pub stable_memory_size: Option<u32>,
+    pub cycle_amount: Option<u64>,
+    pub users: Option<Vec<MemoryUser>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchResultItem {
+    pub memory_id: String,
     pub score: f32,
     pub payload: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AskMemoriesOutput {
+    pub response: String,
+    pub failed_memory_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatTarget {
+    pub memory_id: String,
+    pub memory_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryUser {
+    pub principal_id: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryDetails {
+    pub name: String,
+    pub version: String,
+    pub dim: Option<u64>,
+    pub owners: Vec<String>,
+    pub stable_memory_size: Option<u32>,
+    pub cycle_amount: Option<u64>,
+    pub users: Vec<MemoryUser>,
+    pub users_load_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +84,12 @@ pub struct InsertMemorySuccess {
     pub memory_id: String,
     pub tag: String,
     pub inserted_count: usize,
+    pub source_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferKinicSuccess {
+    pub block_index: u128,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +97,7 @@ pub enum CreateMemoryError {
     Principal(String),
     Balance(String),
     Price(String),
+    Fee(String),
     InsufficientBalance {
         required_total_kinic: String,
         required_total_base_units: String,
@@ -67,8 +116,45 @@ pub enum InsertMemoryError {
     Execute(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferKinicError {
+    ResolveAgentFactory(String),
+    BuildAgent(String),
+    ParsePrincipal(String),
+    LoadBalance(String),
+    LoadFee(String),
+    Transfer(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenameMemoryError {
+    ResolveAgentFactory(String),
+    BuildAgent(String),
+    ParseMemoryId(String),
+    Rename(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AccessControlRequest {
+    principal: Principal,
+    action: AccessControlAction,
+    role_code: Option<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatRetrievalConfig {
+    pub overall_top_k: usize,
+    pub per_memory_cap: usize,
+    pub mmr_lambda: f32,
+}
+
 fn resolve_agent_factory(use_mainnet: bool, auth: &TuiAuth) -> Result<crate::agent::AgentFactory> {
     auth.agent_factory(use_mainnet)
+}
+
+pub async fn build_search_agent(use_mainnet: bool, auth: TuiAuth) -> Result<Agent> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    factory.build().await
 }
 
 pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<MemorySummary>> {
@@ -76,7 +162,6 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     let agent = factory.build().await?;
     let client = LauncherClient::new(agent);
     let states = client.list_memories().await?;
-
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
@@ -97,10 +182,13 @@ pub async fn create_memory(
     let balance =
         balance.map_err(|error| CreateMemoryError::Balance(short_error(&error.to_string())))?;
     let price = price.map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
-    match balance_delta(&price, balance) {
+    let fee = fetch_fee(&agent)
+        .await
+        .map_err(|error| CreateMemoryError::Fee(short_error(&error.to_string())))?;
+    match balance_delta(&price, balance, fee) {
         BalanceDelta::Surplus(_) => {}
         BalanceDelta::Shortfall(shortfall) => {
-            let required_total = required_balance(&price);
+            let required_total = required_balance(&price, fee);
             return Err(CreateMemoryError::InsufficientBalance {
                 required_total_kinic: format_e8s_to_kinic_string_nat(&required_total),
                 required_total_base_units: required_total.to_string(),
@@ -110,7 +198,7 @@ pub async fn create_memory(
         }
     }
     client
-        .approve_launcher(&price)
+        .approve_launcher(&price, fee)
         .await
         .map_err(|error| CreateMemoryError::Approve(short_error(&error.to_string())))?;
     let id = client
@@ -176,7 +264,11 @@ pub async fn load_session_account_overview(
         }
     }
     let client = LauncherClient::new(agent.clone());
-    let (balance, price) = tokio::join!(fetch_balance(&agent), client.fetch_deployment_price());
+    let (balance, price, fee) = tokio::join!(
+        fetch_balance(&agent),
+        client.fetch_deployment_price(),
+        fetch_fee(&agent)
+    );
 
     if let Err(error) = &balance {
         overview.balance_error = Some(short_error(&error.to_string()));
@@ -188,28 +280,227 @@ pub async fn load_session_account_overview(
     } else if let Ok(price) = &price {
         overview.price_base_units = Some(price.clone());
     }
+    if let Err(error) = &fee {
+        overview.fee_error = Some(short_error(&error.to_string()));
+    } else if let Ok(fee) = &fee {
+        overview.fee_base_units = Some(*fee);
+    }
 
     overview
 }
 
-pub async fn search_memory(
+pub async fn load_transfer_prerequisites(
     use_mainnet: bool,
     auth: TuiAuth,
+) -> Result<(u128, u128), TransferKinicError> {
+    let factory = resolve_agent_factory(use_mainnet, &auth).map_err(|error| {
+        TransferKinicError::ResolveAgentFactory(short_error(&error.to_string()))
+    })?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| TransferKinicError::BuildAgent(short_error(&error.to_string())))?;
+    let (balance, fee) = tokio::join!(fetch_balance(&agent), fetch_fee(&agent));
+    let balance = balance
+        .map_err(|error| TransferKinicError::LoadBalance(short_error(&error.to_string())))?;
+    let fee = fee.map_err(|error| TransferKinicError::LoadFee(short_error(&error.to_string())))?;
+    Ok((balance, fee))
+}
+
+pub async fn transfer_kinic(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    recipient_principal: String,
+    amount_base_units: u128,
+    fee_base_units: u128,
+) -> Result<TransferKinicSuccess, TransferKinicError> {
+    let recipient = Principal::from_text(&recipient_principal)
+        .map_err(|error| TransferKinicError::ParsePrincipal(short_error(&error.to_string())))?;
+    let factory = resolve_agent_factory(use_mainnet, &auth).map_err(|error| {
+        TransferKinicError::ResolveAgentFactory(short_error(&error.to_string()))
+    })?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| TransferKinicError::BuildAgent(short_error(&error.to_string())))?;
+    let block_index = transfer(&agent, recipient, amount_base_units, fee_base_units)
+        .await
+        .map_err(|error| TransferKinicError::Transfer(short_error(&error.to_string())))?;
+    Ok(TransferKinicSuccess { block_index })
+}
+
+pub async fn search_memory_with_agent(
+    agent: Agent,
     memory_id: String,
-    query: String,
+    embedding: Vec<f32>,
 ) -> Result<Vec<SearchResultItem>> {
-    let factory = resolve_agent_factory(use_mainnet, &auth)?;
-    let agent = factory.build().await?;
-    let memory = Principal::from_text(memory_id).context("Failed to parse memory canister id")?;
+    let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
     let client = MemoryClient::new(agent, memory);
-    let embedding = fetch_embedding(&query).await?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
 
     Ok(results
         .into_iter()
-        .map(|(score, payload)| SearchResultItem { score, payload })
+        .map(|(score, payload)| SearchResultItem {
+            memory_id: memory_id.clone(),
+            score,
+            payload,
+        })
         .collect())
+}
+
+pub async fn ask_memories(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    scope: ChatScope,
+    targets: Vec<ChatTarget>,
+    query: String,
+    history: Vec<(String, String)>,
+    retrieval_config: ChatRetrievalConfig,
+) -> Result<AskMemoriesOutput> {
+    super::chat_service::ask_memories(
+        use_mainnet,
+        auth,
+        scope,
+        targets,
+        query,
+        history,
+        retrieval_config,
+    )
+    .await
+}
+
+pub async fn load_memory_dim(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+) -> Result<u64, InsertMemoryError> {
+    let memory = Principal::from_text(&memory_id)
+        .map_err(|error| InsertMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
+    let factory = resolve_agent_factory(use_mainnet, &auth)
+        .map_err(|error| InsertMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| InsertMemoryError::BuildAgent(short_error(&error.to_string())))?;
+    let client = MemoryClient::new(agent, memory);
+
+    client
+        .get_dim()
+        .await
+        .map_err(|error| InsertMemoryError::Execute(short_error(&error.to_string())))
+}
+
+pub async fn load_memory_details(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+) -> Result<MemoryDetails> {
+    let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
+    let client = MemoryClient::new(agent, memory);
+    let metadata = client.get_metadata().await?;
+    let (dim, users) = tokio::join!(client.get_dim(), client.get_users());
+    let (users, users_load_error) = memory_users_from_query(users, &launcher_id);
+
+    Ok(MemoryDetails {
+        name: metadata.name,
+        version: metadata.version,
+        dim: dim.ok(),
+        owners: metadata.owners,
+        stable_memory_size: Some(metadata.stable_memory_size),
+        cycle_amount: Some(metadata.cycle_amount),
+        users,
+        users_load_error,
+    })
+}
+
+pub async fn manage_memory_access(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+    action: AccessControlAction,
+    principal_id: String,
+    role: AccessControlRole,
+) -> Result<()> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
+    let request = build_access_control_request(action, &principal_id, role, &launcher_id)?;
+    let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
+    let client = MemoryClient::new(agent, memory);
+
+    match request.action {
+        AccessControlAction::Add => {
+            client
+                .add_new_user(
+                    request.principal,
+                    request.role_code.expect("role code should exist for add"),
+                )
+                .await
+        }
+        AccessControlAction::Remove => client.remove_user(request.principal).await,
+        AccessControlAction::Change => {
+            client.remove_user(request.principal).await?;
+            client
+                .add_new_user(
+                    request.principal,
+                    request
+                        .role_code
+                        .expect("role code should exist for change"),
+                )
+                .await
+        }
+    }
+}
+
+pub async fn rename_memory(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+    name: String,
+) -> Result<(), RenameMemoryError> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)
+        .map_err(|error| RenameMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| RenameMemoryError::BuildAgent(short_error(&error.to_string())))?;
+    let memory = Principal::from_text(&memory_id)
+        .map_err(|error| RenameMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
+    let client = MemoryClient::new(agent, memory);
+
+    client
+        .change_name(&name)
+        .await
+        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))
+}
+
+pub async fn validate_manual_memory_access(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    memory_id: String,
+    principal_id: String,
+) -> Result<()> {
+    let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
+    let self_principal =
+        Principal::from_text(&principal_id).context("Failed to parse current principal")?;
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let client = MemoryClient::new(agent, memory);
+    let users = client.get_users().await?;
+
+    if users.iter().any(|(user_principal_id, _)| {
+        Principal::from_text(user_principal_id)
+            .map(|principal| principal == self_principal)
+            .unwrap_or(false)
+    }) {
+        Ok(())
+    } else {
+        anyhow::bail!("Current principal does not have access to this memory")
+    }
 }
 
 pub async fn run_insert(
@@ -228,12 +519,15 @@ pub async fn run_insert(
     let client = MemoryClient::new(agent, memory);
     let result = execute_insert_request(&client, &request)
         .await
-        .map_err(|error| InsertMemoryError::Execute(short_error(&error.to_string())))?;
+        .map_err(|error| {
+            InsertMemoryError::Execute(format_insert_execute_error(&error.to_string()))
+        })?;
 
     Ok(InsertMemorySuccess {
         memory_id: result.memory_id,
         tag: result.tag,
         inserted_count: result.inserted_count,
+        source_name: result.source_name,
     })
 }
 
@@ -243,45 +537,170 @@ fn memory_summary_from_state(state: State) -> MemorySummary {
             id: format!("empty:{message}"),
             status: "empty".to_string(),
             detail: message,
+            searchable_memory_id: None,
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::Pending(message) => MemorySummary {
             id: format!("pending:{message}"),
             status: "pending".to_string(),
             detail: message,
+            searchable_memory_id: None,
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::Creation(message) => MemorySummary {
             id: format!("creation:{message}"),
             status: "creation".to_string(),
             detail: message,
+            searchable_memory_id: None,
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::Installation(principal, message) => MemorySummary {
             id: principal.to_text(),
             status: "installation".to_string(),
             detail: message,
+            searchable_memory_id: Some(principal.to_text()),
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::SettingUp(principal) => MemorySummary {
             id: principal.to_text(),
             status: "setting_up".to_string(),
             detail: "Launcher is setting up this memory.".to_string(),
+            searchable_memory_id: Some(principal.to_text()),
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
         State::Running(principal) => MemorySummary {
             id: principal.to_text(),
             status: "running".to_string(),
             detail: "Memory is ready for search and writes.".to_string(),
+            searchable_memory_id: Some(principal.to_text()),
+            name: "unknown".to_string(),
+            version: "unknown".to_string(),
+            dim: None,
+            owners: None,
+            stable_memory_size: None,
+            cycle_amount: None,
+            users: None,
         },
     }
+}
+
+fn role_name(role_code: u8) -> String {
+    match role_code {
+        1 => "admin".to_string(),
+        2 => "writer".to_string(),
+        3 => "reader".to_string(),
+        other => format!("unknown({other})"),
+    }
+}
+
+fn memory_users_from_query(
+    users: Result<Vec<(String, u8)>, anyhow::Error>,
+    launcher_id: &str,
+) -> (Vec<MemoryUser>, Option<String>) {
+    match users {
+        Ok(rows) => (decode_memory_users(rows, launcher_id), None),
+        Err(err) => (Vec::new(), Some(short_error(&err.to_string()))),
+    }
+}
+
+fn decode_memory_users(users: Vec<(String, u8)>, launcher_id: &str) -> Vec<MemoryUser> {
+    users
+        .into_iter()
+        .filter(|(principal_id, _)| principal_id != launcher_id)
+        .map(|(principal_id, role_code)| MemoryUser {
+            principal_id,
+            role: role_name(role_code),
+        })
+        .collect()
+}
+
+fn build_access_control_request(
+    action: AccessControlAction,
+    principal_id: &str,
+    role: AccessControlRole,
+    launcher_id: &str,
+) -> Result<AccessControlRequest> {
+    let principal = parse_access_control_principal(principal_id)?;
+    if principal.to_text() == launcher_id {
+        anyhow::bail!("launcher canister access cannot be modified");
+    }
+    let role_code = match action {
+        AccessControlAction::Remove => None,
+        AccessControlAction::Add | AccessControlAction::Change => {
+            Some(role_code(role, principal_id)?)
+        }
+    };
+
+    Ok(AccessControlRequest {
+        principal,
+        action,
+        role_code,
+    })
+}
+
+fn parse_access_control_principal(principal_id: &str) -> Result<Principal> {
+    if principal_id == "anonymous" {
+        return Ok(Principal::anonymous());
+    }
+    Principal::from_text(principal_id)
+        .with_context(|| format!("invalid principal text: {principal_id}"))
+}
+
+fn role_code(role: AccessControlRole, principal_id: &str) -> Result<u8> {
+    if role == AccessControlRole::Admin && principal_id == "anonymous" {
+        anyhow::bail!("cannot grant admin role to anonymous");
+    }
+    Ok(match role {
+        AccessControlRole::Admin => 1,
+        AccessControlRole::Writer => 2,
+        AccessControlRole::Reader => 3,
+    })
 }
 
 fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
 
+fn format_insert_execute_error(message: &str) -> String {
+    short_error(message)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use candid::Nat;
     use ic_agent::identity::AnonymousIdentity;
     use std::sync::Arc;
+    use tokio::runtime::Runtime;
 
     #[test]
     fn resolve_agent_factory_accepts_resolved_identity() {
@@ -300,6 +719,14 @@ mod tests {
                 id: "aaaaa-aa".to_string(),
                 status: "running".to_string(),
                 detail: "ready".to_string(),
+                searchable_memory_id: Some("aaaaa-aa".to_string()),
+                name: "Alpha".to_string(),
+                version: "1.0.0".to_string(),
+                dim: Some(768),
+                owners: Some(vec!["aaaaa-aa".to_string()]),
+                stable_memory_size: Some(2_048),
+                cycle_amount: Some(42),
+                users: Some(Vec::new()),
             }]),
             refresh_warning: None,
         };
@@ -355,6 +782,77 @@ mod tests {
     }
 
     #[test]
+    fn format_insert_execute_error_falls_back_to_first_line_for_assertion_traps() {
+        let message = "update call failed: Canister trapped: assertion `left == right` failed\n  left: 4\n right: 1024";
+
+        assert_eq!(
+            format_insert_execute_error(message),
+            "update call failed: Canister trapped: assertion `left == right` failed"
+        );
+    }
+
+    #[test]
+    fn format_insert_execute_error_falls_back_to_first_line_for_other_errors() {
+        let message = "insert failed\nmore detail";
+
+        assert_eq!(format_insert_execute_error(message), "insert failed");
+    }
+
+    #[test]
+    fn decode_memory_users_excludes_launcher_canister() {
+        let users = vec![("launcher-aa".to_string(), 0), ("writer-aa".to_string(), 2)];
+
+        let decoded = decode_memory_users(users, "launcher-aa");
+
+        assert_eq!(
+            decoded,
+            vec![MemoryUser {
+                principal_id: "writer-aa".to_string(),
+                role: "writer".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn decode_memory_users_keeps_unknown_roles_for_non_launcher_entries() {
+        let users = vec![("other-aa".to_string(), 9)];
+
+        let decoded = decode_memory_users(users, "launcher-aa");
+
+        assert_eq!(
+            decoded,
+            vec![MemoryUser {
+                principal_id: "other-aa".to_string(),
+                role: "unknown(9)".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn memory_users_from_query_records_error_instead_of_silent_empty_list() {
+        let err = anyhow::anyhow!("canister rejected get_users");
+        let (users, load_err) = memory_users_from_query(Err(err), "launcher-aa");
+
+        assert!(users.is_empty());
+        assert_eq!(load_err.as_deref(), Some("canister rejected get_users"));
+    }
+
+    #[test]
+    fn load_memory_dim_reports_invalid_memory_id_before_network_call() {
+        let runtime = Runtime::new().expect("tokio runtime");
+
+        let error = runtime
+            .block_on(load_memory_dim(
+                false,
+                TuiAuth::resolved_for_tests(),
+                "not-a-principal".to_string(),
+            ))
+            .unwrap_err();
+
+        assert!(matches!(error, InsertMemoryError::ParseMemoryId(_)));
+    }
+
+    #[test]
     fn session_account_overview_reports_complete_cost_inputs_when_balance_and_price_exist() {
         let mut overview = SessionAccountOverview::new(session_settings_snapshot(
             &TuiAuth::resolved_for_tests(),
@@ -363,6 +861,7 @@ mod tests {
             "https://api.kinic.io".to_string(),
         ));
         overview.balance_base_units = Some(2_000_000u128);
+        overview.fee_base_units = Some(100_000u128);
         overview.price_base_units = Some(Nat::from(1_500_000u128));
 
         assert!(overview.has_complete_create_cost());
@@ -469,6 +968,7 @@ mod tests {
             "https://api.kinic.io".to_string(),
         ));
         complete.balance_base_units = Some(2_000_000u128);
+        complete.fee_base_units = Some(100_000u128);
         complete.price_base_units = Some(Nat::from(1_500_000u128));
         assert_eq!(
             complete.session_settings_refresh_notify_message(),

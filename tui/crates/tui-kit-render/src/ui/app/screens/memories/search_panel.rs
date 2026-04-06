@@ -4,6 +4,7 @@ use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use crate::ui::app::TuiKitUi;
 use crate::ui::search::{SearchBar, SearchCompletion};
+use tui_kit_runtime::{SearchScope, kinic_tabs::KINIC_MEMORIES_TAB_ID};
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_search_panel(&self, area: Rect, buf: &mut Buffer) {
@@ -16,9 +17,18 @@ impl<'a> TuiKitUi<'a> {
                 .map(|t| t.search_placeholder.as_str())
                 .unwrap_or("Search memories...")
         };
+        let title = if self.current_tab_id.0.as_str() == KINIC_MEMORIES_TAB_ID {
+            match self.search_scope {
+                SearchScope::All => " Search [all] ",
+                SearchScope::Selected => " Search [selected] ",
+            }
+        } else {
+            " Search "
+        };
         let search = SearchBar::new(self.search_input, self.theme)
             .focused(self.focus == crate::ui::app::Focus::Search)
-            .placeholder(placeholder);
+            .placeholder(placeholder)
+            .title(title);
         search.render(area, buf);
     }
 

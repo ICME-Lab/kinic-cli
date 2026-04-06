@@ -12,7 +12,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
 
-use super::submit_button_text;
+use super::{FormRows, submit_button_text};
+
+const CREATE_DESCRIPTION_HEIGHT: u16 = 5;
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_create_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -36,6 +38,27 @@ impl<'a> TuiKitUi<'a> {
         let field_y = screen
             .layout
             .field_y(self.create_focus, &screen.form_lines)?;
+        if self.create_focus == CreateModalFocus::Description {
+            let (cursor_row, cursor_col) = self.create_description_cursor.unwrap_or_default();
+            let visible = visible_multiline_rows(
+                self.create_description,
+                "<enter a short description>",
+                CREATE_DESCRIPTION_HEIGHT,
+                cursor_row,
+                screen.layout.input_width(0),
+            );
+            let row = cursor_row
+                .saturating_sub(visible.scroll_row)
+                .min(CREATE_DESCRIPTION_HEIGHT.saturating_sub(1) as usize)
+                as u16;
+            let x = screen.layout.field_x()
+                + multiline_cursor_x(
+                    visible.rows[row as usize].as_str(),
+                    cursor_col,
+                    screen.layout.input_width(0),
+                );
+            return Some((x.min(screen.layout.max_field_x()), field_y + row));
+        }
         let prompt_x = screen.layout.field_x();
         let input_display_width = screen.form_lines.focus_display_width(self.create_focus);
         let x = if self.create_focus == CreateModalFocus::Submit {
@@ -109,29 +132,23 @@ fn inner_bordered_area(area: Rect) -> Option<Rect> {
 }
 struct CreateFormLines<'a> {
     lines: Vec<Line<'a>>,
-    name_row: u16,
-    description_row: u16,
-    submit_row: u16,
-    name_display_width: u16,
-    description_display_width: u16,
+    rows: FormRows<CreateModalFocus>,
 }
 impl CreateFormLines<'_> {
     fn focus_row_index(&self, focus: CreateModalFocus) -> Option<u16> {
-        match focus {
-            CreateModalFocus::Name => Some(self.name_row),
-            CreateModalFocus::Description => Some(self.description_row),
-            CreateModalFocus::Submit => Some(self.submit_row),
-        }
+        self.rows.focus_row(focus)
     }
 
     fn focus_display_width(&self, focus: CreateModalFocus) -> u16 {
-        match focus {
-            CreateModalFocus::Name => self.name_display_width,
-            CreateModalFocus::Description => self.description_display_width,
-            CreateModalFocus::Submit => 0,
-        }
+        self.rows.focus_width(focus)
     }
 }
+
+struct VisibleMultilineRows {
+    rows: Vec<String>,
+    scroll_row: usize,
+}
+
 fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> CreateFormLines<'a> {
     let name_style = create_field_style(ui, CreateModalFocus::Name);
     let description_style = create_field_style(ui, CreateModalFocus::Description);
@@ -146,10 +163,14 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
         layout.input_width(terminal_str_width(name_hint.content.as_ref())),
         !ui.create_name.is_empty(),
     );
-    let description_value = fit_single_line(
-        display_create_value(ui.create_description, "<enter a short description>"),
+    let description_rows = visible_multiline_rows(
+        ui.create_description,
+        "<enter a short description>",
+        CREATE_DESCRIPTION_HEIGHT,
+        ui.create_description_cursor
+            .map(|(row, _)| row)
+            .unwrap_or_default(),
         layout.input_width(terminal_str_width(description_hint.content.as_ref())),
-        !ui.create_description.is_empty(),
     );
     let submit_value = fit_single_line(
         submit_text.as_str(),
@@ -157,35 +178,53 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
         false,
     );
     let mut lines = Vec::with_capacity(if ui.create_error.is_some() { 20 } else { 18 });
+    let mut rows = FormRows::default();
 
-    lines.push(Line::from(Span::styled(
-        ui.ui_config.create.name_label.as_str(),
-        ui.theme.style_dim(),
-    )));
-    let name_row = u16::try_from(lines.len()).expect("name row fits into u16");
-    lines.push(Line::from(vec![
-        create_input_indent(),
-        Span::styled(name_value.clone(), name_style),
-        name_hint,
-    ]));
+    rows.push_labeled_row(
+        &mut lines,
+        Line::from(Span::styled(
+            ui.ui_config.create.name_label.as_str(),
+            ui.theme.style_dim(),
+        )),
+        CreateModalFocus::Name,
+        Line::from(vec![
+            create_input_indent(),
+            Span::styled(name_value.clone(), name_style),
+            name_hint,
+        ]),
+        name_value.as_str(),
+    );
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        ui.ui_config.create.description_label.as_str(),
-        ui.theme.style_dim(),
-    )));
-    let description_row = u16::try_from(lines.len()).expect("description row fits into u16");
-    lines.push(Line::from(vec![
-        create_input_indent(),
-        Span::styled(description_value.clone(), description_style),
-        description_hint,
-    ]));
-    lines.push(Line::from(""));
-    let submit_row = u16::try_from(lines.len()).expect("submit row fits into u16");
-    lines.push(Line::from(vec![
-        create_input_indent(),
-        Span::styled(submit_value, submit_style),
-        submit_hint,
-    ]));
+    rows.push_labeled_row(
+        &mut lines,
+        Line::from(Span::styled(
+            ui.ui_config.create.description_label.as_str(),
+            ui.theme.style_dim(),
+        )),
+        CreateModalFocus::Description,
+        Line::from(vec![
+            create_input_indent(),
+            Span::styled(description_rows.rows[0].clone(), description_style),
+            description_hint,
+        ]),
+        description_rows.rows[0].as_str(),
+    );
+    for row in description_rows.rows.iter().skip(1) {
+        lines.push(Line::from(vec![
+            create_input_indent(),
+            Span::styled(row.clone(), description_style),
+        ]));
+    }
+    rows.push_unlabeled_row(
+        &mut lines,
+        CreateModalFocus::Submit,
+        Line::from(vec![
+            create_input_indent(),
+            Span::styled(submit_value, submit_style),
+            submit_hint,
+        ]),
+        "",
+    );
     lines.push(Line::from(""));
     lines.extend(create_cost_lines(ui, layout));
     lines.push(Line::from(""));
@@ -199,14 +238,7 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
         )));
     }
 
-    CreateFormLines {
-        lines,
-        name_row,
-        description_row,
-        submit_row,
-        name_display_width: terminal_str_width(name_value.as_str()),
-        description_display_width: terminal_str_width(description_value.as_str()),
-    }
+    CreateFormLines { lines, rows }
 }
 fn create_cost_lines(ui: &TuiKitUi<'_>, layout: CreateScreenLayout) -> Vec<Line<'static>> {
     if matches!(ui.create_cost_state, CreateCostState::Hidden) {
@@ -415,6 +447,48 @@ fn is_pending_create_entry(ui: &TuiKitUi<'_>, focus: CreateModalFocus) -> bool {
 fn display_create_value<'a>(value: &'a str, placeholder: &'a str) -> &'a str {
     if value.is_empty() { placeholder } else { value }
 }
+
+fn visible_multiline_rows(
+    value: &str,
+    placeholder: &str,
+    height: u16,
+    cursor_row: usize,
+    max_width: u16,
+) -> VisibleMultilineRows {
+    let mut source_rows = if value.is_empty() {
+        vec![placeholder.to_string()]
+    } else {
+        value
+            .split('\n')
+            .map(|row| row.to_string())
+            .collect::<Vec<_>>()
+    };
+    if source_rows.is_empty() {
+        source_rows.push(String::new());
+    }
+    let height_usize = height as usize;
+    let scroll_row = if cursor_row >= height_usize {
+        cursor_row + 1 - height_usize
+    } else {
+        0
+    };
+    let mut rows = source_rows
+        .into_iter()
+        .skip(scroll_row)
+        .take(height_usize)
+        .map(|row| fit_single_line(row.as_str(), max_width, false))
+        .collect::<Vec<_>>();
+    while rows.len() < height_usize {
+        rows.push(String::new());
+    }
+    VisibleMultilineRows { rows, scroll_row }
+}
+
+fn multiline_cursor_x(line: &str, cursor_col: usize, max_width: u16) -> u16 {
+    let prefix = line.chars().take(cursor_col).collect::<String>();
+    terminal_str_width(fit_single_line(prefix.as_str(), max_width, false).as_str())
+}
+
 fn create_submit_text(ui: &TuiKitUi<'_>) -> String {
     submit_button_text(
         &ui.create_submit_state,

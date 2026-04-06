@@ -4,6 +4,8 @@ use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+use crate::operation_timeout::embedding_request_timeout;
+
 pub(crate) const EMBEDDING_API_ENV_VAR: &str = "EMBEDDING_API_ENDPOINT";
 pub(crate) const DEFAULT_EMBEDDING_API_ENDPOINT: &str = "https://api.kinic.io";
 const LATE_CHUNKING_PATH: &str = "/late-chunking";
@@ -11,8 +13,10 @@ const EMBEDDING_PATH: &str = "/embedding";
 
 pub async fn late_chunking(text: &str) -> Result<Vec<LateChunk>> {
     let url = format!("{}{}", embedding_base_url(), LATE_CHUNKING_PATH);
+    let timeout = embedding_request_timeout(text.len());
     let response = Client::new()
         .post(url)
+        .timeout(timeout)
         .json(&LateChunkingRequest { markdown: text })
         .send()
         .await
@@ -28,8 +32,10 @@ pub async fn late_chunking(text: &str) -> Result<Vec<LateChunk>> {
 
 pub async fn fetch_embedding(text: &str) -> Result<Vec<f32>> {
     let url = format!("{}{}", embedding_base_url(), EMBEDDING_PATH);
+    let timeout = embedding_request_timeout(text.len());
     let response = Client::new()
         .post(url)
+        .timeout(timeout)
         .json(&EmbeddingRequest { content: text })
         .send()
         .await

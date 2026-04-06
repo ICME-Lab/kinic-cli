@@ -61,6 +61,27 @@ fn build_insert_request_prefers_explicit_memory_over_saved_default() {
 }
 
 #[test]
+fn build_insert_request_uses_saved_default_memory_when_insert_target_is_blank() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
+    provider.all = provider.memory_records.clone();
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+
+    let request = provider.build_insert_request(&CoreState {
+        insert_mode: InsertMode::ManualEmbedding,
+        insert_tag: "docs".to_string(),
+        insert_text: "payload".to_string(),
+        insert_embedding: "[0.1]".to_string(),
+        ..CoreState::default()
+    });
+
+    assert!(matches!(
+        request,
+        InsertRequest::Raw { memory_id, .. } if memory_id == "aaaaa-aa"
+    ));
+}
+
+#[test]
 fn build_insert_request_uses_inline_text_mode_without_file_path() {
     let provider = KinicProvider::new(live_config());
     let request = provider.build_insert_request(&CoreState {
@@ -236,7 +257,7 @@ fn insert_submit_rejects_existing_pdf_submit_after_validation() {
         .handle_action(&CoreAction::InsertSubmit, &file_insert_state(&file_path))
         .expect("insert submit should succeed");
 
-    assert!(provider.insert_submit_in_flight);
+    assert!(provider.insert_submit_task.in_flight);
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::Notify(message) if message == "Submitting insert request..."
@@ -257,7 +278,25 @@ fn insert_submit_rejects_nonexistent_normal_file_path_before_background_submit()
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::InsertFormError(Some(message))
-            if message.contains("File path does not exist")
+            if message == "File path does not exist: /path/that/does/not/need/to/exist.md"
+    )));
+}
+
+#[test]
+fn insert_submit_rejects_unsupported_file_extension_before_background_submit() {
+    let mut provider = KinicProvider::new(live_config());
+    let output = provider
+        .handle_action(
+            &CoreAction::InsertSubmit,
+            &file_insert_state("/tmp/unsupported.exe"),
+        )
+        .expect("insert submit should succeed");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message
+                == "File path must use a supported .md, .markdown, .mdx, .txt, .json, .yaml, .yml, .csv, .log, .pdf extension."
     )));
 }
 
@@ -290,6 +329,7 @@ fn insert_success_status_includes_count_tag_and_memory_id() {
         memory_id: "aaaaa-aa".to_string(),
         tag: "docs".to_string(),
         inserted_count: 12,
+        source_name: None,
     };
 
     assert_eq!(
@@ -299,19 +339,35 @@ fn insert_success_status_includes_count_tag_and_memory_id() {
 }
 
 #[test]
+fn insert_success_status_includes_source_name_for_file_insert() {
+    let success = bridge::InsertMemorySuccess {
+        memory_id: "aaaaa-aa".to_string(),
+        tag: "docs".to_string(),
+        inserted_count: 12,
+        source_name: Some("doc.md".to_string()),
+    };
+
+    assert_eq!(
+        insert_success_status(&success),
+        "Inserted 12 chunks from doc.md (tag: docs) into aaaaa-aa"
+    );
+}
+
+#[test]
 fn poll_insert_submit_background_resets_form_and_notifies_on_success() {
     let mut provider = KinicProvider::new(live_config());
     let (tx, rx) = std::sync::mpsc::channel();
     let request_id = 7;
-    provider.pending_insert_submit = Some(rx);
-    provider.pending_insert_submit_request_id = Some(request_id);
-    provider.insert_submit_in_flight = true;
+    provider.insert_submit_task.receiver = Some(rx);
+    provider.insert_submit_task.request_id = Some(request_id);
+    provider.insert_submit_task.in_flight = true;
     tx.send(InsertSubmitTaskOutput {
         request_id,
         result: Ok(bridge::InsertMemorySuccess {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             inserted_count: 12,
+            source_name: None,
         }),
     })
     .expect("background insert result should send");
@@ -334,15 +390,16 @@ fn poll_insert_submit_background_resets_form_and_notifies_on_success() {
 fn insert_success_status_emits_persistent_notify() {
     let mut provider = KinicProvider::new(live_config());
     let (tx, rx) = std::sync::mpsc::channel();
-    provider.pending_insert_submit = Some(rx);
-    provider.pending_insert_submit_request_id = Some(1);
-    provider.insert_submit_in_flight = true;
+    provider.insert_submit_task.receiver = Some(rx);
+    provider.insert_submit_task.request_id = Some(1);
+    provider.insert_submit_task.in_flight = true;
     tx.send(InsertSubmitTaskOutput {
         request_id: 1,
         result: Ok(bridge::InsertMemorySuccess {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             inserted_count: 12,
+            source_name: None,
         }),
     })
     .expect("background insert result should send");
@@ -361,7 +418,7 @@ fn insert_success_status_emits_persistent_notify() {
 #[test]
 fn insert_submit_reports_in_flight_insert_requests() {
     let mut provider = KinicProvider::new(live_config());
-    provider.insert_submit_in_flight = true;
+    provider.insert_submit_task.in_flight = true;
 
     let output = provider
         .handle_action(
@@ -379,5 +436,42 @@ fn insert_submit_reports_in_flight_insert_requests() {
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
         CoreEffect::Notify(message) if message == "Insert request already running."
+    )));
+}
+
+#[test]
+fn insert_submit_blocks_after_insert_dim_task_returns_error() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = std::sync::mpsc::channel();
+    provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
+    provider.insert_expected_dim = None;
+    provider.insert_expected_dim_loading = true;
+    provider.insert_expected_dim_load_error = None;
+    provider.pending_insert_dim = Some(rx);
+    tx.send(super::super::InsertDimTaskOutput {
+        memory_id: "aaaaa-aa".to_string(),
+        result: Err(bridge::InsertMemoryError::ResolveAgentFactory(
+            "network down".to_string(),
+        )),
+    })
+    .expect("dim task output");
+
+    let state = raw_insert_state("payload", "[0.1, 0.2]");
+    provider
+        .poll_background(&state)
+        .expect("insert dim poll should return output");
+
+    assert!(provider.insert_expected_dim_load_error.is_some());
+    assert!(!provider.insert_expected_dim_loading);
+    assert!(!provider.insert_submit_task.in_flight);
+
+    let output = provider
+        .handle_action(&CoreAction::InsertSubmit, &state)
+        .expect("insert submit output");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::InsertFormError(Some(message))
+            if message.contains("Could not load expected embedding dimension")
     )));
 }

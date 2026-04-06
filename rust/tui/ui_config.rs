@@ -21,7 +21,8 @@ pub fn kinic_ui_config() -> UiConfig {
             visible_icon: "◆".to_string(),
             visible_suffix: "items".to_string(),
             contexts_icon: "◈".to_string(),
-            contexts_suffix: "groups".to_string(),
+            memory_prefix: "memory".to_string(),
+            memory_empty_label: "no memory selected".to_string(),
             data_label: "cache".to_string(),
         },
         tabs: vec![

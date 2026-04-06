@@ -2,7 +2,7 @@
 name = "tui-kit-render"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.86"
 license = "MIT"
 description = "Ratatui-based UI layer for tui-kit"
 

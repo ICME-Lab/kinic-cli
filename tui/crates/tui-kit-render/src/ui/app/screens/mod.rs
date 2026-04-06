@@ -6,9 +6,10 @@ pub mod memories;
 pub mod placeholder;
 pub mod settings;
 
-use ratatui::{buffer::Buffer, layout::Rect};
+use ratatui::{buffer::Buffer, layout::Rect, text::Line};
 use tui_kit_runtime::CreateSubmitState;
 use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::TuiKitUi;
 
@@ -73,4 +74,56 @@ fn submit_button_text(
 fn spinner_frame(frame: usize) -> &'static str {
     const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
     FRAMES[frame % FRAMES.len()]
+}
+
+pub(crate) struct FormRows<F> {
+    rows: Vec<(F, u16, u16)>,
+}
+
+impl<F> Default for FormRows<F> {
+    fn default() -> Self {
+        Self { rows: Vec::new() }
+    }
+}
+
+impl<F: Copy + PartialEq> FormRows<F> {
+    pub(crate) fn push_unlabeled_row<'a>(
+        &mut self,
+        lines: &mut Vec<Line<'a>>,
+        focus: F,
+        row_line: Line<'a>,
+        display_value: &str,
+    ) {
+        let row = u16::try_from(lines.len()).unwrap_or(0);
+        let width = UnicodeWidthStr::width(display_value) as u16;
+        self.rows.push((focus, row, width));
+        lines.push(row_line);
+    }
+
+    pub(crate) fn push_labeled_row<'a>(
+        &mut self,
+        lines: &mut Vec<Line<'a>>,
+        label_line: Line<'a>,
+        focus: F,
+        row_line: Line<'a>,
+        display_value: &str,
+    ) {
+        lines.push(label_line);
+        self.push_unlabeled_row(lines, focus, row_line, display_value);
+    }
+
+    pub(crate) fn focus_row(&self, focus: F) -> Option<u16> {
+        self.rows
+            .iter()
+            .find(|(field, _, _)| *field == focus)
+            .map(|(_, row, _)| *row)
+    }
+
+    pub(crate) fn focus_width(&self, focus: F) -> u16 {
+        self.rows
+            .iter()
+            .find(|(field, _, _)| *field == focus)
+            .map(|(_, _, width)| *width)
+            .unwrap_or(0)
+    }
 }

@@ -2,59 +2,33 @@
 
 use crossterm::event::KeyCode;
 use tui_kit_runtime::{
-    CoreAction, CoreState, CreateModalFocus, InsertFormFocus, PaneFocus,
-    kinic_tabs::{is_form_tab, is_kinic_create_tab, is_kinic_insert_tab},
+    CoreState, FormFocus, FormResetKind, PaneFocus, apply_form_focus, current_form_focus,
+    form_char_input_command, form_command_to_action, form_descriptor, form_enter_command,
+    form_horizontal_change_command, kinic_tabs::is_form_tab,
 };
 
-pub fn form_tab_action_from_key(code: KeyCode, state: &mut CoreState) -> Option<CoreAction> {
+pub fn form_tab_action_from_key(
+    code: KeyCode,
+    state: &mut CoreState,
+) -> Option<tui_kit_runtime::CoreAction> {
     if !is_form_input_mode(state) {
         return None;
     }
 
-    if is_kinic_create_tab(state.current_tab_id.as_str()) {
-        return match code {
-            KeyCode::Tab => Some(CoreAction::CreateNextField),
-            KeyCode::BackTab => Some(CoreAction::CreatePrevField),
-            KeyCode::Backspace => Some(CoreAction::CreateBackspace),
-            KeyCode::Enter => Some(CoreAction::CreateSubmit),
-            KeyCode::Char(c) if !c.is_control() => match state.create_focus {
-                CreateModalFocus::Name | CreateModalFocus::Description => {
-                    Some(CoreAction::CreateInput(c))
-                }
-                CreateModalFocus::Submit => None,
-            },
-            _ => None,
-        };
-    }
-
-    match code {
-        KeyCode::Tab => Some(CoreAction::InsertNextField),
-        KeyCode::BackTab => Some(CoreAction::InsertPrevField),
-        KeyCode::Backspace => Some(CoreAction::InsertBackspace),
-        KeyCode::Left => match state.insert_focus {
-            InsertFormFocus::Mode => Some(CoreAction::InsertCycleModePrev),
-            _ => None,
-        },
-        KeyCode::Right => match state.insert_focus {
-            InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
-            _ => None,
-        },
-        KeyCode::Enter => match state.insert_focus {
-            InsertFormFocus::Mode => Some(CoreAction::InsertCycleMode),
-            InsertFormFocus::MemoryId => Some(CoreAction::OpenDefaultMemoryPicker),
-            InsertFormFocus::FilePath => Some(CoreAction::InsertOpenFileDialog),
-            InsertFormFocus::Submit => Some(CoreAction::InsertSubmit),
-            _ => None,
-        },
-        KeyCode::Char(c) if !c.is_control() => match state.insert_focus {
-            InsertFormFocus::Tag
-            | InsertFormFocus::Text
-            | InsertFormFocus::FilePath
-            | InsertFormFocus::Embedding => Some(CoreAction::InsertInput(c)),
-            InsertFormFocus::Mode | InsertFormFocus::MemoryId | InsertFormFocus::Submit => None,
-        },
+    let descriptor = form_descriptor(state.current_tab_id.as_str())?;
+    let focus = current_form_focus(state)?;
+    let command = match code {
+        KeyCode::Tab | KeyCode::Down => Some(descriptor.next_command()),
+        KeyCode::BackTab | KeyCode::Up => Some(descriptor.prev_command()),
+        KeyCode::Backspace => Some(descriptor.backspace_command()),
+        KeyCode::Left => form_horizontal_change_command(focus, false),
+        KeyCode::Right => form_horizontal_change_command(focus, true),
+        KeyCode::Enter => form_enter_command(state),
+        KeyCode::Char(c) if !c.is_control() => form_char_input_command(state, c),
         _ => None,
-    }
+    }?;
+
+    form_command_to_action(descriptor.kind, command)
 }
 
 pub fn is_form_input_mode(state: &CoreState) -> bool {
@@ -62,35 +36,56 @@ pub fn is_form_input_mode(state: &CoreState) -> bool {
 }
 
 pub fn reset_form_focus(state: &mut CoreState) {
-    if is_kinic_insert_tab(state.current_tab_id.as_str()) {
-        state.insert_focus = InsertFormFocus::Mode;
+    let Some(descriptor) = form_descriptor(state.current_tab_id.as_str()) else {
         return;
-    }
-    state.create_focus = CreateModalFocus::Name;
+    };
+    apply_form_focus(state, descriptor.first_focus);
 }
 
 pub fn reset_form_state_for_tab(state: &mut CoreState, tab_id: &str) {
-    if is_kinic_insert_tab(tab_id) {
-        state.insert_mode = tui_kit_runtime::InsertMode::default();
-        state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
-        state.insert_tag.clear();
-        state.insert_text.clear();
-        state.insert_file_path_input.clear();
-        state.insert_selected_file_path = None;
-        state.insert_embedding.clear();
-        state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
-        state.insert_spinner_frame = 0;
-        state.insert_error = None;
-        state.insert_focus = InsertFormFocus::Mode;
+    let Some(descriptor) = form_descriptor(tab_id) else {
         return;
-    }
+    };
 
+    match descriptor.reset_kind {
+        FormResetKind::Create => {
+            reset_create_fields(state);
+            reset_create_common_state(state, descriptor.first_focus);
+        }
+        FormResetKind::Insert => {
+            reset_insert_fields(state);
+            reset_insert_common_state(state, descriptor.first_focus);
+        }
+    }
+}
+
+fn reset_create_fields(state: &mut CoreState) {
     state.create_name.clear();
     state.create_description.clear();
+}
+
+fn reset_insert_fields(state: &mut CoreState) {
+    state.insert_mode = tui_kit_runtime::InsertMode::default();
+    state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
+    state.insert_tag.clear();
+    state.insert_text.clear();
+    state.insert_file_path_input.clear();
+    state.insert_selected_file_path = None;
+    state.insert_embedding.clear();
+}
+
+fn reset_create_common_state(state: &mut CoreState, first_focus: FormFocus) {
     state.create_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
     state.create_spinner_frame = 0;
     state.create_error = None;
-    state.create_focus = CreateModalFocus::Name;
+    apply_form_focus(state, first_focus);
+}
+
+fn reset_insert_common_state(state: &mut CoreState, first_focus: FormFocus) {
+    state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+    state.insert_spinner_frame = 0;
+    state.insert_error = None;
+    apply_form_focus(state, first_focus);
 }
 
 #[cfg(test)]

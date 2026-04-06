@@ -1,14 +1,19 @@
 //! Host-side helpers for integrating terminal input/output with `tui-kit-runtime`.
 
+pub mod picker;
 pub mod runtime_loop;
 pub mod settings;
 pub mod terminal;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::time::Duration;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateCostState, CreateModalFocus,
-    CreateSubmitState, PaneFocus, action_for_key, tab_focus_policy,
+    CreateSubmitState, PaneFocus, PickerContext, PickerState, action_for_key, apply_modal_error,
+    close_access_control_modal, close_add_memory_modal, close_remove_memory_modal,
+    close_rename_memory_modal, close_transfer_modal, open_access_control_modal,
+    open_add_memory_modal, open_remove_memory_modal, open_rename_memory_modal,
+    open_transfer_confirm, open_transfer_modal, tab_focus_policy,
 };
 
 /// Fallback tab ids used when host does not provide explicit tabs.
@@ -17,6 +22,7 @@ pub const DEFAULT_TAB_IDS: [&str; 4] = ["tab-1", "tab-2", "tab-3", "tab-4"];
 /// Host-level normalized input event used by app loops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HostInputEvent {
+    pub key_event: KeyEvent,
     pub code: KeyCode,
     pub modifiers: KeyModifiers,
 }
@@ -32,6 +38,7 @@ pub fn poll_host_input(timeout: Duration) -> std::io::Result<Option<HostInputEve
 fn normalize_host_input_event(event: Event) -> Option<HostInputEvent> {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => Some(HostInputEvent {
+            key_event: key,
             code: key.code,
             modifiers: key.modifiers,
         }),
@@ -140,7 +147,9 @@ pub enum HostGlobalCommand {
     ToggleHelp,
     ToggleSettings,
     SetDefaultFromSelection,
+    OpenRenameMemory,
     BackFromContent,
+    BackFromItems,
     RefreshCurrentView,
     ClearQuery,
     Quit,
@@ -180,11 +189,19 @@ pub fn global_command_for_key(
             && focus == PaneFocus::Content
         {
             HostGlobalCommand::BackFromContent
-        } else if focus == PaneFocus::Content
-            || (current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
-                && matches!(focus, PaneFocus::Search | PaneFocus::Items)
-                && query_is_empty)
+        } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
+            && focus == PaneFocus::Items
         {
+            HostGlobalCommand::BackFromItems
+        } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
+            && focus == PaneFocus::Search
+        {
+            if query_is_empty {
+                HostGlobalCommand::BackToTabs
+            } else {
+                HostGlobalCommand::ClearQuery
+            }
+        } else if focus == PaneFocus::Content {
             HostGlobalCommand::BackToTabs
         } else if focus == PaneFocus::Tabs && !focus_policy.allows_search {
             HostGlobalCommand::BackToMemoriesTab
@@ -233,6 +250,13 @@ pub fn global_command_for_key(
     {
         return HostGlobalCommand::SetDefaultFromSelection;
     }
+    if code == KeyCode::Char('R')
+        && modifiers.contains(KeyModifiers::SHIFT)
+        && current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
+        && matches!(focus, PaneFocus::Items | PaneFocus::Content)
+    {
+        return HostGlobalCommand::OpenRenameMemory;
+    }
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateTab;
     }
@@ -267,6 +291,17 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             CoreEffect::NotifyPersistent(message) => {
                 state.persistent_status_message = Some(message.clone());
                 state.status_message = Some(message);
+            }
+            CoreEffect::ReplaceChatMessages(messages) => {
+                state.chat_messages = messages;
+                state.chat_scroll = 0;
+            }
+            CoreEffect::AppendChatMessage { role, content } => {
+                state.chat_messages.push((role, content));
+                state.chat_scroll = state.chat_scroll.saturating_add(9999);
+            }
+            CoreEffect::SetChatLoading(loading) => {
+                state.chat_loading = loading;
             }
             CoreEffect::OpenExternal(url) => match open_external(&url) {
                 Ok(()) => {
@@ -343,8 +378,150 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             CoreEffect::SetInsertMemoryId(memory_id) => {
                 state.insert_memory_id = memory_id.clone();
                 state.insert_memory_placeholder = None;
-                state.default_memory_selector_selected_id = Some(memory_id);
+                if let PickerState::List {
+                    context: PickerContext::InsertTarget,
+                    selected_id,
+                    ..
+                } = &mut state.picker
+                {
+                    *selected_id = Some(memory_id);
+                }
                 state.insert_error = None;
+            }
+            CoreEffect::SetInsertTag(tag) => {
+                state.insert_tag = tag.clone();
+                state.insert_error = None;
+            }
+            CoreEffect::SetAccessListIndex(index) => {
+                state.access_list_index = index;
+            }
+            CoreEffect::SetMemoryContentActionIndex(index) => {
+                state.memory_content_action_index = index;
+            }
+            CoreEffect::OpenAccessAction {
+                memory_id,
+                principal_id,
+                role,
+            } => {
+                open_access_control_modal(state);
+                state.access_control.memory_id = memory_id;
+                state.access_control.mode = tui_kit_runtime::AccessControlMode::Action;
+                state.access_control.action = tui_kit_runtime::AccessControlAction::Change;
+                state.access_control.role = match role {
+                    tui_kit_runtime::AccessControlRole::Admin => {
+                        tui_kit_runtime::AccessControlRole::Writer
+                    }
+                    tui_kit_runtime::AccessControlRole::Writer => {
+                        tui_kit_runtime::AccessControlRole::Admin
+                    }
+                    tui_kit_runtime::AccessControlRole::Reader => {
+                        tui_kit_runtime::AccessControlRole::Admin
+                    }
+                };
+                state.access_control.current_role = role;
+                state.access_control.principal_id = principal_id;
+                state.access_control.focus = tui_kit_runtime::AccessControlFocus::Principal;
+            }
+            CoreEffect::OpenAccessConfirm {
+                memory_id,
+                principal_id,
+                action,
+                role,
+            } => {
+                open_access_control_modal(state);
+                state.access_control.mode = tui_kit_runtime::AccessControlMode::Confirm;
+                state.access_control.memory_id = memory_id;
+                state.access_control.action = action;
+                state.access_control.principal_id = principal_id;
+                state.access_control.role = role;
+                state.access_control.focus = tui_kit_runtime::AccessControlFocus::Principal;
+            }
+            CoreEffect::OpenAccessAdd { memory_id } => {
+                open_access_control_modal(state);
+                state.access_control.mode = tui_kit_runtime::AccessControlMode::Add;
+                state.access_control.memory_id = memory_id;
+                state.access_control.action = tui_kit_runtime::AccessControlAction::Add;
+                state.access_control.role = tui_kit_runtime::AccessControlRole::Reader;
+                state.access_control.current_role = tui_kit_runtime::AccessControlRole::Reader;
+                state.access_control.principal_id.clear();
+                state.access_control.focus = tui_kit_runtime::AccessControlFocus::Principal;
+            }
+            CoreEffect::CloseAccessControl => {
+                close_access_control_modal(state);
+            }
+            CoreEffect::AccessFormError(message) => {
+                apply_modal_error(
+                    &mut state.access_control.submit_state,
+                    &mut state.access_control.error,
+                    message,
+                );
+            }
+            CoreEffect::OpenTransferModal {
+                fee_base_units,
+                available_balance_base_units,
+            } => {
+                open_transfer_modal(state);
+                state.transfer_modal.fee_base_units = Some(fee_base_units);
+                state.transfer_modal.available_balance_base_units =
+                    Some(available_balance_base_units);
+            }
+            CoreEffect::OpenTransferConfirm => {
+                open_transfer_confirm(state);
+            }
+            CoreEffect::CloseTransferModal => {
+                close_transfer_modal(state);
+            }
+            CoreEffect::TransferFormError(message) => {
+                state.transfer_modal.prerequisites_loading = false;
+                apply_modal_error(
+                    &mut state.transfer_modal.submit_state,
+                    &mut state.transfer_modal.error,
+                    message,
+                );
+            }
+            CoreEffect::OpenAddMemory => {
+                open_add_memory_modal(state);
+            }
+            CoreEffect::CloseAddMemory => {
+                close_add_memory_modal(state);
+            }
+            CoreEffect::AddMemoryFormError(message) => {
+                apply_modal_error(
+                    &mut state.add_memory.submit_state,
+                    &mut state.add_memory.error,
+                    message,
+                );
+            }
+            CoreEffect::OpenRemoveMemory => {
+                open_remove_memory_modal(state);
+            }
+            CoreEffect::CloseRemoveMemory => {
+                close_remove_memory_modal(state);
+            }
+            CoreEffect::RemoveMemoryFormError(message) => {
+                apply_modal_error(
+                    &mut state.remove_memory.submit_state,
+                    &mut state.remove_memory.error,
+                    message,
+                );
+            }
+            CoreEffect::OpenRenameMemory {
+                memory_id,
+                current_name,
+            } => {
+                open_rename_memory_modal(state);
+                state.rename_memory.memory_id = memory_id;
+                state.rename_memory.form.value = current_name;
+            }
+            CoreEffect::CloseRenameMemory => {
+                close_rename_memory_modal(state);
+            }
+            CoreEffect::RenameFormError(message) => {
+                apply_modal_error(
+                    &mut state.rename_memory.form.submit_state,
+                    &mut state.rename_memory.form.error,
+                    message,
+                );
             }
             CoreEffect::Custom { id, payload } => {
                 state.persistent_status_message = None;

@@ -6,7 +6,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tui_kit_runtime::{
-    CreateCostState, LoadedCreateCost, MemorySelectorItem, SessionAccountOverview,
+    CreateCostState, LoadedCreateCost, PickerConfirmKind, PickerContext, PickerItem,
+    PickerListMode, PickerState, RenameMemoryModalState, SessionAccountOverview,
+    TextInputModalState, TransferModalState,
 };
 
 fn session_snapshot(principal_id: &str) -> tui_kit_runtime::SessionSettingsSnapshot {
@@ -43,13 +45,7 @@ fn live_memory(id: &str, title: &str) -> KinicRecord {
         "Status: running",
         format!("detail for {id}"),
     )
-}
-
-fn selector_item(id: &str, title: Option<&str>) -> MemorySelectorItem {
-    MemorySelectorItem {
-        id: id.to_string(),
-        title: title.map(str::to_string),
-    }
+    .with_searchable_memory_id_option(Some(id.to_string()))
 }
 
 fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
@@ -57,20 +53,64 @@ fn running_memory_summary(id: &str, detail: &str) -> MemorySummary {
         id: id.to_string(),
         status: "running".to_string(),
         detail: detail.to_string(),
+        searchable_memory_id: Some(id.to_string()),
+        name: "unknown".to_string(),
+        version: "unknown".to_string(),
+        dim: None,
+        owners: None,
+        stable_memory_size: None,
+        cycle_amount: None,
+        users: None,
     }
 }
 
-fn pending_search_context(request_id: u64, memory_id: &str, query: &str) -> SearchRequestContext {
+fn non_searchable_memory(id: &str, title: &str, status: &str) -> KinicRecord {
+    KinicRecord::new(
+        id,
+        title,
+        "memories",
+        format!("Status: {status}"),
+        format!("detail for {id}"),
+    )
+}
+
+fn pending_search_context(
+    request_id: u64,
+    query: &str,
+    scope: SearchScope,
+    target_memory_ids: &[&str],
+) -> SearchRequestContext {
     SearchRequestContext {
         request_id,
-        memory_id: memory_id.to_string(),
         query: query.to_string(),
+        scope,
+        target_memory_ids: target_memory_ids
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect(),
     }
+}
+
+fn install_pending_search(
+    provider: &mut KinicProvider,
+    request_id: u64,
+    query: &str,
+    scope: SearchScope,
+    target_memory_ids: &[&str],
+) -> mpsc::Sender<SearchTaskOutput> {
+    let (tx, rx) = mpsc::channel();
+    provider.pending_search = Some(PendingSearch {
+        receiver: rx,
+        cancellation: CancellationToken::new(),
+        context: pending_search_context(request_id, query, scope, target_memory_ids),
+    });
+    tx
 }
 
 fn refreshed_session_overview() -> SessionAccountOverview {
     let mut overview = SessionAccountOverview::new(session_snapshot("aaaaa-aa"));
     overview.balance_base_units = Some(1_234_000_000u128);
+    overview.fee_base_units = Some(100_000u128);
     overview.price_base_units = Some(Nat::from(150_000_000u128));
     overview
 }
@@ -105,6 +145,7 @@ fn loaded_create_cost(overview: SessionAccountOverview) -> CreateCostState {
         overview.session.principal_id.as_str(),
         overview.balance_base_units,
         overview.price_base_units.as_ref(),
+        overview.fee_base_units,
     );
     CreateCostState::Loaded(Box::new(LoadedCreateCost { overview, details }))
 }
@@ -163,6 +204,9 @@ mod insert_submit;
 #[path = "tests/live_browser.rs"]
 mod live_browser;
 
+#[path = "tests/memory_navigation.rs"]
+mod memory_navigation;
+
 #[path = "tests/search.rs"]
 mod search;
 
@@ -171,3 +215,9 @@ mod settings;
 
 #[path = "tests/snapshot.rs"]
 mod snapshot;
+
+#[path = "tests/rename.rs"]
+mod rename;
+
+#[path = "tests/chat.rs"]
+mod chat;

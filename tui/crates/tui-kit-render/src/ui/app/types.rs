@@ -45,7 +45,8 @@ pub struct HeaderText {
     pub visible_icon: String,
     pub visible_suffix: String,
     pub contexts_icon: String,
-    pub contexts_suffix: String,
+    pub memory_prefix: String,
+    pub memory_empty_label: String,
     pub data_label: String,
 }
 
@@ -62,7 +63,7 @@ pub struct CreateOverlayText {
     pub title: String,
     pub intro_description: String,
     pub intro_enter_hint: String,
-    pub intro_cycle_hint: String,
+    pub intro_next_prev_hint: String,
     pub intro_escape_hint: String,
     pub name_label: String,
     pub description_label: String,
@@ -124,6 +125,7 @@ pub struct StatusText {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct InsertFormCopy {
+    pub close_hint: &'static str,
     pub mode_help: &'static str,
     pub help_line: &'static str,
     pub status_enter_hint: &'static str,
@@ -131,10 +133,10 @@ pub(crate) struct InsertFormCopy {
 
 pub(crate) fn insert_form_copy() -> InsertFormCopy {
     InsertFormCopy {
+        close_hint: "Tab: cycle fields, Enter: cycle mode / open target picker / submit, Esc: back to tab focus",
         mode_help: "File: .md/.markdown/.mdx/.txt/.json/.yaml/.yml/.csv/.log/.pdf\nInline Text: plain text\nManual Embedding: text + embedding JSON",
-        help_line:
-            "Insert form: ←/→ switch mode, Enter cycles mode / opens target picker / browses file / submits",
-        status_enter_hint: " cycle/picker/file/submit ",
+        help_line: "Insert form: ←/→ switch mode, Enter moves to next field / opens pickers / browses file / submits",
+        status_enter_hint: " next/picker/file/submit ",
     }
 }
 
@@ -151,7 +153,8 @@ impl Default for UiConfig {
                 visible_icon: "📦".to_string(),
                 visible_suffix: "visible items".to_string(),
                 contexts_icon: "📚".to_string(),
-                contexts_suffix: "contexts".to_string(),
+                memory_prefix: "memory".to_string(),
+                memory_empty_label: "no memory selected".to_string(),
                 data_label: "data".to_string(),
             },
             chat: ChatPanelText {
@@ -180,7 +183,7 @@ impl Default for UiConfig {
                 intro_description: "Provision a new memory canister without leaving the tab view."
                     .to_string(),
                 intro_enter_hint: "enter the form when tabs are focused".to_string(),
-                intro_cycle_hint: "cycle fields".to_string(),
+                intro_next_prev_hint: "next/prev field".to_string(),
                 intro_escape_hint: "step back one level".to_string(),
                 name_label: "Name".to_string(),
                 description_label: "Description".to_string(),
@@ -191,7 +194,7 @@ impl Default for UiConfig {
                     "Tabs focused. Press Enter or Tab to edit from Name, or Esc for Memories."
                         .to_string(),
                 close_hint:
-                    "Tab: cycle fields, Enter: submit, Ctrl-R: refresh account info, Esc: back to tab focus"
+                    "Tab: next field, Shift+Tab: previous field, Enter: submit, Ctrl-R: refresh account info, Esc: back to tab focus"
                         .to_string(),
                 account_title: "Account & Cost".to_string(),
                 loading_message: "Loading account info...".to_string(),
@@ -332,6 +335,7 @@ mod tests {
         let config = UiConfig::default();
         let copy = insert_form_copy();
 
+        assert_eq!(config.insert.mode_help, copy.mode_help);
         assert_eq!(config.insert.mode_help, copy.mode_help);
         assert!(config.help.lines.iter().any(|line| line == copy.help_line));
     }

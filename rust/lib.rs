@@ -8,6 +8,9 @@ mod embedding;
 pub(crate) mod identity_store;
 pub(crate) mod insert_service;
 mod ledger;
+pub(crate) mod memory_client_builder;
+mod operation_timeout;
+mod prompt_utils;
 #[cfg(feature = "python-bindings")]
 mod python;
 pub mod tui;
@@ -23,6 +26,9 @@ use crate::{
     cli::Cli,
     commands::{CommandContext, run_command},
 };
+
+pub(crate) const KEYRING_IDENTITY_REQUIRED_MESSAGE: &str =
+    "--identity is required unless --ii is set";
 
 #[cfg(feature = "python-bindings")]
 use pyo3::{
@@ -41,6 +47,7 @@ pub(crate) const TUI_II_UNSUPPORTED_MESSAGE: &str =
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     validate_tui_cli_args(&cli)?;
+    validate_keyring_identity(&cli)?;
 
     let max = match cli.global.verbose {
         0 => LevelFilter::INFO,
@@ -111,6 +118,29 @@ fn validate_tui_cli_args(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
+fn validate_keyring_identity(cli: &Cli) -> Result<()> {
+    if cli.global.ii {
+        return Ok(());
+    }
+    if matches!(&cli.command, cli::Command::Login(_)) {
+        return Ok(());
+    }
+    if matches!(&cli.command, cli::Command::Tui(_)) {
+        return Ok(());
+    }
+    if cli.global.identity.is_some() {
+        return Ok(());
+    }
+    let mut command = Cli::command();
+    let clap_error = command
+        .error(
+            ErrorKind::MissingRequiredArgument,
+            KEYRING_IDENTITY_REQUIRED_MESSAGE,
+        )
+        .with_cmd(&command);
+    Err(clap_error.into())
+}
+
 fn build_cli_command_context(global: &cli::GlobalOpts) -> Result<(AgentFactory, Option<PathBuf>)> {
     if global.ii {
         let identity_path = resolve_identity_path(global)?;
@@ -140,7 +170,7 @@ fn resolve_required_identity(global: &cli::GlobalOpts) -> Result<String> {
     global
         .identity
         .clone()
-        .ok_or_else(|| anyhow!("--identity is required unless --ii is set"))
+        .ok_or_else(|| anyhow!(KEYRING_IDENTITY_REQUIRED_MESSAGE))
 }
 
 fn resolve_identity_path(global: &cli::GlobalOpts) -> Result<PathBuf> {
@@ -227,6 +257,43 @@ mod tests {
         let error = Cli::try_parse_from(["kinic-cli", "--identity", "   ", "tui"]).unwrap_err();
 
         assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn validate_keyring_identity_rejects_list_without_identity() {
+        let cli = Cli::try_parse_from(["kinic-cli", "list"]).expect("cli parse");
+
+        let error = validate_keyring_identity(&cli).unwrap_err();
+        let clap_error = error.downcast_ref::<clap::Error>().unwrap();
+
+        assert_eq!(clap_error.kind(), ErrorKind::MissingRequiredArgument);
+        assert!(
+            clap_error
+                .to_string()
+                .contains(KEYRING_IDENTITY_REQUIRED_MESSAGE)
+        );
+    }
+
+    #[test]
+    fn validate_keyring_identity_accepts_list_with_identity() {
+        let cli =
+            Cli::try_parse_from(["kinic-cli", "--identity", "alice", "list"]).expect("cli parse");
+
+        validate_keyring_identity(&cli).expect("identity present");
+    }
+
+    #[test]
+    fn validate_keyring_identity_accepts_list_with_ii() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--ii", "list"]).expect("cli parse");
+
+        validate_keyring_identity(&cli).expect("ii avoids keyring identity");
+    }
+
+    #[test]
+    fn validate_keyring_identity_skips_tui_command() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--identity", "alice", "tui"]).expect("cli");
+
+        validate_keyring_identity(&cli).expect("tui handled by validate_tui_cli_args");
     }
 }
 

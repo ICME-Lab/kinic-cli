@@ -1,9 +1,14 @@
 use super::*;
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use std::path::PathBuf;
+use tui_kit_render::ui::UiConfig;
 use tui_kit_runtime::kinic_tabs::{
     KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
 };
-use tui_kit_runtime::{CoreError, CoreResult, ProviderOutput, ProviderSnapshot};
+use tui_kit_runtime::{
+    CoreError, CoreResult, InsertFormFocus, InsertMode, PaneFocus, PickerContext, PickerListMode,
+    PickerState, ProviderOutput, ProviderSnapshot, RenameMemoryModalState, TextInputModalState,
+};
 
 struct TestProvider {
     result: CoreResult<ProviderOutput>,
@@ -13,6 +18,12 @@ impl TestProvider {
     fn err(message: &str) -> Self {
         Self {
             result: Err(CoreError::new(message)),
+        }
+    }
+
+    fn ok() -> Self {
+        Self {
+            result: Ok(ProviderOutput::default()),
         }
     }
 }
@@ -28,6 +39,25 @@ impl DataProvider for TestProvider {
         _state: &CoreState,
     ) -> CoreResult<ProviderOutput> {
         self.result.clone()
+    }
+}
+
+fn test_ui_config() -> UiConfig {
+    UiConfig::default()
+}
+
+fn test_runtime_config() -> RuntimeLoopConfig {
+    RuntimeLoopConfig {
+        initial_tab_id: KINIC_INSERT_TAB_ID,
+        tab_ids: &[
+            KINIC_MEMORIES_TAB_ID,
+            KINIC_CREATE_TAB_ID,
+            KINIC_INSERT_TAB_ID,
+            KINIC_MARKET_TAB_ID,
+        ],
+        initial_focus: PaneFocus::Form,
+        ui_config: test_ui_config,
+        file_picker: None,
     }
 }
 
@@ -88,35 +118,99 @@ fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
 }
 
 #[test]
-fn selector_overlay_action_maps_arrow_keys_only() {
+fn picker_overlay_action_maps_generic_picker_keys() {
     assert_eq!(
-        selector_overlay_action(
+        picker_overlay_action(
+            &PickerState::List {
+                context: PickerContext::DefaultMemory,
+                items: Vec::new(),
+                selected_index: 0,
+                selected_id: None,
+                mode: PickerListMode::Browsing,
+            },
             crossterm::event::KeyCode::Down,
             crossterm::event::KeyModifiers::NONE
         ),
-        Some(CoreAction::MoveDefaultMemoryPickerNext)
+        Some(CoreAction::MovePickerNext)
     );
     assert_eq!(
-        selector_overlay_action(
-            crossterm::event::KeyCode::Up,
+        picker_overlay_action(
+            &PickerState::List {
+                context: PickerContext::TagManagement,
+                items: Vec::new(),
+                selected_index: 0,
+                selected_id: None,
+                mode: PickerListMode::Browsing,
+            },
+            crossterm::event::KeyCode::Char('d'),
             crossterm::event::KeyModifiers::NONE
         ),
-        Some(CoreAction::MoveDefaultMemoryPickerPrev)
+        Some(CoreAction::DeleteSelectedPickerItem)
     );
     assert_eq!(
-        selector_overlay_action(
-            crossterm::event::KeyCode::Char('j'),
+        picker_overlay_action(
+            &PickerState::Input {
+                context: PickerContext::AddTag,
+                origin_context: Some(PickerContext::InsertTag),
+                value: String::new(),
+            },
+            crossterm::event::KeyCode::Backspace,
             crossterm::event::KeyModifiers::NONE
         ),
-        None
+        Some(CoreAction::PickerBackspace)
     );
+}
+
+#[test]
+fn build_ui_renders_rename_overlay_contents() {
+    let theme = Theme::default();
+    let cfg = test_runtime_config();
+    let state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Alpha Memory".to_string(),
+                ..TextInputModalState::default()
+            },
+            focus: tui_kit_runtime::RenameModalFocus::Name,
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+    let textareas = FormTextareas::default();
+    let animation = AnimationState::new();
+    let ui = build_ui(
+        &theme, &cfg, &state, &textareas, 0, 0, false, false, &animation,
+    );
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buf = Buffer::empty(area);
+    Widget::render(ui, area, &mut buf);
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("Rename Memory"));
+    assert!(rendered.contains("Alpha Memory"));
 }
 
 #[test]
 fn handle_overlay_input_returns_dispatch_error_when_selector_action_fails() {
     let mut provider = TestProvider::err("selector failed");
     let mut state = CoreState {
-        default_memory_selector_open: true,
+        picker: PickerState::List {
+            context: PickerContext::DefaultMemory,
+            items: Vec::new(),
+            selected_index: 0,
+            selected_id: None,
+            mode: PickerListMode::Browsing,
+        },
         ..CoreState::default()
     };
 
@@ -156,7 +250,13 @@ fn handle_overlay_input_closes_settings_without_provider_dispatch() {
 fn handle_overlay_input_consumes_unknown_selector_keys() {
     let mut provider = TestProvider::err("should not run");
     let mut state = CoreState {
-        default_memory_selector_open: true,
+        picker: PickerState::List {
+            context: PickerContext::DefaultMemory,
+            items: Vec::new(),
+            selected_index: 0,
+            selected_id: None,
+            mode: PickerListMode::Browsing,
+        },
         ..CoreState::default()
     };
 
@@ -169,6 +269,190 @@ fn handle_overlay_input_consumes_unknown_selector_keys() {
     );
 
     assert!(matches!(result, OverlayInputResult::Consumed));
+}
+
+#[test]
+fn textarea_input_updates_create_description_with_newlines() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: tui_kit_runtime::CreateModalFocus::Description,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('a'),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+    assert!(handled);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+    assert!(handled);
+
+    assert_eq!(state.create_description, "a\n");
+}
+
+#[test]
+fn textarea_up_on_first_create_description_row_moves_to_previous_field() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: tui_kit_runtime::CreateModalFocus::Description,
+        create_description: "first\nsecond".into(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Up,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+
+    assert!(handled);
+    assert_eq!(state.create_focus, tui_kit_runtime::CreateModalFocus::Name);
+    assert_eq!(state.create_description, "first\nsecond");
+}
+
+#[test]
+fn textarea_down_on_last_create_description_row_moves_to_submit() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: tui_kit_runtime::CreateModalFocus::Description,
+        create_description: "first\nsecond".into(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+    textareas
+        .create_description
+        .input(textarea_input_from_key_event(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        ));
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+
+    assert!(handled);
+    assert_eq!(
+        state.create_focus,
+        tui_kit_runtime::CreateModalFocus::Submit
+    );
+    assert_eq!(state.create_description, "first\nsecond");
+}
+
+#[test]
+fn textarea_down_inside_insert_text_moves_cursor_before_leaving_field() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: tui_kit_runtime::kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: tui_kit_runtime::InsertMode::InlineText,
+        insert_focus: tui_kit_runtime::InsertFormFocus::Text,
+        insert_text: "first\nsecond".into(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+
+    assert!(handled);
+    assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Text);
+    assert_eq!(textareas.insert_text.cursor().0, 1);
+}
+
+#[test]
+fn textarea_down_on_last_insert_text_row_moves_to_next_field() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: tui_kit_runtime::kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: tui_kit_runtime::InsertMode::InlineText,
+        insert_focus: tui_kit_runtime::InsertFormFocus::Text,
+        insert_text: "first\nsecond".into(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+    textareas.insert_text.input(textarea_input_from_key_event(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    ));
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("textarea input");
+
+    assert!(handled);
+    assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Submit);
+    assert_eq!(state.insert_text, "first\nsecond");
 }
 
 #[test]
@@ -256,6 +540,53 @@ fn switch_to_tab_failure_keeps_existing_focus_when_target_tab_allows_it() {
 
     assert_eq!(result, Err("Dispatch error: tab failed".into()));
     assert_eq!(state.focus, PaneFocus::Content);
+}
+
+#[test]
+fn build_ui_forwards_insert_validation_fields_to_render_tree() {
+    let theme = Theme::default();
+    let animation = AnimationState::new();
+    let state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: InsertMode::ManualEmbedding,
+        insert_memory_id: "aaaaa-aa".to_string(),
+        insert_embedding: "[0.1, 0.2]".to_string(),
+        insert_current_dim: Some("2".to_string()),
+        insert_validation_message: Some(
+            "Embedding dimension mismatch. Received 2 values, expected 4.".to_string(),
+        ),
+        ..CoreState::default()
+    };
+    let textareas = FormTextareas::default();
+
+    let ui = build_ui(
+        &theme,
+        &test_runtime_config(),
+        &state,
+        &textareas,
+        0,
+        0,
+        false,
+        false,
+        &animation,
+    );
+    let area = Rect::new(0, 0, 120, 40);
+    let mut buf = Buffer::empty(area);
+    ui.render(area, &mut buf);
+
+    let rendered = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol()))
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("Current Dim"));
+    assert!(rendered.contains("2"));
+    assert!(rendered.contains("Embedding dimension mismatch. Received 2 values, expected 4."));
 }
 
 #[test]
@@ -362,7 +693,8 @@ fn apply_insert_file_dialog_selection_updates_file_path_and_clears_insert_error(
         ..CoreState::default()
     };
 
-    let effects = apply_insert_file_dialog_selection(&mut state, Some(PathBuf::from("/tmp/doc.pdf")));
+    let effects =
+        apply_insert_file_dialog_selection(&mut state, Some(PathBuf::from("/tmp/doc.pdf")));
 
     assert_eq!(state.insert_file_path_input, "/tmp/doc.pdf");
     assert_eq!(
@@ -374,9 +706,12 @@ fn apply_insert_file_dialog_selection_updates_file_path_and_clears_insert_error(
         state.insert_submit_state,
         tui_kit_runtime::CreateSubmitState::Idle
     );
+    assert_eq!(state.insert_focus, InsertFormFocus::Submit);
     assert_eq!(
         effects,
-        vec![CoreEffect::Notify("Selected file: /tmp/doc.pdf".to_string())]
+        vec![CoreEffect::Notify(
+            "Selected file: /tmp/doc.pdf".to_string()
+        )]
     );
 }
 
@@ -384,6 +719,7 @@ fn apply_insert_file_dialog_selection_updates_file_path_and_clears_insert_error(
 fn apply_insert_file_dialog_selection_keeps_existing_path_on_cancel() {
     let mut state = CoreState {
         insert_selected_file_path: Some(PathBuf::from("/tmp/existing.md")),
+        insert_focus: InsertFormFocus::FilePath,
         ..CoreState::default()
     };
 
@@ -393,6 +729,7 @@ fn apply_insert_file_dialog_selection_keeps_existing_path_on_cancel() {
         state.insert_selected_file_path,
         Some(PathBuf::from("/tmp/existing.md"))
     );
+    assert_eq!(state.insert_focus, InsertFormFocus::FilePath);
     assert_eq!(
         effects,
         vec![CoreEffect::Notify("File selection canceled.".to_string())]

@@ -14,14 +14,23 @@ use crate::{TUI_IDENTITY_REQUIRED_MESSAGE, resolve_tui_identity};
 
 mod adapter;
 mod bridge;
+mod chat_prompt;
+mod chat_retrieval;
+mod chat_service;
+mod chat_similarity;
 mod provider;
 mod settings;
 mod ui_config;
 
+#[cfg(test)]
+mod chat_retrieval_tests;
+#[cfg(test)]
+mod chat_service_tests;
+
 use tui_kit_host::{
     execute_effects_to_status,
+    picker::default_picker_backend,
     runtime_loop::{RuntimeLoopConfig, RuntimeLoopHooks, run_provider_app_with_hooks},
-    terminal::default_file_picker,
 };
 use tui_kit_runtime::{
     CoreState, CreateCostState, CreateSubmitState, DataProvider, PaneFocus, apply_snapshot,
@@ -83,6 +92,13 @@ impl TuiAuth {
             .map_err(anyhow::Error::msg)
     }
 
+    pub(crate) fn identity_label(&self) -> &str {
+        match self {
+            Self::DeferredIdentity { identity_name, .. } => identity_name.as_str(),
+            Self::ResolvedIdentity(_) => "provided",
+        }
+    }
+
     pub(crate) fn agent_factory(&self, use_mainnet: bool) -> Result<crate::agent::AgentFactory> {
         Ok(crate::agent::AgentFactory::new_with_arc_identity(
             use_mainnet,
@@ -137,7 +153,7 @@ fn kinic_runtime_loop_config() -> RuntimeLoopConfig {
         tab_ids: &kinic_tabs::KINIC_TAB_IDS,
         initial_focus: PaneFocus::Search,
         ui_config: ui_config::kinic_ui_config,
-        file_picker: default_file_picker(),
+        file_picker: default_picker_backend(),
     }
 }
 
