@@ -1,0 +1,20 @@
+[package]
+name = "tui-kit-render"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+license = "MIT"
+description = "Ratatui-based UI layer for tui-kit"
+
+[lib]
+name = "tui_kit_render"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+ratatui = "0.29"
+unicode-width = "0.2"
+crossterm = "0.28"
+fuzzy-matcher = "0.3"
+tui-kit-model = { path = "../tui-kit-model" }
+tui-kit-runtime = { path = "../tui-kit-runtime" }

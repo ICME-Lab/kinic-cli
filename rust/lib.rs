@@ -3,14 +3,21 @@ pub mod agent;
 pub mod cli;
 pub(crate) mod clients;
 mod commands;
+pub(crate) mod create_domain;
 mod embedding;
 pub(crate) mod identity_store;
+pub(crate) mod insert_service;
 mod ledger;
+pub(crate) mod memory_client_builder;
+mod operation_timeout;
+mod prompt_utils;
 #[cfg(feature = "python-bindings")]
 mod python;
+pub mod tui;
 
-use anyhow::Result;
-use clap::Parser;
+use anyhow::{Result, anyhow};
+use clap::{CommandFactory, Parser, error::ErrorKind};
+use std::path::PathBuf;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::fmt;
 
@@ -20,6 +27,9 @@ use crate::{
     commands::{CommandContext, run_command},
 };
 
+pub(crate) const KEYRING_IDENTITY_REQUIRED_MESSAGE: &str =
+    "--identity is required unless --ii is set";
+
 #[cfg(feature = "python-bindings")]
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
@@ -28,12 +38,16 @@ use pyo3::{
     wrap_pyfunction,
 };
 #[cfg(feature = "python-bindings")]
-use std::path::PathBuf;
-#[cfg(feature = "python-bindings")]
 use tokio::runtime::Runtime;
+
+pub(crate) const TUI_IDENTITY_REQUIRED_MESSAGE: &str = "--identity is required for the Kinic TUI";
+pub(crate) const TUI_II_UNSUPPORTED_MESSAGE: &str =
+    "Internet Identity is not supported for the Kinic TUI yet";
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+    validate_tui_cli_args(&cli)?;
+    validate_keyring_identity(&cli)?;
 
     let max = match cli.global.verbose {
         0 => LevelFilter::INFO,
@@ -43,44 +57,30 @@ pub async fn run() -> Result<()> {
 
     fmt().with_max_level(max).without_time().try_init().ok();
 
-    if cli.global.ii
-        && matches!(
-            cli.command,
-            cli::Command::Create(_) | cli::Command::Balance(_)
-        )
-    {
-        if !cfg!(feature = "experimental") {
-            anyhow::bail!(
-                "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
-            );
-        }
+    if matches!(&cli.command, cli::Command::Tui(_)) {
+        return tui::run(&cli.global);
     }
 
-    let needs_identity_path = matches!(cli.command, cli::Command::Login(_)) || cli.global.ii;
-    let identity_path = if needs_identity_path {
-        Some(match cli.global.identity_path.clone() {
-            Some(path) => path,
-            None => identity_store::default_identity_path()?,
-        })
-    } else {
-        None
-    };
+    if cli.global.ii
+        && matches!(
+            &cli.command,
+            cli::Command::Create(_) | cli::Command::Balance(_)
+        )
+        && !cfg!(feature = "experimental")
+    {
+        anyhow::bail!(
+            "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
+        );
+    }
 
-    let agent_factory = if matches!(cli.command, cli::Command::Login(_)) {
-        AgentFactory::new(cli.global.ic, String::new())
-    } else if cli.global.ii {
-        let path = identity_path
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("Identity path is missing"))?;
-        let delegated = identity_store::load_delegated_identity(&path)?;
-        AgentFactory::new_with_identity(cli.global.ic, delegated)
+    let (agent_factory, identity_path) = if matches!(&cli.command, cli::Command::Login(_)) {
+        let identity_path = Some(resolve_identity_path(&cli.global)?);
+        (
+            AgentFactory::new(cli.global.ic, String::new()),
+            identity_path,
+        )
     } else {
-        let identity_suffix = cli
-            .global
-            .identity
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("--identity is required unless --ii is set"))?;
-        AgentFactory::new(cli.global.ic, identity_suffix)
+        build_cli_command_context(&cli.global)?
     };
 
     let context = CommandContext {
@@ -89,6 +89,212 @@ pub async fn run() -> Result<()> {
     };
 
     run_command(cli.command, context).await
+}
+
+fn validate_tui_cli_args(cli: &Cli) -> Result<()> {
+    if !matches!(&cli.command, cli::Command::Tui(_)) {
+        return Ok(());
+    }
+
+    if cli.global.ii {
+        let mut command = Cli::command();
+        let clap_error = command
+            .error(ErrorKind::ArgumentConflict, TUI_II_UNSUPPORTED_MESSAGE)
+            .with_cmd(&command);
+        return Err(clap_error.into());
+    }
+
+    if cli.global.identity.is_none() {
+        let mut command = Cli::command();
+        let clap_error = command
+            .error(
+                ErrorKind::MissingRequiredArgument,
+                TUI_IDENTITY_REQUIRED_MESSAGE,
+            )
+            .with_cmd(&command);
+        return Err(clap_error.into());
+    }
+
+    Ok(())
+}
+
+fn validate_keyring_identity(cli: &Cli) -> Result<()> {
+    if cli.global.ii {
+        return Ok(());
+    }
+    if matches!(&cli.command, cli::Command::Login(_)) {
+        return Ok(());
+    }
+    if matches!(&cli.command, cli::Command::Tui(_)) {
+        return Ok(());
+    }
+    if cli.global.identity.is_some() {
+        return Ok(());
+    }
+    let mut command = Cli::command();
+    let clap_error = command
+        .error(
+            ErrorKind::MissingRequiredArgument,
+            KEYRING_IDENTITY_REQUIRED_MESSAGE,
+        )
+        .with_cmd(&command);
+    Err(clap_error.into())
+}
+
+fn build_cli_command_context(global: &cli::GlobalOpts) -> Result<(AgentFactory, Option<PathBuf>)> {
+    if global.ii {
+        let identity_path = resolve_identity_path(global)?;
+        let delegated = identity_store::load_delegated_identity(&identity_path)?;
+        Ok((
+            AgentFactory::new_with_identity(global.ic, delegated),
+            Some(identity_path),
+        ))
+    } else {
+        let identity = resolve_required_identity(global)?;
+        Ok((build_keyring_agent_factory(global.ic, &identity), None))
+    }
+}
+
+pub(crate) fn build_keyring_agent_factory(use_mainnet: bool, identity: &str) -> AgentFactory {
+    AgentFactory::new(use_mainnet, identity.to_string())
+}
+
+pub(crate) fn resolve_tui_identity(global: &cli::GlobalOpts) -> Result<String> {
+    global
+        .identity
+        .clone()
+        .ok_or_else(|| anyhow!(TUI_IDENTITY_REQUIRED_MESSAGE))
+}
+
+fn resolve_required_identity(global: &cli::GlobalOpts) -> Result<String> {
+    global
+        .identity
+        .clone()
+        .ok_or_else(|| anyhow!(KEYRING_IDENTITY_REQUIRED_MESSAGE))
+}
+
+fn resolve_identity_path(global: &cli::GlobalOpts) -> Result<PathBuf> {
+    match global.identity_path.clone() {
+        Some(path) => Ok(path),
+        None => identity_store::default_identity_path(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn global_opts(
+        identity: Option<&str>,
+        ii: bool,
+        identity_path: Option<PathBuf>,
+    ) -> cli::GlobalOpts {
+        cli::GlobalOpts {
+            verbose: 0,
+            ic: false,
+            identity: identity.map(ToOwned::to_owned),
+            ii,
+            identity_path,
+        }
+    }
+
+    #[test]
+    fn resolve_tui_identity_returns_identity_when_present() {
+        let global = global_opts(Some("alice"), false, None);
+
+        let identity = resolve_tui_identity(&global).unwrap();
+
+        assert_eq!(identity, "alice");
+    }
+
+    #[test]
+    fn resolve_tui_identity_requires_identity() {
+        let global = global_opts(None, false, None);
+
+        let error = resolve_tui_identity(&global).unwrap_err();
+
+        assert_eq!(error.to_string(), TUI_IDENTITY_REQUIRED_MESSAGE);
+    }
+
+    #[test]
+    fn resolve_identity_path_uses_default_location_when_not_provided() {
+        let global = global_opts(None, true, None);
+
+        let path = resolve_identity_path(&global).unwrap();
+
+        assert!(path.ends_with(PathBuf::from(".config/kinic/identity.json")));
+    }
+
+    #[test]
+    fn validate_tui_cli_args_accepts_identity_for_tui_command() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--identity", "alice", "tui"])
+            .expect("cli parsing should succeed");
+
+        validate_tui_cli_args(&cli).expect("validation should accept tui with identity");
+    }
+
+    #[test]
+    fn validate_tui_cli_args_rejects_ii_for_tui() {
+        let cli =
+            Cli::try_parse_from(["kinic-cli", "--ii", "tui"]).expect("cli parsing should succeed");
+
+        let error = validate_tui_cli_args(&cli).unwrap_err();
+        let clap_error = error.downcast_ref::<clap::Error>().unwrap();
+
+        assert_eq!(clap_error.kind(), ErrorKind::ArgumentConflict);
+        assert!(clap_error.to_string().contains(TUI_II_UNSUPPORTED_MESSAGE));
+    }
+
+    #[test]
+    fn cli_rejects_empty_identity_for_tui_command() {
+        let error = Cli::try_parse_from(["kinic-cli", "--identity", "", "tui"]).unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn cli_rejects_whitespace_only_identity_for_tui_command() {
+        let error = Cli::try_parse_from(["kinic-cli", "--identity", "   ", "tui"]).unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn validate_keyring_identity_rejects_list_without_identity() {
+        let cli = Cli::try_parse_from(["kinic-cli", "list"]).expect("cli parse");
+
+        let error = validate_keyring_identity(&cli).unwrap_err();
+        let clap_error = error.downcast_ref::<clap::Error>().unwrap();
+
+        assert_eq!(clap_error.kind(), ErrorKind::MissingRequiredArgument);
+        assert!(
+            clap_error
+                .to_string()
+                .contains(KEYRING_IDENTITY_REQUIRED_MESSAGE)
+        );
+    }
+
+    #[test]
+    fn validate_keyring_identity_accepts_list_with_identity() {
+        let cli =
+            Cli::try_parse_from(["kinic-cli", "--identity", "alice", "list"]).expect("cli parse");
+
+        validate_keyring_identity(&cli).expect("identity present");
+    }
+
+    #[test]
+    fn validate_keyring_identity_accepts_list_with_ii() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--ii", "list"]).expect("cli parse");
+
+        validate_keyring_identity(&cli).expect("ii avoids keyring identity");
+    }
+
+    #[test]
+    fn validate_keyring_identity_skips_tui_command() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--identity", "alice", "tui"]).expect("cli");
+
+        validate_keyring_identity(&cli).expect("tui handled by validate_tui_cli_args");
+    }
 }
 
 #[cfg(feature = "python-bindings")]
@@ -315,12 +521,7 @@ fn update_instance(identity: &str, memory_id: &str, ic: Option<bool>) -> PyResul
 #[cfg(feature = "python-bindings")]
 #[pyfunction]
 #[pyo3(signature = (identity, memory_id, dim, ic=None))]
-fn reset_memory(
-    identity: &str,
-    memory_id: &str,
-    dim: usize,
-    ic: Option<bool>,
-) -> PyResult<()> {
+fn reset_memory(identity: &str, memory_id: &str, dim: usize, ic: Option<bool>) -> PyResult<()> {
     let ic = ic.unwrap_or(false);
     block_on_py(python::reset_memory(
         ic,

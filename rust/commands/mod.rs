@@ -9,14 +9,14 @@ pub mod convert_pdf;
 pub mod create;
 pub mod ii_login;
 pub mod insert;
-pub mod insert_raw;
 pub mod insert_pdf;
+pub mod insert_raw;
 pub mod list;
+pub mod reset;
 pub mod search;
 pub mod search_raw;
 pub mod tagged_embeddings;
 pub mod update;
-pub mod reset;
 
 #[derive(Clone)]
 pub struct CommandContext {
@@ -41,5 +41,6 @@ pub async fn run_command(command: Command, ctx: CommandContext) -> Result<()> {
         Command::Balance(args) => balance::handle(args, &ctx).await,
         Command::AskAi(args) => ask_ai::handle(args, &ctx).await,
         Command::Login(args) => ii_login::handle(args, &ctx).await,
+        Command::Tui(_) => unreachable!("TUI command is handled before command dispatch"),
     }
 }

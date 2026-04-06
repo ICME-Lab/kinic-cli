@@ -1,0 +1,17 @@
+[package]
+name = "tui-kit"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+license = "MIT"
+description = "Unified public API for tui-kit modules"
+
+[lib]
+name = "tui_kit"
+path = "src/lib.rs"
+
+[dependencies]
+tui-kit-host = { path = "../tui-kit-host" }
+tui-kit-runtime = { path = "../tui-kit-runtime" }
+tui-kit-model = { path = "../tui-kit-model" }
+tui-kit-render = { path = "../tui-kit-render" }

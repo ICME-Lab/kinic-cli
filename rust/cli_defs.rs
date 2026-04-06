@@ -2,6 +2,14 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand};
 
+pub fn parse_identity_arg(value: &str) -> Result<String, String> {
+    if value.trim().is_empty() {
+        return Err("identity must not be empty or whitespace-only".to_string());
+    }
+
+    Ok(value.to_string())
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "kinic-cli",
@@ -30,7 +38,7 @@ pub struct GlobalOpts {
     #[arg(
         long,
         conflicts_with = "ii",
-        required_unless_present = "ii",
+        value_parser = parse_identity_arg,
         help = "Dfx identity name used to load credentials from the system keyring"
     )]
     pub identity: Option<String>,
@@ -81,6 +89,11 @@ pub enum Command {
     AskAi(AskAiArgs),
     #[command(about = "Login via Internet Identity and store a delegation")]
     Login(LoginArgs),
+    #[command(
+        about = "Launch the Kinic terminal UI (requires global --identity)",
+        after_help = "Required invocation:\n  kinic-cli --identity <IDENTITY> tui"
+    )]
+    Tui(TuiArgs),
 }
 
 #[derive(Args, Debug)]
@@ -91,6 +104,9 @@ pub struct CreateArgs {
     #[arg(long, required = true, help = "Short description for the new memory")]
     pub description: String,
 }
+
+#[derive(Args, Debug, Default)]
+pub struct TuiArgs {}
 
 #[derive(Args, Debug)]
 pub struct ListArgs {}
@@ -135,7 +151,11 @@ pub struct InsertRawArgs {
     )]
     pub embedding: String,
 
-    #[arg(long, required = true, help = "Text payload to store with the embedding")]
+    #[arg(
+        long,
+        required = true,
+        help = "Text payload to store with the embedding"
+    )]
     pub text: String,
 
     #[arg(long, required = true, help = "Tag metadata stored alongside the text")]

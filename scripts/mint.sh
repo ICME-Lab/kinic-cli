@@ -1,10 +1,12 @@
 #!/bin/bash
 set -e  # Stop script on errors
 
-echo Mint $2 KINIC to $1
+MINTER_NAME="${3:-local-minter}"
+
+echo Mint $2 KINIC to $1 using identity ${MINTER_NAME}
 KINIC=$(( $2 * 100000000 ))
 
-dfx --identity default canister call 73mez-iiaaa-aaaaq-aaasq-cai icrc1_transfer '
+dfx --identity "${MINTER_NAME}" canister call 73mez-iiaaa-aaaaq-aaasq-cai icrc1_transfer '
 (
   record {
     25_979 = record {
@@ -18,4 +20,3 @@ dfx --identity default canister call 73mez-iiaaa-aaaaq-aaasq-cai icrc1_transfer 
     3_573_748_184 = '$KINIC' : nat;
   },
 )'
-
