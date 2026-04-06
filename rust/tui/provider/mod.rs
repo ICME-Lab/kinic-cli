@@ -4439,8 +4439,8 @@ fn add_memory_action_record() -> KinicRecord {
 fn manual_memory_summary(id: &str) -> MemorySummary {
     MemorySummary {
         id: id.to_string(),
-        status: "manual".to_string(),
-        detail: "Manual memory. Loading details...".to_string(),
+        status: "manually added".to_string(),
+        detail: "Manually added memory. Loading details...".to_string(),
         searchable_memory_id: Some(id.to_string()),
         name: "unknown".to_string(),
         version: "unknown".to_string(),
@@ -4533,11 +4533,6 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         .dim
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let owners = memory
-        .owners
-        .as_ref()
-        .map(|owners| format_owner_list(owners))
-        .unwrap_or_else(|| "unknown".to_string());
     let cycle_amount = memory
         .cycle_amount
         .map(format_cycle_amount)
@@ -4558,13 +4553,12 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         "memories",
         summary,
         format!(
-            "## Memory\n\n- Id: `{}`\n- Status: `{}`\n- Name: `{}`\n{}- Version: `{}`\n- Owners: `{}`\n- Dimension: `{}`\n- Stable Memory Size: `{}`\n- Cycle Amount: `{}`\n\n### Content\n{}\n\n### Search\nSelect this item, then type a query and press Enter in the search box.\n\n### Users\n{}\n",
+            "## Memory\n\n- Id: `{}`\n- Status: `{}`\n- Name: `{}`\n{}- Version: `{}`\n- Dimension: `{}`\n- Stable Memory Size: `{}`\n- Cycle Amount: `{}`\n\n### Content\n{}\n\n### Search\nSelect this item, then type a query and press Enter in the search box.\n\n### Users\n{}\n",
             memory.id,
             memory.status,
             display_memory_name(memory.name.as_str(), resolved_name.as_deref()),
             description_line,
             memory.version,
-            owners,
             dim,
             stable_memory_size,
             cycle_amount,
@@ -4617,14 +4611,6 @@ fn format_count(value: u32) -> String {
         formatted.push(ch);
     }
     formatted
-}
-
-fn format_owner_list(owners: &[String]) -> String {
-    if owners.is_empty() {
-        return "none".to_string();
-    }
-
-    owners.join(", ")
 }
 
 fn format_multiline_metadata_field(label: &str, value: &str) -> String {

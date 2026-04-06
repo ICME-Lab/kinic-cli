@@ -118,7 +118,6 @@ fn memory_content(record: &KinicRecord) -> UiItemContent {
             metadata_section(
                 record,
                 &[
-                    ("Owners", metadata_value(record, "- Owners:")),
                     ("Dimension", metadata_value(record, "- Dimension:")),
                     (
                         "Stable Memory Size",
@@ -433,7 +432,7 @@ mod tests {
             "2chl6-4hpzw-vqaaa-aaaaa-c",
             "memories",
             "Status: running",
-            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description:\n  Project notes\n  second line\n- Version: `1.0.0`\n- Owners: `aaaaa-aa, bbbbb-bb`\n- Dimension: `768`\n- Stable Memory Size: `2,048`\n- Cycle Amount: `1.235T`\n\n### Content\nready\n\n### Search\nsearch help\n\n### Users\n- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer\n".to_string(),
+            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description:\n  Project notes\n  second line\n- Version: `1.0.0`\n- Dimension: `768`\n- Stable Memory Size: `2,048`\n- Cycle Amount: `1.235T`\n\n### Content\nready\n\n### Search\nsearch help\n\n### Users\n- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer\n".to_string(),
         );
 
         let content = memory_content(&record);
@@ -478,12 +477,7 @@ mod tests {
         );
         assert!(overview.rows.iter().all(|row| row.label != "Owners"));
         assert!(overview.rows.iter().all(|row| row.label != "Dimension"));
-        assert!(
-            metadata
-                .rows
-                .iter()
-                .any(|row| row.label == "Owners" && row.value == "aaaaa-aa, bbbbb-bb")
-        );
+        assert!(metadata.rows.iter().all(|row| row.label != "Owners"));
         assert!(
             metadata
                 .rows
