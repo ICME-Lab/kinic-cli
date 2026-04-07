@@ -33,20 +33,259 @@ By default we use the Internet Computer as the DA layer—with VetKey encryption
 
 ## Prerequisites
 
-- **Python 3.9+**
-- **dfx 0.31+** with the `arm64` build on Apple Silicon (macOS)
-- **KINIC tokens**: At least 1 KINIC to deploy memory canisters
-- **dfx identity**: Create or select one with `dfx identity new <name>` or `dfx identity use <name>`
+- **dfx 0.31+**
+- **dfx identity**: Create or select a named identity with `dfx identity new <name>` or `dfx identity use <name>`
+- **KINIC tokens**: Have KINIC ready if you plan to create memories
+- **yazi**: Required only if you want to use the file chooser in TUI `File` mode
+- **pdftotext**: Required only if you want to insert PDFs
 
 > Note: Do not use the `default` identity with `kinic-cli`—it always fails. Use a named identity instead.
 
-Optional: If you need local launcher/ledger/II canisters, run `./scripts/setup.sh` after `dfx start --clean --background`.
+On macOS, the PEM for the dfx identity you use with `--identity` must be stored in Keychain.
+
+When using a local environment, make sure the local replica and supporting canisters are already running.
+
+Optional local setup: if you need local launcher, ledger, or II canisters, run `./scripts/setup.sh` after `dfx start --clean --background`.
 
 ---
 
-## Installation
+## Terminal UI Quickstart
 
-### From PyPI (Recommended)
+Kinic TUI is a terminal UI for operating Kinic memory canisters. It lets you handle `list`, `search`, `create`, `insert`, and settings changes from one screen, so you do not need to remember every subcommand each time.
+
+Follow this flow once from start to finish:
+
+1. Start the TUI
+2. Confirm your identity and balance
+3. Create one memory
+4. Insert a short string
+5. Search for that content
+
+> Operate Kinic memories from one terminal screen. Create a memory, insert text or files, search for content, and use chat without leaving the UI.
+
+### Install and Launch
+
+Kinic TUI is included in `kinic-cli`. For OSS users, the usual path is to download a release binary and run it directly, or start it from source during development.
+
+Mainnet:
+
+```bash
+kinic-cli --identity alice --ic tui
+```
+
+Local replica:
+
+```bash
+kinic-cli --identity alice tui
+```
+
+From source:
+
+```bash
+cargo run -- --identity alice --ic tui
+```
+
+First-run notes:
+
+- `--identity` is required
+- `--ii` is not supported yet
+- on macOS, you may be asked to allow Keychain access
+- the TUI opens on the `Memories` tab first
+- `File` mode requires `yazi` for the chooser, but manual path input still works without it
+
+Install `yazi` on macOS:
+
+```bash
+brew install yazi
+```
+
+If you also want to try PDF insertion:
+
+```bash
+brew install poppler
+```
+
+---
+
+### Quick Path
+
+1. Start the TUI
+2. In `Settings`, confirm `Principal ID` and `KINIC balance`
+3. In `Create`, create one memory
+4. In `Insert`, add a short string
+5. In `Memories`, search for that string
+
+For the fastest first success, start with `Inline Text`. It avoids file chooser and PDF conversion setup.
+
+### Step 1: Start the TUI and Learn the Layout
+
+When the TUI starts, it opens on the `Memories` tab. Use `1` to `5` to switch tabs, `Tab` / `Shift+Tab` to move focus, and `?` to open help. In normal list navigation, `q` quits and `Ctrl+R` refreshes the current view.
+
+![Memories tab screenshot](./docs/images/tui-memories.png)
+
+What to understand first:
+
+- `Memories`: list, search, detail view, and chat
+- `Insert`: add files, text, or manual embeddings
+- `Create`: create a new memory
+- `Market`: reserved and not implemented yet
+- `Settings`: principal, balance, default memory, saved tags, and retrieval settings
+
+### Step 2: Confirm Identity and Balance
+
+Open `Settings` and confirm that `Principal ID` matches the identity you launched with. Then check whether `KINIC balance` is high enough to create a memory. If needed, you can transfer tokens from the transfer modal, and `Ctrl+R` refreshes both `Principal ID` and `KINIC balance`.
+
+![Settings tab screenshot](./docs/images/tui-settings.png)
+
+Quick checklist:
+
+1. Open `Settings`
+2. Read `Principal ID`
+3. Confirm `Identity name`
+4. Confirm `Network`
+5. Press `Ctrl+R` if the balance looks stale
+
+Main items shown in this tab:
+
+- `Principal ID`
+- `KINIC balance`
+- `Default memory`
+- `Saved tags`
+- `Embedding API endpoint`
+- `Identity name`
+- `Auth mode`
+- `Network`
+
+### Step 3: Create Your First Memory
+
+Move to `Create`, enter a short name and description, and submit. This screen also shows the current principal, current balance, and required creation cost, so you can catch funding issues before submission. If the balance is insufficient or retrieval fails, a message appears immediately.
+
+![Create tab screenshot](./docs/images/tui-create.png)
+
+Walkthrough:
+
+1. Press `3` or `Ctrl+N` to open `Create`
+2. Enter `Name`
+3. Enter `Description`
+4. Move to `Submit` and press `Enter`
+5. Return to `Memories` and confirm that the new memory appears in the list
+
+### Step 4: Insert Something Small First
+
+For the first run, `Inline Text` is the easiest choice. It avoids file chooser setup and PDF conversion. `Inline Text` supports multiple lines and works well for short notes or test data.
+
+![Insert tab screenshot](./docs/images/tui-insert.png)
+
+Walkthrough:
+
+1. Open `Insert`
+2. Set `Mode` to `Inline Text`
+3. Leave `Memory ID` empty if you already set a default memory, or paste the memory id if you did not
+4. Enter a simple `Tag`, for example `hello`
+5. Enter a short unique string that will be easy to search for
+6. Submit
+
+Shared fields in the `Insert` tab:
+
+- `Mode`: insertion method
+- `Memory ID`: target memory
+- `Tag`: tag to save with the content
+- `Submit`: run the insertion
+
+Notes:
+
+- if `Memory ID` is empty and a default memory is already set, that value appears as a placeholder candidate
+- `File` mode supports `md`, `markdown`, `mdx`, `txt`, `json`, `yaml`, `yml`, `csv`, `log`, and `pdf`
+- `Manual Embedding` mode accepts `Text` plus an `Embedding` in JSON array format
+
+Example text:
+
+```text
+Kinic TUI smoke test: mango-orbit-314
+```
+
+#### Optional Next Step: File and PDF
+
+File mode:
+
+- open the picker with `yazi`, or type the path directly
+- a good second step after inline text
+- manual `FilePath` input still works even if `yazi` is not installed
+
+PDF mode:
+
+- PDFs are converted to Markdown before insertion
+- `pdftotext` is required
+- PDF insertion fails if `pdftotext` is not available
+
+### Step 5: Search for What You Inserted
+
+Return to `Memories`, select the target memory, switch the search scope to `selected memory`, and search for the unique text you just inserted. Press `Enter` to open the result details, and `Esc` to return to the list.
+
+Walkthrough:
+
+1. Open `Memories`
+2. Select the memory you just created
+3. Set the scope to `selected memory`
+4. Search for the exact text you inserted
+5. Press `Enter` on the result to open the details
+
+Notes:
+
+- switch search scope with `←` `→`
+- `all memories` searches across every memory
+- `selected memory` searches only within the currently selected memory
+- if you want to search inside one memory, it is easiest to select that memory first and then search
+
+### Step 6: Try Chat If You Want
+
+After you confirm search works, you can try chat from the `Memories` tab. Press `Shift+C` to open the chat panel. Start with the selected memory, then switch to `all memories` if needed. Press `Shift+N` to start a new empty thread for the current chat context.
+
+Current behavior:
+
+- chat can target either the selected memory or all searchable memories
+- the TUI restores the last used thread for each selected memory and for `all memories`
+- v1 does not have a thread list yet, so you cannot reopen older threads from the UI
+- existing saved chat history is not migrated; the TUI starts from the new thread store file
+
+### Keyboard Cheat Sheet
+
+| Key | Action |
+| --- | --- |
+| `1` to `5` | Switch tabs |
+| `Tab` / `Shift+Tab` | Move focus |
+| `↑` / `↓` | Move through lists and fields |
+| `Enter` | Open, confirm, submit |
+| `Esc` | Go back or close |
+| `?` | Show help |
+| `q` | Quit |
+| `Ctrl+N` | Open `Create` |
+| `Ctrl+R` | Refresh the current view |
+| `Shift+C` | Toggle the chat panel |
+| `Shift+D` | Set the selected memory as default |
+
+### Common Next Steps
+
+- set a default memory
+- insert a file
+- insert a PDF
+- reuse saved tags
+- rename a memory
+- add an existing memory canister
+- tune chat retrieval settings
+
+For more detail, see `docs/tui.md`.
+
+---
+
+# Direct CLI and Python Usage
+
+If you want to work directly with Kinic from the command line or from Python, use the setup below instead of the TUI flow. This path is useful when you want to script memory operations, integrate Kinic into an agent, or call the library from your own application.
+
+### Python Library
+
+From PyPI:
+
 ```bash
 pip install kinic-py
 
@@ -54,9 +293,10 @@ pip install kinic-py
 uv pip install kinic-py
 ```
 
-### From Source
+From source:
 
-Requires Rust toolchain for the PyO3 extension:
+Requires Rust toolchain for the PyO3 extension.
+
 ```bash
 pip install -e .
 
@@ -64,34 +304,22 @@ pip install -e .
 uv pip install -e .
 ```
 
-### Terminal UI
+### Direct CLI and Python Quickstart
 
-Kinic also includes a terminal UI for browsing, creating, and inserting memories.
+#### 1. Create or Select Your Identity
 
-Mainnet example:
-```bash
-kinic-cli --identity <name> --ic tui
-```
-
-See `docs/tui.md` for the TUI quickstart, setup notes, and keyboard workflows.
-
----
-
-## Quickstart
-
-### 1. Create or Select Your Identity
-
-Create (or switch to) a dfx identity before using the library:
+Create or switch to a named dfx identity before using the CLI or Python library:
 
 ```bash
 dfx identity new <name>
-# or if you have already created
+# or if you have already created it
 dfx identity use <name>
 ```
 
-### 2. Check Your Balance
+#### 2. Check Your Balance
 
 Make sure you have at least 1 KINIC token:
+
 ```bash
 # Get your principal
 dfx --identity <name> identity get-principal
@@ -102,28 +330,28 @@ dfx canister --ic call 73mez-iiaaa-aaaaq-aaasq-cai icrc1_balance_of '(record {ow
 # Example: (100000000 : nat) == 1 KINIC
 ```
 
-### 3. Internet Identity flow (--ii, CLI only)
+**DM https://x.com/wyatt_benno for KINIC prod tokens** with your principal ID.
 
-If you prefer browser login instead of a keychain-backed dfx identity:
+Or purchase them from MEXC or swap at https://app.icpswap.com/ .
+
+#### 3. Internet Identity Flow (`--ii`, CLI only)
+
+If you prefer browser login instead of a Keychain-backed dfx identity:
 
 ```bash
 cargo run -- --ii login
 cargo run -- --ii list
 ```
 
-Delegations are stored at `~/.config/kinic/identity.json` (default TTL: 6 hours).
+Delegations are stored at `~/.config/kinic/identity.json` with a default TTL of 6 hours.
 The login flow uses a local callback on port `8620`.
 
-**DM https://x.com/wyatt_benno for KINIC prod tokens** with your principal ID.
-
-Or purchase them from MEXC or swap at https://app.icpswap.com/ . 
-
-### 4. Deploy and Use Memory
+#### 4. Deploy and Use Memory from Python
 
 ```python
 from kinic_py import KinicMemories
 
-km = KinicMemories("<identity name>")  # dfx identity name; use ic=True for mainnet, e.g. KinicMemories("<name>", ic=True)
+km = KinicMemories("<identity name>")  # use ic=True for mainnet, e.g. KinicMemories("<name>", ic=True)
 memory_id = km.create("Python demo", "Created via kinic_py")
 tag = "notes"
 markdown = "# Hello Kinic!\n\nInserted from Python."
@@ -131,10 +359,10 @@ markdown = "# Hello Kinic!\n\nInserted from Python."
 km.insert_markdown(memory_id, tag, markdown)
 
 for score, payload in km.search(memory_id, "Hello"):
-    print(f"{score:.4f} -> {payload}")  # payload is the JSON stored in insert
+    print(f"{score:.4f} -> {payload}")
 ```
 
-You can tag inserted content (e.g., `notes`, `summary_q1`) and manage it later by tag.
+You can tag inserted content such as `notes` or `summary_q1` and manage it later by tag.
 
 ---
 
