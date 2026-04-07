@@ -9,7 +9,7 @@ use std::{
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
-use super::chat_prompt::SelectedMemoryContext;
+use super::chat_prompt::ActiveMemoryContext;
 use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::{
     create_domain::derive_create_cost,
@@ -293,7 +293,7 @@ struct CapturedChatRequest {
     target_memory_ids: Vec<String>,
     query: String,
     history: Vec<(String, String)>,
-    selected_memory_context: Option<SelectedMemoryContext>,
+    active_memory_context: Option<ActiveMemoryContext>,
 }
 
 struct SessionSettingsTaskOutput {
@@ -1135,6 +1135,32 @@ impl KinicProvider {
         self.cursor_memory_id != previous_cursor_memory_id
     }
 
+    /// Aligns provider cursor with [`CoreState::selected_index`] for browser list interactions.
+    /// `all memories` chat still keeps the browser selection so detail/search/default-memory
+    /// actions keep pointing at the visible list selection. In [`MemoriesMode::Results`], list
+    /// selection follows a different path; chat scope sync is intentionally browser-first here.
+    fn sync_cursor_to_chat_scope_for_browser(&mut self, state: &CoreState) {
+        if state.current_tab_id.as_str() != KINIC_MEMORIES_TAB_ID {
+            return;
+        }
+        if self.memories_mode != MemoriesMode::Browser {
+            return;
+        }
+        if let Some(id) = state
+            .selected_index
+            .and_then(|idx| state.list_items.get(idx))
+            .filter(|item| {
+                matches!(
+                    &item.kind,
+                    tui_kit_model::UiItemKind::Custom(kind) if kind == "memory"
+                )
+            })
+            .map(|item| item.id.clone())
+        {
+            self.cursor_memory_id = Some(id);
+        }
+    }
+
     fn cursor_visible_memory_index(&self) -> Option<usize> {
         let active_id = self.cursor_memory_id.as_deref()?;
         self.visible_memory_records()
@@ -1316,7 +1342,7 @@ impl KinicProvider {
     fn chat_history_thread_key(&self, state: &CoreState) -> Option<String> {
         match state.chat_scope {
             ChatScope::All => Some(ALL_MEMORIES_CHAT_THREAD_KEY.to_string()),
-            ChatScope::Selected => self.cursor_memory_id.clone(),
+            ChatScope::Selected => self.active_chat_scope_memory_id(state),
         }
     }
 
@@ -1351,8 +1377,41 @@ impl KinicProvider {
         }
     }
 
-    fn chat_targets(&self, scope: ChatScope) -> Result<Vec<bridge::ChatTarget>, String> {
-        match scope {
+    fn active_chat_scope_memory_id(&self, state: &CoreState) -> Option<String> {
+        match state.chat_scope {
+            ChatScope::All => None,
+            ChatScope::Selected => state
+                .selected_index
+                .and_then(|idx| state.list_items.get(idx))
+                .filter(|item| {
+                    matches!(
+                        &item.kind,
+                        tui_kit_model::UiItemKind::Custom(kind) if kind == "memory"
+                    )
+                })
+                .map(|item| item.id.clone())
+                .or_else(|| self.cursor_memory_id.clone()),
+        }
+    }
+
+    fn chat_scope_label(&self, state: &CoreState) -> Option<String> {
+        let memory_id = self.active_chat_scope_memory_id(state)?;
+        self.memory_records
+            .iter()
+            .find(|record| record.id == memory_id)
+            .map(|record| {
+                let title = record.title.trim();
+                if title.is_empty() {
+                    record.id.clone()
+                } else {
+                    title.to_string()
+                }
+            })
+            .or(Some(memory_id))
+    }
+
+    fn chat_targets(&self, state: &CoreState) -> Result<Vec<bridge::ChatTarget>, String> {
+        match state.chat_scope {
             ChatScope::All => {
                 let targets =
                     self.memory_records
@@ -1374,8 +1433,7 @@ impl KinicProvider {
             }
             ChatScope::Selected => {
                 let active_memory_id = self
-                    .cursor_memory_id
-                    .as_deref()
+                    .active_chat_scope_memory_id(state)
                     .ok_or_else(|| "Select a memory before asking AI.".to_string())?;
                 let record = self
                     .memory_records
@@ -1402,13 +1460,20 @@ impl KinicProvider {
         }
     }
 
-    fn selected_memory_chat_context(&self, scope: ChatScope) -> Option<SelectedMemoryContext> {
-        if scope != ChatScope::Selected {
+    fn active_memory_chat_context(&self, state: &CoreState) -> Option<ActiveMemoryContext> {
+        if state.chat_scope != ChatScope::Selected {
             return None;
         }
 
-        let summary = self.selected_memory_summary()?;
-        let record = self.selected_memory_record()?;
+        let active_memory_id = self.active_chat_scope_memory_id(state)?;
+        let record = self
+            .memory_records
+            .iter()
+            .find(|record| record.id == active_memory_id)?;
+        let summary = self
+            .memory_summaries
+            .iter()
+            .find(|summary| summary.id == active_memory_id)?;
         let parsed_detail = parse_memory_detail(summary.detail.as_str());
         let summary_text = self
             .memory_content_summaries
@@ -1418,7 +1483,7 @@ impl KinicProvider {
             .filter(|value| !value.is_empty())
             .map(str::to_string);
 
-        Some(SelectedMemoryContext {
+        Some(ActiveMemoryContext {
             memory_id: record.id.clone(),
             memory_name: resolved_memory_name(summary.name.as_str(), summary.detail.as_str()),
             description: parsed_detail.description,
@@ -1428,7 +1493,7 @@ impl KinicProvider {
 
     fn start_chat_submit(
         &mut self,
-        scope: ChatScope,
+        state: &CoreState,
         history_thread_key: String,
         thread_id: String,
         targets: Vec<bridge::ChatTarget>,
@@ -1437,21 +1502,22 @@ impl KinicProvider {
     ) -> CoreEffect {
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
+        let scope = state.chat_scope;
         let retrieval_config = self.chat_retrieval_config();
-        let selected_memory_context = self.selected_memory_chat_context(scope);
+        let active_memory_context = self.active_memory_chat_context(state);
 
         #[cfg(test)]
         set_last_test_chat_request(CapturedChatRequest {
             history_thread_key: history_thread_key.clone(),
             thread_id: thread_id.clone(),
-            scope,
+            scope: state.chat_scope,
             target_memory_ids: targets
                 .iter()
                 .map(|target| target.memory_id.clone())
                 .collect(),
             query: query.clone(),
             history: history.clone(),
-            selected_memory_context: selected_memory_context.clone(),
+            active_memory_context: active_memory_context.clone(),
         });
 
         spawn_request_task(
@@ -1481,7 +1547,7 @@ impl KinicProvider {
                             query,
                             history,
                             retrieval_config,
-                            selected_memory_context,
+                            active_memory_context,
                         },
                     ))
                     .map_err(|error| short_error(&error.to_string()));
@@ -2034,7 +2100,7 @@ impl KinicProvider {
                             query: MEMORY_SUMMARY_QUERY.to_string(),
                             history: Vec::new(),
                             retrieval_config,
-                            selected_memory_context: None,
+                            active_memory_context: None,
                         },
                     ))
                     .map_err(|error| short_error(&error.to_string()));
@@ -2180,6 +2246,7 @@ impl KinicProvider {
             total_count: filtered.len(),
             status_message: Some(self.status_message(state, filtered.len())),
             selected_memory_label: self.selected_memory_label(),
+            chat_scope_label: self.chat_scope_label(state),
             create_cost_state: self.create_cost_state.clone(),
             create_submit_state: state.create_submit_state.clone(),
             settings: settings::build_settings_snapshot(
@@ -2894,13 +2961,6 @@ impl KinicProvider {
                     SearchScope::Selected => "selected memory",
                 };
                 format!("Search scope {scope}")
-            }
-            PaneFocus::Extra => {
-                let scope = match state.chat_scope {
-                    ChatScope::All => "all memories",
-                    ChatScope::Selected => "selected memory",
-                };
-                format!("Chat scope {scope}")
             }
             _ => "Browse memories".to_string(),
         }
@@ -4278,7 +4338,8 @@ impl DataProvider for KinicProvider {
             CoreAction::SearchScopeNext => {
                 self.invalidate_pending_search();
             }
-            CoreAction::ChatScopePrev | CoreAction::ChatScopeNext => {
+            CoreAction::ChatScopePrev | CoreAction::ChatScopeNext | CoreAction::ChatScopeAll => {
+                self.sync_cursor_to_chat_scope_for_browser(state);
                 effects.extend(self.load_active_chat_history_effects(state));
             }
             CoreAction::ChatNewThread => {
@@ -4347,7 +4408,7 @@ impl DataProvider for KinicProvider {
                     ));
                 } else {
                     let history_thread_key = self.chat_history_thread_key(state);
-                    match (history_thread_key, self.chat_targets(state.chat_scope)) {
+                    match (history_thread_key, self.chat_targets(state)) {
                         (Some(history_thread_key), Ok(targets)) => {
                             let thread_id =
                                 match self.ensure_chat_thread_id(history_thread_key.as_str()) {
@@ -4380,7 +4441,7 @@ impl DataProvider for KinicProvider {
                                 )));
                             }
                             effects.push(self.start_chat_submit(
-                                state.chat_scope,
+                                state,
                                 history_thread_key,
                                 thread_id,
                                 targets,
@@ -4903,12 +4964,19 @@ impl DataProvider for KinicProvider {
             }
             _ => self.build_snapshot(state),
         };
+        let chat_scope_follows_cursor = state.chat_scope == ChatScope::Selected
+            && !matches!(
+                action,
+                CoreAction::ChatScopePrev | CoreAction::ChatScopeNext | CoreAction::ChatScopeAll
+            );
         if self.cursor_memory_id != previous_cursor_memory_id {
             self.invalidate_pending_search();
             self.start_cursor_memory_detail_load();
             self.start_selected_memory_summary_load(false);
             effects.push(CoreEffect::SetMemoryContentActionIndex(0));
-            effects.extend(self.load_active_chat_history_effects(state));
+            if chat_scope_follows_cursor {
+                effects.extend(self.load_active_chat_history_effects(state));
+            }
         }
 
         Ok(ProviderOutput {

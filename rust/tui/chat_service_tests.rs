@@ -10,7 +10,7 @@ use super::{
     bridge::{
         AskMemoriesOutput, AskMemoriesRequest, ChatRetrievalConfig, ChatTarget, SearchResultItem,
     },
-    chat_prompt::SelectedMemoryContext,
+    chat_prompt::ActiveMemoryContext,
     chat_service::{ChatSearchBatch, ask_memories_with_services, fold_chat_search_results},
 };
 use crate::tui::TuiAuth;
@@ -100,8 +100,8 @@ fn test_retrieval_config() -> ChatRetrievalConfig {
     }
 }
 
-fn selected_memory_context() -> SelectedMemoryContext {
-    SelectedMemoryContext {
+fn active_memory_context() -> ActiveMemoryContext {
+    ActiveMemoryContext {
         memory_id: "aaaaa-aa".to_string(),
         memory_name: "Alpha".to_string(),
         description: Some("A Kinic memory for release notes.".to_string()),
@@ -114,7 +114,7 @@ fn test_request(
     targets: Vec<ChatTarget>,
     query: &str,
     history: Vec<(String, String)>,
-    selected_memory_context: Option<SelectedMemoryContext>,
+    active_memory_context: Option<ActiveMemoryContext>,
 ) -> AskMemoriesRequest {
     AskMemoriesRequest {
         scope,
@@ -122,7 +122,7 @@ fn test_request(
         query: query.to_string(),
         history,
         retrieval_config: test_retrieval_config(),
-        selected_memory_context,
+        active_memory_context,
     }
 }
 
@@ -153,7 +153,7 @@ async fn ask_memories_with_services_runs_full_chat_flow_without_real_api_calls()
                 "assistant".to_string(),
                 "We were discussing release notes.".to_string(),
             )],
-            Some(selected_memory_context()),
+            Some(active_memory_context()),
         ),
         move |prompt| {
             let prompts = Arc::clone(&prompts_for_chat);
@@ -216,7 +216,7 @@ async fn ask_memories_with_services_runs_full_chat_flow_without_real_api_calls()
     assert_eq!(captured_prompts.len(), 2);
     assert!(captured_prompts[0].contains("You rewrite a user's latest message"));
     assert!(captured_prompts[0].contains("What changed this week?"));
-    assert!(captured_prompts[0].contains("<selected_memory_context>"));
+    assert!(captured_prompts[0].contains("<active_memory_context>"));
     assert!(captured_prompts[1].contains("rewritten release status"));
     assert!(captured_prompts[1].contains("Release notes mention a fixed chat flow."));
     assert!(captured_prompts[1].contains("1 parallel memory search(es) failed."));
@@ -260,7 +260,7 @@ async fn ask_memories_with_services_stops_before_embedding_when_rewrite_is_empty
             vec![test_chat_target("aaaaa-aa", "Alpha")],
             "What changed this week?",
             Vec::new(),
-            Some(selected_memory_context()),
+            Some(active_memory_context()),
         ),
         move |_prompt| {
             let chat_calls = Arc::clone(&chat_calls_for_test);
@@ -325,7 +325,7 @@ async fn ask_memories_with_services_stops_before_embedding_when_rewrite_is_empty
 }
 
 #[tokio::test]
-async fn ask_memories_with_services_omits_selected_memory_context_when_not_provided() {
+async fn ask_memories_with_services_omits_active_memory_context_when_not_provided() {
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let prompts_for_chat = Arc::clone(&prompts);
     let responses = Arc::new(Mutex::new(VecDeque::from([
@@ -379,6 +379,6 @@ async fn ask_memories_with_services_omits_selected_memory_context_when_not_provi
         .expect("prompt capture mutex should not be poisoned")
         .clone();
     assert_eq!(captured_prompts.len(), 2);
-    assert!(!captured_prompts[0].contains("<selected_memory_context>"));
-    assert!(!captured_prompts[1].contains("<selected_memory_context>"));
+    assert!(!captured_prompts[0].contains("<active_memory_context>"));
+    assert!(!captured_prompts[1].contains("<active_memory_context>"));
 }

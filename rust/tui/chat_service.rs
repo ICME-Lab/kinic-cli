@@ -76,7 +76,7 @@ where
         query,
         history,
         retrieval_config,
-        selected_memory_context,
+        active_memory_context,
     } = request;
 
     if targets.is_empty() {
@@ -92,7 +92,7 @@ where
         history.iter().map(|message| message.content.as_str()),
     );
     let rewrite_prompt =
-        build_search_rewrite_prompt(&query, &history, language, selected_memory_context.as_ref());
+        build_search_rewrite_prompt(&query, &history, language, active_memory_context.as_ref());
     let search_query = chat_endpoint_fn(rewrite_prompt).await?.trim().to_string();
     if search_query.is_empty() {
         anyhow::bail!("chat endpoint returned an empty search rewrite");
@@ -118,7 +118,7 @@ where
         &prompt_documents,
         language,
         failed_memory_ids.len(),
-        selected_memory_context.as_ref(),
+        active_memory_context.as_ref(),
     );
     let response = chat_endpoint_fn(prompt).await?;
     Ok(AskMemoriesOutput {

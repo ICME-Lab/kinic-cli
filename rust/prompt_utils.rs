@@ -1,6 +1,7 @@
 //! Shared prompt helpers.
 //! Where: reused by CLI ask-ai and the embedded TUI chat prompt builders.
-//! What: escapes XML-like prompt payloads and performs lightweight language detection.
+//! What: escapes XML-like prompt payloads, performs lightweight language detection,
+//! and resolves human-readable language labels for prompt instructions.
 //! Why: keep prompt construction safe and consistent without adding dependencies.
 
 pub(crate) fn escape_xml(input: &str) -> String {
@@ -35,6 +36,29 @@ where
                 .find_map(|message| detect_language_from_text(message.as_str()))
         })
         .unwrap_or("en")
+}
+
+pub(crate) fn prompt_language_instruction(lang_code: &str) -> &'static str {
+    // Normalize locale-style inputs like `ja-JP` or `pt_BR` so prompt wording
+    // stays consistent without scattering per-language special cases.
+    match lang_code
+        .split(['-', '_'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "ja" => "日本語 (Japanese)",
+        "ko" => "한국어 (Korean)",
+        "zh" => "中文 (Chinese)",
+        "es" => "Español (Spanish)",
+        "fr" => "Français (French)",
+        "de" => "Deutsch (German)",
+        "it" => "Italiano (Italian)",
+        "pt" => "Português (Portuguese)",
+        "ru" => "Русский (Russian)",
+        _ => "English",
+    }
 }
 
 fn detect_language_from_text(text: &str) -> Option<&'static str> {
@@ -83,7 +107,7 @@ fn detect_language_from_text(text: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_language, escape_xml};
+    use super::{detect_language, escape_xml, prompt_language_instruction};
 
     #[test]
     fn escape_xml_escapes_reserved_characters() {
@@ -109,5 +133,15 @@ mod tests {
     #[test]
     fn detect_language_uses_kana_as_a_stronger_signal_than_kanji() {
         assert_eq!(detect_language("検索結果を見せて", ["hello"]), "ja");
+    }
+
+    #[test]
+    fn prompt_language_instruction_normalizes_locale_variants() {
+        assert_eq!(prompt_language_instruction("ja-JP"), "日本語 (Japanese)");
+        assert_eq!(
+            prompt_language_instruction("PT_br"),
+            "Português (Portuguese)"
+        );
+        assert_eq!(prompt_language_instruction("en-US"), "English");
     }
 }

@@ -8,6 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 use tui_kit_runtime::{
+    chat_commands::CHAT_SLASH_COMMAND_HINT,
     current_form_focus_for_tab, form_shows_horizontal_change_hint,
     kinic_tabs::{KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind},
     settings_row_behavior_for_index,
@@ -64,16 +65,16 @@ impl<'a> TuiKitUi<'a> {
         }
         if show_memories_chat_scope_hint(tab_id, self.focus, self.show_chat_panel) {
             suffix_spans.extend([
-                Span::styled("Ctrl+←/→", self.theme.style_accent()),
-                Span::styled(" chat scope ", self.theme.style_muted()),
-                Span::styled("Shift+N", self.theme.style_accent()),
-                Span::styled(" new thread ", self.theme.style_muted()),
-                Span::styled("Shift+Enter", self.theme.style_accent()),
-                Span::styled(" newline ", self.theme.style_muted()),
+                Span::styled("Shift+←/→", self.theme.style_accent()),
                 Span::styled("Enter", self.theme.style_accent()),
                 Span::styled(" send ", self.theme.style_muted()),
                 Span::styled("Esc", self.theme.style_accent()),
                 Span::styled(" close ", self.theme.style_muted()),
+                Span::styled("│ ", self.theme.style_dim()),
+            ]);
+            suffix_spans.extend([
+                Span::styled(CHAT_SLASH_COMMAND_HINT, self.theme.style_type()),
+                Span::styled(" commands ", self.theme.style_muted()),
                 Span::styled("│ ", self.theme.style_dim()),
             ]);
         }
@@ -272,14 +273,16 @@ impl<'a> TuiKitUi<'a> {
         )];
         if show_memories_chat_scope_hint(tab_id, self.focus, self.show_chat_panel) {
             spans.extend([
-                Span::styled("←/→", self.theme.style_accent()),
-                Span::styled(" chat scope ", self.theme.style_muted()),
-                Span::styled("Shift+N", self.theme.style_accent()),
-                Span::styled(" new thread ", self.theme.style_muted()),
+                Span::styled("Shift+←/→", self.theme.style_accent()),
                 Span::styled("Enter", self.theme.style_accent()),
                 Span::styled(" send ", self.theme.style_muted()),
                 Span::styled("Esc", self.theme.style_accent()),
                 Span::styled(" close ", self.theme.style_muted()),
+            ]);
+            spans.extend([
+                Span::styled(" ", self.theme.style_dim()),
+                Span::styled(CHAT_SLASH_COMMAND_HINT, self.theme.style_type()),
+                Span::styled(" commands ", self.theme.style_muted()),
             ]);
         }
         if show_memories_search_scope_hint(tab_id, self.focus) {
@@ -607,10 +610,6 @@ mod tests {
             .status_message("Ready");
         let rendered = render_status_line(&ui);
 
-        assert!(rendered.contains("Shift+N"));
-        assert!(rendered.contains("new thread"));
-        assert!(rendered.contains("Shift+Enter"));
-        assert!(rendered.contains("newline"));
         assert!(rendered.contains("Enter"));
         assert!(rendered.contains("Esc"));
         assert!(rendered.contains("close"));
@@ -625,11 +624,50 @@ mod tests {
             .show_chat(true);
         let rendered = render_status_line(&ui);
 
-        assert!(rendered.contains("chat scope"));
-        assert!(rendered.contains("Shift+N"));
+        assert!(rendered.contains("Shift+←/→"));
         assert!(rendered.contains("Enter"));
         assert!(rendered.contains("Esc"));
         assert!(rendered.contains("close"));
+    }
+
+    #[test]
+    fn chat_status_shows_slash_command_hint_before_typing() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_MEMORIES_TAB_ID))
+            .focus(Focus::Chat)
+            .show_chat(true);
+        let rendered = render_status_line(&ui);
+
+        assert!(rendered.contains("/new /all"));
+        assert!(!rendered.contains("/selected"));
+        assert!(rendered.contains("commands"));
+    }
+
+    #[test]
+    fn chat_status_hides_selected_memory_name_from_scope_hint() {
+        let theme = Theme::default();
+        let items = vec![crate::ui::model::UiItemSummary {
+            id: "aaaaa-aa".to_string(),
+            name: "Alpha Memory".to_string(),
+            leading_marker: None,
+            kind: crate::ui::model::UiItemKind::Custom("memory".to_string()),
+            visibility: crate::ui::model::UiVisibility::Private,
+            qualified_name: None,
+            subtitle: None,
+            tags: vec![],
+        }];
+        let ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_MEMORIES_TAB_ID))
+            .focus(Focus::Chat)
+            .show_chat(true)
+            .ui_summaries(&items)
+            .list_selected(Some(0));
+        let rendered = render_status_line(&ui);
+
+        assert!(!rendered.contains("Alpha Memory"));
+        assert!(!rendered.contains("chat scope"));
+        assert!(rendered.contains("Shift+←/→"));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! What: combines recent visible chat history with search results into one prompt.
 //! Why: keep CLI/Python ask-ai single-turn while letting the TUI preserve conversation context.
 
-use crate::prompt_utils::escape_xml;
+use crate::prompt_utils::{escape_xml, prompt_language_instruction};
 
 const MAX_HIT_LEN: usize = 600;
 const MAX_FULL_LEN: usize = 4096;
@@ -27,7 +27,7 @@ pub struct PromptDocument {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SelectedMemoryContext {
+pub struct ActiveMemoryContext {
     pub memory_id: String,
     pub memory_name: String,
     pub description: Option<String>,
@@ -38,14 +38,13 @@ pub fn build_search_rewrite_prompt(
     query: &str,
     history: &[PromptHistoryMessage],
     language: &str,
-    selected_memory_context: Option<&SelectedMemoryContext>,
+    active_memory_context: Option<&ActiveMemoryContext>,
 ) -> String {
-    let language_instruction = language_instruction(language);
+    let language_instruction = prompt_language_instruction(language);
     let conversation_block = render_conversation_block(history, MAX_REWRITE_HISTORY_MESSAGES);
-    let selected_memory_context_block =
-        render_selected_memory_context_block(selected_memory_context);
-    let selected_memory_instruction = if selected_memory_context.is_some() {
-        "- When <selected_memory_context> is present, references like \"this memory\", \"this\", or \"it\" may refer to that selected Kinic memory.\n"
+    let active_memory_context_block = render_active_memory_context_block(active_memory_context);
+    let active_memory_instruction = if active_memory_context.is_some() {
+        "- When <active_memory_context> is present, references like \"this memory\", \"this\", or \"it\" may refer to the active Kinic memory from the list selection.\n"
     } else {
         ""
     };
@@ -55,19 +54,19 @@ pub fn build_search_rewrite_prompt(
 
 # Instructions
 - Use the latest message plus the recent conversation only to resolve references like "it", "that", or "the previous point".
-- Use the selected memory context when available to resolve references to the currently selected memory.
+- Use the active memory context when available to resolve references to the currently selected memory.
 - Return only one short standalone search query inside <answer>...</answer>.
 - Do not answer the question.
 - Do not include XML, quotes, or explanations in <answer>.
 - Keep the rewritten query concise and specific.
 - Use {language_instruction} if the latest user message is in that language.
-{selected_memory_instruction}
+{active_memory_instruction}
 
 <latest_user_query>
 {query}
 </latest_user_query>
 
-{selected_memory_context_block}<conversation>
+{active_memory_context_block}<conversation>
 {conversation}
 </conversation>"#,
         conversation = if conversation_block.is_empty() {
@@ -77,8 +76,8 @@ pub fn build_search_rewrite_prompt(
         },
         language_instruction = language_instruction,
         query = escape_xml(query.trim()),
-        selected_memory_context_block = selected_memory_context_block,
-        selected_memory_instruction = selected_memory_instruction,
+        active_memory_context_block = active_memory_context_block,
+        active_memory_instruction = active_memory_instruction,
     )
 }
 
@@ -89,16 +88,15 @@ pub fn build_multi_turn_chat_prompt(
     docs: &[PromptDocument],
     language: &str,
     failed_memory_search_count: usize,
-    selected_memory_context: Option<&SelectedMemoryContext>,
+    active_memory_context: Option<&ActiveMemoryContext>,
 ) -> String {
-    let language_instruction = language_instruction(language);
+    let language_instruction = prompt_language_instruction(language);
     let conversation_block = render_conversation_block(history, MAX_HISTORY_MESSAGES);
-    let selected_memory_context_block =
-        render_selected_memory_context_block(selected_memory_context);
-    let selected_memory_instruction = if selected_memory_context.is_some() {
-        r#"- Use <selected_memory_context> to answer generic questions like "what is this memory?" or "what is in this memory?".
-- When retrieved docs are weak or generic, you may briefly explain that a Kinic memory is a memory canister / vector-backed knowledge store, then describe this selected memory only from <selected_memory_context> and <docs>.
-- Any concrete claim about this selected memory's actual contents must come from <selected_memory_context> or <docs>.
+    let active_memory_context_block = render_active_memory_context_block(active_memory_context);
+    let active_memory_instruction = if active_memory_context.is_some() {
+        r#"- Use <active_memory_context> to answer generic questions like "what is this memory?" or "what is in this memory?".
+- When retrieved docs are weak or generic, you may briefly explain that a Kinic memory is a memory canister / vector-backed knowledge store, then describe this active memory only from <active_memory_context> and <docs>.
+- Any concrete claim about this active memory's actual contents must come from <active_memory_context> or <docs>.
 - If evidence is partial, say that clearly instead of refusing immediately.
 "#
     } else {
@@ -175,7 +173,7 @@ Kinic memory domain note:
 - If <retrieval_status> reports failed memory searches, mention briefly in <answer> that some sources were unavailable.
 - Keep the final answer concise and grounded in the retrieved content.
 - Answer in {language_instruction} inside the <answer> tag.
-{selected_memory_instruction}
+{active_memory_instruction}
 
 # Input
 
@@ -186,7 +184,7 @@ Kinic memory domain note:
 <search_query>
 {search_query}
 </search_query>
-{retrieval_status}{selected_memory_context_block}<conversation>
+{retrieval_status}{active_memory_context_block}<conversation>
 {conversation}
 </conversation>
 
@@ -204,8 +202,8 @@ Kinic memory domain note:
         language_instruction = language_instruction,
         retrieval_status = retrieval_status_block,
         search_query = escape_xml(search_query.trim()),
-        selected_memory_context_block = selected_memory_context_block,
-        selected_memory_instruction = selected_memory_instruction,
+        active_memory_context_block = active_memory_context_block,
+        active_memory_instruction = active_memory_instruction,
     )
 }
 
@@ -251,10 +249,10 @@ fn render_conversation_block(history: &[PromptHistoryMessage], max_messages: usi
         .join("\n")
 }
 
-fn render_selected_memory_context_block(
-    selected_memory_context: Option<&SelectedMemoryContext>,
+fn render_active_memory_context_block(
+    active_memory_context: Option<&ActiveMemoryContext>,
 ) -> String {
-    let Some(selected_memory_context) = selected_memory_context else {
+    let Some(active_memory_context) = active_memory_context else {
         return String::new();
     };
 
@@ -262,20 +260,20 @@ fn render_selected_memory_context_block(
         format!(
             "<memory_id>{}</memory_id>",
             escape_xml(&clip(
-                selected_memory_context.memory_id.as_str(),
+                active_memory_context.memory_id.as_str(),
                 MAX_MEMORY_CONTEXT_FIELD_LEN,
             ))
         ),
         format!(
             "<memory_name>{}</memory_name>",
             escape_xml(&clip(
-                selected_memory_context.memory_name.as_str(),
+                active_memory_context.memory_name.as_str(),
                 MAX_MEMORY_CONTEXT_FIELD_LEN,
             ))
         ),
     ];
 
-    if let Some(description) = selected_memory_context
+    if let Some(description) = active_memory_context
         .description
         .as_deref()
         .map(str::trim)
@@ -287,7 +285,7 @@ fn render_selected_memory_context_block(
         ));
     }
 
-    if let Some(summary) = selected_memory_context
+    if let Some(summary) = active_memory_context
         .summary
         .as_deref()
         .map(str::trim)
@@ -300,35 +298,20 @@ fn render_selected_memory_context_block(
     }
 
     format!(
-        "<selected_memory_context>\n{}\n</selected_memory_context>\n\n",
+        "<active_memory_context>\n{}\n</active_memory_context>\n\n",
         body.join("\n")
     )
-}
-
-fn language_instruction(lang_code: &str) -> &'static str {
-    match lang_code {
-        "ja" => "日本語 (Japanese)",
-        "ko" => "한국어 (Korean)",
-        "zh" => "中文 (Chinese)",
-        "es" => "Español (Spanish)",
-        "fr" => "Français (French)",
-        "de" => "Deutsch (German)",
-        "it" => "Italiano (Italian)",
-        "pt" => "Português (Portuguese)",
-        "ru" => "Русский (Russian)",
-        _ => "English",
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        PromptDocument, PromptHistoryMessage, SelectedMemoryContext, build_multi_turn_chat_prompt,
+        ActiveMemoryContext, PromptDocument, PromptHistoryMessage, build_multi_turn_chat_prompt,
         build_search_rewrite_prompt,
     };
 
-    fn selected_memory_context() -> SelectedMemoryContext {
-        SelectedMemoryContext {
+    fn active_memory_context() -> ActiveMemoryContext {
+        ActiveMemoryContext {
             memory_id: "aaaaa-aa".to_string(),
             memory_name: "Skill Store".to_string(),
             description: Some("A vector-backed memory for UI notes.".to_string()),
@@ -527,22 +510,29 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_prompt_includes_selected_memory_context_when_present() {
+    fn prompt_normalizes_locale_language_codes() {
+        let prompt = build_multi_turn_chat_prompt("まとめて", "検索", &[], &[], "ja-JP", 0, None);
+
+        assert!(prompt.contains("Answer in 日本語 (Japanese) inside the <answer> tag."));
+    }
+
+    #[test]
+    fn rewrite_prompt_includes_active_memory_context_when_present() {
         let prompt = build_search_rewrite_prompt(
             "Tell me about this memory",
             &[],
             "en",
-            Some(&selected_memory_context()),
+            Some(&active_memory_context()),
         );
 
-        assert!(prompt.contains("<selected_memory_context>"));
+        assert!(prompt.contains("<active_memory_context>"));
         assert!(prompt.contains("<memory_id>aaaaa-aa</memory_id>"));
         assert!(prompt.contains("<memory_name>Skill Store</memory_name>"));
         assert!(prompt.contains("references like \"this memory\""));
     }
 
     #[test]
-    fn prompt_includes_selected_memory_context_and_domain_note() {
+    fn prompt_includes_active_memory_context_and_domain_note() {
         let prompt = build_multi_turn_chat_prompt(
             "Tell me about this memory",
             "skill store overview",
@@ -555,26 +545,26 @@ mod tests {
             }],
             "en",
             1,
-            Some(&selected_memory_context()),
+            Some(&active_memory_context()),
         );
 
         assert!(prompt.contains("Kinic memory domain note"));
-        assert!(prompt.contains("<selected_memory_context>"));
+        assert!(prompt.contains("<active_memory_context>"));
         assert!(prompt.contains("<description>A vector-backed memory for UI notes.</description>"));
         assert!(
             prompt.contains(
                 "<summary>Contains UI skills and store-related memory entries.</summary>"
             )
         );
-        assert!(prompt.contains("Use <selected_memory_context> to answer generic questions"));
+        assert!(prompt.contains("Use <active_memory_context> to answer generic questions"));
         assert!(prompt.contains("1 parallel memory search(es) failed."));
     }
 
     #[test]
-    fn prompt_omits_selected_memory_context_when_absent() {
+    fn prompt_omits_active_memory_context_when_absent() {
         let prompt =
             build_multi_turn_chat_prompt("latest", "rewritten latest", &[], &[], "en", 0, None);
 
-        assert!(!prompt.contains("<selected_memory_context>"));
+        assert!(!prompt.contains("<active_memory_context>"));
     }
 }

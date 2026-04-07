@@ -456,28 +456,17 @@ fn textarea_down_on_last_insert_text_row_moves_to_next_field() {
 }
 
 #[test]
-fn chat_textarea_input_updates_chat_with_newlines() {
+fn chat_textarea_shift_enter_submits_instead_of_inserting_newline() {
     let mut provider = TestProvider::ok();
     let mut hooks = NoopRuntimeHooks;
     let mut state = CoreState {
         current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Extra,
+        chat_input: "a".to_string(),
         ..CoreState::default()
     };
     let mut textareas = FormTextareas::default();
-
-    let handled = handle_textarea_input(
-        &mut provider,
-        &mut state,
-        &mut hooks,
-        &mut textareas,
-        &crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Char('a'),
-            crossterm::event::KeyModifiers::NONE,
-        ),
-    )
-    .expect("chat textarea input");
-    assert!(handled);
+    sync_form_textareas_from_state(&mut textareas, &state);
 
     let handled = handle_textarea_input(
         &mut provider,
@@ -492,7 +481,7 @@ fn chat_textarea_input_updates_chat_with_newlines() {
     .expect("chat textarea input");
     assert!(handled);
 
-    assert_eq!(state.chat_input, "a\n");
+    assert_eq!(state.chat_input, "");
 }
 
 #[test]
@@ -522,6 +511,262 @@ fn chat_textarea_enter_submits_without_inserting_text() {
 
     assert!(handled);
     assert_eq!(state.chat_input, "");
+}
+
+#[test]
+fn chat_textarea_multiline_paste_is_normalized_to_single_line() {
+    let mut state = CoreState {
+        chat_input: "first line\nsecond line".to_string(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    sync_form_textareas_from_state(&mut textareas, &state);
+    sync_state_from_textareas(&mut state, &textareas);
+
+    assert_eq!(state.chat_input, "first line second line");
+}
+
+#[test]
+fn chat_textarea_up_down_moves_slash_command_selection() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "/".to_string(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let moved_down = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat slash down");
+    assert!(moved_down);
+    assert_eq!(textareas.chat_command_selected, 1);
+
+    let moved_up = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Up,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat slash up");
+
+    assert!(moved_up);
+    assert_eq!(textareas.chat_command_selected, 0);
+}
+
+#[test]
+fn chat_textarea_shift_arrows_switch_scope() {
+    let action_prev = chat_textarea_action(
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Left,
+            crossterm::event::KeyModifiers::SHIFT,
+        ),
+        crossterm::event::KeyCode::Left,
+    );
+    let action_next = chat_textarea_action(
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Right,
+            crossterm::event::KeyModifiers::SHIFT,
+        ),
+        crossterm::event::KeyCode::Right,
+    );
+
+    assert_eq!(action_prev, Some(CoreAction::ChatScopePrev));
+    assert_eq!(action_next, Some(CoreAction::ChatScopeNext));
+}
+
+#[test]
+fn chat_textarea_shift_arrows_switch_scope_with_extra_modifier_bits() {
+    let shift_super = crossterm::event::KeyModifiers::SHIFT | crossterm::event::KeyModifiers::SUPER;
+    let prev = chat_textarea_action(
+        &crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Left, shift_super),
+        crossterm::event::KeyCode::Left,
+    );
+    let next = chat_textarea_action(
+        &crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Right, shift_super),
+        crossterm::event::KeyCode::Right,
+    );
+    assert_eq!(prev, Some(CoreAction::ChatScopePrev));
+    assert_eq!(next, Some(CoreAction::ChatScopeNext));
+}
+
+#[test]
+fn chat_textarea_shift_arrow_with_control_or_alt_does_not_switch_scope() {
+    assert_eq!(
+        chat_textarea_action(
+            &crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Left,
+                crossterm::event::KeyModifiers::SHIFT | crossterm::event::KeyModifiers::CONTROL,
+            ),
+            crossterm::event::KeyCode::Left,
+        ),
+        None
+    );
+    assert_eq!(
+        chat_textarea_action(
+            &crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Right,
+                crossterm::event::KeyModifiers::SHIFT | crossterm::event::KeyModifiers::ALT,
+            ),
+            crossterm::event::KeyCode::Right,
+        ),
+        None
+    );
+}
+
+#[test]
+fn chat_textarea_brackets_remain_regular_input() {
+    let action_prev = chat_textarea_action(
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('['),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+        crossterm::event::KeyCode::Char('['),
+    );
+    let action_next = chat_textarea_action(
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(']'),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+        crossterm::event::KeyCode::Char(']'),
+    );
+
+    assert_eq!(action_prev, None);
+    assert_eq!(action_next, None);
+}
+
+#[test]
+fn chat_submit_slash_new_starts_new_thread_without_sending_message() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "/new".to_string(),
+        chat_messages: vec![("user".to_string(), "alpha".to_string())],
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled =
+        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+            .expect("slash command");
+
+    assert!(handled);
+    assert_eq!(
+        state.chat_messages,
+        vec![("user".to_string(), "alpha".to_string())]
+    );
+    assert!(state.chat_input.is_empty());
+}
+
+#[test]
+fn chat_submit_uses_selected_slash_command_candidate() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "/".to_string(),
+        chat_scope: tui_kit_runtime::ChatScope::Selected,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    textareas.chat_command_selected = 1;
+
+    let handled =
+        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+            .expect("slash command");
+
+    assert!(handled);
+    assert_eq!(state.chat_scope, tui_kit_runtime::ChatScope::All);
+    assert!(state.chat_input.is_empty());
+}
+
+#[test]
+fn chat_submit_slash_all_switches_scope_without_sending_message() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "/all".to_string(),
+        chat_scope: tui_kit_runtime::ChatScope::Selected,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled =
+        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+            .expect("slash command");
+
+    assert!(handled);
+    assert_eq!(state.chat_scope, tui_kit_runtime::ChatScope::All);
+    assert!(state.chat_messages.is_empty());
+    assert!(state.chat_input.is_empty());
+}
+
+#[test]
+fn chat_submit_slash_all_is_idempotent_when_already_on_all_scope() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "/all".to_string(),
+        chat_scope: tui_kit_runtime::ChatScope::All,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled =
+        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+            .expect("slash command");
+
+    assert!(handled);
+    assert_eq!(state.chat_scope, tui_kit_runtime::ChatScope::All);
+    assert!(state.chat_messages.is_empty());
+    assert!(state.chat_input.is_empty());
+}
+
+#[test]
+fn chat_submit_unknown_slash_command_keeps_input_and_sets_status() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "/wat".to_string(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled =
+        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+            .expect("slash command");
+
+    assert!(handled);
+    assert_eq!(state.chat_input, "/wat");
+    assert_eq!(
+        state.status_message.as_deref(),
+        Some("Unknown chat command. Try /new or /all.")
+    );
 }
 
 #[test]

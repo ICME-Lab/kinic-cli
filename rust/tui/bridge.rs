@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use super::chat_prompt::SelectedMemoryContext;
+use super::chat_prompt::ActiveMemoryContext;
 use crate::{
     clients::{
         launcher::{LauncherClient, State},
@@ -56,7 +56,7 @@ pub struct AskMemoriesRequest {
     pub query: String,
     pub history: Vec<(String, String)>,
     pub retrieval_config: ChatRetrievalConfig,
-    pub selected_memory_context: Option<SelectedMemoryContext>,
+    pub active_memory_context: Option<ActiveMemoryContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

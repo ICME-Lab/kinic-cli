@@ -10,13 +10,13 @@ use ratatui::{
         Widget, Wrap, block::BorderType,
     },
 };
-use tui_kit_runtime::ChatScope;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::{Focus, TuiKitUi};
 use crate::ui::theme::Theme;
+use tui_kit_runtime::chat_commands::{matching_slash_commands, normalize_chat_input_lines};
 
-pub(super) const CHAT_INPUT_MAX_HEIGHT: u16 = 4;
+pub(super) const CHAT_INPUT_MAX_HEIGHT: u16 = 1;
 
 fn markdown_line_to_spans(line: &str, theme: &Theme, base_style: Style) -> Vec<Span<'static>> {
     let mut spans: Vec<Span> = Vec::new();
@@ -307,10 +307,7 @@ impl<'a> TuiKitUi<'a> {
         } else {
             self.theme.style_border()
         };
-        let title = match self.chat_scope {
-            ChatScope::All => " ◇ Chat [all] ",
-            ChatScope::Selected => " ◇ Chat [selected] ",
-        };
+        let title = format!(" ◇ Chat [{}] ", self.chat_scope_label());
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -328,12 +325,26 @@ impl<'a> TuiKitUi<'a> {
             inner.width.saturating_sub(3),
         );
         let input_height = input_visible.rows.len().max(1) as u16;
+        let command_rows = matching_slash_commands(self.chat_input);
+        let command_height = command_rows.len() as u16;
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(2), Constraint::Length(input_height)])
+            .constraints([
+                Constraint::Min(2),
+                Constraint::Length(command_height + input_height),
+            ])
             .split(inner);
         let messages_area = chunks[0];
-        let input_area = chunks[1];
+        let footer_area = chunks[1];
+        let footer_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(command_height),
+                Constraint::Length(input_height),
+            ])
+            .split(footer_area);
+        let commands_area = footer_chunks[0];
+        let input_area = footer_chunks[1];
         let full_width = messages_area.width as usize;
         let mut lines = build_chat_lines(self, full_width);
         let visible_height = messages_area.height as usize;
@@ -394,6 +405,28 @@ impl<'a> TuiKitUi<'a> {
             .borders(Borders::NONE)
             .style(Style::default().bg(self.theme.bg_highlight));
         let input_inner = input_block.inner(input_area);
+        if command_height > 0 {
+            let command_lines = command_rows
+                .iter()
+                .enumerate()
+                .map(|(index, command)| {
+                    let selected = self.chat_command_selected == Some(index);
+                    let prefix = if selected { " › " } else { "   " };
+                    let style = if selected {
+                        self.theme.style_accent().add_modifier(Modifier::BOLD)
+                    } else {
+                        self.theme.style_type()
+                    };
+                    Line::from(vec![
+                        Span::styled(prefix, self.theme.style_dim()),
+                        Span::styled((*command).to_string(), style),
+                    ])
+                })
+                .collect::<Vec<_>>();
+            Paragraph::new(command_lines)
+                .wrap(Wrap { trim: false })
+                .render(commands_area, buf);
+        }
         input_block.render(input_area, buf);
         let input_lines = input_visible
             .rows
@@ -427,20 +460,20 @@ pub(super) fn visible_chat_input_rows(
     cursor_col: usize,
     max_width: u16,
 ) -> VisibleChatInputRows {
-    let mut source_rows = if value.is_empty() {
+    let single_line_value = normalize_chat_input_lines(value);
+    let mut source_rows = if single_line_value.is_empty() {
         vec![placeholder.to_string()]
     } else {
-        value
-            .split('\n')
-            .map(|row| row.to_string())
-            .collect::<Vec<_>>()
+        vec![single_line_value]
     };
     if source_rows.is_empty() {
         source_rows.push(String::new());
     }
+    let last_row_index = source_rows.len().saturating_sub(1);
+    let effective_cursor_row = cursor_row.min(last_row_index);
     let visible_height = source_rows.len().clamp(1, max_height as usize);
-    let scroll_row = if cursor_row >= visible_height {
-        cursor_row + 1 - visible_height
+    let scroll_row = if effective_cursor_row >= visible_height {
+        effective_cursor_row + 1 - visible_height
     } else {
         0
     };
@@ -453,7 +486,7 @@ pub(super) fn visible_chat_input_rows(
         .map(|(index, row)| {
             let row_cursor_col = if value.is_empty() {
                 0
-            } else if scroll_row + index == cursor_row {
+            } else if scroll_row + index == effective_cursor_row {
                 cursor_col
             } else {
                 0
@@ -537,6 +570,7 @@ fn trim_chat_input_row(value: &str, max_width: u16, cursor_col: usize) -> (Strin
 mod tests {
     use super::*;
     use crate::theme::Theme;
+    use tui_kit_runtime::ChatScope;
 
     #[test]
     fn wrapped_user_chat_lines_keep_indentation() {
@@ -607,5 +641,48 @@ mod tests {
 
         assert_eq!(placeholder.rows, vec!["type here".to_string()]);
         assert_eq!(short.rows, vec!["short".to_string()]);
+    }
+
+    #[test]
+    fn visible_chat_input_rows_flattens_multiline_input_to_single_row() {
+        let visible = visible_chat_input_rows(
+            "first line\nsecond line",
+            "type here",
+            CHAT_INPUT_MAX_HEIGHT,
+            1,
+            6,
+            40,
+        );
+
+        assert_eq!(visible.rows, vec!["first line second line".to_string()]);
+    }
+
+    #[test]
+    fn chat_scope_label_uses_selected_memory_name() {
+        let theme = Theme::default();
+        let items = vec![tui_kit_model::UiItemSummary {
+            id: "aaaaa-aa".to_string(),
+            name: "Alpha Memory".to_string(),
+            leading_marker: None,
+            kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+            visibility: tui_kit_model::UiVisibility::Private,
+            qualified_name: None,
+            subtitle: None,
+            tags: vec![],
+        }];
+        let ui = TuiKitUi::new(&theme)
+            .ui_summaries(&items)
+            .list_selected(Some(0))
+            .chat_scope(ChatScope::Selected);
+
+        assert_eq!(ui.chat_scope_label(), "Alpha Memory");
+    }
+
+    #[test]
+    fn chat_scope_label_falls_back_when_selected_memory_missing() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).chat_scope(ChatScope::Selected);
+
+        assert_eq!(ui.chat_scope_label(), "selected");
     }
 }

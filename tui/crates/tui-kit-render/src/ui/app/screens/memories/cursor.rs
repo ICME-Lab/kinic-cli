@@ -6,6 +6,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::ui::app::{Focus, TuiKitUi, shared};
 
 use super::chat_panel::{CHAT_INPUT_MAX_HEIGHT, visible_chat_input_rows};
+use tui_kit_runtime::chat_commands::matching_slash_commands;
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn memories_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
@@ -78,6 +79,7 @@ fn chat_cursor_position(
         return None;
     }
     let (cursor_row, cursor_col) = chat_input_cursor.unwrap_or_default();
+    let command_height = matching_slash_commands(chat_input).len() as u16;
     let input_rows = visible_chat_input_rows(
         chat_input,
         "<type your question>",
@@ -89,9 +91,19 @@ fn chat_cursor_position(
     let input_height = input_rows.rows.len().max(1) as u16;
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(2), Constraint::Length(input_height)])
+        .constraints([
+            Constraint::Min(2),
+            Constraint::Length(command_height + input_height),
+        ])
         .split(chat_inner);
-    let input_area = v_chunks[1];
+    let footer_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(command_height),
+            Constraint::Length(input_height),
+        ])
+        .split(v_chunks[1]);
+    let input_area = footer_chunks[1];
     if input_area.width == 0 || input_area.height == 0 {
         return None;
     }
@@ -100,7 +112,10 @@ fn chat_cursor_position(
         .min(input_height.saturating_sub(1) as usize) as u16;
     let prefix_width = 3u16;
     let visible_line = input_rows.rows.get(visible_row as usize)?;
-    let row_start_col = *input_rows.row_start_cols.get(visible_row as usize).unwrap_or(&0);
+    let row_start_col = *input_rows
+        .row_start_cols
+        .get(visible_row as usize)
+        .unwrap_or(&0);
     let visible_cursor_col = cursor_col.saturating_sub(row_start_col);
     let prefix = visible_line
         .chars()
