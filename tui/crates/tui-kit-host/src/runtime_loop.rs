@@ -64,11 +64,13 @@ enum OverlayInputResult {
 enum ActiveTextarea {
     CreateDescription,
     InsertText,
+    ChatInput,
 }
 
 struct FormTextareas {
     create_description: TextArea<'static>,
     insert_text: TextArea<'static>,
+    chat_input: TextArea<'static>,
 }
 
 impl Default for FormTextareas {
@@ -76,6 +78,7 @@ impl Default for FormTextareas {
         Self {
             create_description: textarea_from_text(""),
             insert_text: textarea_from_text(""),
+            chat_input: textarea_from_text(""),
         }
     }
 }
@@ -215,6 +218,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .candidates(&[])
                     .chat_messages(&state.chat_messages)
                     .chat_input(&state.chat_input)
+                    .chat_input_cursor(textarea_cursor(
+                        active_textarea(&state),
+                        ActiveTextarea::ChatInput,
+                        &textareas.chat_input,
+                    ))
                     .chat_loading(state.chat_loading)
                     .chat_scroll(state.chat_scroll)
                     .chat_scope(state.chat_scope)
@@ -618,6 +626,11 @@ fn build_ui<'a>(
         .candidates(&[])
         .chat_messages(&state.chat_messages)
         .chat_input(&state.chat_input)
+        .chat_input_cursor(textarea_cursor(
+            active_textarea(state),
+            ActiveTextarea::ChatInput,
+            &textareas.chat_input,
+        ))
         .chat_loading(state.chat_loading)
         .chat_scroll(state.chat_scroll)
         .chat_scope(state.chat_scope)
@@ -727,7 +740,7 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
         return Ok(false);
     };
     let textarea = textarea_mut(textareas, target);
-    let action = textarea_navigation_action(target, key_event.code, textarea);
+    let action = textarea_navigation_action(target, key_event, key_event.code, textarea);
 
     let Some(action) = action else {
         if key_event.code == crossterm::event::KeyCode::Esc {
@@ -749,9 +762,13 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
 
 fn textarea_navigation_action(
     target: ActiveTextarea,
+    key_event: &crossterm::event::KeyEvent,
     code: crossterm::event::KeyCode,
     textarea: &TextArea<'static>,
 ) -> Option<CoreAction> {
+    if target == ActiveTextarea::ChatInput {
+        return chat_textarea_action(key_event, code);
+    }
     match code {
         crossterm::event::KeyCode::Tab => Some(textarea_next_field_action(target)),
         crossterm::event::KeyCode::BackTab => Some(textarea_prev_field_action(target)),
@@ -769,6 +786,7 @@ fn textarea_next_field_action(target: ActiveTextarea) -> CoreAction {
     match target {
         ActiveTextarea::CreateDescription => CoreAction::CreateNextField,
         ActiveTextarea::InsertText => CoreAction::InsertNextField,
+        ActiveTextarea::ChatInput => CoreAction::FocusNext,
     }
 }
 
@@ -776,6 +794,50 @@ fn textarea_prev_field_action(target: ActiveTextarea) -> CoreAction {
     match target {
         ActiveTextarea::CreateDescription => CoreAction::CreatePrevField,
         ActiveTextarea::InsertText => CoreAction::InsertPrevField,
+        ActiveTextarea::ChatInput => CoreAction::FocusPrev,
+    }
+}
+
+fn chat_textarea_action(
+    key_event: &crossterm::event::KeyEvent,
+    code: crossterm::event::KeyCode,
+) -> Option<CoreAction> {
+    match (code, key_event.modifiers) {
+        (crossterm::event::KeyCode::Tab, _) => Some(CoreAction::FocusNext),
+        (crossterm::event::KeyCode::BackTab, _) => Some(CoreAction::FocusPrev),
+        (crossterm::event::KeyCode::Enter, modifiers)
+            if modifiers == crossterm::event::KeyModifiers::NONE =>
+        {
+            Some(CoreAction::ChatSubmit)
+        }
+        (crossterm::event::KeyCode::Left, modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            Some(CoreAction::ChatScopePrev)
+        }
+        (crossterm::event::KeyCode::Right, modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            Some(CoreAction::ChatScopeNext)
+        }
+        (crossterm::event::KeyCode::PageUp, _) => Some(CoreAction::ChatScrollPageUp),
+        (crossterm::event::KeyCode::PageDown, _) => Some(CoreAction::ChatScrollPageDown),
+        (crossterm::event::KeyCode::Home, modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            Some(CoreAction::ChatScrollHome)
+        }
+        (crossterm::event::KeyCode::End, modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            Some(CoreAction::ChatScrollEnd)
+        }
+        (crossterm::event::KeyCode::Char('N'), modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
+        {
+            Some(CoreAction::ChatNewThread)
+        }
+        _ => None,
     }
 }
 
@@ -788,7 +850,7 @@ fn textarea_is_at_last_row(textarea: &TextArea<'static>) -> bool {
 }
 
 fn active_textarea(state: &CoreState) -> Option<ActiveTextarea> {
-    if state.focus != PaneFocus::Form {
+    if state.focus != PaneFocus::Form && state.focus != PaneFocus::Extra {
         return None;
     }
 
@@ -808,6 +870,10 @@ fn active_textarea(state: &CoreState) -> Option<ActiveTextarea> {
         return Some(ActiveTextarea::InsertText);
     }
 
+    if state.current_tab_id == KINIC_MEMORIES_TAB_ID && state.focus == PaneFocus::Extra {
+        return Some(ActiveTextarea::ChatInput);
+    }
+
     None
 }
 
@@ -815,6 +881,7 @@ fn textarea_mut(textareas: &mut FormTextareas, target: ActiveTextarea) -> &mut T
     match target {
         ActiveTextarea::CreateDescription => &mut textareas.create_description,
         ActiveTextarea::InsertText => &mut textareas.insert_text,
+        ActiveTextarea::ChatInput => &mut textareas.chat_input,
     }
 }
 
@@ -824,6 +891,7 @@ fn sync_form_textareas_from_state(textareas: &mut FormTextareas, state: &CoreSta
         state.create_description.as_str(),
     );
     sync_textarea_from_string(&mut textareas.insert_text, state.insert_text.as_str());
+    sync_textarea_from_string(&mut textareas.chat_input, state.chat_input.as_str());
 }
 
 fn sync_textarea_from_string(textarea: &mut TextArea<'static>, value: &str) {
@@ -854,6 +922,11 @@ fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
         if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
             state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
         }
+    }
+
+    let chat_input = textareas.chat_input.lines().join("\n");
+    if state.chat_input != chat_input {
+        state.chat_input = chat_input;
     }
 }
 

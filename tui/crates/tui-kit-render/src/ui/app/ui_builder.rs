@@ -398,6 +398,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn chat_input_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.chat_input_cursor = value;
+        self
+    }
+
+    #[must_use]
     pub fn chat_loading(mut self, loading: bool) -> Self {
         self.chat_loading = loading;
         self

@@ -293,7 +293,13 @@ impl Focus {
     pub fn next(&self, chat_open: bool) -> Self {
         match self {
             Focus::Search => Focus::Items,
-            Focus::Items => Focus::Content,
+            Focus::Items => {
+                if chat_open {
+                    Focus::Chat
+                } else {
+                    Focus::Content
+                }
+            }
             Focus::Content => {
                 if chat_open {
                     Focus::Chat
@@ -314,7 +320,13 @@ impl Focus {
             Focus::Items => Focus::Search,
             Focus::Content => Focus::Items,
             Focus::Form => Focus::Tabs,
-            Focus::Chat => Focus::Content,
+            Focus::Chat => {
+                if chat_open {
+                    Focus::Items
+                } else {
+                    Focus::Content
+                }
+            }
             Focus::Tabs => {
                 if chat_open {
                     Focus::Chat

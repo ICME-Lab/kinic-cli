@@ -456,6 +456,75 @@ fn textarea_down_on_last_insert_text_row_moves_to_next_field() {
 }
 
 #[test]
+fn chat_textarea_input_updates_chat_with_newlines() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('a'),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat textarea input");
+    assert!(handled);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::SHIFT,
+        ),
+    )
+    .expect("chat textarea input");
+    assert!(handled);
+
+    assert_eq!(state.chat_input, "a\n");
+}
+
+#[test]
+fn chat_textarea_enter_submits_without_inserting_text() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "hello".to_string(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat submit");
+
+    assert!(handled);
+    assert_eq!(state.chat_input, "");
+}
+
+#[test]
 fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
     let mut provider = TestProvider::err("tab failed");
     let mut hooks = NoopRuntimeHooks;
@@ -609,7 +678,10 @@ fn dispatch_with_effects_returns_error_message_on_failure() {
 fn dispatch_with_effects_keeps_non_tab_reducer_state_on_failure() {
     let mut provider = TestProvider::err("chat failed");
     let mut hooks = NoopRuntimeHooks;
-    let mut state = CoreState::default();
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        ..CoreState::default()
+    };
 
     let result = dispatch_with_effects(
         &mut provider,

@@ -23,9 +23,10 @@ impl<'a> TuiKitUi<'a> {
             self.render_items_panel(layout.list_rect, buf);
         }
         self.render_memories_divider(layout.divider_rect, buf);
-        self.render_content_panel(layout.detail_rect, buf);
         if let Some(chat_rect) = layout.chat_rect {
             self.render_chat_panel(chat_rect, buf);
+        } else {
+            self.render_content_panel(layout.detail_rect, buf);
         }
         self.render_search_completion(layout.search_rect, buf);
     }

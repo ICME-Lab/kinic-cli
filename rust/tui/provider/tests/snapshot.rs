@@ -1,8 +1,32 @@
 use super::*;
-use tui_kit_runtime::RemoveMemoryModalState;
+use crate::tui::bridge::AskMemoriesOutput;
+use std::{
+    sync::{Mutex, MutexGuard, OnceLock},
+    thread,
+    time::Duration,
+};
+use tui_kit_runtime::{RemoveMemoryModalState, dispatch_action};
 
 fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
     provider.cursor_memory_id = Some(memory_id.to_string());
+}
+
+fn snapshot_test_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    match LOCK.get_or_init(|| Mutex::new(())).lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn poll_background_until_ready(provider: &mut KinicProvider, state: &CoreState) -> ProviderOutput {
+    for _ in 0..100 {
+        if let Some(output) = provider.poll_background(state) {
+            return output;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    panic!("background output was not ready");
 }
 
 #[test]
@@ -511,6 +535,230 @@ fn build_snapshot_reserves_marker_column_for_memory_metadata_rows() {
 }
 
 #[test]
+fn build_snapshot_inserts_memory_summary_before_overview_when_present() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "first")];
+    provider.refresh_memory_records_from_summaries();
+    provider.memory_content_summaries.insert(
+        "aaaaa-aa".to_string(),
+        "summary line one\nsummary line two".to_string(),
+    );
+    set_memory_selection(&mut provider, "aaaaa-aa");
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        ..CoreState::default()
+    });
+
+    let content = snapshot.selected_content.expect("selected content");
+    let summary_index = content
+        .sections
+        .iter()
+        .position(|section| section.heading == "Memory Summary")
+        .expect("summary section index");
+    let overview_index = content
+        .sections
+        .iter()
+        .position(|section| section.heading == "Overview")
+        .expect("overview section index");
+    let summary = &content.sections[summary_index];
+
+    assert!(summary_index < overview_index);
+    assert_eq!(
+        summary.body_lines,
+        vec![
+            "summary line one".to_string(),
+            "summary line two".to_string()
+        ]
+    );
+}
+
+#[test]
+fn build_snapshot_omits_memory_summary_for_other_memory() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![
+        running_memory_summary("aaaaa-aa", "first"),
+        running_memory_summary("bbbbb-bb", "second"),
+    ];
+    provider.refresh_memory_records_from_summaries();
+    provider
+        .memory_content_summaries
+        .insert("aaaaa-aa".to_string(), "summary line one".to_string());
+    set_memory_selection(&mut provider, "bbbbb-bb");
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        ..CoreState::default()
+    });
+
+    let content = snapshot.selected_content.expect("selected content");
+    assert!(
+        content
+            .sections
+            .iter()
+            .all(|section| section.heading != "Memory Summary")
+    );
+}
+
+#[test]
+fn moving_memory_selection_starts_generated_summary_and_shows_loading() {
+    let _guard = snapshot_test_guard();
+    set_next_test_memory_summary_result(Ok(AskMemoriesOutput {
+        response: "Auto summary".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+    provider.memory_summaries = vec![
+        running_memory_summary("aaaaa-aa", "first"),
+        running_memory_summary("bbbbb-bb", "second"),
+    ];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Items,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
+        .expect("move next should dispatch");
+
+    assert!(
+        provider
+            .memory_summary_tasks
+            .get("bbbbb-bb")
+            .is_some_and(|task| task.in_flight)
+    );
+    let loading_content = provider
+        .build_snapshot(&state)
+        .selected_content
+        .expect("content");
+    let summary = loading_content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Memory Summary")
+        .expect("summary section");
+    assert_eq!(summary.body_lines, vec!["Loading summary...".to_string()]);
+
+    let _ = poll_background_until_ready(&mut provider, &state);
+
+    assert_eq!(
+        provider.memory_content_summaries.get("bbbbb-bb"),
+        Some(&"Auto summary".to_string())
+    );
+    let content = provider
+        .build_snapshot(&state)
+        .selected_content
+        .expect("content");
+    let summary = content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Memory Summary")
+        .expect("summary section");
+    assert_eq!(summary.body_lines, vec!["Auto summary".to_string()]);
+}
+
+#[test]
+fn generated_summary_failure_shows_unavailable_for_selected_memory() {
+    let _guard = snapshot_test_guard();
+    set_next_test_memory_summary_result(Err("summary failed".to_string()));
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+    provider.memory_summaries = vec![
+        running_memory_summary("aaaaa-aa", "first"),
+        running_memory_summary("bbbbb-bb", "second"),
+    ];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Items,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
+        .expect("move next should dispatch");
+    let _ = poll_background_until_ready(&mut provider, &state);
+
+    assert!(!provider.memory_content_summaries.contains_key("bbbbb-bb"));
+    let content = provider
+        .build_snapshot(&state)
+        .selected_content
+        .expect("content");
+    let summary = content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Memory Summary")
+        .expect("summary section");
+    assert_eq!(summary.body_lines, vec!["Summary unavailable.".to_string()]);
+}
+
+#[test]
+fn completed_summary_for_previous_selection_is_cached_after_cursor_moves_again() {
+    let _guard = snapshot_test_guard();
+    set_next_test_memory_summary_result(Ok(AskMemoriesOutput {
+        response: "Summary for beta".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    let mut provider = KinicProvider::new(live_config());
+    provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
+    provider.memory_summaries = vec![
+        running_memory_summary("aaaaa-aa", "first"),
+        running_memory_summary("bbbbb-bb", "second"),
+        running_memory_summary("ccccc-cc", "third"),
+    ];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Items,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
+        .expect("move next should dispatch");
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
+        .expect("second move next should dispatch");
+
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("ccccc-cc"));
+    let _ = poll_background_until_ready(&mut provider, &state);
+
+    assert_eq!(
+        provider.memory_content_summaries.get("bbbbb-bb"),
+        Some(&"Summary for beta".to_string())
+    );
+}
+
+#[test]
+fn start_live_memories_load_clears_cached_memory_summaries() {
+    let mut provider = KinicProvider::new(live_config());
+    provider
+        .memory_content_summaries
+        .insert("aaaaa-aa".to_string(), "stale summary".to_string());
+    provider
+        .failed_memory_content_summaries
+        .insert("bbbbb-bb".to_string(), "stale error".to_string());
+    provider.memory_summary_tasks.insert(
+        "ccccc-cc".to_string(),
+        RequestTaskState {
+            receiver: None,
+            in_flight: true,
+            request_id: Some(7),
+        },
+    );
+
+    let _ = provider.start_live_memories_load(None, true);
+
+    assert!(provider.memory_content_summaries.is_empty());
+    assert!(provider.failed_memory_content_summaries.is_empty());
+    assert!(provider.memory_summary_tasks.is_empty());
+}
+
+#[test]
 fn build_snapshot_reserves_marker_column_for_unselected_name_row() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_summaries = vec![MemorySummary {
@@ -750,6 +998,33 @@ fn memory_content_jump_next_focuses_search_after_last_action() {
             .effects
             .iter()
             .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Search)))
+    );
+}
+
+#[test]
+fn memory_content_jump_next_focuses_chat_when_chat_is_open() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "first")];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+
+    let output = provider
+        .handle_action(
+            &CoreAction::MemoryContentJumpNext,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                chat_open: true,
+                memory_content_action_index: 1,
+                ..CoreState::default()
+            },
+        )
+        .expect("jump next output");
+
+    assert!(
+        output
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Extra)))
     );
 }
 

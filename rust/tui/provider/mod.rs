@@ -1,7 +1,7 @@
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::Path,
     sync::{Arc, mpsc},
     thread,
@@ -9,6 +9,7 @@ use std::{
 
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
+use super::chat_prompt::SelectedMemoryContext;
 use super::settings::{self, PreferencesHealth, UserPreferences};
 use crate::{
     create_domain::derive_create_cost,
@@ -112,6 +113,10 @@ const MAX_CONCURRENT_MEMORY_SEARCHES: usize = 10;
 const MAX_CONCURRENT_MEMORY_DETAIL_PREFETCHES: usize = 4;
 const ADD_MEMORY_ACTION_ID: &str = "kinic-action-add-memory";
 const ALL_MEMORIES_CHAT_THREAD_KEY: &str = "all-memories";
+#[cfg_attr(test, allow(dead_code))]
+const MEMORY_SUMMARY_QUERY: &str = "Summarize the contents of this memory concisely. Explain the main topics, what kinds of information it contains, and what the memory appears to be for, in 3 to 5 sentences.";
+const MEMORY_SUMMARY_LOADING_TEXT: &str = "Loading summary...";
+const MEMORY_SUMMARY_UNAVAILABLE_TEXT: &str = "Summary unavailable.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActiveChatThreadRef {
@@ -160,6 +165,10 @@ pub struct KinicProvider {
     transfer_prerequisites_task: TaskState<TransferPrerequisitesTaskOutput>,
     transfer_submit_task: TaskState<TransferSubmitTaskOutput>,
     preferred_memory_after_refresh: Option<String>,
+    memory_content_summaries: HashMap<String, String>,
+    failed_memory_content_summaries: HashMap<String, String>,
+    memory_summary_tasks: HashMap<String, RequestTaskState<MemorySummaryTaskOutput>>,
+    next_memory_summary_request_id: u64,
     loaded_memory_details: HashSet<String>,
     pending_memory_detail: RequestTaskState<MemoryDetailTaskOutput>,
     next_memory_detail_request_id: u64,
@@ -269,6 +278,12 @@ struct ChatTaskOutput {
     result: Result<bridge::AskMemoriesOutput, String>,
 }
 
+struct MemorySummaryTaskOutput {
+    request_id: u64,
+    memory_id: String,
+    result: Result<bridge::AskMemoriesOutput, String>,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CapturedChatRequest {
@@ -278,6 +293,7 @@ struct CapturedChatRequest {
     target_memory_ids: Vec<String>,
     query: String,
     history: Vec<(String, String)>,
+    selected_memory_context: Option<SelectedMemoryContext>,
 }
 
 struct SessionSettingsTaskOutput {
@@ -670,6 +686,30 @@ fn take_last_test_chat_request() -> Option<CapturedChatRequest> {
     guard.take()
 }
 
+#[cfg(test)]
+fn test_memory_summary_override()
+-> &'static Mutex<Option<Result<bridge::AskMemoriesOutput, String>>> {
+    static OVERRIDE: OnceLock<Mutex<Option<Result<bridge::AskMemoriesOutput, String>>>> =
+        OnceLock::new();
+    OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+fn set_next_test_memory_summary_result(result: Result<bridge::AskMemoriesOutput, String>) {
+    let mut guard = test_memory_summary_override()
+        .lock()
+        .expect("test memory summary override lock should be available");
+    *guard = Some(result);
+}
+
+#[cfg(test)]
+fn take_test_memory_summary_result() -> Option<Result<bridge::AskMemoriesOutput, String>> {
+    let mut guard = test_memory_summary_override()
+        .lock()
+        .expect("test memory summary override lock should be available");
+    guard.take()
+}
+
 struct InsertSubmitTaskOutput {
     request_id: u64,
     result: Result<bridge::InsertMemorySuccess, bridge::InsertMemoryError>,
@@ -963,6 +1003,10 @@ impl KinicProvider {
             transfer_prerequisites_task: TaskState::default(),
             transfer_submit_task: TaskState::default(),
             preferred_memory_after_refresh: None,
+            memory_content_summaries: HashMap::new(),
+            failed_memory_content_summaries: HashMap::new(),
+            memory_summary_tasks: HashMap::new(),
+            next_memory_summary_request_id: 0,
             loaded_memory_details: HashSet::new(),
             pending_memory_detail: RequestTaskState::default(),
             next_memory_detail_request_id: 0,
@@ -994,6 +1038,9 @@ impl KinicProvider {
         self.all = vec![loading_memories_record()];
         self.memory_summaries.clear();
         self.memory_records.clear();
+        self.memory_content_summaries.clear();
+        self.failed_memory_content_summaries.clear();
+        self.memory_summary_tasks.clear();
         self.loaded_memory_details.clear();
         reset_request_task(&mut self.pending_memory_detail);
         self.pending_memory_detail_memory_id = None;
@@ -1047,20 +1094,7 @@ impl KinicProvider {
             MemoriesMode::Results => &self.result_records,
         };
 
-        if self.memories_mode == MemoriesMode::Results || self.query.is_empty() {
-            return base.iter().collect();
-        }
-
-        let q = self.query.to_lowercase();
-        base.iter()
-            .filter(|r| {
-                r.title.to_lowercase().contains(&q)
-                    || r.summary.to_lowercase().contains(&q)
-                    || r.group.to_lowercase().contains(&q)
-                    || r.id.to_lowercase().contains(&q)
-                    || (r.group == "memories" && r.content_md.to_lowercase().contains(&q))
-            })
-            .collect()
+        base.iter().collect()
     }
 
     fn visible_memory_records(&self) -> Vec<&KinicRecord> {
@@ -1368,6 +1402,30 @@ impl KinicProvider {
         }
     }
 
+    fn selected_memory_chat_context(&self, scope: ChatScope) -> Option<SelectedMemoryContext> {
+        if scope != ChatScope::Selected {
+            return None;
+        }
+
+        let summary = self.selected_memory_summary()?;
+        let record = self.selected_memory_record()?;
+        let parsed_detail = parse_memory_detail(summary.detail.as_str());
+        let summary_text = self
+            .memory_content_summaries
+            .get(record.id.as_str())
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        Some(SelectedMemoryContext {
+            memory_id: record.id.clone(),
+            memory_name: resolved_memory_name(summary.name.as_str(), summary.detail.as_str()),
+            description: parsed_detail.description,
+            summary: summary_text,
+        })
+    }
+
     fn start_chat_submit(
         &mut self,
         scope: ChatScope,
@@ -1380,6 +1438,7 @@ impl KinicProvider {
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
         let retrieval_config = self.chat_retrieval_config();
+        let selected_memory_context = self.selected_memory_chat_context(scope);
 
         #[cfg(test)]
         set_last_test_chat_request(CapturedChatRequest {
@@ -1392,6 +1451,7 @@ impl KinicProvider {
                 .collect(),
             query: query.clone(),
             history: history.clone(),
+            selected_memory_context: selected_memory_context.clone(),
         });
 
         spawn_request_task(
@@ -1415,11 +1475,14 @@ impl KinicProvider {
                     .block_on(bridge::ask_memories(
                         use_mainnet,
                         auth,
-                        scope,
-                        targets,
-                        query,
-                        history,
-                        retrieval_config,
+                        bridge::AskMemoriesRequest {
+                            scope,
+                            targets,
+                            query,
+                            history,
+                            retrieval_config,
+                            selected_memory_context,
+                        },
                     ))
                     .map_err(|error| short_error(&error.to_string()));
                 let _ = tx.send(ChatTaskOutput {
@@ -1484,6 +1547,46 @@ impl KinicProvider {
         self.memory_records
             .iter()
             .find(|record| record.id == selected_id)
+    }
+
+    fn memory_summary_display_text(&self, memory_id: &str) -> Option<String> {
+        if let Some(summary) = self.memory_content_summaries.get(memory_id) {
+            return Some(summary.clone());
+        }
+        if self
+            .memory_summary_tasks
+            .get(memory_id)
+            .is_some_and(|task| task.in_flight)
+        {
+            return Some(MEMORY_SUMMARY_LOADING_TEXT.to_string());
+        }
+        if self.failed_memory_content_summaries.contains_key(memory_id) {
+            return Some(MEMORY_SUMMARY_UNAVAILABLE_TEXT.to_string());
+        }
+        None
+    }
+
+    fn invalidate_memory_summary(&mut self, memory_id: &str) {
+        self.memory_content_summaries.remove(memory_id);
+        self.failed_memory_content_summaries.remove(memory_id);
+        self.memory_summary_tasks.remove(memory_id);
+    }
+
+    fn selected_content_for_record(
+        &self,
+        record: &KinicRecord,
+        state: &CoreState,
+    ) -> tui_kit_model::UiItemContent {
+        let summary_text = if record.group == "memories" {
+            self.memory_summary_display_text(record.id.as_str())
+        } else {
+            None
+        };
+        let mut content = adapter::to_content(record, summary_text.as_deref());
+        if record.group == "memories" {
+            self.apply_access_content(&mut content, state);
+        }
+        content
     }
 
     fn active_rename_target(&self, state: &CoreState) -> Option<(&MemorySummary, String)> {
@@ -1845,6 +1948,107 @@ impl KinicProvider {
         );
     }
 
+    fn start_selected_memory_summary_load(&mut self, force_reload: bool) {
+        if self.memories_mode != MemoriesMode::Browser {
+            return;
+        }
+        let Some(record) = self.selected_memory_record() else {
+            return;
+        };
+        #[cfg(test)]
+        if record.searchable_memory_id.is_none() {
+            return;
+        }
+        #[cfg(not(test))]
+        let Some(searchable_memory_id) = record.searchable_memory_id.clone() else {
+            return;
+        };
+        let memory_id = record.id.clone();
+        if !force_reload {
+            if self
+                .memory_content_summaries
+                .contains_key(memory_id.as_str())
+            {
+                return;
+            }
+            if self
+                .failed_memory_content_summaries
+                .contains_key(memory_id.as_str())
+            {
+                return;
+            }
+            if self
+                .memory_summary_tasks
+                .get(memory_id.as_str())
+                .is_some_and(|task| task.in_flight)
+            {
+                return;
+            }
+        }
+
+        #[cfg(test)]
+        let Some(result) = take_test_memory_summary_result() else {
+            return;
+        };
+        #[cfg(not(test))]
+        let auth = self.config.auth.clone();
+        #[cfg(not(test))]
+        let use_mainnet = self.config.use_mainnet;
+        #[cfg(not(test))]
+        let retrieval_config = self.chat_retrieval_config();
+        #[cfg(not(test))]
+        let target = bridge::ChatTarget {
+            memory_id: searchable_memory_id,
+            memory_name: record.title.clone(),
+        };
+
+        self.failed_memory_content_summaries
+            .remove(memory_id.as_str());
+        let task_state = self
+            .memory_summary_tasks
+            .entry(memory_id.clone())
+            .or_default();
+
+        spawn_request_task(
+            &mut self.next_memory_summary_request_id,
+            task_state,
+            move |request_id, tx| {
+                #[cfg(test)]
+                {
+                    let _ = tx.send(MemorySummaryTaskOutput {
+                        request_id,
+                        memory_id,
+                        result,
+                    });
+                }
+
+                #[cfg(not(test))]
+                let result = Runtime::new()
+                    .expect("failed to create tokio runtime for memory summary")
+                    .block_on(bridge::ask_memories(
+                        use_mainnet,
+                        auth,
+                        bridge::AskMemoriesRequest {
+                            scope: ChatScope::Selected,
+                            targets: vec![target],
+                            query: MEMORY_SUMMARY_QUERY.to_string(),
+                            history: Vec::new(),
+                            retrieval_config,
+                            selected_memory_context: None,
+                        },
+                    ))
+                    .map_err(|error| short_error(&error.to_string()));
+
+                #[cfg(not(test))]
+                let _ = tx.send(MemorySummaryTaskOutput {
+                    request_id,
+                    memory_id,
+                    result,
+                });
+            },
+        );
+    }
+
     fn should_handle_memory_navigation(&self, state: &CoreState) -> bool {
         state.current_tab_id == KINIC_MEMORIES_TAB_ID
             && self.tab_id == KINIC_MEMORIES_TAB_ID
@@ -1940,19 +2144,19 @@ impl KinicProvider {
             None
         } else if self.memories_mode == MemoriesMode::Browser {
             if self.cursor_memory_id.is_none() && self.memory_records.is_empty() {
-                filtered.first().copied().map(adapter::to_content)
+                filtered
+                    .first()
+                    .copied()
+                    .map(|record| self.selected_content_for_record(record, state))
             } else {
-                self.selected_memory_record().map(|record| {
-                    let mut content = adapter::to_content(record);
-                    if record.group == "memories" {
-                        self.apply_access_content(&mut content, state);
-                    }
-                    content
-                })
+                self.selected_memory_record()
+                    .map(|record| self.selected_content_for_record(record, state))
             }
         } else {
             let sel = state.selected_index.unwrap_or(0);
-            filtered.get(sel).map(|r| adapter::to_content(r))
+            filtered
+                .get(sel)
+                .map(|record| adapter::to_content(record, None))
         };
         let selected_index = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
@@ -2536,6 +2740,7 @@ impl KinicProvider {
             .retain(|summary| summary.id != memory_id);
         self.memory_records.retain(|record| record.id != memory_id);
         self.all.retain(|record| record.id != memory_id);
+        self.invalidate_memory_summary(memory_id);
         self.loaded_memory_details.remove(memory_id);
         if self.pending_memory_detail_memory_id.as_deref() == Some(memory_id) {
             reset_request_task(&mut self.pending_memory_detail);
@@ -3495,6 +3700,7 @@ impl KinicProvider {
                 self.last_search_state = None;
                 self.start_memory_detail_prefetch_for_records();
                 self.start_cursor_memory_detail_load();
+                self.start_selected_memory_summary_load(false);
                 self.start_insert_dim_load(state);
                 let mut effects = Vec::new();
                 if self.cursor_memory_id != previous_cursor_memory_id {
@@ -3637,6 +3843,75 @@ impl KinicProvider {
         Some(self.snapshot_output(state, effects))
     }
 
+    fn poll_memory_summary_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        enum MemorySummaryPollState {
+            Pending,
+            Ready(MemorySummaryTaskOutput, bool),
+            Disconnected,
+        }
+
+        let memory_ids = self
+            .memory_summary_tasks
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for memory_id in memory_ids {
+            let poll_state = {
+                let Some(task_state) = self.memory_summary_tasks.get_mut(memory_id.as_str()) else {
+                    continue;
+                };
+                let Some(receiver) = task_state.receiver.as_ref() else {
+                    continue;
+                };
+                match poll_pending_task(receiver) {
+                    PendingTaskPoll::Pending => MemorySummaryPollState::Pending,
+                    PendingTaskPoll::Ready(output) => {
+                        let output_request_id = output.request_id;
+                        MemorySummaryPollState::Ready(
+                            output,
+                            finish_request_task(task_state, output_request_id),
+                        )
+                    }
+                    PendingTaskPoll::Disconnected => {
+                        reset_request_task(task_state);
+                        MemorySummaryPollState::Disconnected
+                    }
+                }
+            };
+
+            match poll_state {
+                MemorySummaryPollState::Pending => continue,
+                MemorySummaryPollState::Disconnected => {
+                    self.memory_summary_tasks.remove(memory_id.as_str());
+                    return Some(self.snapshot_output(state, Vec::new()));
+                }
+                MemorySummaryPollState::Ready(output, is_current) => {
+                    self.memory_summary_tasks.remove(memory_id.as_str());
+                    match output.result {
+                        Ok(success) => {
+                            self.memory_content_summaries
+                                .insert(output.memory_id.clone(), success.response);
+                            self.failed_memory_content_summaries
+                                .remove(output.memory_id.as_str());
+                        }
+                        Err(error) => {
+                            self.memory_content_summaries
+                                .remove(output.memory_id.as_str());
+                            self.failed_memory_content_summaries
+                                .insert(output.memory_id, error);
+                        }
+                    }
+                    if !is_current {
+                        return Some(self.stale_request_output(state));
+                    }
+                    return Some(self.snapshot_output(state, Vec::new()));
+                }
+            }
+        }
+
+        None
+    }
+
     fn poll_create_submit_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
         let receiver = self.create_submit_task.receiver.as_ref()?;
         let output = match poll_pending_task(receiver) {
@@ -3689,6 +3964,7 @@ impl KinicProvider {
                 self.last_search_state = None;
                 self.start_memory_detail_prefetch_for_records();
                 self.start_cursor_memory_detail_load();
+                self.start_selected_memory_summary_load(false);
                 let _ = self.start_create_cost_refresh();
                 effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
                 effects.push(CoreEffect::SelectFirstListItem);
@@ -3842,11 +4118,17 @@ impl KinicProvider {
         }
 
         let effects = match output.result {
-            Ok(success) => vec![
-                CoreEffect::InsertFormError(None),
-                CoreEffect::ResetInsertFormForRepeat,
-                CoreEffect::NotifyPersistent(insert_success_status(&success)),
-            ],
+            Ok(success) => {
+                self.invalidate_memory_summary(success.memory_id.as_str());
+                if self.cursor_memory_id.as_deref() == Some(success.memory_id.as_str()) {
+                    self.start_selected_memory_summary_load(true);
+                }
+                vec![
+                    CoreEffect::InsertFormError(None),
+                    CoreEffect::ResetInsertFormForRepeat,
+                    CoreEffect::NotifyPersistent(insert_success_status(&success)),
+                ]
+            }
             Err(error) => vec![CoreEffect::InsertFormError(Some(
                 format_insert_submit_error(&error),
             ))],
@@ -4196,7 +4478,12 @@ impl DataProvider for KinicProvider {
                     .memory_content_action_index
                     .min(selections.len().saturating_sub(1));
                 if current + 1 >= selections.len().max(1) {
-                    effects.push(CoreEffect::FocusPane(PaneFocus::Search));
+                    let next_focus = if state.chat_open {
+                        PaneFocus::Extra
+                    } else {
+                        PaneFocus::Search
+                    };
+                    effects.push(CoreEffect::FocusPane(next_focus));
                     return Ok(ProviderOutput {
                         snapshot: Some(self.build_snapshot(state)),
                         effects,
@@ -4619,6 +4906,7 @@ impl DataProvider for KinicProvider {
         if self.cursor_memory_id != previous_cursor_memory_id {
             self.invalidate_pending_search();
             self.start_cursor_memory_detail_load();
+            self.start_selected_memory_summary_load(false);
             effects.push(CoreEffect::SetMemoryContentActionIndex(0));
             effects.extend(self.load_active_chat_history_effects(state));
         }
@@ -4631,6 +4919,7 @@ impl DataProvider for KinicProvider {
 
     fn poll_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
         self.poll_initial_memories_background(state)
+            .or_else(|| self.poll_memory_summary_background(state))
             .or_else(|| self.poll_memory_detail_background(state))
             .or_else(|| self.poll_memory_detail_prefetch_background(state))
             .or_else(|| self.poll_chat_submit_background(state))
@@ -4848,7 +5137,7 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         .map(|description| format_multiline_metadata_field("Description", description))
         .unwrap_or_default();
     let display_name = display_memory_name(memory.name.as_str(), resolved_name.as_deref());
-    let summary = format!("Id: {} | Status: {}", memory.id, memory.status);
+    let summary = format!("Id: {}\nStatus: {}", memory.id, memory.status);
     KinicRecord::new(
         memory.id.clone(),
         display_name,

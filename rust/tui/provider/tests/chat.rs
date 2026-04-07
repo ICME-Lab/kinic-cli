@@ -1,3 +1,4 @@
+use super::super::super::chat_prompt::SelectedMemoryContext;
 use super::*;
 use crate::tui::bridge::AskMemoriesOutput;
 use crate::tui::settings::{
@@ -15,6 +16,15 @@ use tui_kit_runtime::{
 };
 
 const CHAT_HISTORY_IDENTITY_LABEL: &str = "provided";
+
+fn expected_selected_memory_context() -> SelectedMemoryContext {
+    SelectedMemoryContext {
+        memory_id: "aaaaa-aa".to_string(),
+        memory_name: "unknown".to_string(),
+        description: None,
+        summary: None,
+    }
+}
 
 fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
     provider.cursor_memory_id = Some(memory_id.to_string());
@@ -138,6 +148,7 @@ fn chat_submit_starts_background_task_and_saves_user_message() {
             target_memory_ids: vec!["aaaaa-aa".to_string()],
             query: "What changed?".to_string(),
             history: vec![],
+            selected_memory_context: Some(expected_selected_memory_context()),
         }
     );
 }
@@ -258,6 +269,36 @@ fn chat_background_failure_clears_loading_without_persisting_assistant() {
         .expect("history should load")
         .messages,
         vec![("user".to_string(), "Question".to_string())]
+    );
+}
+
+#[test]
+fn chat_background_success_does_not_overwrite_memory_content_summary() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "New chat answer".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    let mut provider = configure_provider_for_chat();
+    provider.memory_content_summaries.insert(
+        "aaaaa-aa".to_string(),
+        "Existing generated summary".to_string(),
+    );
+    let mut state = chat_state("Question");
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("chat submit should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    let output = poll_background_until_ready(&mut provider, &state);
+    execute_effects_to_status(&mut state, output.effects);
+
+    assert_eq!(
+        provider.memory_content_summaries.get("aaaaa-aa"),
+        Some(&"Existing generated summary".to_string())
     );
 }
 
@@ -457,6 +498,10 @@ fn chat_submit_uses_latest_user_query_and_recent_visible_history() {
             ("assistant".to_string(), "a4".to_string()),
         ]
     );
+    assert_eq!(
+        request.selected_memory_context,
+        Some(expected_selected_memory_context())
+    );
 }
 
 #[test]
@@ -506,6 +551,7 @@ fn all_memories_chat_submit_uses_all_targets_and_separate_history_thread() {
             target_memory_ids: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
             query: "compare everything".to_string(),
             history: vec![],
+            selected_memory_context: None,
         }
     );
 }
@@ -625,6 +671,68 @@ fn chat_new_thread_switches_to_empty_thread_and_submit_uses_it() {
     let request = take_last_test_chat_request().expect("captured request should exist");
     assert_eq!(request.thread_id, next_thread_id);
     assert!(request.history.is_empty());
+    assert_eq!(
+        request.selected_memory_context,
+        Some(expected_selected_memory_context())
+    );
+}
+
+#[test]
+fn selected_chat_submit_includes_cached_memory_summary_context() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "ok".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    let mut provider = configure_provider_for_chat();
+    provider.memory_content_summaries.insert(
+        "aaaaa-aa".to_string(),
+        "Contains UI skills and store entries.".to_string(),
+    );
+    let mut state = chat_state("Tell me about this memory");
+
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("chat submit should dispatch");
+
+    let request = take_last_test_chat_request().expect("captured request should exist");
+    assert_eq!(
+        request.selected_memory_context,
+        Some(SelectedMemoryContext {
+            memory_id: "aaaaa-aa".to_string(),
+            memory_name: "unknown".to_string(),
+            description: None,
+            summary: Some("Contains UI skills and store entries.".to_string()),
+        })
+    );
+}
+
+#[test]
+fn selected_chat_submit_excludes_placeholder_memory_summary_context() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "ok".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    let mut provider = configure_provider_for_chat();
+    provider
+        .failed_memory_content_summaries
+        .insert("aaaaa-aa".to_string(), "failed".to_string());
+    let mut state = chat_state("Tell me about this memory");
+
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("chat submit should dispatch");
+
+    let request = take_last_test_chat_request().expect("captured request should exist");
+    assert_eq!(
+        request.selected_memory_context,
+        Some(expected_selected_memory_context())
+    );
 }
 
 #[test]

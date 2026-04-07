@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 
+use super::chat_prompt::SelectedMemoryContext;
 use crate::{
     clients::{
         launcher::{LauncherClient, State},
@@ -46,6 +47,16 @@ pub struct SearchResultItem {
 pub struct AskMemoriesOutput {
     pub response: String,
     pub failed_memory_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AskMemoriesRequest {
+    pub scope: ChatScope,
+    pub targets: Vec<ChatTarget>,
+    pub query: String,
+    pub history: Vec<(String, String)>,
+    pub retrieval_config: ChatRetrievalConfig,
+    pub selected_memory_context: Option<SelectedMemoryContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -352,22 +363,9 @@ pub async fn search_memory_with_agent(
 pub async fn ask_memories(
     use_mainnet: bool,
     auth: TuiAuth,
-    scope: ChatScope,
-    targets: Vec<ChatTarget>,
-    query: String,
-    history: Vec<(String, String)>,
-    retrieval_config: ChatRetrievalConfig,
+    request: AskMemoriesRequest,
 ) -> Result<AskMemoriesOutput> {
-    super::chat_service::ask_memories(
-        use_mainnet,
-        auth,
-        scope,
-        targets,
-        query,
-        history,
-        retrieval_config,
-    )
-    .await
+    super::chat_service::ask_memories(use_mainnet, auth, request).await
 }
 
 pub async fn load_memory_dim(

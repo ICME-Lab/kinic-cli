@@ -92,7 +92,7 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
             allows_tabs: true,
             allows_content: false,
             allows_form: true,
-            allows_chat: true,
+            allows_chat: false,
         },
         kinic_tabs::TabKind::PlaceholderMarket | kinic_tabs::TabKind::PlaceholderSettings => {
             TabFocusPolicy {
@@ -102,10 +102,14 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
                 allows_tabs: true,
                 allows_content: true,
                 allows_form: false,
-                allows_chat: true,
+                allows_chat: false,
             }
         }
     }
+}
+
+fn chat_supported_for_tab(tab_id: &str) -> bool {
+    kinic_tabs::tab_kind(tab_id) == kinic_tabs::TabKind::Memories
 }
 
 pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
@@ -1465,6 +1469,12 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         CoreAction::SetTab(tab_id) => {
             state.current_tab_id = tab_id.0.clone();
+            if !chat_supported_for_tab(state.current_tab_id.as_str()) {
+                state.chat_open = false;
+                if state.focus == PaneFocus::Extra {
+                    state.focus = focus_after_chat_close(state.current_tab_id.as_str());
+                }
+            }
             state.selected_index = Some(0);
             close_picker(state);
             close_access_control_modal(state);
@@ -1482,7 +1492,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::FocusNext => {
             state.focus = match state.focus {
                 PaneFocus::Search => PaneFocus::Items,
-                PaneFocus::Items => PaneFocus::Content,
+                PaneFocus::Items => {
+                    if memories_chat_replaces_content(state) {
+                        PaneFocus::Extra
+                    } else {
+                        PaneFocus::Content
+                    }
+                }
                 PaneFocus::Content => {
                     if state.chat_open {
                         PaneFocus::Extra
@@ -1517,7 +1533,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 PaneFocus::Items => PaneFocus::Search,
                 PaneFocus::Content => PaneFocus::Items,
                 PaneFocus::Form => PaneFocus::Tabs,
-                PaneFocus::Extra => PaneFocus::Content,
+                PaneFocus::Extra => {
+                    if memories_chat_replaces_content(state) {
+                        PaneFocus::Items
+                    } else {
+                        PaneFocus::Content
+                    }
+                }
                 PaneFocus::Tabs => {
                     if state.chat_open {
                         PaneFocus::Extra
@@ -1548,8 +1570,14 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::OpenSelected => {
-            state.focus = PaneFocus::Content;
-            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+            if memories_chat_replaces_content(state) {
+                state.focus = PaneFocus::Extra;
+            } else {
+                state.focus = PaneFocus::Content;
+            }
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID
+                && state.focus == PaneFocus::Content
+            {
                 state.memory_content_action_index = 0;
             }
         }
@@ -1561,6 +1589,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             };
         }
         CoreAction::ToggleChat => {
+            if !chat_supported_for_tab(state.current_tab_id.as_str()) {
+                state.chat_open = false;
+                if state.focus == PaneFocus::Extra {
+                    state.focus = focus_after_chat_close(state.current_tab_id.as_str());
+                }
+                return;
+            }
             state.chat_open = !state.chat_open;
             if state.chat_open {
                 state.focus = PaneFocus::Extra;
@@ -1661,6 +1696,10 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     }
 
     normalize_focus_for_tab(state, previous_focus);
+}
+
+fn memories_chat_replaces_content(state: &CoreState) -> bool {
+    state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID && state.chat_open
 }
 
 fn normalize_focus_for_tab(state: &mut CoreState, previous_focus: PaneFocus) {
@@ -2215,7 +2254,7 @@ fn is_focus_allowed_for_policy(policy: TabFocusPolicy, focus: PaneFocus) -> bool
 }
 
 fn default_focus_for_policy(policy: TabFocusPolicy, chat_open: bool) -> PaneFocus {
-    if chat_open {
+    if chat_open && policy.allows_chat {
         return PaneFocus::Extra;
     }
 
@@ -2896,6 +2935,22 @@ mod tests {
     }
 
     #[test]
+    fn open_selected_keeps_focus_on_chat_when_memories_chat_replaces_content() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            chat_open: true,
+            memory_content_action_index: 2,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::OpenSelected);
+
+        assert_eq!(state.focus, PaneFocus::Extra);
+        assert_eq!(state.memory_content_action_index, 2);
+    }
+
+    #[test]
     fn test_dispatch_action_applies_provider_snapshot() {
         struct DispatchTestProvider;
 
@@ -2923,7 +2978,7 @@ mod tests {
     }
 
     #[test]
-    fn toggle_chat_returns_to_create_focus_on_create_tab() {
+    fn toggle_chat_is_ignored_on_create_tab() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
             focus: PaneFocus::Form,
@@ -2931,10 +2986,27 @@ mod tests {
         };
 
         apply_core_action(&mut state, &CoreAction::ToggleChat);
-        assert_eq!(state.focus, PaneFocus::Extra);
-
-        apply_core_action(&mut state, &CoreAction::ToggleChat);
         assert_eq!(state.focus, PaneFocus::Form);
+        assert!(!state.chat_open);
+    }
+
+    #[test]
+    fn switching_away_from_memories_closes_chat() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Extra,
+            chat_open: true,
+            ..CoreState::default()
+        };
+
+        apply_core_action(
+            &mut state,
+            &CoreAction::SetTab(CoreTabId::new(kinic_tabs::KINIC_CREATE_TAB_ID)),
+        );
+
+        assert_eq!(state.current_tab_id, kinic_tabs::KINIC_CREATE_TAB_ID);
+        assert_eq!(state.focus, PaneFocus::Form);
+        assert!(!state.chat_open);
     }
 
     #[test]
@@ -3239,6 +3311,31 @@ mod tests {
     }
 
     #[test]
+    fn memories_items_tab_moves_focus_to_chat_when_chat_replaces_content() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            chat_open: true,
+            selected_index: Some(0),
+            list_items: vec![UiItemSummary {
+                id: "1".to_string(),
+                name: "a".to_string(),
+                leading_marker: None,
+                kind: tui_kit_model::UiItemKind::Custom("x".to_string()),
+                visibility: tui_kit_model::UiVisibility::Private,
+                qualified_name: None,
+                subtitle: None,
+                tags: vec![],
+            }],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusNext);
+        assert_eq!(state.focus, PaneFocus::Extra);
+        assert_eq!(state.selected_index, Some(0));
+    }
+
+    #[test]
     fn memories_items_backtab_moves_focus_to_search() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
@@ -3260,6 +3357,19 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::FocusPrev);
         assert_eq!(state.focus, PaneFocus::Search);
         assert_eq!(state.selected_index, Some(0));
+    }
+
+    #[test]
+    fn memories_chat_backtab_moves_focus_to_items_when_chat_replaces_content() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Extra,
+            chat_open: true,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusPrev);
+        assert_eq!(state.focus, PaneFocus::Items);
     }
 
     #[test]

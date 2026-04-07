@@ -526,7 +526,7 @@ fn invalidate_pending_search_cancels_worker_and_clears_receiver() {
 }
 
 #[test]
-fn sync_active_memory_tracks_visible_records_and_restores_after_query_clears() {
+fn sync_active_memory_ignores_query_when_browser_records_are_loaded() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_records = vec![
         live_memory("aaaaa-aa", "Alpha Memory"),
@@ -537,14 +537,20 @@ fn sync_active_memory_tracks_visible_records_and_restores_after_query_clears() {
     provider.query = "beta".to_string();
 
     provider.sync_memory_browser_selection();
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
 
     provider.query = "gamma".to_string();
     provider.sync_memory_browser_selection();
-    assert_eq!(provider.cursor_memory_id, None);
-    let empty_snapshot = provider.build_snapshot(&CoreState::default());
-    assert!(empty_snapshot.selected_content.is_none());
-    assert!(empty_snapshot.items.is_empty());
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
+    let snapshot = provider.build_snapshot(&CoreState::default());
+    assert_eq!(snapshot.items.len(), 2);
+    assert_eq!(
+        snapshot
+            .selected_content
+            .as_ref()
+            .map(|detail| detail.id.as_str()),
+        Some("aaaaa-aa")
+    );
 
     provider.query.clear();
     provider.sync_memory_browser_selection();
@@ -560,7 +566,7 @@ fn sync_active_memory_tracks_visible_records_and_restores_after_query_clears() {
 }
 
 #[test]
-fn memory_navigation_stays_within_visible_filtered_records() {
+fn memory_navigation_ignores_query_filtered_visibility() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_records = vec![
         live_memory("aaaaa-aa", "Alpha Memory"),
@@ -581,7 +587,7 @@ fn memory_navigation_stays_within_visible_filtered_records() {
         )
         .expect("move next should succeed");
 
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("ccccc-cc"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
     assert!(output.snapshot.is_some());
     provider
         .handle_action(
@@ -592,7 +598,7 @@ fn memory_navigation_stays_within_visible_filtered_records() {
             },
         )
         .expect("move home should succeed");
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
 
     let output = provider
         .handle_action(

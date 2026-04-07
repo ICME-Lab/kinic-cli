@@ -231,6 +231,7 @@ pub fn global_command_for_key(
     }
     if code == KeyCode::Char('C')
         && modifiers.contains(KeyModifiers::SHIFT)
+        && focus != PaneFocus::Search
         && focus != PaneFocus::Form
         && focus != PaneFocus::Extra
     {
@@ -249,13 +250,6 @@ pub fn global_command_for_key(
         && matches!(focus, PaneFocus::Items | PaneFocus::Content)
     {
         return HostGlobalCommand::SetDefaultFromSelection;
-    }
-    if code == KeyCode::Char('R')
-        && modifiers.contains(KeyModifiers::SHIFT)
-        && current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
-        && matches!(focus, PaneFocus::Items | PaneFocus::Content)
-    {
-        return HostGlobalCommand::OpenRenameMemory;
     }
     if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
         return HostGlobalCommand::OpenCreateTab;

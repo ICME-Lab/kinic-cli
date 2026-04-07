@@ -97,7 +97,7 @@ The `Memories` tab opens first when the TUI starts.
 - `q`: quit
 - `Ctrl+N`: open the `Create` tab
 - `Ctrl+R`: refresh the current view
-- `Shift+C`: toggle the chat panel in the `Memories` tab
+- `Shift+C`: replace the `Memories` detail pane with the chat view, or close it
 
 The status bar at the bottom also shows the keys available in the current context.
 
@@ -140,7 +140,8 @@ PDFs are converted to Markdown before insertion. This will fail if `pdftotext` i
 ## Memories Tab
 
 In the `Memories` tab, you work with memories using the search field, list, and detail pane.
-The chat panel asks AI against either the selected memory or all searchable memories, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` reranks search hits before diversity-aware selection builds the final answer prompt. The reranking step uses both token matches and short character-fragment matches so Japanese or other low-whitespace text can still influence retrieval. Chat history is now stored per `network + identity + chat context + thread`, so each selected memory and the `all memories` scope can keep multiple local threads.
+When you press `Shift+C`, the detail pane is replaced by a larger chat view so the conversation can use the full right side of the screen.
+The chat panel asks AI against either the selected memory or all searchable memories, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` reranks search hits before diversity-aware selection builds the final answer prompt. Chat history is now stored per `network + identity + chat context + thread`, so each selected memory and the `all memories` scope can keep multiple local threads.
 
 ![Memories tab screenshot](./images/tui-memories.png)
 
@@ -148,12 +149,15 @@ The chat panel asks AI against either the selected memory or all searchable memo
 - Switch the search scope with `←` `→`
   - `all memories`: search across every memory
   - `selected memory`: search only the currently selected memory
+- In the chat pane, press `Enter` to send and `Shift+Enter` to insert a newline
+- In the chat pane, press `Ctrl+←` or `Ctrl+→` to switch the chat scope
 - Press `Shift+N` in the chat pane to start a new empty thread for the current chat context
 - The TUI restores the last thread used for each selected memory and for `all memories`
 - v1 does not include a thread list yet, so you cannot reopen older threads from the UI
 - Existing saved chat history is not migrated; the TUI starts from the new thread store file
+- Press `Shift+C` from the list or detail pane when you want the larger chat view
 - Use `↑` `↓` in the list and `Enter` to open details
-- Press `Shift+R` in the list or detail pane to rename the currently selected memory
+- Move focus to the detail pane and press `Enter` on the selected `Name` row to rename the currently selected memory
 - Move to `+ Add Existing Memory Canister` at the end of the list and press `Enter` to register an existing memory manually
 - In the modal, enter an existing memory canister id and submit it to validate access via `get_users()`
 - For manually added memories, move focus to the detail pane and use `Tab` / `Shift+Tab` to jump between actions, including `Remove from list`

@@ -31,11 +31,7 @@ impl<'a> TuiKitUi<'a> {
             .constraints([Constraint::Length(3), Constraint::Min(6)])
             .split(left_div_right[0]);
         let (detail_rect, chat_rect) = if self.show_chat_panel {
-            let horz = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-                .split(left_div_right[2]);
-            (horz[0], Some(horz[1]))
+            (left_div_right[2], Some(left_div_right[2]))
         } else {
             (left_div_right[2], None)
         };
@@ -58,5 +54,33 @@ impl<'a> TuiKitUi<'a> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+
+    use super::*;
+    use crate::theme::Theme;
+
+    #[test]
+    fn memories_layout_uses_full_detail_pane_for_chat_when_open() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).show_chat(true);
+
+        let layout = ui.memories_screen_layout(Rect::new(0, 0, 120, 40));
+
+        assert_eq!(layout.chat_rect, Some(layout.detail_rect));
+    }
+
+    #[test]
+    fn memories_layout_keeps_chat_closed_when_panel_is_hidden() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme).show_chat(false);
+
+        let layout = ui.memories_screen_layout(Rect::new(0, 0, 120, 40));
+
+        assert_eq!(layout.chat_rect, None);
     }
 }
