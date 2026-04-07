@@ -80,6 +80,35 @@ impl<'a> ContentPanel<'a> {
         ])
     }
 
+    fn push_wrapped_plain_lines(
+        &self,
+        lines: &mut Vec<Line<'static>>,
+        text: &str,
+        indent: &str,
+        style: Style,
+        available_width: usize,
+    ) {
+        let indent_width = UnicodeWidthStr::width(indent);
+        let body_width = available_width.saturating_sub(indent_width).max(1);
+
+        for raw_line in text.lines() {
+            let wrapped = wrap_plain_text_line(raw_line, body_width);
+            if wrapped.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::raw(indent.to_string()),
+                    Span::styled(String::new(), style),
+                ]));
+                continue;
+            }
+            for segment in wrapped {
+                lines.push(Line::from(vec![
+                    Span::raw(indent.to_string()),
+                    Span::styled(segment, style),
+                ]));
+            }
+        }
+    }
+
     fn render_empty(&self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
             .borders(Borders::ALL)
@@ -123,6 +152,7 @@ impl<'a> ContentPanel<'a> {
 
     fn render_content(&self, content: &UiItemContent, area: Rect, buf: &mut Buffer) {
         let mut lines = Vec::new();
+        let available_width = area.width.saturating_sub(3) as usize;
         if !is_memory_item(content) {
             let mut title_spans = Vec::new();
             if !content.kind.label().is_empty() {
@@ -141,22 +171,26 @@ impl<'a> ContentPanel<'a> {
         } else if let Some(subtitle) = &content.subtitle {
             lines.push(self.section_header("Description"));
             lines.push(Line::from(""));
-            for line in subtitle.lines() {
-                lines.push(Line::from(vec![
-                    Span::raw(Self::MEMORY_PLAIN_TEXT_INDENT),
-                    Span::styled(line.to_string(), self.theme.style_normal()),
-                ]));
-            }
+            self.push_wrapped_plain_lines(
+                &mut lines,
+                subtitle,
+                Self::MEMORY_PLAIN_TEXT_INDENT,
+                self.theme.style_normal(),
+                available_width,
+            );
         }
 
         if !content.definition.trim().is_empty() {
             lines.push(Line::from(""));
             lines.push(self.section_header("Definition"));
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::raw(Self::MEMORY_PLAIN_TEXT_INDENT),
-                Span::styled(content.definition.clone(), self.theme.style_type()),
-            ]));
+            self.push_wrapped_plain_lines(
+                &mut lines,
+                &content.definition,
+                Self::MEMORY_PLAIN_TEXT_INDENT,
+                self.theme.style_type(),
+                available_width,
+            );
         }
 
         if let Some(loc) = &content.location {
@@ -171,10 +205,13 @@ impl<'a> ContentPanel<'a> {
                 location.push_str(&format!(":{}", line));
             }
             if !location.is_empty() {
-                lines.push(Line::from(vec![
-                    Span::raw(format!("{}📍 ", Self::MEMORY_PLAIN_TEXT_INDENT)),
-                    Span::styled(location, self.theme.style_muted()),
-                ]));
+                self.push_wrapped_plain_lines(
+                    &mut lines,
+                    &location,
+                    &format!("{}📍 ", Self::MEMORY_PLAIN_TEXT_INDENT),
+                    self.theme.style_muted(),
+                    available_width,
+                );
             }
         }
 
@@ -182,10 +219,13 @@ impl<'a> ContentPanel<'a> {
             lines.push(Line::from(""));
             lines.push(self.section_header("Badges"));
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::raw(Self::MEMORY_PLAIN_TEXT_INDENT),
-                Span::styled(content.badges.join(", "), self.theme.style_keyword()),
-            ]));
+            self.push_wrapped_plain_lines(
+                &mut lines,
+                &content.badges.join(", "),
+                Self::MEMORY_PLAIN_TEXT_INDENT,
+                self.theme.style_keyword(),
+                available_width,
+            );
         }
 
         for section in &content.sections {
@@ -203,10 +243,13 @@ impl<'a> ContentPanel<'a> {
                 Self::CONTENT_INDENT
             };
             for line in &section.body_lines {
-                lines.push(Line::from(vec![
-                    Span::raw(body_indent),
-                    Span::styled(line.clone(), self.theme.style_normal()),
-                ]));
+                self.push_wrapped_plain_lines(
+                    &mut lines,
+                    line,
+                    body_indent,
+                    self.theme.style_normal(),
+                    available_width,
+                );
             }
         }
 
@@ -253,6 +296,36 @@ impl<'a> ContentPanel<'a> {
     }
 }
 
+fn wrap_plain_text_line(line: &str, max_width: usize) -> Vec<String> {
+    if line.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+
+    for ch in line.chars() {
+        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if current_width > 0 && current_width + ch_width > max_width {
+            result.push(current.trim_end().to_string());
+            current = String::new();
+            current_width = 0;
+            if ch.is_whitespace() {
+                continue;
+            }
+        }
+        current.push(ch);
+        current_width += ch_width;
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
 fn content_panel_title(theme: &Theme, content: &UiItemContent) -> Line<'static> {
     match &content.kind {
         crate::ui::model::UiItemKind::Custom(kind) if kind == "memory" => Line::from(vec![
@@ -288,7 +361,7 @@ mod tests {
     use ratatui::widgets::Widget;
 
     use super::{ContentPanel, content_panel_title};
-    use crate::ui::model::{UiItemContent, UiItemKind};
+    use crate::ui::model::{UiItemContent, UiItemKind, UiSection};
     use crate::ui::theme::Theme;
 
     fn item_content(id: &str, kind: UiItemKind) -> UiItemContent {
@@ -418,5 +491,73 @@ mod tests {
             .join("\n");
 
         assert!(rendered.contains("     Body line"));
+    }
+
+    #[test]
+    fn memory_content_renders_memory_summary_section() {
+        let theme = Theme::default();
+        let mut content = item_content("memory-1", UiItemKind::Custom("memory".to_string()));
+        content.subtitle = Some("Notes".to_string());
+        content.sections.push(UiSection {
+            heading: "Memory Summary".to_string(),
+            rows: Vec::new(),
+            body_lines: vec!["line one".to_string(), "line two".to_string()],
+        });
+
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 60, 20));
+        ContentPanel::new(&theme)
+            .ui_content(Some(&content))
+            .render(ratatui::layout::Rect::new(0, 0, 60, 20), &mut buf);
+
+        let rendered = (0..20)
+            .map(|y| {
+                (0..60)
+                    .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Memory Summary"));
+        assert!(rendered.contains("line one"));
+        assert!(rendered.contains("line two"));
+    }
+
+    #[test]
+    fn memory_summary_wrapped_lines_keep_body_indent() {
+        let theme = Theme::default();
+        let mut content = item_content("memory-1", UiItemKind::Custom("memory".to_string()));
+        content.sections.push(UiSection {
+            heading: "Memory Summary".to_string(),
+            rows: Vec::new(),
+            body_lines: vec!["123456789012345678901234567890".to_string()],
+        });
+
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 24, 12));
+        ContentPanel::new(&theme)
+            .ui_content(Some(&content))
+            .render(ratatui::layout::Rect::new(0, 0, 24, 12), &mut buf);
+
+        let rendered = (0..12)
+            .map(|y| {
+                (0..24)
+                    .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("     1234567890123456"));
+        assert!(rendered.contains("     78901234567890"));
+    }
+
+    #[test]
+    fn wrap_plain_text_line_skips_leading_space_on_continuation() {
+        let wrapped = super::wrap_plain_text_line("word1 word2 word3 word4", 12);
+
+        assert_eq!(
+            wrapped,
+            vec!["word1 word2".to_string(), "word3 word4".to_string(),]
+        );
     }
 }

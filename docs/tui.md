@@ -90,6 +90,7 @@ The `Memories` tab opens first when the TUI starts.
 - `1` to `5`: switch tabs
 - `Tab`: move focus forward within the screen
 - `Shift+Tab`: move focus backward
+- `/`: focus the search field
 - `↑` `↓`: move through lists and form fields
 - `Enter`: open, confirm, or submit the current item
 - `Esc`: go back one step, return to the list, or close the picker
@@ -98,10 +99,13 @@ The `Memories` tab opens first when the TUI starts.
 - `Ctrl+N`: open the `Create` tab
 - `Ctrl+R`: refresh the current view
 - `Shift+C`: toggle the chat panel in the `Memories` tab
+- `Shift+S`: toggle the settings overlay (session info and saved settings)
 
 The status bar at the bottom also shows the keys available in the current context.
 
-`?` and `q` are intended for normal list and tab navigation, not while typing in a search field or form.
+`?` and `q` are intended for normal list and tab navigation, not while typing in a search field or form, and not while the chat input is focused.
+`Shift+C` (toggle chat on `Memories`) follows the same focus rules.
+`Shift+S` toggles the settings overlay from the search field, lists, and other panes, but not while editing a form field or while the chat input is focused.
 In multiline text fields, `Enter` inserts a newline instead of submitting. Move to `Submit` with `Tab` or `Shift+Tab` and press `Enter` there.
 
 ## Common Workflows
@@ -140,7 +144,8 @@ PDFs are converted to Markdown before insertion. This will fail if `pdftotext` i
 ## Memories Tab
 
 In the `Memories` tab, you work with memories using the search field, list, and detail pane.
-The chat panel asks AI against either the selected memory or all searchable memories, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` reranks search hits before diversity-aware selection builds the final answer prompt. The reranking step uses both token matches and short character-fragment matches so Japanese or other low-whitespace text can still influence retrieval. Chat history is now stored per `network + identity + chat context + thread`, so each selected memory and the `all memories` scope can keep multiple local threads.
+Press `Shift+C` to toggle the chat panel when focus is not on the search field, a form, or the chat input (see **Basic Controls**).
+The chat panel asks AI against either all searchable memories or one memory from the visible items list, restores local history separately for each chat scope, rewrites follow-up prompts like `that one` into a standalone search query before retrieval, and for `all memories` reranks search hits before diversity-aware selection builds the final answer prompt. Chat history is now stored per `network + identity + chat context + thread`, so `all memories` and each scoped memory can keep multiple local threads.
 
 ![Memories tab screenshot](./images/tui-memories.png)
 
@@ -148,12 +153,15 @@ The chat panel asks AI against either the selected memory or all searchable memo
 - Switch the search scope with `←` `→`
   - `all memories`: search across every memory
   - `selected memory`: search only the currently selected memory
-- Press `Shift+N` in the chat pane to start a new empty thread for the current chat context
-- The TUI restores the last thread used for each selected memory and for `all memories`
+- In the chat pane, press `Enter` to send
+- In the chat pane, press `Shift+←` or `Shift+→` to cycle the chat scope through `all memories` and the visible memory items
+- In the chat pane, type `/new` or `/all` and press `Enter` to run the matching chat command
+- When slash commands are visible above the chat input, use `↑` `↓` to move and `Enter` to select
+- The TUI restores the last thread used for each scoped memory and for `all memories`
 - v1 does not include a thread list yet, so you cannot reopen older threads from the UI
 - Existing saved chat history is not migrated; the TUI starts from the new thread store file
 - Use `↑` `↓` in the list and `Enter` to open details
-- Press `Shift+R` in the list or detail pane to rename the currently selected memory
+- Move focus to the detail pane and press `Enter` on the selected `Name` row to rename the currently selected memory
 - Move to `+ Add Existing Memory Canister` at the end of the list and press `Enter` to register an existing memory manually
 - In the modal, enter an existing memory canister id and submit it to validate access via `get_users()`
 - For manually added memories, move focus to the detail pane and use `Tab` / `Shift+Tab` to jump between actions, including `Remove from list`

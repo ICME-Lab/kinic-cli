@@ -11,6 +11,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::TuiKitUi;
 
+const ADD_MEMORY_ACTION_ID: &str = "kinic-action-add-memory";
+
 fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * 1024.0;
@@ -32,7 +34,7 @@ impl<'a> TuiKitUi<'a> {
         let line1 = format!(
             "{} {} {}",
             self.ui_config.header.visible_icon,
-            self.ui_summaries.len(),
+            self.visible_item_count(),
             self.ui_config.header.visible_suffix
         );
         let header_chunks = Layout::default()
@@ -92,6 +94,13 @@ impl<'a> TuiKitUi<'a> {
         };
 
         trim_to_width(with_cache.as_str(), max_width)
+    }
+
+    fn visible_item_count(&self) -> usize {
+        self.ui_summaries
+            .iter()
+            .filter(|item| item.id != ADD_MEMORY_ACTION_ID)
+            .count()
     }
 
     fn current_memory_name(&self) -> Option<&str> {
@@ -235,5 +244,38 @@ mod tests {
 
         assert!(line.ends_with('…'));
         assert!(UnicodeWidthStr::width(line.as_str()) <= 18_usize);
+    }
+
+    #[test]
+    fn visible_item_count_excludes_add_memory_action() {
+        let theme = Theme::default();
+        let items = vec![
+            UiItemSummary {
+                id: "memory-1".to_string(),
+                name: "Alpha Memory".to_string(),
+                leading_marker: None,
+                kind: UiItemKind::Custom("memory".to_string()),
+                visibility: UiVisibility::Private,
+                qualified_name: None,
+                subtitle: None,
+                tags: Vec::new(),
+            },
+            UiItemSummary {
+                id: ADD_MEMORY_ACTION_ID.to_string(),
+                name: "+ Add Existing Memory Canister".to_string(),
+                leading_marker: None,
+                kind: UiItemKind::Custom("action".to_string()),
+                visibility: UiVisibility::Public,
+                qualified_name: None,
+                subtitle: None,
+                tags: Vec::new(),
+            },
+        ];
+
+        let count = TuiKitUi::new(&theme)
+            .ui_summaries(&items)
+            .visible_item_count();
+
+        assert_eq!(count, 1);
     }
 }

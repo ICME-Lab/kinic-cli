@@ -1,3 +1,4 @@
+use super::super::super::chat_prompt::ActiveMemoryContext;
 use super::*;
 use crate::tui::bridge::AskMemoriesOutput;
 use crate::tui::settings::{
@@ -10,11 +11,21 @@ use std::{
     time::Duration,
 };
 use tui_kit_host::execute_effects_to_status;
+use tui_kit_model::{UiItemKind, UiItemSummary, UiVisibility};
 use tui_kit_runtime::{
-    ChatScope, CoreEffect, CreateSubmitState, PaneFocus, dispatch_action, kinic_tabs,
+    ChatScope, CoreAction, CoreEffect, CreateSubmitState, PaneFocus, dispatch_action, kinic_tabs,
 };
 
 const CHAT_HISTORY_IDENTITY_LABEL: &str = "provided";
+
+fn expected_active_memory_context() -> ActiveMemoryContext {
+    ActiveMemoryContext {
+        memory_id: "aaaaa-aa".to_string(),
+        memory_name: "unknown".to_string(),
+        description: None,
+        summary: None,
+    }
+}
 
 fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
     provider.cursor_memory_id = Some(memory_id.to_string());
@@ -25,8 +36,35 @@ fn chat_state(query: &str) -> CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Extra,
         chat_input: query.to_string(),
+        selected_index: Some(0),
+        list_items: chat_list_items(),
         ..CoreState::default()
     }
+}
+
+fn chat_list_items() -> Vec<UiItemSummary> {
+    vec![
+        UiItemSummary {
+            id: "aaaaa-aa".to_string(),
+            name: "Alpha".to_string(),
+            leading_marker: None,
+            kind: UiItemKind::Custom("memory".to_string()),
+            visibility: UiVisibility::Private,
+            qualified_name: None,
+            subtitle: None,
+            tags: vec![],
+        },
+        UiItemSummary {
+            id: "bbbbb-bb".to_string(),
+            name: "Beta".to_string(),
+            leading_marker: None,
+            kind: UiItemKind::Custom("memory".to_string()),
+            visibility: UiVisibility::Private,
+            qualified_name: None,
+            subtitle: None,
+            tags: vec![],
+        },
+    ]
 }
 
 fn configure_provider_for_chat() -> KinicProvider {
@@ -54,11 +92,12 @@ fn chat_test_guard() -> MutexGuard<'static, ()> {
 }
 
 fn poll_background_until_ready(provider: &mut KinicProvider, state: &CoreState) -> ProviderOutput {
-    for _ in 0..100 {
+    // Parallel `cargo test` can delay the background worker; allow ~2s under contention.
+    for _ in 0..200 {
         if let Some(output) = provider.poll_background(state) {
             return output;
         }
-        thread::sleep(Duration::from_millis(5));
+        thread::sleep(Duration::from_millis(10));
     }
     panic!("background output was not ready");
 }
@@ -71,7 +110,7 @@ fn chat_history_principal() -> String {
 }
 
 #[test]
-fn chat_focus_status_message_uses_chat_scope() {
+fn chat_focus_status_message_does_not_announce_chat_scope() {
     let provider = configure_provider_for_chat();
     let message = provider.status_message(
         &CoreState {
@@ -83,7 +122,7 @@ fn chat_focus_status_message_uses_chat_scope() {
         provider.memory_records.len(),
     );
 
-    assert_eq!(message, "Chat scope all memories");
+    assert_eq!(message, "Browse memories");
 }
 
 #[test]
@@ -138,6 +177,7 @@ fn chat_submit_starts_background_task_and_saves_user_message() {
             target_memory_ids: vec!["aaaaa-aa".to_string()],
             query: "What changed?".to_string(),
             history: vec![],
+            active_memory_context: Some(expected_active_memory_context()),
         }
     );
 }
@@ -258,6 +298,36 @@ fn chat_background_failure_clears_loading_without_persisting_assistant() {
         .expect("history should load")
         .messages,
         vec![("user".to_string(), "Question".to_string())]
+    );
+}
+
+#[test]
+fn chat_background_success_does_not_overwrite_memory_content_summary() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "New chat answer".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    let mut provider = configure_provider_for_chat();
+    provider.memory_content_summaries.insert(
+        "aaaaa-aa".to_string(),
+        "Existing generated summary".to_string(),
+    );
+    let mut state = chat_state("Question");
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("chat submit should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    let output = poll_background_until_ready(&mut provider, &state);
+    execute_effects_to_status(&mut state, output.effects);
+
+    assert_eq!(
+        provider.memory_content_summaries.get("aaaaa-aa"),
+        Some(&"Existing generated summary".to_string())
     );
 }
 
@@ -457,6 +527,10 @@ fn chat_submit_uses_latest_user_query_and_recent_visible_history() {
             ("assistant".to_string(), "a4".to_string()),
         ]
     );
+    assert_eq!(
+        request.active_memory_context,
+        Some(expected_active_memory_context())
+    );
 }
 
 #[test]
@@ -506,6 +580,7 @@ fn all_memories_chat_submit_uses_all_targets_and_separate_history_thread() {
             target_memory_ids: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
             query: "compare everything".to_string(),
             history: vec![],
+            active_memory_context: None,
         }
     );
 }
@@ -538,19 +613,47 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
         2,
     )
     .expect("all history should save");
+    append_chat_history_message(
+        "local",
+        &chat_history_principal(),
+        CHAT_HISTORY_IDENTITY_LABEL,
+        "bbbbb-bb",
+        "thread-beta",
+        "assistant",
+        "beta",
+        3,
+    )
+    .expect("beta history should save");
     let mut provider = configure_provider_for_chat();
     let mut state = CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Extra,
         chat_messages: vec![("user".to_string(), "alpha".to_string())],
+        selected_index: Some(0),
+        list_items: chat_list_items(),
         ..CoreState::default()
     };
 
     let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatScopeNext)
-        .expect("chat scope next should dispatch");
+        .expect("first chat scope next should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    assert_eq!(state.chat_scope, ChatScope::Selected);
+    assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
+    assert_eq!(state.selected_index, Some(1));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(
+        state.chat_messages,
+        vec![("assistant".to_string(), "beta".to_string())]
+    );
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatScopeNext)
+        .expect("second chat scope next should dispatch");
     execute_effects_to_status(&mut state, effects);
 
     assert_eq!(state.chat_scope, ChatScope::All);
+    assert_eq!(state.selected_index, Some(1));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "global".to_string())]
@@ -561,9 +664,139 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
     execute_effects_to_status(&mut state, effects);
 
     assert_eq!(state.chat_scope, ChatScope::Selected);
+    assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
+    assert_eq!(state.selected_index, Some(1));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
-        vec![("user".to_string(), "alpha".to_string())]
+        vec![("assistant".to_string(), "beta".to_string())]
+    );
+}
+
+#[test]
+fn chat_scope_cycles_across_visible_memories_before_returning_to_all() {
+    let _guard = chat_test_guard();
+    clear_chat_history_for_tests();
+    append_chat_history_message(
+        "local",
+        &chat_history_principal(),
+        CHAT_HISTORY_IDENTITY_LABEL,
+        "bbbbb-bb",
+        "thread-beta",
+        "assistant",
+        "beta",
+        2,
+    )
+    .expect("beta history should save");
+    let mut provider = configure_provider_for_chat();
+    let mut state = CoreState {
+        current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_scope: ChatScope::Selected,
+        selected_index: Some(0),
+        list_items: chat_list_items(),
+        ..CoreState::default()
+    };
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatScopeNext)
+        .expect("chat scope next should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    assert_eq!(state.chat_scope, ChatScope::Selected);
+    assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
+    assert_eq!(state.selected_index, Some(1));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(
+        state.chat_messages,
+        vec![("assistant".to_string(), "beta".to_string())]
+    );
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatScopeNext)
+        .expect("second chat scope next should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    assert_eq!(state.chat_scope, ChatScope::All);
+    assert_eq!(state.selected_index, Some(1));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+}
+
+#[test]
+fn chat_scope_all_loads_all_memories_history_from_selected_scope() {
+    let _guard = chat_test_guard();
+    clear_chat_history_for_tests();
+    append_chat_history_message(
+        "local",
+        &chat_history_principal(),
+        CHAT_HISTORY_IDENTITY_LABEL,
+        "aaaaa-aa",
+        "thread-alpha",
+        "assistant",
+        "alpha",
+        1,
+    )
+    .expect("alpha history should save");
+    append_chat_history_message(
+        "local",
+        &chat_history_principal(),
+        CHAT_HISTORY_IDENTITY_LABEL,
+        "all-memories",
+        "thread-global",
+        "assistant",
+        "global",
+        2,
+    )
+    .expect("all history should save");
+    let mut provider = configure_provider_for_chat();
+    let mut state = CoreState {
+        current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_scope: ChatScope::Selected,
+        chat_messages: vec![("assistant".to_string(), "alpha".to_string())],
+        selected_index: Some(0),
+        list_items: chat_list_items(),
+        ..CoreState::default()
+    };
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatScopeAll)
+        .expect("chat scope all should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    assert_eq!(state.chat_scope, ChatScope::All);
+    assert_eq!(
+        state.chat_messages,
+        vec![("assistant".to_string(), "global".to_string())]
+    );
+}
+
+#[test]
+fn chat_scope_all_keeps_browser_selection_for_selected_memory_actions() {
+    let mut provider = configure_provider_for_chat();
+    let mut state = CoreState {
+        current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        selected_index: Some(0),
+        list_items: chat_list_items(),
+        ..CoreState::default()
+    };
+
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatScopeNext)
+        .expect("first chat scope next should dispatch");
+    execute_effects_to_status(&mut state, effects);
+    let effects = dispatch_action(&mut provider, &mut state, &CoreAction::ChatScopeNext)
+        .expect("second chat scope next should dispatch");
+    execute_effects_to_status(&mut state, effects);
+
+    assert_eq!(state.chat_scope, ChatScope::All);
+    assert_eq!(state.selected_index, Some(1));
+    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+
+    let search_targets = provider
+        .search_target_memory_ids(SearchScope::Selected)
+        .expect("selected memory search should still resolve from the list selection");
+    assert_eq!(search_targets, vec!["bbbbb-bb".to_string()]);
+    assert_eq!(
+        provider.selected_memory_id_for_default(&state).as_deref(),
+        Some("bbbbb-bb")
     );
 }
 
@@ -625,6 +858,68 @@ fn chat_new_thread_switches_to_empty_thread_and_submit_uses_it() {
     let request = take_last_test_chat_request().expect("captured request should exist");
     assert_eq!(request.thread_id, next_thread_id);
     assert!(request.history.is_empty());
+    assert_eq!(
+        request.active_memory_context,
+        Some(expected_active_memory_context())
+    );
+}
+
+#[test]
+fn selected_chat_submit_includes_cached_memory_summary_context() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "ok".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    let mut provider = configure_provider_for_chat();
+    provider.memory_content_summaries.insert(
+        "aaaaa-aa".to_string(),
+        "Contains UI skills and store entries.".to_string(),
+    );
+    let mut state = chat_state("Tell me about this memory");
+
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("chat submit should dispatch");
+
+    let request = take_last_test_chat_request().expect("captured request should exist");
+    assert_eq!(
+        request.active_memory_context,
+        Some(ActiveMemoryContext {
+            memory_id: "aaaaa-aa".to_string(),
+            memory_name: "unknown".to_string(),
+            description: None,
+            summary: Some("Contains UI skills and store entries.".to_string()),
+        })
+    );
+}
+
+#[test]
+fn selected_chat_submit_excludes_placeholder_memory_summary_context() {
+    let _guard = chat_test_guard();
+    let _ = take_test_chat_submit_result();
+    let _ = take_last_test_chat_request();
+    clear_chat_history_for_tests();
+    set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
+        response: "ok".to_string(),
+        failed_memory_ids: vec![],
+    }));
+    let mut provider = configure_provider_for_chat();
+    provider
+        .failed_memory_content_summaries
+        .insert("aaaaa-aa".to_string(), "failed".to_string());
+    let mut state = chat_state("Tell me about this memory");
+
+    let _ = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
+        .expect("chat submit should dispatch");
+
+    let request = take_last_test_chat_request().expect("captured request should exist");
+    assert_eq!(
+        request.active_memory_context,
+        Some(expected_active_memory_context())
+    );
 }
 
 #[test]

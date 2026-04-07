@@ -230,7 +230,7 @@ fn poll_rename_submit_background_resets_task_when_worker_disconnects() {
 }
 
 #[test]
-fn renamed_memory_is_searchable_by_name_in_browser_filter() {
+fn renamed_memory_remains_visible_while_query_is_present() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_summaries = vec![MemorySummary {
         id: "aaaaa-aa".to_string(),

@@ -10,6 +10,7 @@ use ratatui::{
 
 use crate::ui::app::{Focus, TuiKitUi};
 use crate::ui::model::{UiItemKind, UiVisibility};
+use tui_kit_runtime::ChatScope;
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn render_items_panel(&self, area: Rect, buf: &mut Buffer) {
@@ -43,7 +44,12 @@ impl<'a> TuiKitUi<'a> {
             .skip(scroll_offset)
             .take(visible_height)
             .map(|(idx, item)| {
-                let is_selected = Some(idx) == selected;
+                let is_memory_row =
+                    matches!(&item.kind, UiItemKind::Custom(kind) if kind == "memory");
+                let is_selected = match self.chat_scope {
+                    ChatScope::All => is_memory_row,
+                    ChatScope::Selected => Some(idx) == selected,
+                };
                 let kind_style = match item.kind {
                     UiItemKind::Function => self.theme.style_function(),
                     UiItemKind::Type => self.theme.style_type(),
@@ -110,8 +116,13 @@ impl<'a> TuiKitUi<'a> {
             self.theme.style_border()
         };
         let scroll_indicator = if total_items > visible_height {
-            let pos = selected.unwrap_or(0) + 1;
-            format!(" [{}/{}]", pos, total_items)
+            match self.chat_scope {
+                ChatScope::All => format!(" [all/{}]", total_items),
+                ChatScope::Selected => {
+                    let pos = selected.unwrap_or(0) + 1;
+                    format!(" [{}/{}]", pos, total_items)
+                }
+            }
         } else {
             String::new()
         };

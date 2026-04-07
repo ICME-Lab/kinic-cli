@@ -15,10 +15,10 @@ pub fn to_summary(record: &KinicRecord) -> UiItemSummary {
     }
 }
 
-pub fn to_content(record: &KinicRecord) -> UiItemContent {
+pub fn to_content(record: &KinicRecord, memory_summary: Option<&str>) -> UiItemContent {
     match record.group.as_str() {
         "search-result" => search_result_content(record),
-        "memories" => memory_content(record),
+        "memories" => memory_content(record, memory_summary),
         _ => generic_content(record),
     }
 }
@@ -59,10 +59,69 @@ fn generic_content(record: &KinicRecord) -> UiItemContent {
     }
 }
 
-fn memory_content(record: &KinicRecord) -> UiItemContent {
+fn memory_content(record: &KinicRecord, memory_summary: Option<&str>) -> UiItemContent {
     let user_lines = memory_user_lines(&section_body(&record.content_md, "### Users"));
+    let id = metadata_value(record, "- Id:");
     let name = metadata_value(record, "- Name:");
     let description = description_value(&record.content_md);
+    let mut sections = Vec::new();
+
+    if let Some(summary) = memory_summary.filter(|summary| !summary.trim().is_empty()) {
+        sections.push(UiSection {
+            heading: "Memory Summary".to_string(),
+            rows: vec![],
+            body_lines: summary.lines().map(|line| line.to_string()).collect(),
+        });
+    }
+
+    sections.extend([
+        UiSection {
+            heading: "Overview".to_string(),
+            rows: vec![
+                UiRow {
+                    label: "Name".to_string(),
+                    value: name.clone(),
+                },
+                UiRow {
+                    label: "Status".to_string(),
+                    value: summary_value(&record.summary),
+                },
+                UiRow {
+                    label: "Id".to_string(),
+                    value: id,
+                },
+                UiRow {
+                    label: "Version".to_string(),
+                    value: metadata_value(record, "- Version:"),
+                },
+            ],
+            body_lines: vec![],
+        },
+        UiSection {
+            heading: "Access".to_string(),
+            rows: vec![],
+            body_lines: if user_lines.is_empty() {
+                vec![
+                    "unavailable".to_string(),
+                    String::new(),
+                    "  + Add User".to_string(),
+                ]
+            } else {
+                user_lines
+            },
+        },
+        metadata_section(
+            record,
+            &[
+                ("Dimension", metadata_value(record, "- Dimension:")),
+                (
+                    "Stable Memory Size",
+                    metadata_value(record, "- Stable Memory Size:"),
+                ),
+                ("Cycle Amount", metadata_value(record, "- Cycle Amount:")),
+            ],
+        ),
+    ]);
 
     UiItemContent {
         id: record.id.clone(),
@@ -73,50 +132,7 @@ fn memory_content(record: &KinicRecord) -> UiItemContent {
         location: None,
         docs: Some(record.content_md.clone()),
         badges: vec![],
-        sections: vec![
-            UiSection {
-                heading: "Overview".to_string(),
-                rows: vec![
-                    UiRow {
-                        label: "Name".to_string(),
-                        value: name.clone(),
-                    },
-                    UiRow {
-                        label: "Status".to_string(),
-                        value: summary_value(&record.summary),
-                    },
-                    UiRow {
-                        label: "Version".to_string(),
-                        value: metadata_value(record, "- Version:"),
-                    },
-                ],
-                body_lines: vec![],
-            },
-            UiSection {
-                heading: "Access".to_string(),
-                rows: vec![],
-                body_lines: if user_lines.is_empty() {
-                    vec![
-                        "unavailable".to_string(),
-                        String::new(),
-                        "  + Add User".to_string(),
-                    ]
-                } else {
-                    user_lines
-                },
-            },
-            metadata_section(
-                record,
-                &[
-                    ("Dimension", metadata_value(record, "- Dimension:")),
-                    (
-                        "Stable Memory Size",
-                        metadata_value(record, "- Stable Memory Size:"),
-                    ),
-                    ("Cycle Amount", metadata_value(record, "- Cycle Amount:")),
-                ],
-            ),
-        ],
+        sections,
     }
 }
 
@@ -309,8 +325,8 @@ fn pretty_payload(payload: &str) -> String {
 
 fn summary_value(summary: &str) -> String {
     summary
-        .strip_prefix("Status:")
-        .map(str::trim)
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Status:").map(str::trim))
         .unwrap_or(summary)
         .to_string()
 }
@@ -425,7 +441,7 @@ mod tests {
             "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description:\n  Project notes\n  second line\n- Version: `1.0.0`\n- Dimension: `768`\n- Stable Memory Size: `2,048`\n- Cycle Amount: `1.235T`\n\n### Search\nsearch help\n\n### Users\n- User: `2chl6-4hpzw-vqaaa-aaaaa-c` | writer\n".to_string(),
         );
 
-        let content = memory_content(&record);
+        let content = memory_content(&record, None);
         let overview = content
             .sections
             .iter()
@@ -463,6 +479,18 @@ mod tests {
             overview
                 .rows
                 .iter()
+                .any(|row| row.label == "Id" && row.value == "2chl6-4hpzw-vqaaa-aaaaa-c")
+        );
+        assert!(
+            overview
+                .rows
+                .iter()
+                .any(|row| row.label == "Status" && row.value == "running")
+        );
+        assert!(
+            overview
+                .rows
+                .iter()
                 .any(|row| row.label == "Version" && row.value == "1.0.0")
         );
         assert!(overview.rows.iter().all(|row| row.label != "Owners"));
@@ -495,5 +523,46 @@ mod tests {
                 .iter()
                 .any(|line| line == "> 2chl6...aaa-c   writer")
         );
+    }
+
+    #[test]
+    fn memory_content_inserts_summary_before_overview_when_present() {
+        let record = KinicRecord::new(
+            "2chl6-4hpzw-vqaaa-aaaaa-c",
+            "2chl6-4hpzw-vqaaa-aaaaa-c",
+            "memories",
+            "Status: running",
+            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n- Description:\n  Project notes\n\n### Users\nNo users found.\n".to_string(),
+        );
+
+        let content = memory_content(&record, Some("first line\nsecond line"));
+
+        assert_eq!(content.sections[0].heading, "Memory Summary");
+        assert_eq!(
+            content.sections[0].body_lines,
+            vec!["first line".to_string(), "second line".to_string()]
+        );
+        assert_eq!(content.sections[1].heading, "Overview");
+    }
+
+    #[test]
+    fn memory_content_skips_summary_section_when_absent() {
+        let record = KinicRecord::new(
+            "2chl6-4hpzw-vqaaa-aaaaa-c",
+            "2chl6-4hpzw-vqaaa-aaaaa-c",
+            "memories",
+            "Status: running",
+            "## Memory\n\n- Id: `2chl6-4hpzw-vqaaa-aaaaa-c`\n- Status: `running`\n- Name: `Alpha`\n\n### Users\nNo users found.\n".to_string(),
+        );
+
+        let content = memory_content(&record, None);
+
+        assert!(
+            content
+                .sections
+                .iter()
+                .all(|section| section.heading != "Memory Summary")
+        );
+        assert_eq!(content.sections[0].heading, "Overview");
     }
 }

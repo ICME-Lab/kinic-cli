@@ -3,6 +3,7 @@
 //! This crate defines common actions/effects, shared runtime state, and the
 //! `DataProvider` trait used by the Kinic TUI crates.
 
+pub mod chat_commands;
 mod form_descriptor;
 pub mod kinic_tabs;
 
@@ -14,7 +15,7 @@ pub use form_descriptor::{
     form_horizontal_change_command, form_shows_horizontal_change_hint,
 };
 use std::path::PathBuf;
-use tui_kit_model::{UiContextNode, UiItemContent, UiItemSummary};
+use tui_kit_model::{UiContextNode, UiItemContent, UiItemKind, UiItemSummary};
 
 pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
 pub const SETTINGS_ENTRY_KINIC_BALANCE_ID: &str = "kinic_balance";
@@ -92,7 +93,7 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
             allows_tabs: true,
             allows_content: false,
             allows_form: true,
-            allows_chat: true,
+            allows_chat: false,
         },
         kinic_tabs::TabKind::PlaceholderMarket | kinic_tabs::TabKind::PlaceholderSettings => {
             TabFocusPolicy {
@@ -102,10 +103,14 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
                 allows_tabs: true,
                 allows_content: true,
                 allows_form: false,
-                allows_chat: true,
+                allows_chat: false,
             }
         }
     }
+}
+
+fn chat_supported_for_tab(tab_id: &str) -> bool {
+    kinic_tabs::tab_kind(tab_id) == kinic_tabs::TabKind::Memories
 }
 
 pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
@@ -644,6 +649,7 @@ pub struct CoreState {
     pub chat_loading: bool,
     pub chat_scroll: usize,
     pub chat_scope: ChatScope,
+    pub chat_scope_label: Option<String>,
     pub create_name: String,
     pub create_description: String,
     pub create_submit_state: CreateSubmitState,
@@ -700,6 +706,7 @@ impl Default for CoreState {
             chat_loading: false,
             chat_scroll: 0,
             chat_scope: ChatScope::default(),
+            chat_scope_label: None,
             create_name: String::new(),
             create_description: String::new(),
             create_submit_state: CreateSubmitState::default(),
@@ -842,6 +849,7 @@ pub enum CoreAction {
     ChatBackspace,
     ChatScopePrev,
     ChatScopeNext,
+    ChatScopeAll,
     ChatNewThread,
     ChatSubmit,
     ChatScrollUp,
@@ -979,6 +987,7 @@ pub struct ProviderSnapshot {
     pub total_count: usize,
     pub status_message: Option<String>,
     pub selected_memory_label: Option<String>,
+    pub chat_scope_label: Option<String>,
     pub create_cost_state: CreateCostState,
     pub create_submit_state: CreateSubmitState,
     pub settings: SettingsSnapshot,
@@ -1465,6 +1474,12 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         CoreAction::SetTab(tab_id) => {
             state.current_tab_id = tab_id.0.clone();
+            if !chat_supported_for_tab(state.current_tab_id.as_str()) {
+                state.chat_open = false;
+                if state.focus == PaneFocus::Extra {
+                    state.focus = focus_after_chat_close(state.current_tab_id.as_str());
+                }
+            }
             state.selected_index = Some(0);
             close_picker(state);
             close_access_control_modal(state);
@@ -1482,7 +1497,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         CoreAction::FocusNext => {
             state.focus = match state.focus {
                 PaneFocus::Search => PaneFocus::Items,
-                PaneFocus::Items => PaneFocus::Content,
+                PaneFocus::Items => {
+                    if memories_chat_replaces_content(state) {
+                        PaneFocus::Extra
+                    } else {
+                        PaneFocus::Content
+                    }
+                }
                 PaneFocus::Content => {
                     if state.chat_open {
                         PaneFocus::Extra
@@ -1517,7 +1538,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 PaneFocus::Items => PaneFocus::Search,
                 PaneFocus::Content => PaneFocus::Items,
                 PaneFocus::Form => PaneFocus::Tabs,
-                PaneFocus::Extra => PaneFocus::Content,
+                PaneFocus::Extra => {
+                    if memories_chat_replaces_content(state) {
+                        PaneFocus::Items
+                    } else {
+                        PaneFocus::Content
+                    }
+                }
                 PaneFocus::Tabs => {
                     if state.chat_open {
                         PaneFocus::Extra
@@ -1548,8 +1575,14 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::OpenSelected => {
-            state.focus = PaneFocus::Content;
-            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+            if memories_chat_replaces_content(state) {
+                state.focus = PaneFocus::Extra;
+            } else {
+                state.focus = PaneFocus::Content;
+            }
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID
+                && state.focus == PaneFocus::Content
+            {
                 state.memory_content_action_index = 0;
             }
         }
@@ -1561,6 +1594,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             };
         }
         CoreAction::ToggleChat => {
+            if !chat_supported_for_tab(state.current_tab_id.as_str()) {
+                state.chat_open = false;
+                if state.focus == PaneFocus::Extra {
+                    state.focus = focus_after_chat_close(state.current_tab_id.as_str());
+                }
+                return;
+            }
             state.chat_open = !state.chat_open;
             if state.chat_open {
                 state.focus = PaneFocus::Extra;
@@ -1584,12 +1624,17 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         }
         CoreAction::ChatScopePrev => {
             if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
-                state.chat_scope = prev_chat_scope(state.chat_scope);
+                prev_chat_scope(state);
             }
         }
         CoreAction::ChatScopeNext => {
             if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
-                state.chat_scope = next_chat_scope(state.chat_scope);
+                next_chat_scope(state);
+            }
+        }
+        CoreAction::ChatScopeAll => {
+            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+                state.chat_scope = ChatScope::All;
             }
         }
         CoreAction::ChatNewThread => {}
@@ -1661,6 +1706,10 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
     }
 
     normalize_focus_for_tab(state, previous_focus);
+}
+
+fn memories_chat_replaces_content(state: &CoreState) -> bool {
+    state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID && state.chat_open
 }
 
 fn normalize_focus_for_tab(state: &mut CoreState, previous_focus: PaneFocus) {
@@ -1901,15 +1950,106 @@ fn prev_search_scope(scope: SearchScope) -> SearchScope {
     next_search_scope(scope)
 }
 
-fn next_chat_scope(scope: ChatScope) -> ChatScope {
-    match scope {
-        ChatScope::All => ChatScope::Selected,
-        ChatScope::Selected => ChatScope::All,
+fn next_chat_scope(state: &mut CoreState) {
+    let visible_ids = visible_chat_scope_memory_ids(state);
+    if visible_ids.is_empty() {
+        if state.chat_scope == ChatScope::Selected {
+            state.chat_scope = ChatScope::All;
+        }
+        return;
+    }
+
+    match state.chat_scope {
+        ChatScope::All => {
+            state.chat_scope = ChatScope::Selected;
+            state.selected_index = first_memory_list_index(state);
+        }
+        ChatScope::Selected => {
+            let current_id = resolve_selected_chat_scope_memory_id(state)
+                .or_else(|| visible_ids.first().cloned());
+            let Some(current_id) = current_id else {
+                state.chat_scope = ChatScope::All;
+                return;
+            };
+            let current_index = visible_ids
+                .iter()
+                .position(|id| id == &current_id)
+                .unwrap_or(0);
+            if current_index + 1 >= visible_ids.len() {
+                state.chat_scope = ChatScope::All;
+            } else {
+                let next_id = visible_ids[current_index + 1].clone();
+                state.selected_index = list_index_for_memory_id(state, &next_id);
+            }
+        }
     }
 }
 
-fn prev_chat_scope(scope: ChatScope) -> ChatScope {
-    next_chat_scope(scope)
+fn prev_chat_scope(state: &mut CoreState) {
+    let visible_ids = visible_chat_scope_memory_ids(state);
+    if visible_ids.is_empty() {
+        if state.chat_scope == ChatScope::Selected {
+            state.chat_scope = ChatScope::All;
+        }
+        return;
+    }
+
+    match state.chat_scope {
+        ChatScope::All => {
+            state.chat_scope = ChatScope::Selected;
+            let last_id = visible_ids.last().expect("non-empty checked").clone();
+            state.selected_index = list_index_for_memory_id(state, &last_id);
+        }
+        ChatScope::Selected => {
+            let current_id = resolve_selected_chat_scope_memory_id(state)
+                .or_else(|| visible_ids.first().cloned());
+            let Some(current_id) = current_id else {
+                state.chat_scope = ChatScope::All;
+                return;
+            };
+            let current_index = visible_ids
+                .iter()
+                .position(|id| id == &current_id)
+                .unwrap_or(0);
+            if current_index == 0 {
+                state.chat_scope = ChatScope::All;
+            } else {
+                let prev_id = visible_ids[current_index - 1].clone();
+                state.selected_index = list_index_for_memory_id(state, &prev_id);
+            }
+        }
+    }
+}
+
+fn visible_chat_scope_memory_ids(state: &CoreState) -> Vec<String> {
+    state
+        .list_items
+        .iter()
+        .filter(|item| matches!(&item.kind, UiItemKind::Custom(kind) if kind == "memory"))
+        .map(|item| item.id.clone())
+        .collect()
+}
+
+fn resolve_selected_chat_scope_memory_id(state: &CoreState) -> Option<String> {
+    state.selected_index.and_then(|index| {
+        state.list_items.get(index).and_then(|item| {
+            matches!(&item.kind, UiItemKind::Custom(kind) if kind == "memory")
+                .then(|| item.id.clone())
+        })
+    })
+}
+
+fn first_memory_list_index(state: &CoreState) -> Option<usize> {
+    state
+        .list_items
+        .iter()
+        .position(|item| matches!(&item.kind, UiItemKind::Custom(kind) if kind == "memory"))
+}
+
+fn list_index_for_memory_id(state: &CoreState, memory_id: &str) -> Option<usize> {
+    state.list_items.iter().position(|item| {
+        item.id == memory_id && matches!(&item.kind, UiItemKind::Custom(kind) if kind == "memory")
+    })
 }
 
 pub fn clear_modal_error_state(submit_state: &mut CreateSubmitState, error: &mut Option<String>) {
@@ -2215,7 +2355,7 @@ fn is_focus_allowed_for_policy(policy: TabFocusPolicy, focus: PaneFocus) -> bool
 }
 
 fn default_focus_for_policy(policy: TabFocusPolicy, chat_open: bool) -> PaneFocus {
-    if chat_open {
+    if chat_open && policy.allows_chat {
         return PaneFocus::Extra;
     }
 
@@ -2354,9 +2494,6 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
                 CoreKey::Right if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
                     Some(CoreAction::ChatScopeNext)
                 }
-                CoreKey::Char('N') if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
-                    Some(CoreAction::ChatNewThread)
-                }
                 CoreKey::Enter => Some(CoreAction::ChatSubmit),
                 CoreKey::Down => Some(CoreAction::ChatScrollDown),
                 CoreKey::Up => Some(CoreAction::ChatScrollUp),
@@ -2382,6 +2519,7 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
         state.status_message = snapshot.status_message;
     }
     state.selected_memory_label = snapshot.selected_memory_label;
+    state.chat_scope_label = snapshot.chat_scope_label;
     state.create_cost_state = snapshot.create_cost_state;
     state.create_submit_state = snapshot.create_submit_state;
     state.settings = snapshot.settings;
@@ -2896,6 +3034,22 @@ mod tests {
     }
 
     #[test]
+    fn open_selected_keeps_focus_on_chat_when_memories_chat_replaces_content() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            chat_open: true,
+            memory_content_action_index: 2,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::OpenSelected);
+
+        assert_eq!(state.focus, PaneFocus::Extra);
+        assert_eq!(state.memory_content_action_index, 2);
+    }
+
+    #[test]
     fn test_dispatch_action_applies_provider_snapshot() {
         struct DispatchTestProvider;
 
@@ -2923,7 +3077,7 @@ mod tests {
     }
 
     #[test]
-    fn toggle_chat_returns_to_create_focus_on_create_tab() {
+    fn toggle_chat_is_ignored_on_create_tab() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
             focus: PaneFocus::Form,
@@ -2931,10 +3085,27 @@ mod tests {
         };
 
         apply_core_action(&mut state, &CoreAction::ToggleChat);
-        assert_eq!(state.focus, PaneFocus::Extra);
-
-        apply_core_action(&mut state, &CoreAction::ToggleChat);
         assert_eq!(state.focus, PaneFocus::Form);
+        assert!(!state.chat_open);
+    }
+
+    #[test]
+    fn switching_away_from_memories_closes_chat() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Extra,
+            chat_open: true,
+            ..CoreState::default()
+        };
+
+        apply_core_action(
+            &mut state,
+            &CoreAction::SetTab(CoreTabId::new(kinic_tabs::KINIC_CREATE_TAB_ID)),
+        );
+
+        assert_eq!(state.current_tab_id, kinic_tabs::KINIC_CREATE_TAB_ID);
+        assert_eq!(state.focus, PaneFocus::Form);
+        assert!(!state.chat_open);
     }
 
     #[test]
@@ -3239,6 +3410,31 @@ mod tests {
     }
 
     #[test]
+    fn memories_items_tab_moves_focus_to_chat_when_chat_replaces_content() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            chat_open: true,
+            selected_index: Some(0),
+            list_items: vec![UiItemSummary {
+                id: "1".to_string(),
+                name: "a".to_string(),
+                leading_marker: None,
+                kind: tui_kit_model::UiItemKind::Custom("x".to_string()),
+                visibility: tui_kit_model::UiVisibility::Private,
+                qualified_name: None,
+                subtitle: None,
+                tags: vec![],
+            }],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusNext);
+        assert_eq!(state.focus, PaneFocus::Extra);
+        assert_eq!(state.selected_index, Some(0));
+    }
+
+    #[test]
     fn memories_items_backtab_moves_focus_to_search() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
@@ -3260,6 +3456,19 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::FocusPrev);
         assert_eq!(state.focus, PaneFocus::Search);
         assert_eq!(state.selected_index, Some(0));
+    }
+
+    #[test]
+    fn memories_chat_backtab_moves_focus_to_items_when_chat_replaces_content() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            focus: PaneFocus::Extra,
+            chat_open: true,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusPrev);
+        assert_eq!(state.focus, PaneFocus::Items);
     }
 
     #[test]
@@ -3382,6 +3591,17 @@ mod tests {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
             chat_scope: ChatScope::Selected,
+            selected_index: Some(0),
+            list_items: vec![UiItemSummary {
+                id: "aaaaa-aa".to_string(),
+                name: "Alpha Memory".to_string(),
+                leading_marker: None,
+                kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                visibility: tui_kit_model::UiVisibility::Private,
+                qualified_name: None,
+                subtitle: None,
+                tags: vec![],
+            }],
             ..CoreState::default()
         };
 
@@ -3397,22 +3617,239 @@ mod tests {
     }
 
     #[test]
-    fn memories_chat_focus_maps_shift_n_to_new_thread() {
+    fn chat_scope_selected_persists_while_list_selection_moves() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            chat_scope: ChatScope::Selected,
+            selected_index: Some(0),
+            list_items: vec![
+                UiItemSummary {
+                    id: "aaaaa-aa".to_string(),
+                    name: "Alpha Memory".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+                UiItemSummary {
+                    id: "bbbbb-bb".to_string(),
+                    name: "Beta Memory".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+            ],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::MoveNext);
+
+        assert_eq!(state.selected_index, Some(1));
+        assert_eq!(state.chat_scope, ChatScope::Selected);
+    }
+
+    #[test]
+    fn chat_scope_cycles_through_visible_memory_items() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            chat_scope: ChatScope::Selected,
+            selected_index: Some(0),
+            list_items: vec![
+                UiItemSummary {
+                    id: "aaaaa-aa".to_string(),
+                    name: "Alpha Memory".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+                UiItemSummary {
+                    id: "kinic-action-add-memory".to_string(),
+                    name: "+ Add Existing Memory Canister".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("action".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+                UiItemSummary {
+                    id: "bbbbb-bb".to_string(),
+                    name: "Beta Memory".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+            ],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ChatScopeNext);
+        assert_eq!(state.chat_scope, ChatScope::Selected);
+        assert_eq!(state.selected_index, Some(2));
+        assert_eq!(
+            state
+                .selected_index
+                .and_then(|i| state.list_items.get(i))
+                .map(|item| item.id.as_str()),
+            Some("bbbbb-bb")
+        );
+
+        apply_core_action(&mut state, &CoreAction::ChatScopeNext);
+        assert_eq!(state.chat_scope, ChatScope::All);
+
+        apply_core_action(&mut state, &CoreAction::ChatScopePrev);
+        assert_eq!(state.chat_scope, ChatScope::Selected);
+        assert_eq!(state.selected_index, Some(2));
+        assert_eq!(
+            state
+                .selected_index
+                .and_then(|i| state.list_items.get(i))
+                .map(|item| item.id.as_str()),
+            Some("bbbbb-bb")
+        );
+    }
+
+    #[test]
+    fn chat_scope_next_from_all_uses_first_visible_memory_not_browser_cursor() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            chat_scope: ChatScope::All,
+            selected_index: Some(2),
+            list_items: vec![
+                UiItemSummary {
+                    id: "aaaaa-aa".to_string(),
+                    name: "Alpha Memory".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+                UiItemSummary {
+                    id: "kinic-action-add-memory".to_string(),
+                    name: "+ Add Existing Memory Canister".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("action".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+                UiItemSummary {
+                    id: "bbbbb-bb".to_string(),
+                    name: "Beta Memory".to_string(),
+                    leading_marker: None,
+                    kind: tui_kit_model::UiItemKind::Custom("memory".to_string()),
+                    visibility: tui_kit_model::UiVisibility::Private,
+                    qualified_name: None,
+                    subtitle: None,
+                    tags: vec![],
+                },
+            ],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ChatScopeNext);
+
+        assert_eq!(state.chat_scope, ChatScope::Selected);
+        assert_eq!(state.selected_index, Some(0));
+        assert_eq!(
+            state
+                .selected_index
+                .and_then(|i| state.list_items.get(i))
+                .map(|item| item.id.as_str()),
+            Some("aaaaa-aa")
+        );
+    }
+
+    #[test]
+    fn chat_scope_all_switches_selected_scope_back_to_all() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            chat_scope: ChatScope::Selected,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ChatScopeAll);
+
+        assert_eq!(state.chat_scope, ChatScope::All);
+    }
+
+    #[test]
+    fn chat_scope_next_returns_to_all_when_no_visible_memories() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            chat_scope: ChatScope::Selected,
+            list_items: vec![UiItemSummary {
+                id: "kinic-action-add-memory".to_string(),
+                name: "+ Add Existing Memory Canister".to_string(),
+                leading_marker: None,
+                kind: tui_kit_model::UiItemKind::Custom("action".to_string()),
+                visibility: tui_kit_model::UiVisibility::Private,
+                qualified_name: None,
+                subtitle: None,
+                tags: vec![],
+            }],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ChatScopeNext);
+
+        assert_eq!(state.chat_scope, ChatScope::All);
+    }
+
+    #[test]
+    fn chat_scope_prev_returns_to_all_when_no_visible_memories() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
+            chat_scope: ChatScope::Selected,
+            list_items: vec![UiItemSummary {
+                id: "kinic-action-add-memory".to_string(),
+                name: "+ Add Existing Memory Canister".to_string(),
+                leading_marker: None,
+                kind: tui_kit_model::UiItemKind::Custom("action".to_string()),
+                visibility: tui_kit_model::UiVisibility::Private,
+                qualified_name: None,
+                subtitle: None,
+                tags: vec![],
+            }],
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::ChatScopePrev);
+
+        assert_eq!(state.chat_scope, ChatScope::All);
+    }
+
+    #[test]
+    fn memories_chat_focus_maps_regular_chars_to_chat_input() {
         assert_eq!(
             action_for_key(
                 CoreKey::Char('N'),
                 PaneFocus::Extra,
                 kinic_tabs::KINIC_MEMORIES_TAB_ID
             ),
-            Some(CoreAction::ChatNewThread)
+            Some(CoreAction::ChatInput('N'))
         );
         assert_eq!(
             action_for_key(
-                CoreKey::Char('N'),
+                CoreKey::Char('t'),
                 PaneFocus::Extra,
-                kinic_tabs::KINIC_CREATE_TAB_ID
+                kinic_tabs::KINIC_MEMORIES_TAB_ID
             ),
-            Some(CoreAction::ChatInput('N'))
+            Some(CoreAction::ChatInput('t'))
         );
     }
 

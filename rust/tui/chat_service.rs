@@ -4,14 +4,14 @@
 //! Why: keep the bridge layer thin while preserving the existing TUI-facing API surface.
 
 use anyhow::Result;
+use std::future::Future;
 use tokio::{sync::Semaphore, task::JoinSet};
-use tui_kit_runtime::ChatScope;
 
 use crate::prompt_utils::detect_language;
 
 use super::{
     bridge::{
-        AskMemoriesOutput, ChatTarget, SearchResultItem, build_search_agent,
+        AskMemoriesOutput, AskMemoriesRequest, ChatTarget, SearchResultItem, build_search_agent,
         search_memory_with_agent,
     },
     chat_prompt::{
@@ -32,12 +32,53 @@ pub(crate) struct ChatSearchBatch {
 pub(crate) async fn ask_memories(
     use_mainnet: bool,
     auth: TuiAuth,
-    scope: ChatScope,
-    targets: Vec<ChatTarget>,
-    query: String,
-    history: Vec<(String, String)>,
-    retrieval_config: super::bridge::ChatRetrievalConfig,
+    request: AskMemoriesRequest,
 ) -> Result<AskMemoriesOutput> {
+    ask_memories_with_services(
+        use_mainnet,
+        auth,
+        request,
+        |prompt| async move { call_chat_endpoint(prompt.as_str()).await },
+        |search_query| async move { fetch_embedding(search_query.as_str()).await },
+        |use_mainnet, auth, targets, embedding| async move {
+            search_chat_targets(use_mainnet, auth, &targets, &embedding).await
+        },
+    )
+    .await
+}
+
+pub(crate) async fn ask_memories_with_services<
+    ChatEndpointFn,
+    ChatEndpointFuture,
+    EmbeddingFn,
+    EmbeddingFuture,
+    SearchTargetsFn,
+    SearchTargetsFuture,
+>(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    request: AskMemoriesRequest,
+    chat_endpoint_fn: ChatEndpointFn,
+    embedding_fn: EmbeddingFn,
+    search_targets_fn: SearchTargetsFn,
+) -> Result<AskMemoriesOutput>
+where
+    ChatEndpointFn: Fn(String) -> ChatEndpointFuture,
+    ChatEndpointFuture: Future<Output = Result<String>>,
+    EmbeddingFn: Fn(String) -> EmbeddingFuture,
+    EmbeddingFuture: Future<Output = Result<Vec<f32>>>,
+    SearchTargetsFn: Fn(bool, TuiAuth, Vec<ChatTarget>, Vec<f32>) -> SearchTargetsFuture,
+    SearchTargetsFuture: Future<Output = Result<ChatSearchBatch>>,
+{
+    let AskMemoriesRequest {
+        scope,
+        targets,
+        query,
+        history,
+        retrieval_config,
+        active_memory_context,
+    } = request;
+
     if targets.is_empty() {
         anyhow::bail!("no searchable memories are available for chat");
     }
@@ -50,20 +91,18 @@ pub(crate) async fn ask_memories(
         &query,
         history.iter().map(|message| message.content.as_str()),
     );
-    let rewrite_prompt = build_search_rewrite_prompt(&query, &history, language);
-    let search_query = call_chat_endpoint(&rewrite_prompt)
-        .await?
-        .trim()
-        .to_string();
+    let rewrite_prompt =
+        build_search_rewrite_prompt(&query, &history, language, active_memory_context.as_ref());
+    let search_query = chat_endpoint_fn(rewrite_prompt).await?.trim().to_string();
     if search_query.is_empty() {
         anyhow::bail!("chat endpoint returned an empty search rewrite");
     }
 
-    let embedding = fetch_embedding(&search_query).await?;
+    let embedding = embedding_fn(search_query.clone()).await?;
     let ChatSearchBatch {
         items,
         failed_memory_ids,
-    } = search_chat_targets(use_mainnet, auth, &targets, &embedding).await?;
+    } = search_targets_fn(use_mainnet, auth, targets.clone(), embedding).await?;
     let prompt_documents = select_chat_prompt_documents(
         scope,
         items,
@@ -79,8 +118,9 @@ pub(crate) async fn ask_memories(
         &prompt_documents,
         language,
         failed_memory_ids.len(),
+        active_memory_context.as_ref(),
     );
-    let response = call_chat_endpoint(&prompt).await?;
+    let response = chat_endpoint_fn(prompt).await?;
     Ok(AskMemoriesOutput {
         response,
         failed_memory_ids,

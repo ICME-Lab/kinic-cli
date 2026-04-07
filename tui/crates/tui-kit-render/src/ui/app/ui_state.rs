@@ -73,12 +73,15 @@ pub struct TuiKitUi<'a> {
     pub(super) transfer_modal: TransferModalState,
     pub(super) status_message: &'a str,
     pub(super) selected_memory_label: Option<&'a str>,
+    pub(super) chat_scope_label: Option<&'a str>,
     pub(super) inspector_scroll: usize,
     pub(super) animation: Option<&'a AnimationState>,
     pub(super) theme: &'a Theme,
     pub(super) show_chat_panel: bool,
     pub(super) chat_messages: &'a [(String, String)],
     pub(super) chat_input: &'a str,
+    pub(super) chat_input_cursor: Option<(usize, usize)>,
+    pub(super) chat_command_selected: Option<usize>,
     pub(super) chat_loading: bool,
     pub(super) chat_scroll: usize,
     pub(super) chat_scope: ChatScope,
@@ -146,15 +149,34 @@ impl<'a> TuiKitUi<'a> {
             transfer_modal: TransferModalState::default(),
             status_message: "",
             selected_memory_label: None,
+            chat_scope_label: None,
             inspector_scroll: 0,
             animation: None,
             theme,
             show_chat_panel: false,
             chat_messages: &[],
             chat_input: "",
+            chat_input_cursor: None,
+            chat_command_selected: None,
             chat_loading: false,
             chat_scroll: 0,
             chat_scope: ChatScope::Selected,
+        }
+    }
+
+    pub(super) fn selected_chat_memory_name(&self) -> Option<&'a str> {
+        self.chat_scope_label.or_else(|| {
+            self.list_selected
+                .and_then(|index| self.ui_summaries.get(index))
+                .map(|item| item.name.as_str())
+                .or(self.selected_memory_label)
+        })
+    }
+
+    pub(super) fn chat_scope_label(&self) -> &'a str {
+        match self.chat_scope {
+            ChatScope::All => "all",
+            ChatScope::Selected => self.selected_chat_memory_name().unwrap_or("selected"),
         }
     }
 }

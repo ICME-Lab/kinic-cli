@@ -260,14 +260,6 @@ mod global_commands {
                 HostGlobalCommand::RefreshCurrentView,
             ),
             (
-                KeyCode::Char('R'),
-                KeyModifiers::SHIFT,
-                PaneFocus::Content,
-                KINIC_MEMORIES_TAB_ID,
-                true,
-                HostGlobalCommand::OpenRenameMemory,
-            ),
-            (
                 KeyCode::Char('q'),
                 KeyModifiers::NONE,
                 PaneFocus::Items,
@@ -331,6 +323,22 @@ mod global_commands {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn global_command_does_not_open_chat_from_search_focus() {
+        assert_eq!(
+            global_command_for_key(
+                KeyCode::Char('C'),
+                KeyModifiers::SHIFT,
+                PaneFocus::Search,
+                KINIC_MEMORIES_TAB_ID,
+                false,
+                false,
+                false,
+            ),
+            HostGlobalCommand::None
+        );
     }
 
     #[test]

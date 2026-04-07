@@ -10,7 +10,7 @@ use crate::{
     cli::AskAiArgs,
     clients::memory::MemoryClient,
     embedding::{embedding_base_url, fetch_embedding},
-    prompt_utils::escape_xml,
+    prompt_utils::{escape_xml, prompt_language_instruction},
 };
 
 use super::CommandContext;
@@ -210,23 +210,8 @@ fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
         .position(|window| window.eq_ignore_ascii_case(needle_bytes))
 }
 
-fn get_language_instruction(lang_code: &str) -> &'static str {
-    match lang_code {
-        "ja" => "日本語 (Japanese)",
-        "ko" => "한국어 (Korean)",
-        "zh" => "中文 (Chinese)",
-        "es" => "Español (Spanish)",
-        "fr" => "Français (French)",
-        "de" => "Deutsch (German)",
-        "it" => "Italiano (Italian)",
-        "pt" => "Português (Portuguese)",
-        "ru" => "Русский (Russian)",
-        _ => "English",
-    }
-}
-
 fn ask_ai_prompt(query: &str, results: &[SearchResult], language: &str) -> String {
-    let language_instruction = get_language_instruction(language);
+    let language_instruction = prompt_language_instruction(language);
 
     let top_results = results.iter().take(MAX_RESULTS).collect::<Vec<_>>();
 
@@ -341,5 +326,12 @@ mod tests {
         assert!(prompt.contains("&lt;title&gt;"));
         assert!(prompt.contains("&lt;doc&gt;unsafe&lt;/doc&gt;"));
         assert!(!prompt.contains("<doc>unsafe</doc>"));
+    }
+
+    #[test]
+    fn ask_ai_prompt_normalizes_locale_language_codes() {
+        let prompt = ask_ai_prompt("summary", &[], "ja-JP");
+
+        assert!(prompt.contains("Answer in 日本語 (Japanese) in <answer> tag."));
     }
 }

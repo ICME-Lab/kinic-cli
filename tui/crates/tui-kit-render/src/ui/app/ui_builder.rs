@@ -368,6 +368,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn chat_scope_label_value(mut self, value: Option<&'a str>) -> Self {
+        self.chat_scope_label = value;
+        self
+    }
+
+    #[must_use]
     pub fn inspector_scroll(mut self, scroll: usize) -> Self {
         self.inspector_scroll = scroll;
         self
@@ -394,6 +400,18 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn chat_input(mut self, input: &'a str) -> Self {
         self.chat_input = input;
+        self
+    }
+
+    #[must_use]
+    pub fn chat_input_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.chat_input_cursor = value;
+        self
+    }
+
+    #[must_use]
+    pub fn chat_command_selected(mut self, value: Option<usize>) -> Self {
+        self.chat_command_selected = value;
         self
     }
 
