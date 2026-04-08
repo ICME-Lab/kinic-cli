@@ -279,7 +279,7 @@ Main items you can review:
 - `d` in the saved tag list: delete a tag
 - `Ctrl+R`: refresh `Principal ID` and `KINIC balance`
 
-The transfer modal accepts a recipient principal and an amount in KINIC. `Max` fills the largest sendable amount after subtracting the current ledger fee, and `Submit` opens a confirmation step before the transfer is sent.
+The transfer modal accepts a recipient principal and an amount in KINIC. The amount field accepts digits and a single decimal point, with up to 8 fractional digits. `Max` fills the largest sendable amount after subtracting the current ledger fee, and `Submit` opens a confirmation step before the transfer is sent.
 
 Values saved from `Settings` persist across restarts.
 
