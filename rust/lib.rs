@@ -10,6 +10,7 @@ pub(crate) mod insert_service;
 mod ledger;
 pub(crate) mod memory_client_builder;
 mod operation_timeout;
+pub(crate) mod preferences;
 mod prompt_utils;
 #[cfg(feature = "python-bindings")]
 mod python;
@@ -24,7 +25,7 @@ use tracing_subscriber::fmt;
 use crate::{
     agent::AgentFactory,
     cli::Cli,
-    commands::{CommandContext, run_command},
+    commands::{CommandContext, capabilities, prefs, run_command},
 };
 
 pub(crate) const KEYRING_IDENTITY_REQUIRED_MESSAGE: &str =
@@ -61,34 +62,37 @@ pub async fn run() -> Result<()> {
         return tui::run(&cli.global);
     }
 
-    if cli.global.ii
-        && matches!(
-            &cli.command,
-            cli::Command::Create(_) | cli::Command::Balance(_)
-        )
-        && !cfg!(feature = "experimental")
-    {
-        anyhow::bail!(
-            "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
-        );
+    match cli.command {
+        cli::Command::Capabilities(args) => capabilities::handle(args),
+        cli::Command::Prefs(args) => prefs::handle(args),
+        command => {
+            if cli.global.ii
+                && matches!(&command, cli::Command::Create(_) | cli::Command::Balance(_))
+                && !cfg!(feature = "experimental")
+            {
+                anyhow::bail!(
+                    "For security reasons, using a locally hosted origin Internet Identity is not recommended for commands involving asset transfers."
+                );
+            }
+
+            let (agent_factory, identity_path) = if matches!(&command, cli::Command::Login(_)) {
+                let identity_path = Some(resolve_identity_path(&cli.global)?);
+                (
+                    AgentFactory::new(cli.global.ic, String::new()),
+                    identity_path,
+                )
+            } else {
+                build_cli_command_context(&cli.global)?
+            };
+
+            let context = CommandContext {
+                agent_factory,
+                identity_path,
+            };
+
+            run_command(command, context).await
+        }
     }
-
-    let (agent_factory, identity_path) = if matches!(&cli.command, cli::Command::Login(_)) {
-        let identity_path = Some(resolve_identity_path(&cli.global)?);
-        (
-            AgentFactory::new(cli.global.ic, String::new()),
-            identity_path,
-        )
-    } else {
-        build_cli_command_context(&cli.global)?
-    };
-
-    let context = CommandContext {
-        agent_factory,
-        identity_path,
-    };
-
-    run_command(cli.command, context).await
 }
 
 fn validate_tui_cli_args(cli: &Cli) -> Result<()> {
@@ -126,6 +130,12 @@ fn validate_keyring_identity(cli: &Cli) -> Result<()> {
         return Ok(());
     }
     if matches!(&cli.command, cli::Command::Tui(_)) {
+        return Ok(());
+    }
+    if matches!(&cli.command, cli::Command::Capabilities(_)) {
+        return Ok(());
+    }
+    if matches!(&cli.command, cli::Command::Prefs(_)) {
         return Ok(());
     }
     if cli.global.identity.is_some() {
@@ -294,6 +304,32 @@ mod tests {
         let cli = Cli::try_parse_from(["kinic-cli", "--identity", "alice", "tui"]).expect("cli");
 
         validate_keyring_identity(&cli).expect("tui handled by validate_tui_cli_args");
+    }
+
+    #[test]
+    fn validate_keyring_identity_skips_prefs_command_without_identity() {
+        let cli = Cli::try_parse_from(["kinic-cli", "prefs", "show"]).expect("cli");
+
+        validate_keyring_identity(&cli).expect("prefs should not require identity");
+    }
+
+    #[test]
+    fn validate_keyring_identity_skips_capabilities_without_identity() {
+        let cli = Cli::try_parse_from(["kinic-cli", "capabilities"]).expect("cli");
+
+        validate_keyring_identity(&cli).expect("capabilities should not require identity");
+    }
+
+    #[test]
+    fn cli_parses_prefs_show_without_identity() {
+        let cli = Cli::try_parse_from(["kinic-cli", "prefs", "show"]).expect("cli");
+
+        assert!(matches!(
+            cli.command,
+            cli::Command::Prefs(cli::PrefsArgs {
+                command: cli::PrefsCommand::Show
+            })
+        ));
     }
 }
 
