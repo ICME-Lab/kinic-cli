@@ -16,51 +16,20 @@ use tui_kit_runtime::{
     format_e8s_to_kinic_string_u128,
 };
 
+use crate::preferences::{
+    UserPreferences, chat_diversity_display, chat_per_memory_limit_display,
+    chat_result_limit_display,
+};
 use crate::tui::TuiAuth;
 
 #[cfg(not(test))]
 const APP_NAMESPACE: &str = "kinic";
-#[cfg(not(test))]
-const SETTINGS_FILE_NAME: &str = "tui.yaml";
 #[cfg(not(test))]
 const CHAT_HISTORY_FILE_NAME: &str = "chat-threads.yaml";
 const UNAVAILABLE: &str = "unavailable";
 const NOT_SET: &str = "not set";
 const CHAT_HISTORY_MAX_MESSAGES: usize = 40;
 const CHAT_MESSAGE_MAX_CONTENT_LEN: usize = 4096;
-pub const DEFAULT_CHAT_OVERALL_TOP_K: usize = 8;
-pub const DEFAULT_CHAT_PER_MEMORY_CAP: usize = 3;
-pub const DEFAULT_CHAT_MMR_LAMBDA: u8 = 70;
-const CHAT_RESULT_LIMIT_OPTIONS: &[usize] = &[4, 6, 8, 10, 12];
-const CHAT_PER_MEMORY_LIMIT_OPTIONS: &[usize] = &[1, 2, 3, 4];
-const CHAT_DIVERSITY_OPTIONS: &[u8] = &[60, 70, 80, 90];
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// The current on-disk schema is intentionally fixed; unsupported legacy shapes fail to decode.
-pub struct UserPreferences {
-    pub default_memory_id: Option<String>,
-    pub saved_tags: Vec<String>,
-    pub manual_memory_ids: Vec<String>,
-    #[serde(default = "default_chat_overall_top_k")]
-    pub chat_overall_top_k: usize,
-    #[serde(default = "default_chat_per_memory_cap")]
-    pub chat_per_memory_cap: usize,
-    #[serde(default = "default_chat_mmr_lambda")]
-    pub chat_mmr_lambda: u8,
-}
-
-impl Default for UserPreferences {
-    fn default() -> Self {
-        Self {
-            default_memory_id: None,
-            saved_tags: Vec::new(),
-            manual_memory_ids: Vec::new(),
-            chat_overall_top_k: DEFAULT_CHAT_OVERALL_TOP_K,
-            chat_per_memory_cap: DEFAULT_CHAT_PER_MEMORY_CAP,
-            chat_mmr_lambda: DEFAULT_CHAT_MMR_LAMBDA,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PreferencesHealth {
@@ -105,43 +74,6 @@ pub struct StoredChatMessage {
 pub struct ActiveChatThread {
     pub thread_id: String,
     pub messages: Vec<(String, String)>,
-}
-
-pub fn default_chat_overall_top_k() -> usize {
-    DEFAULT_CHAT_OVERALL_TOP_K
-}
-
-pub fn default_chat_per_memory_cap() -> usize {
-    DEFAULT_CHAT_PER_MEMORY_CAP
-}
-
-pub fn default_chat_mmr_lambda() -> u8 {
-    DEFAULT_CHAT_MMR_LAMBDA
-}
-
-#[cfg(test)]
-pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
-    Ok(normalize_user_preferences(UserPreferences::default()))
-}
-
-#[cfg(not(test))]
-pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
-    let preferences: UserPreferences = load_yaml_or_default(APP_NAMESPACE, SETTINGS_FILE_NAME)?;
-    Ok(normalize_user_preferences(preferences))
-}
-
-#[cfg(test)]
-pub fn save_user_preferences(_preferences: &UserPreferences) -> Result<(), SettingsError> {
-    Ok(())
-}
-
-#[cfg(not(test))]
-pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), SettingsError> {
-    save_yaml(
-        APP_NAMESPACE,
-        SETTINGS_FILE_NAME,
-        &normalize_user_preferences(preferences.clone()),
-    )
 }
 
 pub fn current_chat_saved_at() -> u64 {
@@ -779,96 +711,12 @@ fn preferences_status_label(health: &PreferencesHealth) -> String {
     }
 }
 
-pub(crate) fn normalize_saved_tags(mut tags: Vec<String>) -> Vec<String> {
-    tags = tags
-        .into_iter()
-        .map(|tag| tag.trim().to_string())
-        .filter(|tag| !tag.is_empty())
-        .collect();
-    tags.sort();
-    tags.dedup();
-    tags
-}
-
-pub fn normalize_user_preferences(mut preferences: UserPreferences) -> UserPreferences {
-    preferences.saved_tags = normalize_saved_tags(preferences.saved_tags);
-    preferences.manual_memory_ids = normalize_manual_memory_ids(preferences.manual_memory_ids);
-    preferences.chat_overall_top_k = normalize_chat_overall_top_k(preferences.chat_overall_top_k);
-    preferences.chat_per_memory_cap =
-        normalize_chat_per_memory_cap(preferences.chat_per_memory_cap);
-    preferences.chat_mmr_lambda = normalize_chat_mmr_lambda(preferences.chat_mmr_lambda);
-    preferences
-}
-
-pub fn normalize_chat_overall_top_k(value: usize) -> usize {
-    if CHAT_RESULT_LIMIT_OPTIONS.contains(&value) {
-        value
-    } else {
-        DEFAULT_CHAT_OVERALL_TOP_K
-    }
-}
-
-pub fn normalize_chat_per_memory_cap(value: usize) -> usize {
-    if CHAT_PER_MEMORY_LIMIT_OPTIONS.contains(&value) {
-        value
-    } else {
-        DEFAULT_CHAT_PER_MEMORY_CAP
-    }
-}
-
-pub fn normalize_chat_mmr_lambda(value: u8) -> u8 {
-    if CHAT_DIVERSITY_OPTIONS.contains(&value) {
-        value
-    } else {
-        DEFAULT_CHAT_MMR_LAMBDA
-    }
-}
-
-pub fn chat_result_limit_options() -> &'static [usize] {
-    CHAT_RESULT_LIMIT_OPTIONS
-}
-
-pub fn chat_per_memory_limit_options() -> &'static [usize] {
-    CHAT_PER_MEMORY_LIMIT_OPTIONS
-}
-
-pub fn chat_diversity_options() -> &'static [u8] {
-    CHAT_DIVERSITY_OPTIONS
-}
-
-pub fn chat_result_limit_display(value: usize) -> String {
-    format!("{value} docs")
-}
-
-pub fn chat_per_memory_limit_display(value: usize) -> String {
-    format!("{value} per memory")
-}
-
-pub fn chat_diversity_display(value: u8) -> String {
-    format!("{:.2}", f32::from(value) / 100.0)
-}
-
 fn saved_tags_display(preferences: &UserPreferences) -> String {
     if preferences.saved_tags.is_empty() {
         return NOT_SET.to_string();
     }
 
     preferences.saved_tags.join(", ")
-}
-
-#[cfg_attr(test, allow(dead_code))]
-fn normalize_manual_memory_ids(memory_ids: Vec<String>) -> Vec<String> {
-    let mut unique = Vec::new();
-    for memory_id in memory_ids
-        .into_iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
-        if !unique.iter().any(|existing| existing == &memory_id) {
-            unique.push(memory_id);
-        }
-    }
-    unique
 }
 
 #[cfg(test)]

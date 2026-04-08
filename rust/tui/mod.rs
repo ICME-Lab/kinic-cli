@@ -19,7 +19,7 @@ mod chat_retrieval;
 mod chat_service;
 mod chat_similarity;
 mod provider;
-mod settings;
+pub(crate) mod settings;
 mod ui_config;
 
 #[cfg(test)]
