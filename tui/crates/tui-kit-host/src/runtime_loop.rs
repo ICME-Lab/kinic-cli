@@ -1,7 +1,7 @@
 #[path = "form_tab_flow.rs"]
 mod form_tab_flow;
 
-use ratatui_textarea::{CursorMove, Input as TextAreaInput, Key as TextAreaKey, TextArea};
+use ratatui_textarea::{Input as TextAreaInput, Key as TextAreaKey, TextArea};
 use std::{io, time::Duration};
 use tui_kit_render::theme::Theme;
 use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
@@ -71,10 +71,37 @@ enum ActiveTextarea {
     ChatInput,
 }
 
+// Memories chat uses a dedicated single-line model so chat shortcuts and paste
+// behavior stay independent from multiline textarea defaults.
+#[derive(Default)]
+struct ChatInputState {
+    value: String,
+    cursor_col: usize,
+}
+
+impl ChatInputState {
+    #[cfg(test)]
+    fn lines(&self) -> Vec<String> {
+        vec![self.value.clone()]
+    }
+
+    #[cfg(test)]
+    fn cursor(&self) -> (usize, usize) {
+        (0, self.cursor_col)
+    }
+
+    #[cfg(test)]
+    fn input(&mut self, input: TextAreaInput) {
+        if let Some(action) = chat_edit_from_textarea_input(input) {
+            apply_chat_edit(self, action);
+        }
+    }
+}
+
 struct FormTextareas {
     create_description: TextArea<'static>,
     insert_text: TextArea<'static>,
-    chat_input: TextArea<'static>,
+    chat_input: ChatInputState,
     chat_command_selected: usize,
 }
 
@@ -83,7 +110,7 @@ impl Default for FormTextareas {
         Self {
             create_description: textarea_from_text(""),
             insert_text: textarea_from_text(""),
-            chat_input: textarea_from_text(""),
+            chat_input: ChatInputState::default(),
             chat_command_selected: 0,
         }
     }
@@ -250,176 +277,201 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             let Some(input) = poll_host_input(poll_duration)? else {
                 continue;
             };
-            let HostInputEvent {
-                key_event,
-                code,
-                modifiers,
-            } = input;
-
-            match handle_overlay_input(provider, &mut state, show_settings, code, modifiers) {
-                OverlayInputResult::NotHandled => {}
-                OverlayInputResult::Consumed => continue,
-                OverlayInputResult::CloseSettings => {
-                    show_settings = false;
-                    continue;
-                }
-                OverlayInputResult::DispatchError(error) => {
-                    state.status_message = Some(error);
-                    continue;
-                }
-                OverlayInputResult::ApplyEffects(effects) => {
-                    hooks.on_effects(provider, &mut state, &effects);
-                    execute_effects_to_status(&mut state, effects);
+            if matches!(input, HostInputEvent::Paste(_))
+                && handle_textarea_input(provider, &mut state, hooks, &mut textareas, &input)?
+            {
+                continue;
+            }
+            if let HostInputEvent::Paste(text) = &input {
+                if handle_paste_input(provider, &mut state, hooks, text.as_str())? {
                     continue;
                 }
             }
+            let (_key_event, code, modifiers) = match &input {
+                HostInputEvent::Key {
+                    key_event,
+                    code,
+                    modifiers,
+                } => (Some(*key_event), Some(*code), Some(*modifiers)),
+                HostInputEvent::Paste(_) => (None, None, None),
+            };
 
-            if handle_textarea_input(provider, &mut state, hooks, &mut textareas, &key_event)? {
+            if let (Some(code), Some(modifiers)) = (code, modifiers) {
+                match handle_overlay_input(provider, &mut state, show_settings, code, modifiers) {
+                    OverlayInputResult::NotHandled => {}
+                    OverlayInputResult::Consumed => continue,
+                    OverlayInputResult::CloseSettings => {
+                        show_settings = false;
+                        continue;
+                    }
+                    OverlayInputResult::DispatchError(error) => {
+                        state.status_message = Some(error);
+                        continue;
+                    }
+                    OverlayInputResult::ApplyEffects(effects) => {
+                        hooks.on_effects(provider, &mut state, &effects);
+                        execute_effects_to_status(&mut state, effects);
+                        continue;
+                    }
+                }
+            }
+
+            if handle_textarea_input(provider, &mut state, hooks, &mut textareas, &input)? {
                 continue;
             }
 
-            match global_command_for_key(
-                code,
-                modifiers,
-                state.focus,
-                state.current_tab_id.as_str(),
-                show_help,
-                show_settings,
-                state.query.is_empty(),
-            ) {
-                HostGlobalCommand::None => {}
-                HostGlobalCommand::CloseHelp => {
-                    show_help = false;
-                    continue;
-                }
-                HostGlobalCommand::CloseSettings => {
-                    show_settings = false;
-                    continue;
-                }
-                HostGlobalCommand::CloseChat => {
-                    if let Err(error) =
-                        dispatch_with_effects(provider, &mut state, hooks, &CoreAction::ToggleChat)
-                    {
-                        state.status_message = Some(error);
+            if let (Some(code), Some(modifiers)) = (code, modifiers) {
+                match global_command_for_key(
+                    code,
+                    modifiers,
+                    state.focus,
+                    state.current_tab_id.as_str(),
+                    show_help,
+                    show_settings,
+                    state.query.is_empty(),
+                ) {
+                    HostGlobalCommand::None => {}
+                    HostGlobalCommand::CloseHelp => {
+                        show_help = false;
+                        continue;
                     }
-                    continue;
-                }
-                HostGlobalCommand::BackToTabs => {
-                    state.focus = PaneFocus::Tabs;
-                    continue;
-                }
-                HostGlobalCommand::BackFromFormToTabs => {
-                    state.focus = PaneFocus::Tabs;
-                    continue;
-                }
-                HostGlobalCommand::BackToMemoriesTab => {
-                    if let Err(error) =
-                        switch_to_tab(provider, &mut state, hooks, KINIC_MEMORIES_TAB_ID)
-                    {
-                        state.status_message = Some(error);
+                    HostGlobalCommand::CloseSettings => {
+                        show_settings = false;
+                        continue;
                     }
-                    continue;
-                }
-                HostGlobalCommand::OpenCreateTab => {
-                    open_form_tab(provider, &mut state, hooks, KINIC_CREATE_TAB_ID, true);
-                    continue;
-                }
-                HostGlobalCommand::ToggleHelp => {
-                    show_help = true;
-                    continue;
-                }
-                HostGlobalCommand::ToggleChat => {
-                    if let Err(error) =
-                        dispatch_with_effects(provider, &mut state, hooks, &CoreAction::ToggleChat)
-                    {
-                        state.status_message = Some(error);
+                    HostGlobalCommand::CloseChat => {
+                        if let Err(error) = dispatch_with_effects(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &CoreAction::ToggleChat,
+                        ) {
+                            state.status_message = Some(error);
+                        }
+                        continue;
                     }
-                    continue;
-                }
-                HostGlobalCommand::ToggleSettings => {
-                    match dispatch_with_effects(
-                        provider,
-                        &mut state,
-                        hooks,
-                        &CoreAction::ToggleSettings,
-                    ) {
-                        Ok(()) => show_settings = true,
-                        Err(error) => state.status_message = Some(error),
+                    HostGlobalCommand::BackToTabs => {
+                        state.focus = PaneFocus::Tabs;
+                        continue;
                     }
-                    continue;
-                }
-                HostGlobalCommand::SetDefaultFromSelection => {
-                    if let Err(error) = dispatch_with_effects(
-                        provider,
-                        &mut state,
-                        hooks,
-                        &CoreAction::SetDefaultMemoryFromSelection,
-                    ) {
-                        state.status_message = Some(error);
+                    HostGlobalCommand::BackFromFormToTabs => {
+                        state.focus = PaneFocus::Tabs;
+                        continue;
                     }
-                    continue;
-                }
-                HostGlobalCommand::OpenRenameMemory => {
-                    if let Err(error) = dispatch_with_effects(
-                        provider,
-                        &mut state,
-                        hooks,
-                        &CoreAction::OpenRenameMemory,
-                    ) {
-                        state.status_message = Some(error);
+                    HostGlobalCommand::BackToMemoriesTab => {
+                        if let Err(error) =
+                            switch_to_tab(provider, &mut state, hooks, KINIC_MEMORIES_TAB_ID)
+                        {
+                            state.status_message = Some(error);
+                        }
+                        continue;
                     }
-                    continue;
-                }
-                HostGlobalCommand::BackFromContent => {
-                    state.focus = PaneFocus::Items;
-                    continue;
-                }
-                HostGlobalCommand::BackFromItems => {
-                    state.focus = PaneFocus::Search;
-                    continue;
-                }
-                HostGlobalCommand::RefreshCurrentView => {
-                    if let Err(error) = dispatch_with_effects(
-                        provider,
-                        &mut state,
-                        hooks,
-                        &CoreAction::RefreshCurrentView,
-                    ) {
-                        state.status_message = Some(error);
+                    HostGlobalCommand::OpenCreateTab => {
+                        open_form_tab(provider, &mut state, hooks, KINIC_CREATE_TAB_ID, true);
+                        continue;
                     }
-                    continue;
-                }
-                HostGlobalCommand::ClearQuery => {
-                    if let Err(error) = dispatch_with_effects(
-                        provider,
-                        &mut state,
-                        hooks,
-                        &CoreAction::SetQuery(String::new()),
-                    ) {
-                        state.status_message = Some(error);
+                    HostGlobalCommand::ToggleHelp => {
+                        show_help = true;
+                        continue;
                     }
-                    continue;
+                    HostGlobalCommand::ToggleChat => {
+                        if let Err(error) = dispatch_with_effects(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &CoreAction::ToggleChat,
+                        ) {
+                            state.status_message = Some(error);
+                        }
+                        continue;
+                    }
+                    HostGlobalCommand::ToggleSettings => {
+                        match dispatch_with_effects(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &CoreAction::ToggleSettings,
+                        ) {
+                            Ok(()) => show_settings = true,
+                            Err(error) => state.status_message = Some(error),
+                        }
+                        continue;
+                    }
+                    HostGlobalCommand::SetDefaultFromSelection => {
+                        if let Err(error) = dispatch_with_effects(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &CoreAction::SetDefaultMemoryFromSelection,
+                        ) {
+                            state.status_message = Some(error);
+                        }
+                        continue;
+                    }
+                    HostGlobalCommand::OpenRenameMemory => {
+                        if let Err(error) = dispatch_with_effects(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &CoreAction::OpenRenameMemory,
+                        ) {
+                            state.status_message = Some(error);
+                        }
+                        continue;
+                    }
+                    HostGlobalCommand::BackFromContent => {
+                        state.focus = PaneFocus::Items;
+                        continue;
+                    }
+                    HostGlobalCommand::BackFromItems => {
+                        state.focus = PaneFocus::Search;
+                        continue;
+                    }
+                    HostGlobalCommand::RefreshCurrentView => {
+                        if let Err(error) = dispatch_with_effects(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &CoreAction::RefreshCurrentView,
+                        ) {
+                            state.status_message = Some(error);
+                        }
+                        continue;
+                    }
+                    HostGlobalCommand::ClearQuery => {
+                        if let Err(error) = dispatch_with_effects(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &CoreAction::SetQuery(String::new()),
+                        ) {
+                            state.status_message = Some(error);
+                        }
+                        continue;
+                    }
+                    HostGlobalCommand::Quit => break Ok(()),
                 }
-                HostGlobalCommand::Quit => break Ok(()),
             }
 
-            let action = form_tab_action_from_key(code, &mut state).or_else(|| {
-                if code == crossterm::event::KeyCode::Enter {
-                    if let Some(action) = selected_settings_row_behavior(&state)
-                        .and_then(|behavior| behavior.enter_action)
-                    {
-                        return Some(action);
+            let action = code.and_then(|code| {
+                form_tab_action_from_key(code, &mut state).or_else(|| {
+                    if code == crossterm::event::KeyCode::Enter {
+                        if let Some(action) = selected_settings_row_behavior(&state)
+                            .and_then(|behavior| behavior.enter_action)
+                        {
+                            return Some(action);
+                        }
                     }
-                }
-                action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
-                    |a| {
-                        resolve_tab_action_with_current(
-                            a,
-                            tab_ids,
-                            Some(state.current_tab_id.as_str()),
-                        )
-                    },
-                )
+                    action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
+                        |a| {
+                            resolve_tab_action_with_current(
+                                a,
+                                tab_ids,
+                                Some(state.current_tab_id.as_str()),
+                            )
+                        },
+                    )
+                })
             });
             let mut handled = false;
 
@@ -471,17 +523,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     inspector_scroll = 0;
                 }
             }
-            if !handled
-                && hooks.on_unhandled_input(
-                    provider,
-                    &mut state,
-                    HostInputEvent {
-                        key_event,
-                        code,
-                        modifiers,
-                    },
-                )
-            {
+            if !handled && hooks.on_unhandled_input(provider, &mut state, input) {
                 continue;
             }
         }
@@ -561,7 +603,7 @@ fn build_ui<'a>(
     theme: &'a Theme,
     cfg: &RuntimeLoopConfig,
     state: &'a CoreState,
-    textareas: &FormTextareas,
+    textareas: &'a FormTextareas,
     list_scroll_offset: usize,
     inspector_scroll: usize,
     show_help: bool,
@@ -633,7 +675,7 @@ fn build_ui<'a>(
         .filtered_context_indices(&[])
         .candidates(&[])
         .chat_messages(&state.chat_messages)
-        .chat_input(&state.chat_input)
+        .chat_input(&textareas.chat_input.value)
         .chat_input_cursor(chat_input_cursor(
             active_textarea(state),
             &textareas.chat_input,
@@ -742,18 +784,28 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
     state: &mut CoreState,
     hooks: &mut H,
     textareas: &mut FormTextareas,
-    key_event: &crossterm::event::KeyEvent,
+    input: &HostInputEvent,
 ) -> Result<bool, Box<dyn std::error::Error>> {
+    if let Some(handled) = handle_chat_input_event(provider, state, hooks, textareas, input)? {
+        return Ok(handled);
+    }
+
     let Some(target) = active_textarea(state) else {
         return Ok(false);
     };
-    if target == ActiveTextarea::ChatInput
-        && handle_chat_command_navigation(state, textareas, key_event)
-    {
-        return Ok(true);
-    }
     let textarea = textarea_mut(textareas, target);
-    let action = textarea_navigation_action(target, key_event, key_event.code, textarea);
+    let HostInputEvent::Key {
+        key_event, code, ..
+    } = input
+    else {
+        textarea.insert_str(match input {
+            HostInputEvent::Paste(text) => text.as_str(),
+            HostInputEvent::Key { .. } => "",
+        });
+        sync_state_from_textareas(state, textareas);
+        return Ok(true);
+    };
+    let action = textarea_navigation_action(target, key_event, *code, textarea);
 
     let Some(action) = action else {
         if key_event.code == crossterm::event::KeyCode::Esc {
@@ -761,20 +813,8 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
         }
         textarea.input(textarea_input_from_key_event(*key_event));
         sync_state_from_textareas(state, textareas);
-        if target == ActiveTextarea::ChatInput {
-            sync_chat_textarea_from_state(
-                &mut textareas.chat_input,
-                state.chat_input.as_str(),
-                true,
-            );
-            sync_chat_command_selection(textareas, state.chat_input.as_str());
-        }
         return Ok(true);
     };
-
-    if target == ActiveTextarea::ChatInput && action == CoreAction::ChatSubmit {
-        return handle_chat_submit_or_command(provider, state, hooks, textareas);
-    }
 
     match dispatch_with_effects(provider, state, hooks, &action) {
         Ok(()) => Ok(true),
@@ -783,6 +823,82 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
             Ok(true)
         }
     }
+}
+
+fn handle_chat_input_event<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    textareas: &mut FormTextareas,
+    input: &HostInputEvent,
+) -> Result<Option<bool>, Box<dyn std::error::Error>> {
+    if !chat_input_active(state) {
+        return Ok(None);
+    }
+
+    match input {
+        HostInputEvent::Paste(text) => {
+            insert_chat_text(
+                &mut textareas.chat_input,
+                flatten_chat_input_for_display(text).as_str(),
+            );
+            sync_state_from_chat_input(state, textareas);
+            Ok(Some(true))
+        }
+        HostInputEvent::Key {
+            key_event,
+            code,
+            modifiers,
+        } => {
+            if handle_chat_command_navigation(state, textareas, *code) {
+                return Ok(Some(true));
+            }
+            if let Some(action) = chat_input_action(*key_event, *code, *modifiers) {
+                return match action {
+                    ChatInputAction::Edit(edit) => {
+                        apply_chat_edit(&mut textareas.chat_input, edit);
+                        sync_state_from_chat_input(state, textareas);
+                        Ok(Some(true))
+                    }
+                    ChatInputAction::Submit => {
+                        handle_chat_submit_or_command(provider, state, hooks, textareas).map(Some)
+                    }
+                    ChatInputAction::Dispatch(core_action) => {
+                        match dispatch_with_effects(provider, state, hooks, &core_action) {
+                            Ok(()) => Ok(Some(true)),
+                            Err(error) => {
+                                state.status_message = Some(error);
+                                Ok(Some(true))
+                            }
+                        }
+                    }
+                    ChatInputAction::Passthrough => Ok(Some(false)),
+                };
+            }
+            Ok(Some(false))
+        }
+    }
+}
+
+fn handle_paste_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    text: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let normalized = flatten_single_line_paste(text);
+    if normalized.is_empty() {
+        return Ok(false);
+    }
+
+    if let Some(actions) = paste_actions_for_state(state, normalized.as_str()) {
+        for action in actions {
+            dispatch_with_effects(provider, state, hooks, &action).map_err(io::Error::other)?;
+        }
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 fn handle_chat_submit_or_command<P: DataProvider, H: RuntimeLoopHooks<P>>(
@@ -826,13 +942,13 @@ fn handle_chat_submit_or_command<P: DataProvider, H: RuntimeLoopHooks<P>>(
 fn handle_chat_command_navigation(
     state: &CoreState,
     textareas: &mut FormTextareas,
-    key_event: &crossterm::event::KeyEvent,
+    code: crossterm::event::KeyCode,
 ) -> bool {
     let matches = matching_slash_commands(state.chat_input.as_str());
     if matches.is_empty() {
         return false;
     }
-    match key_event.code {
+    match code {
         crossterm::event::KeyCode::Up => {
             if textareas.chat_command_selected == 0 {
                 textareas.chat_command_selected = matches.len().saturating_sub(1);
@@ -848,6 +964,103 @@ fn handle_chat_command_navigation(
         }
         _ => false,
     }
+}
+
+fn paste_actions_for_state(state: &CoreState, text: &str) -> Option<Vec<CoreAction>> {
+    if state.access_control.open {
+        return paste_actions_for_access_control(state, text);
+    }
+    if state.add_memory.open {
+        return nonempty_actions(char_input_actions(text, CoreAction::AddMemoryInput));
+    }
+    if state.rename_memory.form.open {
+        return paste_actions_for_rename(state, text);
+    }
+    if state.transfer_modal.open {
+        return paste_actions_for_transfer(state, text);
+    }
+    if let PickerState::Input { .. } = &state.picker {
+        return nonempty_actions(char_input_actions(text, CoreAction::PickerInput));
+    }
+    if form_tab_flow::is_form_input_mode(state) && active_textarea(state).is_none() {
+        return nonempty_actions(form_paste_actions(state, text));
+    }
+    if state.focus == PaneFocus::Search {
+        return nonempty_actions(char_input_actions(text, CoreAction::SearchInput));
+    }
+
+    None
+}
+
+fn paste_actions_for_access_control(state: &CoreState, text: &str) -> Option<Vec<CoreAction>> {
+    use tui_kit_runtime::{AccessControlFocus, AccessControlMode};
+
+    if state.access_control.mode == AccessControlMode::Add
+        && state.access_control.focus == AccessControlFocus::Principal
+    {
+        return Some(char_input_actions(text, CoreAction::AccessInput));
+    }
+
+    None
+}
+
+fn paste_actions_for_transfer(state: &CoreState, text: &str) -> Option<Vec<CoreAction>> {
+    use tui_kit_runtime::{TransferModalFocus, TransferModalMode};
+
+    if state.transfer_modal.mode != TransferModalMode::Edit {
+        return None;
+    }
+
+    match state.transfer_modal.focus {
+        TransferModalFocus::Principal | TransferModalFocus::Amount => {
+            Some(char_input_actions(text, CoreAction::TransferInput))
+        }
+        TransferModalFocus::Max | TransferModalFocus::Submit => None,
+    }
+}
+
+fn paste_actions_for_rename(state: &CoreState, text: &str) -> Option<Vec<CoreAction>> {
+    use tui_kit_runtime::RenameModalFocus;
+
+    if state.rename_memory.focus == RenameModalFocus::Name {
+        return nonempty_actions(char_input_actions(text, CoreAction::RenameMemoryInput));
+    }
+
+    None
+}
+
+fn form_paste_actions(state: &CoreState, text: &str) -> Vec<CoreAction> {
+    let mut state_for_actions = state.clone();
+    text.chars()
+        .filter_map(|c| {
+            form_tab_flow::form_tab_action_from_key(
+                crossterm::event::KeyCode::Char(c),
+                &mut state_for_actions,
+            )
+        })
+        .collect()
+}
+
+fn char_input_actions(text: &str, action: impl Fn(char) -> CoreAction) -> Vec<CoreAction> {
+    text.chars().map(action).collect()
+}
+
+fn flatten_single_line_paste(text: &str) -> String {
+    canonicalize_paste_line_endings(text)
+        .lines()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn canonicalize_paste_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn nonempty_actions(actions: Vec<CoreAction>) -> Option<Vec<CoreAction>> {
+    if actions.is_empty() {
+        return None;
+    }
+    Some(actions)
 }
 
 fn sync_chat_command_selection(textareas: &mut FormTextareas, input: &str) {
@@ -874,15 +1087,166 @@ fn chat_command_selection(state: &CoreState, textareas: &FormTextareas) -> Optio
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChatEdit {
+    MoveLeft,
+    MoveRight,
+    MoveHome,
+    MoveEnd,
+    Backspace,
+    Delete,
+    InsertChar(char),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ChatInputAction {
+    Edit(ChatEdit),
+    Submit,
+    Dispatch(CoreAction),
+    Passthrough,
+}
+
+#[cfg(test)]
+fn chat_edit_from_textarea_input(input: TextAreaInput) -> Option<ChatEdit> {
+    match input.key {
+        TextAreaKey::Char(c) if !input.ctrl && !input.alt => Some(ChatEdit::InsertChar(c)),
+        TextAreaKey::Left => Some(ChatEdit::MoveLeft),
+        TextAreaKey::Right => Some(ChatEdit::MoveRight),
+        TextAreaKey::Home => Some(ChatEdit::MoveHome),
+        TextAreaKey::End => Some(ChatEdit::MoveEnd),
+        TextAreaKey::Backspace => Some(ChatEdit::Backspace),
+        TextAreaKey::Delete => Some(ChatEdit::Delete),
+        _ => None,
+    }
+}
+
+fn chat_input_action(
+    _key_event: crossterm::event::KeyEvent,
+    code: crossterm::event::KeyCode,
+    modifiers: crossterm::event::KeyModifiers,
+) -> Option<ChatInputAction> {
+    match (code, modifiers) {
+        (crossterm::event::KeyCode::Tab, _) => {
+            Some(ChatInputAction::Dispatch(CoreAction::FocusNext))
+        }
+        (crossterm::event::KeyCode::BackTab, _) => {
+            Some(ChatInputAction::Dispatch(CoreAction::FocusPrev))
+        }
+        (crossterm::event::KeyCode::Enter, _) => Some(ChatInputAction::Submit),
+        (crossterm::event::KeyCode::Left, modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::SHIFT)
+                && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                && !modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
+        {
+            Some(ChatInputAction::Dispatch(CoreAction::ChatScopePrev))
+        }
+        (crossterm::event::KeyCode::Right, modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::SHIFT)
+                && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                && !modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
+        {
+            Some(ChatInputAction::Dispatch(CoreAction::ChatScopeNext))
+        }
+        (crossterm::event::KeyCode::PageUp, _) => Some(ChatInputAction::Passthrough),
+        (crossterm::event::KeyCode::PageDown, _) => Some(ChatInputAction::Passthrough),
+        (crossterm::event::KeyCode::Home, modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            Some(ChatInputAction::Passthrough)
+        }
+        (crossterm::event::KeyCode::End, modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            Some(ChatInputAction::Passthrough)
+        }
+        (crossterm::event::KeyCode::Up, _) | (crossterm::event::KeyCode::Down, _) => {
+            Some(ChatInputAction::Passthrough)
+        }
+        (crossterm::event::KeyCode::Esc, _) => Some(ChatInputAction::Passthrough),
+        (crossterm::event::KeyCode::Left, _) => Some(ChatInputAction::Edit(ChatEdit::MoveLeft)),
+        (crossterm::event::KeyCode::Right, _) => Some(ChatInputAction::Edit(ChatEdit::MoveRight)),
+        (crossterm::event::KeyCode::Home, _) => Some(ChatInputAction::Edit(ChatEdit::MoveHome)),
+        (crossterm::event::KeyCode::End, _) => Some(ChatInputAction::Edit(ChatEdit::MoveEnd)),
+        (crossterm::event::KeyCode::Backspace, _) => {
+            Some(ChatInputAction::Edit(ChatEdit::Backspace))
+        }
+        (crossterm::event::KeyCode::Delete, _) => Some(ChatInputAction::Edit(ChatEdit::Delete)),
+        (crossterm::event::KeyCode::Char(c), modifiers)
+            if !c.is_control()
+                && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                && !modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
+        {
+            Some(ChatInputAction::Edit(ChatEdit::InsertChar(c)))
+        }
+        _ => None,
+    }
+}
+
+fn apply_chat_edit(chat_input: &mut ChatInputState, edit: ChatEdit) {
+    match edit {
+        ChatEdit::MoveLeft => {
+            chat_input.cursor_col = chat_input.cursor_col.saturating_sub(1);
+        }
+        ChatEdit::MoveRight => {
+            chat_input.cursor_col = (chat_input.cursor_col + 1).min(chat_input_len(chat_input));
+        }
+        ChatEdit::MoveHome => {
+            chat_input.cursor_col = 0;
+        }
+        ChatEdit::MoveEnd => {
+            chat_input.cursor_col = chat_input_len(chat_input);
+        }
+        ChatEdit::Backspace => {
+            if chat_input.cursor_col > 0 {
+                let remove_at = chat_input.cursor_col - 1;
+                let start = chat_input_byte_index(chat_input.value.as_str(), remove_at);
+                let end = chat_input_byte_index(chat_input.value.as_str(), chat_input.cursor_col);
+                chat_input.value.replace_range(start..end, "");
+                chat_input.cursor_col = remove_at;
+            }
+        }
+        ChatEdit::Delete => {
+            let len = chat_input_len(chat_input);
+            if chat_input.cursor_col < len {
+                let start = chat_input_byte_index(chat_input.value.as_str(), chat_input.cursor_col);
+                let end =
+                    chat_input_byte_index(chat_input.value.as_str(), chat_input.cursor_col + 1);
+                chat_input.value.replace_range(start..end, "");
+            }
+        }
+        ChatEdit::InsertChar(c) => {
+            insert_chat_text(chat_input, c.to_string().as_str());
+        }
+    }
+}
+
+fn insert_chat_text(chat_input: &mut ChatInputState, text: &str) {
+    let insert_at = chat_input_byte_index(chat_input.value.as_str(), chat_input.cursor_col);
+    chat_input.value.insert_str(insert_at, text);
+    chat_input.cursor_col += text.chars().count();
+}
+
+fn chat_input_len(chat_input: &ChatInputState) -> usize {
+    chat_input.value.chars().count()
+}
+
+fn chat_input_byte_index(value: &str, char_index: usize) -> usize {
+    if char_index == 0 {
+        return 0;
+    }
+    value
+        .char_indices()
+        .nth(char_index)
+        .map(|(index, _)| index)
+        .unwrap_or(value.len())
+}
+
 fn textarea_navigation_action(
     target: ActiveTextarea,
-    key_event: &crossterm::event::KeyEvent,
+    _key_event: &crossterm::event::KeyEvent,
     code: crossterm::event::KeyCode,
     textarea: &TextArea<'static>,
 ) -> Option<CoreAction> {
-    if target == ActiveTextarea::ChatInput {
-        return chat_textarea_action(key_event, code);
-    }
     match code {
         crossterm::event::KeyCode::Tab => Some(textarea_next_field_action(target)),
         crossterm::event::KeyCode::BackTab => Some(textarea_prev_field_action(target)),
@@ -909,44 +1273,6 @@ fn textarea_prev_field_action(target: ActiveTextarea) -> CoreAction {
         ActiveTextarea::CreateDescription => CoreAction::CreatePrevField,
         ActiveTextarea::InsertText => CoreAction::InsertPrevField,
         ActiveTextarea::ChatInput => CoreAction::FocusPrev,
-    }
-}
-
-fn chat_textarea_action(
-    key_event: &crossterm::event::KeyEvent,
-    code: crossterm::event::KeyCode,
-) -> Option<CoreAction> {
-    match (code, key_event.modifiers) {
-        (crossterm::event::KeyCode::Tab, _) => Some(CoreAction::FocusNext),
-        (crossterm::event::KeyCode::BackTab, _) => Some(CoreAction::FocusPrev),
-        (crossterm::event::KeyCode::Enter, _) => Some(CoreAction::ChatSubmit),
-        (crossterm::event::KeyCode::Left, modifiers)
-            if modifiers.contains(crossterm::event::KeyModifiers::SHIFT)
-                && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-                && !modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
-        {
-            Some(CoreAction::ChatScopePrev)
-        }
-        (crossterm::event::KeyCode::Right, modifiers)
-            if modifiers.contains(crossterm::event::KeyModifiers::SHIFT)
-                && !modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-                && !modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
-        {
-            Some(CoreAction::ChatScopeNext)
-        }
-        (crossterm::event::KeyCode::PageUp, _) => Some(CoreAction::ChatScrollPageUp),
-        (crossterm::event::KeyCode::PageDown, _) => Some(CoreAction::ChatScrollPageDown),
-        (crossterm::event::KeyCode::Home, modifiers)
-            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-        {
-            Some(CoreAction::ChatScrollHome)
-        }
-        (crossterm::event::KeyCode::End, modifiers)
-            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-        {
-            Some(CoreAction::ChatScrollEnd)
-        }
-        _ => None,
     }
 }
 
@@ -979,7 +1305,7 @@ fn active_textarea(state: &CoreState) -> Option<ActiveTextarea> {
         return Some(ActiveTextarea::InsertText);
     }
 
-    if state.current_tab_id == KINIC_MEMORIES_TAB_ID && state.focus == PaneFocus::Extra {
+    if chat_input_active(state) {
         return Some(ActiveTextarea::ChatInput);
     }
 
@@ -990,7 +1316,7 @@ fn textarea_mut(textareas: &mut FormTextareas, target: ActiveTextarea) -> &mut T
     match target {
         ActiveTextarea::CreateDescription => &mut textareas.create_description,
         ActiveTextarea::InsertText => &mut textareas.insert_text,
-        ActiveTextarea::ChatInput => &mut textareas.chat_input,
+        ActiveTextarea::ChatInput => unreachable!("chat input no longer uses textarea"),
     }
 }
 
@@ -1000,7 +1326,7 @@ fn sync_form_textareas_from_state(textareas: &mut FormTextareas, state: &CoreSta
         state.create_description.as_str(),
     );
     sync_textarea_from_string(&mut textareas.insert_text, state.insert_text.as_str());
-    sync_chat_textarea_from_state(&mut textareas.chat_input, state.chat_input.as_str(), false);
+    sync_chat_input_from_state(&mut textareas.chat_input, state.chat_input.as_str());
 }
 
 fn sync_textarea_from_string(textarea: &mut TextArea<'static>, value: &str) {
@@ -1014,60 +1340,46 @@ fn textarea_from_text(value: &str) -> TextArea<'static> {
     TextArea::from(value.split('\n'))
 }
 
+#[cfg(test)]
+fn chat_input_from_text(value: &str) -> ChatInputState {
+    let single_line_value = flatten_chat_input_for_display(value);
+    ChatInputState {
+        cursor_col: single_line_value.chars().count(),
+        value: single_line_value,
+    }
+}
+
+fn chat_input_active(state: &CoreState) -> bool {
+    state.current_tab_id == KINIC_MEMORIES_TAB_ID && state.focus == PaneFocus::Extra
+}
+
 // Chat input is rendered and edited as a true single-line widget.
-fn chat_input_display_value(textarea: &TextArea<'static>) -> String {
-    textarea.lines().join("\n")
+fn chat_input_display_value(chat_input: &ChatInputState) -> String {
+    chat_input.value.clone()
 }
 
 fn chat_input_submit_value(value: &str) -> String {
     normalize_chat_input_lines(value)
 }
 
-fn chat_input_display_cursor_col(textarea: &TextArea<'static>) -> usize {
-    let lines = textarea.lines();
-    let last_row = lines.len().saturating_sub(1);
-    let (cursor_row, cursor_col) = textarea.cursor();
-    let effective_row = cursor_row.min(last_row);
-    let mut prefix_lines = lines
-        .iter()
-        .take(effective_row)
-        .map(|line| line.as_str().to_string())
-        .collect::<Vec<_>>();
-    let current_prefix = lines
-        .get(effective_row)
-        .map(|line| line.chars().take(cursor_col).collect::<String>())
-        .unwrap_or_default();
-    prefix_lines.push(current_prefix);
-    flatten_chat_input_for_display(prefix_lines.join("\n").as_str())
-        .chars()
-        .count()
-}
-
 fn chat_input_cursor(
     active: Option<ActiveTextarea>,
-    textarea: &TextArea<'static>,
+    chat_input: &ChatInputState,
 ) -> Option<(usize, usize)> {
     if active != Some(ActiveTextarea::ChatInput) {
         return None;
     }
-    Some((0, textarea.cursor().1))
+    Some((0, chat_input.cursor_col))
 }
 
-fn sync_chat_textarea_from_state(textarea: &mut TextArea<'static>, value: &str, preserve_cursor: bool) {
-    // Rebuild chat input from its flattened single-line form so pasted multiline
-    // content cannot leave hidden rows behind inside the widget.
+fn sync_chat_input_from_state(chat_input: &mut ChatInputState, value: &str) {
     let single_line_value = flatten_chat_input_for_display(value);
-    if textarea.lines().join("\n") == single_line_value {
+    if chat_input.value == single_line_value {
+        chat_input.cursor_col = chat_input.cursor_col.min(chat_input_len(chat_input));
         return;
     }
-    let cursor_col = if preserve_cursor {
-        chat_input_display_cursor_col(textarea).min(single_line_value.chars().count())
-    } else {
-        single_line_value.chars().count()
-    }
-    .min(u16::MAX as usize) as u16;
-    sync_textarea_from_string(textarea, single_line_value.as_str());
-    textarea.move_cursor(CursorMove::Jump(0, cursor_col));
+    chat_input.value = single_line_value;
+    chat_input.cursor_col = chat_input_len(chat_input);
 }
 
 fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
@@ -1089,11 +1401,18 @@ fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
         }
     }
 
-    let display_chat_input =
-        flatten_chat_input_for_display(textareas.chat_input.lines().join("\n").as_str());
+    let display_chat_input = chat_input_display_value(&textareas.chat_input);
     if state.chat_input != display_chat_input {
         state.chat_input = display_chat_input;
     }
+}
+
+fn sync_state_from_chat_input(state: &mut CoreState, textareas: &mut FormTextareas) {
+    let display_chat_input = chat_input_display_value(&textareas.chat_input);
+    if state.chat_input != display_chat_input {
+        state.chat_input = display_chat_input;
+    }
+    sync_chat_command_selection(textareas, state.chat_input.as_str());
 }
 
 fn textarea_cursor(

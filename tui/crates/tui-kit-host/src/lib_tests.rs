@@ -27,6 +27,14 @@ mod key_mapping {
 
         assert_eq!(normalize_host_input_event(key_event), None);
     }
+
+    #[test]
+    fn normalize_host_input_event_preserves_paste_payload() {
+        assert_eq!(
+            normalize_host_input_event(Event::Paste("a\nb".to_string())),
+            Some(HostInputEvent::Paste("a\nb".to_string()))
+        );
+    }
 }
 
 mod tab_resolution {
