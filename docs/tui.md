@@ -84,6 +84,7 @@ The TUI has five tabs.
 - `Settings`: view and change current connection info and saved settings
 
 The `Memories` tab opens first when the TUI starts.
+The local preferences shown in `Settings`, including the default memory, saved tags, and manually tracked memories, can also be managed from the CLI with `kinic-cli prefs ...`.
 
 ## Basic Controls
 
