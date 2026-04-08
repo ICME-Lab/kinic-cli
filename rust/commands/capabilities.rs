@@ -41,6 +41,7 @@ struct CommandCapability {
     requires_auth: bool,
     auth_modes: Vec<&'static str>,
     output_mode: &'static str,
+    supported_output_modes: Vec<&'static str>,
     interactive: bool,
     arguments: Vec<ArgumentCapability>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -54,6 +55,7 @@ struct SubcommandCapability {
     name: String,
     summary: String,
     output_mode: &'static str,
+    supported_output_modes: Vec<&'static str>,
     arguments: Vec<ArgumentCapability>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     arg_groups: Vec<ArgGroupCapability>,
@@ -96,6 +98,7 @@ struct ArgGroupCapability {
 struct CommandMetadata {
     auth_modes: &'static [&'static str],
     output_mode: &'static str,
+    supported_output_modes: &'static [&'static str],
     interactive: bool,
 }
 
@@ -110,6 +113,7 @@ fn command_capabilities() -> Vec<CommandCapability> {
                 requires_auth: !metadata.auth_modes.is_empty(),
                 auth_modes: metadata.auth_modes.to_vec(),
                 output_mode: metadata.output_mode,
+                supported_output_modes: metadata.supported_output_modes.to_vec(),
                 interactive: metadata.interactive,
                 arguments: argument_capabilities(command, command.get_name()),
                 arg_groups: arg_group_capabilities(command),
@@ -139,6 +143,10 @@ fn subcommand_capabilities_with_path(
                 name: subcommand.get_name().to_string(),
                 summary: command_summary(subcommand),
                 output_mode: subcommand_output_mode(&path, parent_output_mode),
+                supported_output_modes: subcommand_supported_output_modes(
+                    &path,
+                    parent_output_mode,
+                ),
                 arguments: argument_capabilities(subcommand, &path),
                 arg_groups: arg_group_capabilities(subcommand),
                 subcommands: subcommand_capabilities_with_path(
@@ -240,16 +248,27 @@ fn command_metadata(name: &str) -> CommandMetadata {
             } else {
                 "text"
             },
+            supported_output_modes: if name == "capabilities" || name == "prefs" {
+                &["json"]
+            } else {
+                &["text"]
+            },
             interactive: false,
         },
         "tui" => CommandMetadata {
             auth_modes: &["identity"],
             output_mode: "interactive",
+            supported_output_modes: &["interactive"],
             interactive: true,
         },
         _ => CommandMetadata {
             auth_modes: &["identity", "ii"],
             output_mode: "text",
+            supported_output_modes: if matches!(name, "list" | "show" | "search") {
+                &["text", "json"]
+            } else {
+                &["text"]
+            },
             interactive: false,
         },
     }
@@ -268,8 +287,30 @@ fn subcommand_output_mode(path: &str, parent_output_mode: &'static str) -> &'sta
     }
 }
 
+fn subcommand_supported_output_modes(
+    path: &str,
+    parent_output_mode: &'static str,
+) -> Vec<&'static str> {
+    match path {
+        "prefs.show"
+        | "prefs.set-default-memory"
+        | "prefs.clear-default-memory"
+        | "prefs.add-tag"
+        | "prefs.remove-tag"
+        | "prefs.add-memory"
+        | "prefs.remove-memory"
+        | "prefs.set-chat-overall-top-k"
+        | "prefs.set-chat-per-memory-cap"
+        | "prefs.set-chat-mmr-lambda" => vec!["json"],
+        _ => vec![parent_output_mode],
+    }
+}
+
 fn argument_kind(path: &str, name: &str) -> &'static str {
-    if name == "all" && path == "search" {
+    if matches!(
+        (path, name),
+        ("search", "all") | ("list", "json") | ("show", "json") | ("search", "json")
+    ) {
         return "boolean";
     }
 
@@ -335,6 +376,7 @@ mod tests {
 
         assert_eq!(capability_subcommands, clap_subcommands);
         assert_eq!(prefs.output_mode, "json");
+        assert_eq!(prefs.supported_output_modes, vec!["json"]);
     }
 
     #[test]
@@ -371,6 +413,7 @@ mod tests {
         assert!(tui.requires_auth);
         assert_eq!(tui.auth_modes, ["identity"]);
         assert_eq!(tui.output_mode, "interactive");
+        assert_eq!(tui.supported_output_modes, vec!["interactive"]);
         assert!(tui.interactive);
     }
 
@@ -437,5 +480,12 @@ mod tests {
 
         assert!(matches!(all.get_action(), clap::ArgAction::SetTrue));
         assert_eq!(argument_kind("search", "all"), "boolean");
+    }
+
+    #[test]
+    fn command_metadata_marks_json_capable_read_commands() {
+        let metadata = command_metadata("search");
+        assert_eq!(metadata.output_mode, "text");
+        assert_eq!(metadata.supported_output_modes, ["text", "json"]);
     }
 }

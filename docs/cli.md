@@ -50,11 +50,14 @@ Command-line companion for deploying and operating Kinic “memory” canisters.
 
 Use either `--identity` (dfx identity name stored in the system keychain) or `--ii` (Internet Identity login). Use `--ic` to talk to mainnet; omit it (or leave false) for the local replica. If you are not using `--ii`, `--identity <name>` is required for CLI commands.
 
+Machine-consumption entrypoint:
+- Agent/public skill: [`skills/kinic-cli-user/SKILL.md`](../skills/kinic-cli-user/SKILL.md)
+
 Agent-friendly discovery tips:
 - Start with `kinic-cli --help` for auth mode guidance and top-level entrypoints
 - Start with `kinic-cli capabilities` to get a JSON description of commands, auth requirements, output modes, major arguments, and arg-group constraints
 - Use `kinic-cli prefs --help` to inspect the JSON contract for shared local preferences
-- `capabilities` and `prefs` commands return JSON; existing network commands currently keep text output
+- `capabilities` and `prefs` commands return JSON; `list`, `show`, and `search` also support `--json` for agent/script consumption while keeping human-friendly text output by default
 
 ### Capabilities JSON
 
@@ -170,6 +173,15 @@ cargo run -- --identity alice search \
 
 The CLI fetches an embedding for the query and prints the scored matches returned by the memory canister.
 
+For AI agents or scripts, use JSON output:
+
+```bash
+cargo run -- --identity alice search \
+  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --query "Hello" \
+  --json
+```
+
 Search across all searchable memories:
 
 ```bash
@@ -179,15 +191,37 @@ cargo run -- --identity alice search \
 ```
 
 When `--all` is used, results are merged and printed with the source memory id.
+With `--json`, the output also includes `searched_memory_ids` and `failed_memory_ids` when some memory searches fail.
 
 ### Show memory details
 
 ```bash
 cargo run -- --identity alice show \
   --memory-id yta6k-5x777-77774-aaaaa-cai
+
+cargo run -- --identity alice show \
+  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --json
 ```
 
-The command prints the memory name, version, dimension, owners, stable memory size, cycle amount, and users.
+The command prints the memory name, optional description, version, dimension, owners, stable memory size, cycle amount, and users.
+
+### List memories for agents
+
+```bash
+cargo run -- --identity alice list --json
+```
+
+`list --json` returns a structured `items[]` payload with `memory_id` and launcher `status`.
+
+### Agent workflow
+
+For agent-driven usage, prefer:
+
+1. `list --json` to discover candidate memories
+2. `show --json` to fetch metadata and access context
+3. `search --json` to fetch retrieval evidence
+4. summarize in the agent, rather than relying on `ask-ai`
 
 ### Rename a memory
 

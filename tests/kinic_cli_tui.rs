@@ -46,6 +46,19 @@ fn prefs_show_help_mentions_return_shape() {
 }
 
 #[test]
+fn read_command_help_mentions_json_output_option() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
+        .args(["search", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("--json"));
+    assert!(stdout.contains("Return machine-readable JSON output"));
+}
+
+#[test]
 fn prefs_mutation_help_mentions_status_shape() {
     let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
         .args(["prefs", "add-tag", "--help"])

@@ -160,8 +160,11 @@ pub struct CreateArgs {
 #[derive(Args, Debug, Default)]
 pub struct TuiArgs {}
 
-#[derive(Args, Debug)]
-pub struct ListArgs {}
+#[derive(Args, Debug, Default)]
+pub struct ListArgs {
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
 
 #[derive(Args, Debug)]
 pub struct ShowArgs {
@@ -171,6 +174,9 @@ pub struct ShowArgs {
         help = "Principal of the memory canister to show"
     )]
     pub memory_id: String,
+
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -272,6 +278,9 @@ pub struct SearchArgs {
 
     #[arg(long, required = true, help = "Query text to embed and search")]
     pub query: String,
+
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]

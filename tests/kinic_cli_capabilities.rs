@@ -38,6 +38,7 @@ fn capabilities_describes_prefs_and_tui_contracts() {
         .expect("prefs command should be present");
     assert_eq!(prefs["requires_auth"], false);
     assert_eq!(prefs["output_mode"], "json");
+    assert_eq!(prefs["supported_output_modes"], json!(["json"]));
     assert!(prefs["subcommands"].is_array());
     assert!(
         prefs["subcommands"]
@@ -60,6 +61,7 @@ fn capabilities_describes_prefs_and_tui_contracts() {
         .expect("tui command should be present");
     assert_eq!(tui["interactive"], true);
     assert_eq!(tui["output_mode"], "interactive");
+    assert_eq!(tui["supported_output_modes"], json!(["interactive"]));
     assert_eq!(tui["auth_modes"], json!(["identity"]));
 }
 
@@ -85,8 +87,36 @@ fn capabilities_describes_major_arguments_for_network_commands() {
         json!([
             { "name": "memory_id", "required": false, "kind": "principal" },
             { "name": "all", "required": false, "kind": "boolean" },
-            { "name": "query", "required": true, "kind": "string" }
+            { "name": "query", "required": true, "kind": "string" },
+            { "name": "json", "required": false, "kind": "boolean" }
         ])
+    );
+    assert_eq!(search["supported_output_modes"], json!(["text", "json"]));
+
+    let list = commands
+        .iter()
+        .find(|entry| entry["name"] == "list")
+        .expect("list command should be present");
+    assert_eq!(list["supported_output_modes"], json!(["text", "json"]));
+    assert!(
+        list["arguments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry == &json!({"name":"json","required":false,"kind":"boolean"}))
+    );
+
+    let show = commands
+        .iter()
+        .find(|entry| entry["name"] == "show")
+        .expect("show command should be present");
+    assert_eq!(show["supported_output_modes"], json!(["text", "json"]));
+    assert!(
+        show["arguments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry == &json!({"name":"json","required":false,"kind":"boolean"}))
     );
     assert_eq!(
         search["arg_groups"],
@@ -122,6 +152,7 @@ fn capabilities_describes_major_arguments_for_network_commands() {
         .expect("capabilities command should be present");
     assert_eq!(capabilities["requires_auth"], false);
     assert_eq!(capabilities["output_mode"], "json");
+    assert_eq!(capabilities["supported_output_modes"], json!(["json"]));
 }
 
 #[test]
