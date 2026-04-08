@@ -530,14 +530,27 @@ fn chat_textarea_multiline_paste_keeps_raw_widget_with_normalized_state() {
 }
 
 #[test]
-fn chat_textarea_sync_state_normalizes_trailing_space() {
+fn chat_textarea_sync_state_preserves_trailing_space() {
     let mut state = CoreState::default();
     let mut textareas = FormTextareas::default();
     textareas.chat_input = textarea_from_text("hello ");
 
     sync_state_from_textareas(&mut state, &textareas);
 
-    assert_eq!(state.chat_input, "hello");
+    assert_eq!(state.chat_input, "hello ");
+}
+
+#[test]
+fn chat_textarea_display_value_preserves_trailing_space() {
+    let textareas = FormTextareas {
+        chat_input: textarea_from_text("hello "),
+        ..FormTextareas::default()
+    };
+
+    assert_eq!(
+        normalized_chat_textarea_value(&textareas.chat_input),
+        "hello "
+    );
 }
 
 #[test]
@@ -545,7 +558,7 @@ fn chat_textarea_sync_from_state_preserves_equivalent_trailing_space_in_widget()
     let mut textareas = FormTextareas::default();
     textareas.chat_input = textarea_from_text("hello ");
     let state = CoreState {
-        chat_input: "hello".to_string(),
+        chat_input: "hello ".to_string(),
         ..CoreState::default()
     };
 
@@ -566,7 +579,7 @@ fn chat_textarea_sync_from_state_keeps_cursor_when_text_is_unchanged() {
     ));
     let cursor_before = textareas.chat_input.cursor();
     let state = CoreState {
-        chat_input: "hello".to_string(),
+        chat_input: "hello ".to_string(),
         ..CoreState::default()
     };
 
@@ -574,6 +587,17 @@ fn chat_textarea_sync_from_state_keeps_cursor_when_text_is_unchanged() {
 
     assert_eq!(textareas.chat_input.lines().join("\n"), "hello ");
     assert_eq!(textareas.chat_input.cursor(), cursor_before);
+}
+
+#[test]
+fn chat_input_cursor_keeps_trailing_space_visible() {
+    let mut textarea = textarea_from_text("hello ");
+    textarea.move_cursor(ratatui_textarea::CursorMove::End);
+
+    assert_eq!(
+        chat_input_cursor(Some(ActiveTextarea::ChatInput), &textarea),
+        Some((0, 6))
+    );
 }
 
 #[test]
@@ -585,6 +609,79 @@ fn chat_input_cursor_flattens_multiline_widget_position_for_ui() {
         chat_input_cursor(Some(ActiveTextarea::ChatInput), &textarea),
         Some((0, 17))
     );
+}
+
+#[test]
+fn chat_textarea_display_value_keeps_space_before_next_char() {
+    let textareas = FormTextareas {
+        chat_input: textarea_from_text("hello w"),
+        ..FormTextareas::default()
+    };
+
+    assert_eq!(
+        normalized_chat_textarea_value(&textareas.chat_input),
+        "hello w"
+    );
+}
+
+#[test]
+fn chat_textarea_space_input_updates_state_and_widget_cursor() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "hello".to_string(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(' '),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat textarea input");
+
+    assert!(handled);
+    assert_eq!(state.chat_input, "hello ");
+    assert_eq!(textareas.chat_input.lines().join("\n"), "hello ");
+    assert_eq!(textareas.chat_input.cursor(), (0, 6));
+    assert_eq!(
+        chat_input_cursor(Some(ActiveTextarea::ChatInput), &textareas.chat_input),
+        Some((0, 6))
+    );
+}
+
+#[test]
+fn build_ui_places_chat_cursor_after_trailing_space() {
+    let theme = Theme::default();
+    let cfg = test_runtime_config();
+    let animation = AnimationState::new();
+    let state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "hello ".to_string(),
+        chat_open: true,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let ui = build_ui(
+        &theme, &cfg, &state, &textareas, 0, 0, false, false, &animation,
+    );
+    let cursor = ui.cursor_position_for_area(Rect::new(0, 0, 120, 40));
+
+    assert!(cursor.is_some());
+    let (x, _) = cursor.expect("chat cursor");
+    assert!(x > 0);
 }
 
 #[test]

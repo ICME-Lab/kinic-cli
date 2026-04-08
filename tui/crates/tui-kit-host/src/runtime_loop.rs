@@ -9,8 +9,8 @@ use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, PickerState, apply_snapshot,
     chat_commands::{
-        UNKNOWN_SLASH_COMMAND_MESSAGE, chat_slash_command_action, matching_slash_commands,
-        normalize_chat_input_lines, selected_slash_command_action,
+        UNKNOWN_SLASH_COMMAND_MESSAGE, chat_slash_command_action, flatten_chat_input_for_display,
+        matching_slash_commands, normalize_chat_input_lines, selected_slash_command_action,
     },
     dispatch_action, is_insert_form_locked,
     kinic_tabs::{
@@ -1009,7 +1009,7 @@ fn textarea_from_text(value: &str) -> TextArea<'static> {
 }
 
 fn normalized_chat_textarea_value(textarea: &TextArea<'static>) -> String {
-    normalize_chat_input_lines(textarea.lines().join("\n").as_str())
+    flatten_chat_input_for_display(textarea.lines().join("\n").as_str())
 }
 
 fn normalized_chat_cursor_col(textarea: &TextArea<'static>) -> usize {
@@ -1027,7 +1027,7 @@ fn normalized_chat_cursor_col(textarea: &TextArea<'static>) -> usize {
         .map(|line| line.chars().take(cursor_col).collect::<String>())
         .unwrap_or_default();
     prefix_lines.push(current_prefix);
-    normalize_chat_input_lines(prefix_lines.join("\n").as_str())
+    flatten_chat_input_for_display(prefix_lines.join("\n").as_str())
         .chars()
         .count()
 }
@@ -1072,10 +1072,9 @@ fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
         }
     }
 
-    let normalized_chat_input =
-        normalize_chat_input_lines(textareas.chat_input.lines().join("\n").as_str());
-    if state.chat_input != normalized_chat_input {
-        state.chat_input = normalized_chat_input;
+    let display_chat_input = normalized_chat_textarea_value(&textareas.chat_input);
+    if state.chat_input != display_chat_input {
+        state.chat_input = display_chat_input;
     }
 }
 

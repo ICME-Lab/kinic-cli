@@ -13,17 +13,18 @@ pub const UNKNOWN_SLASH_COMMAND_MESSAGE: &str = "Unknown chat command. Try /new 
 
 /// Commands whose prefix matches `input` (trimmed), for autocomplete UI.
 pub fn matching_slash_commands(input: &str) -> Vec<&'static str> {
-    let trimmed = input.trim();
-    if !trimmed.starts_with('/') {
+    let trimmed_end = input.trim_end();
+    let command_input = trimmed_end.trim_start();
+    if !command_input.starts_with('/') {
         return Vec::new();
     }
-    if trimmed == "/" {
+    if command_input == "/" {
         return CHAT_SLASH_COMMANDS.to_vec();
     }
     CHAT_SLASH_COMMANDS
         .iter()
         .copied()
-        .filter(|command| command.starts_with(trimmed))
+        .filter(|command| command.starts_with(command_input))
         .collect()
 }
 
@@ -43,6 +44,12 @@ pub fn selected_slash_command_action(input: &str, selected: usize) -> Option<Cor
         .and_then(chat_slash_command_action)
 }
 
+/// Collapse multiline chat input to one line for in-progress display.
+/// This preserves user-typed spacing and only replaces line breaks with spaces.
+pub fn flatten_chat_input_for_display(value: &str) -> String {
+    value.split('\n').collect::<Vec<_>>().join(" ")
+}
+
 /// Collapse multiline chat input to one line (trimmed lines joined with spaces).
 pub fn normalize_chat_input_lines(value: &str) -> String {
     value.lines().map(str::trim).collect::<Vec<_>>().join(" ")
@@ -55,8 +62,14 @@ mod tests {
     #[test]
     fn matching_slash_commands_filters_by_prefix() {
         assert_eq!(matching_slash_commands("/"), vec!["/new", "/all"]);
+        assert_eq!(matching_slash_commands("/all "), vec!["/all"]);
         assert!(matching_slash_commands("/s").is_empty());
         assert!(matching_slash_commands("hello").is_empty());
+    }
+
+    #[test]
+    fn flatten_chat_input_for_display_preserves_spacing() {
+        assert_eq!(flatten_chat_input_for_display("a \n  b"), "a    b");
     }
 
     #[test]

@@ -14,7 +14,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::{Focus, TuiKitUi};
 use crate::ui::theme::Theme;
-use tui_kit_runtime::chat_commands::{matching_slash_commands, normalize_chat_input_lines};
+use tui_kit_runtime::chat_commands::{flatten_chat_input_for_display, matching_slash_commands};
 
 pub(super) const CHAT_INPUT_MAX_HEIGHT: u16 = 1;
 
@@ -460,7 +460,7 @@ pub(super) fn visible_chat_input_rows(
     cursor_col: usize,
     max_width: u16,
 ) -> VisibleChatInputRows {
-    let single_line_value = normalize_chat_input_lines(value);
+    let single_line_value = flatten_chat_input_for_display(value);
     let mut source_rows = if single_line_value.is_empty() {
         vec![placeholder.to_string()]
     } else {
