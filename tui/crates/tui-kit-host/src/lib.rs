@@ -20,11 +20,14 @@ use tui_kit_runtime::{
 pub const DEFAULT_TAB_IDS: [&str; 4] = ["tab-1", "tab-2", "tab-3", "tab-4"];
 
 /// Host-level normalized input event used by app loops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HostInputEvent {
-    pub key_event: KeyEvent,
-    pub code: KeyCode,
-    pub modifiers: KeyModifiers,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostInputEvent {
+    Key {
+        key_event: KeyEvent,
+        code: KeyCode,
+        modifiers: KeyModifiers,
+    },
+    Paste(String),
 }
 
 /// Poll and normalize crossterm events for host loops.
@@ -37,11 +40,12 @@ pub fn poll_host_input(timeout: Duration) -> std::io::Result<Option<HostInputEve
 
 fn normalize_host_input_event(event: Event) -> Option<HostInputEvent> {
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => Some(HostInputEvent {
+        Event::Key(key) if key.kind == KeyEventKind::Press => Some(HostInputEvent::Key {
             key_event: key,
             code: key.code,
             modifiers: key.modifiers,
         }),
+        Event::Paste(text) => Some(HostInputEvent::Paste(text)),
         _ => None,
     }
 }

@@ -10,8 +10,8 @@ use std::{
 
 use crossterm::{
     event::{
-        DisableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-        PushKeyboardEnhancementFlags,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{
@@ -49,6 +49,7 @@ fn enter_terminal(terminal: &mut HostTerminal) -> io::Result<bool> {
         execute!(
             terminal.backend_mut(),
             EnterAlternateScreen,
+            EnableBracketedPaste,
             PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
@@ -56,7 +57,11 @@ fn enter_terminal(terminal: &mut HostTerminal) -> io::Result<bool> {
             )
         )?;
     } else {
-        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+        execute!(
+            terminal.backend_mut(),
+            EnterAlternateScreen,
+            EnableBracketedPaste
+        )?;
     }
     terminal.hide_cursor()?;
     Ok(keyboard_enhancement_enabled)
@@ -72,12 +77,14 @@ fn leave_terminal(
         execute!(
             terminal.backend_mut(),
             PopKeyboardEnhancementFlags,
+            DisableBracketedPaste,
             LeaveAlternateScreen,
             DisableMouseCapture
         )?;
     } else {
         execute!(
             terminal.backend_mut(),
+            DisableBracketedPaste,
             LeaveAlternateScreen,
             DisableMouseCapture
         )?;
