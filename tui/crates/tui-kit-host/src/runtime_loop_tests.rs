@@ -514,7 +514,7 @@ fn chat_textarea_enter_submits_without_inserting_text() {
 }
 
 #[test]
-fn chat_textarea_multiline_paste_keeps_raw_widget_with_normalized_state() {
+fn chat_textarea_multiline_paste_normalizes_widget_and_state_to_single_line() {
     let mut state = CoreState::default();
     let mut textareas = FormTextareas::default();
     textareas.chat_input = textarea_from_text("first line\nsecond line");
@@ -525,7 +525,7 @@ fn chat_textarea_multiline_paste_keeps_raw_widget_with_normalized_state() {
     assert_eq!(state.chat_input, "first line second line");
     assert_eq!(
         textareas.chat_input.lines().join("\n"),
-        "first line\nsecond line"
+        "first line second line"
     );
 }
 
@@ -548,7 +548,7 @@ fn chat_textarea_display_value_preserves_trailing_space() {
     };
 
     assert_eq!(
-        normalized_chat_textarea_value(&textareas.chat_input),
+        chat_input_display_value(&textareas.chat_input),
         "hello "
     );
 }
@@ -601,10 +601,13 @@ fn chat_input_cursor_keeps_trailing_space_visible() {
 }
 
 #[test]
-fn chat_input_cursor_flattens_multiline_widget_position_for_ui() {
+fn chat_textarea_input_normalization_keeps_cursor_on_display_column() {
     let mut textarea = textarea_from_text("first line\nsecond line");
     textarea.move_cursor(ratatui_textarea::CursorMove::Jump(1, 6));
 
+    sync_chat_textarea_from_state(&mut textarea, "first line second line", true);
+
+    assert_eq!(textarea.lines().join("\n"), "first line second line");
     assert_eq!(
         chat_input_cursor(Some(ActiveTextarea::ChatInput), &textarea),
         Some((0, 17))
@@ -619,8 +622,167 @@ fn chat_textarea_display_value_keeps_space_before_next_char() {
     };
 
     assert_eq!(
-        normalized_chat_textarea_value(&textareas.chat_input),
+        chat_input_display_value(&textareas.chat_input),
         "hello w"
+    );
+}
+
+#[test]
+fn chat_textarea_multiline_paste_up_down_do_not_move_hidden_rows() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas {
+        chat_input: textarea_from_text("first line\nsecond line"),
+        ..FormTextareas::default()
+    };
+
+    sync_state_from_textareas(&mut state, &textareas);
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let moved_up = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Up,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat up");
+    let cursor_after_up = textareas.chat_input.cursor();
+    let moved_down = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat down");
+
+    assert!(moved_up);
+    assert!(moved_down);
+    assert_eq!(cursor_after_up.0, 0);
+    assert_eq!(textareas.chat_input.cursor().0, 0);
+    assert_eq!(
+        textareas.chat_input.lines().join("\n"),
+        "first line second line"
+    );
+}
+
+#[test]
+fn chat_textarea_multiline_paste_home_end_backspace_follow_visible_single_line() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas {
+        chat_input: textarea_from_text("first line\nsecond line"),
+        ..FormTextareas::default()
+    };
+
+    sync_state_from_textareas(&mut state, &textareas);
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Home,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat home");
+    assert_eq!(textareas.chat_input.cursor(), (0, 0));
+
+    handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::End,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat end");
+    assert_eq!(textareas.chat_input.cursor(), (0, 22));
+
+    handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Backspace,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat backspace");
+
+    assert_eq!(state.chat_input, "first line second lin");
+    assert_eq!(
+        textareas.chat_input.lines().join("\n"),
+        "first line second lin"
+    );
+    assert_eq!(textareas.chat_input.cursor(), (0, 21));
+}
+
+#[test]
+fn chat_textarea_midline_space_input_preserves_cursor_position() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "helloworld".to_string(),
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+    for _ in 0..5 {
+        textareas.chat_input.input(textarea_input_from_key_event(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Left,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        ));
+    }
+    let cursor_before = textareas.chat_input.cursor();
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(' '),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("chat textarea input");
+
+    assert!(handled);
+    assert_eq!(cursor_before, (0, 5));
+    assert_eq!(state.chat_input, "hello world");
+    assert_eq!(textareas.chat_input.lines().join("\n"), "hello world");
+    assert_eq!(textareas.chat_input.cursor(), (0, 6));
+    assert_eq!(
+        chat_input_cursor(Some(ActiveTextarea::ChatInput), &textareas.chat_input),
+        Some((0, 6))
     );
 }
 
