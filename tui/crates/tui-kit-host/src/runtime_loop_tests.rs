@@ -514,17 +514,77 @@ fn chat_textarea_enter_submits_without_inserting_text() {
 }
 
 #[test]
-fn chat_textarea_multiline_paste_is_normalized_to_single_line() {
-    let mut state = CoreState {
-        chat_input: "first line\nsecond line".to_string(),
-        ..CoreState::default()
-    };
+fn chat_textarea_multiline_paste_keeps_raw_widget_with_normalized_state() {
+    let mut state = CoreState::default();
     let mut textareas = FormTextareas::default();
+    textareas.chat_input = textarea_from_text("first line\nsecond line");
 
-    sync_form_textareas_from_state(&mut textareas, &state);
     sync_state_from_textareas(&mut state, &textareas);
+    sync_form_textareas_from_state(&mut textareas, &state);
 
     assert_eq!(state.chat_input, "first line second line");
+    assert_eq!(
+        textareas.chat_input.lines().join("\n"),
+        "first line\nsecond line"
+    );
+}
+
+#[test]
+fn chat_textarea_sync_state_normalizes_trailing_space() {
+    let mut state = CoreState::default();
+    let mut textareas = FormTextareas::default();
+    textareas.chat_input = textarea_from_text("hello ");
+
+    sync_state_from_textareas(&mut state, &textareas);
+
+    assert_eq!(state.chat_input, "hello");
+}
+
+#[test]
+fn chat_textarea_sync_from_state_preserves_equivalent_trailing_space_in_widget() {
+    let mut textareas = FormTextareas::default();
+    textareas.chat_input = textarea_from_text("hello ");
+    let state = CoreState {
+        chat_input: "hello".to_string(),
+        ..CoreState::default()
+    };
+
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    assert_eq!(textareas.chat_input.lines().join("\n"), "hello ");
+}
+
+#[test]
+fn chat_textarea_sync_from_state_keeps_cursor_when_text_is_unchanged() {
+    let mut textareas = FormTextareas::default();
+    textareas.chat_input = textarea_from_text("hello ");
+    textareas.chat_input.input(textarea_input_from_key_event(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Left,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    ));
+    let cursor_before = textareas.chat_input.cursor();
+    let state = CoreState {
+        chat_input: "hello".to_string(),
+        ..CoreState::default()
+    };
+
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    assert_eq!(textareas.chat_input.lines().join("\n"), "hello ");
+    assert_eq!(textareas.chat_input.cursor(), cursor_before);
+}
+
+#[test]
+fn chat_input_cursor_flattens_multiline_widget_position_for_ui() {
+    let mut textarea = textarea_from_text("first line\nsecond line");
+    textarea.move_cursor(ratatui_textarea::CursorMove::Jump(1, 6));
+
+    assert_eq!(
+        chat_input_cursor(Some(ActiveTextarea::ChatInput), &textarea),
+        Some((0, 17))
+    );
 }
 
 #[test]
@@ -723,6 +783,33 @@ fn chat_submit_slash_all_switches_scope_without_sending_message() {
 }
 
 #[test]
+fn chat_submit_normalizes_multiline_input_before_sending_message() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas {
+        chat_input: textarea_from_text("first line\nsecond line"),
+        ..FormTextareas::default()
+    };
+    sync_state_from_textareas(&mut state, &textareas);
+
+    let handled =
+        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+            .expect("chat submit");
+
+    assert!(handled);
+    assert_eq!(
+        state.chat_messages,
+        vec![("user".to_string(), "first line second line".to_string())]
+    );
+    assert!(state.chat_input.is_empty());
+}
+
+#[test]
 fn chat_submit_slash_all_is_idempotent_when_already_on_all_scope() {
     let mut provider = TestProvider::ok();
     let mut hooks = NoopRuntimeHooks;
@@ -731,6 +818,29 @@ fn chat_submit_slash_all_is_idempotent_when_already_on_all_scope() {
         focus: PaneFocus::Extra,
         chat_input: "/all".to_string(),
         chat_scope: tui_kit_runtime::ChatScope::All,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled =
+        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+            .expect("slash command");
+
+    assert!(handled);
+    assert_eq!(state.chat_scope, tui_kit_runtime::ChatScope::All);
+    assert!(state.chat_messages.is_empty());
+    assert!(state.chat_input.is_empty());
+}
+
+#[test]
+fn chat_submit_slash_all_trims_trailing_space_before_matching_command() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        focus: PaneFocus::Extra,
+        chat_input: "/all ".to_string(),
+        chat_scope: tui_kit_runtime::ChatScope::Selected,
         ..CoreState::default()
     };
     let mut textareas = FormTextareas::default();
