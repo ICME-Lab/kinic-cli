@@ -1,7 +1,7 @@
 #[path = "form_tab_flow.rs"]
 mod form_tab_flow;
 
-use ratatui_textarea::{Input as TextAreaInput, Key as TextAreaKey, TextArea};
+use ratatui_textarea::{CursorMove, Input as TextAreaInput, Key as TextAreaKey, TextArea};
 use std::{io, time::Duration};
 use tui_kit_render::theme::Theme;
 use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
@@ -9,8 +9,8 @@ use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, PickerState, apply_snapshot,
     chat_commands::{
-        UNKNOWN_SLASH_COMMAND_MESSAGE, chat_slash_command_action, matching_slash_commands,
-        normalize_chat_input_lines, selected_slash_command_action,
+        UNKNOWN_SLASH_COMMAND_MESSAGE, chat_slash_command_action, flatten_chat_input_for_display,
+        matching_slash_commands, normalize_chat_input_lines, selected_slash_command_action,
     },
     dispatch_action, is_insert_form_locked,
     kinic_tabs::{
@@ -159,6 +159,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             terminal.draw(|frame| {
                 let focus = ui_focus_from_pane(state.focus);
                 let insert_file_path_display = insert_file_path_display(&state);
+                let visible_chat_input = normalized_chat_textarea_value(&textareas.chat_input);
                 let ui = TuiKitUi::new(&theme)
                     .ui_config(ui_config())
                     .ui_summaries(&state.list_items)
@@ -223,10 +224,9 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .filtered_context_indices(&[])
                     .candidates(&[])
                     .chat_messages(&state.chat_messages)
-                    .chat_input(&state.chat_input)
-                    .chat_input_cursor(textarea_cursor(
+                    .chat_input(visible_chat_input.as_str())
+                    .chat_input_cursor(chat_input_cursor(
                         active_textarea(&state),
-                        ActiveTextarea::ChatInput,
                         &textareas.chat_input,
                     ))
                     .chat_command_selected(chat_command_selection(&state, &textareas))
@@ -634,9 +634,8 @@ fn build_ui<'a>(
         .candidates(&[])
         .chat_messages(&state.chat_messages)
         .chat_input(&state.chat_input)
-        .chat_input_cursor(textarea_cursor(
+        .chat_input_cursor(chat_input_cursor(
             active_textarea(state),
-            ActiveTextarea::ChatInput,
             &textareas.chat_input,
         ))
         .chat_command_selected(chat_command_selection(state, textareas))
@@ -995,10 +994,7 @@ fn sync_form_textareas_from_state(textareas: &mut FormTextareas, state: &CoreSta
         state.create_description.as_str(),
     );
     sync_textarea_from_string(&mut textareas.insert_text, state.insert_text.as_str());
-    sync_textarea_from_string(
-        &mut textareas.chat_input,
-        normalize_chat_input_lines(state.chat_input.as_str()).as_str(),
-    );
+    sync_chat_textarea_from_state(&mut textareas.chat_input, state.chat_input.as_str());
 }
 
 fn sync_textarea_from_string(textarea: &mut TextArea<'static>, value: &str) {
@@ -1010,6 +1006,51 @@ fn sync_textarea_from_string(textarea: &mut TextArea<'static>, value: &str) {
 
 fn textarea_from_text(value: &str) -> TextArea<'static> {
     TextArea::from(value.split('\n'))
+}
+
+fn normalized_chat_textarea_value(textarea: &TextArea<'static>) -> String {
+    flatten_chat_input_for_display(textarea.lines().join("\n").as_str())
+}
+
+fn normalized_chat_cursor_col(textarea: &TextArea<'static>) -> usize {
+    let lines = textarea.lines();
+    let last_row = lines.len().saturating_sub(1);
+    let (cursor_row, cursor_col) = textarea.cursor();
+    let effective_row = cursor_row.min(last_row);
+    let mut prefix_lines = lines
+        .iter()
+        .take(effective_row)
+        .map(|line| line.as_str().to_string())
+        .collect::<Vec<_>>();
+    let current_prefix = lines
+        .get(effective_row)
+        .map(|line| line.chars().take(cursor_col).collect::<String>())
+        .unwrap_or_default();
+    prefix_lines.push(current_prefix);
+    flatten_chat_input_for_display(prefix_lines.join("\n").as_str())
+        .chars()
+        .count()
+}
+
+fn chat_input_cursor(
+    active: Option<ActiveTextarea>,
+    textarea: &TextArea<'static>,
+) -> Option<(usize, usize)> {
+    if active != Some(ActiveTextarea::ChatInput) {
+        return None;
+    }
+    Some((0, normalized_chat_cursor_col(textarea)))
+}
+
+fn sync_chat_textarea_from_state(textarea: &mut TextArea<'static>, value: &str) {
+    // Chat input remains a single-line UI, but the widget may still hold raw pasted
+    // newlines or trailing spaces while editing. Only rebuild when the normalized
+    // text actually diverges so equivalent edits keep the cursor stable.
+    if normalized_chat_textarea_value(textarea) == value {
+        return;
+    }
+    sync_textarea_from_string(textarea, value);
+    textarea.move_cursor(CursorMove::End);
 }
 
 fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
@@ -1031,10 +1072,9 @@ fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
         }
     }
 
-    let normalized_chat_input =
-        normalize_chat_input_lines(textareas.chat_input.lines().join("\n").as_str());
-    if state.chat_input != normalized_chat_input {
-        state.chat_input = normalized_chat_input;
+    let display_chat_input = normalized_chat_textarea_value(&textareas.chat_input);
+    if state.chat_input != display_chat_input {
+        state.chat_input = display_chat_input;
     }
 }
 
