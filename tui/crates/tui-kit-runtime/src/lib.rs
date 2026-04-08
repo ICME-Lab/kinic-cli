@@ -27,6 +27,25 @@ pub const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
     "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
 ];
 
+/// Transfer amount accepts ASCII digits and a single decimal separator.
+/// Fractional precision is capped at 8 places to match ledger parsing.
+pub fn transfer_amount_accepts_char(current: &str, next: char) -> bool {
+    if next.is_ascii_digit() {
+        let fraction_len = current
+            .split_once('.')
+            .map_or(0, |(_, fraction)| fraction.chars().count());
+        return !current.contains('.') || fraction_len < 8;
+    }
+
+    next == '.' && !current.contains('.')
+}
+
+/// Principal-like identifiers in the TUI use lowercase text, digits, and hyphens.
+/// Final validity still belongs to `Principal::from_text(...)` at submit time.
+pub fn principal_text_accepts_char(next: char) -> bool {
+    next.is_ascii_lowercase() || next.is_ascii_digit() || next == '-'
+}
+
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
 
@@ -1116,7 +1135,11 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             {
                 return;
             }
-            state.access_control.principal_id.push(*c);
+            if principal_text_accepts_char(*c) {
+                state.access_control.principal_id.push(*c);
+            } else {
+                return;
+            }
             clear_access_control_error(state);
         }
         CoreAction::AccessBackspace => {
@@ -1222,6 +1245,9 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             close_add_memory_modal(state);
         }
         CoreAction::AddMemoryInput(c) => {
+            if !principal_text_accepts_char(*c) {
+                return;
+            }
             apply_text_input_modal_command(
                 &mut state.add_memory,
                 true,
@@ -1326,8 +1352,20 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
                 return;
             }
             match state.transfer_modal.focus {
-                TransferModalFocus::Principal => state.transfer_modal.principal_id.push(*c),
-                TransferModalFocus::Amount => state.transfer_modal.amount.push(*c),
+                TransferModalFocus::Principal => {
+                    if principal_text_accepts_char(*c) {
+                        state.transfer_modal.principal_id.push(*c);
+                    } else {
+                        return;
+                    }
+                }
+                TransferModalFocus::Amount => {
+                    if transfer_amount_accepts_char(&state.transfer_modal.amount, *c) {
+                        state.transfer_modal.amount.push(*c);
+                    } else {
+                        return;
+                    }
+                }
                 TransferModalFocus::Max | TransferModalFocus::Submit => {}
             }
             clear_transfer_error(state);
@@ -4066,6 +4104,102 @@ mod tests {
 
         assert_eq!(state.transfer_modal.amount, "9.99900000");
         assert_eq!(state.transfer_modal.focus, TransferModalFocus::Submit);
+    }
+
+    #[test]
+    fn transfer_amount_input_rejects_non_numeric_characters() {
+        let mut state = CoreState {
+            transfer_modal: TransferModalState {
+                open: true,
+                mode: TransferModalMode::Edit,
+                focus: TransferModalFocus::Amount,
+                ..TransferModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::TransferInput('1'));
+        apply_core_action(&mut state, &CoreAction::TransferInput('x'));
+        apply_core_action(&mut state, &CoreAction::TransferInput('.'));
+        apply_core_action(&mut state, &CoreAction::TransferInput('2'));
+        apply_core_action(&mut state, &CoreAction::TransferInput('.'));
+
+        assert_eq!(state.transfer_modal.amount, "1.2");
+    }
+
+    #[test]
+    fn transfer_amount_input_caps_fractional_precision_at_eight_digits() {
+        let mut state = CoreState {
+            transfer_modal: TransferModalState {
+                open: true,
+                mode: TransferModalMode::Edit,
+                focus: TransferModalFocus::Amount,
+                amount: "0.".to_string(),
+                ..TransferModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        for next in "123456789".chars() {
+            apply_core_action(&mut state, &CoreAction::TransferInput(next));
+        }
+
+        assert_eq!(state.transfer_modal.amount, "0.12345678");
+    }
+
+    #[test]
+    fn transfer_principal_input_rejects_non_principal_characters() {
+        let mut state = CoreState {
+            transfer_modal: TransferModalState {
+                open: true,
+                mode: TransferModalMode::Edit,
+                focus: TransferModalFocus::Principal,
+                ..TransferModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        for next in "abC-1_+".chars() {
+            apply_core_action(&mut state, &CoreAction::TransferInput(next));
+        }
+
+        assert_eq!(state.transfer_modal.principal_id, "ab-1");
+    }
+
+    #[test]
+    fn access_principal_input_rejects_non_principal_characters() {
+        let mut state = CoreState {
+            access_control: AccessControlModalState {
+                open: true,
+                mode: AccessControlMode::Add,
+                focus: AccessControlFocus::Principal,
+                ..AccessControlModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        for next in "anonyMous!?-1".chars() {
+            apply_core_action(&mut state, &CoreAction::AccessInput(next));
+        }
+
+        assert_eq!(state.access_control.principal_id, "anonyous-1");
+    }
+
+    #[test]
+    fn add_memory_input_rejects_non_principal_characters() {
+        let mut state = CoreState {
+            add_memory: TextInputModalState {
+                open: true,
+                ..TextInputModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        for next in "aaaaA-aa\n_1".chars() {
+            apply_core_action(&mut state, &CoreAction::AddMemoryInput(next));
+        }
+
+        assert_eq!(state.add_memory.value, "aaaa-aa1");
     }
 
     #[test]
