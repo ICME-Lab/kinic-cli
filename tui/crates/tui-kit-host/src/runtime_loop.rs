@@ -159,7 +159,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             terminal.draw(|frame| {
                 let focus = ui_focus_from_pane(state.focus);
                 let insert_file_path_display = insert_file_path_display(&state);
-                let visible_chat_input = normalized_chat_textarea_value(&textareas.chat_input);
+                let visible_chat_input = chat_input_display_value(&textareas.chat_input);
                 let ui = TuiKitUi::new(&theme)
                     .ui_config(ui_config())
                     .ui_summaries(&state.list_items)
@@ -762,6 +762,11 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
         textarea.input(textarea_input_from_key_event(*key_event));
         sync_state_from_textareas(state, textareas);
         if target == ActiveTextarea::ChatInput {
+            sync_chat_textarea_from_state(
+                &mut textareas.chat_input,
+                state.chat_input.as_str(),
+                true,
+            );
             sync_chat_command_selection(textareas, state.chat_input.as_str());
         }
         return Ok(true);
@@ -786,7 +791,8 @@ fn handle_chat_submit_or_command<P: DataProvider, H: RuntimeLoopHooks<P>>(
     hooks: &mut H,
     textareas: &mut FormTextareas,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    state.chat_input = normalize_chat_input_lines(state.chat_input.as_str());
+    // Submit and slash-command matching operate on the normalized single-line payload.
+    state.chat_input = chat_input_submit_value(state.chat_input.as_str());
     sync_chat_command_selection(textareas, state.chat_input.as_str());
     if let Some(command_action) =
         selected_slash_command_action(state.chat_input.as_str(), textareas.chat_command_selected)
@@ -994,7 +1000,7 @@ fn sync_form_textareas_from_state(textareas: &mut FormTextareas, state: &CoreSta
         state.create_description.as_str(),
     );
     sync_textarea_from_string(&mut textareas.insert_text, state.insert_text.as_str());
-    sync_chat_textarea_from_state(&mut textareas.chat_input, state.chat_input.as_str());
+    sync_chat_textarea_from_state(&mut textareas.chat_input, state.chat_input.as_str(), false);
 }
 
 fn sync_textarea_from_string(textarea: &mut TextArea<'static>, value: &str) {
@@ -1008,11 +1014,16 @@ fn textarea_from_text(value: &str) -> TextArea<'static> {
     TextArea::from(value.split('\n'))
 }
 
-fn normalized_chat_textarea_value(textarea: &TextArea<'static>) -> String {
-    flatten_chat_input_for_display(textarea.lines().join("\n").as_str())
+// Chat input is rendered and edited as a true single-line widget.
+fn chat_input_display_value(textarea: &TextArea<'static>) -> String {
+    textarea.lines().join("\n")
 }
 
-fn normalized_chat_cursor_col(textarea: &TextArea<'static>) -> usize {
+fn chat_input_submit_value(value: &str) -> String {
+    normalize_chat_input_lines(value)
+}
+
+fn chat_input_display_cursor_col(textarea: &TextArea<'static>) -> usize {
     let lines = textarea.lines();
     let last_row = lines.len().saturating_sub(1);
     let (cursor_row, cursor_col) = textarea.cursor();
@@ -1039,18 +1050,24 @@ fn chat_input_cursor(
     if active != Some(ActiveTextarea::ChatInput) {
         return None;
     }
-    Some((0, normalized_chat_cursor_col(textarea)))
+    Some((0, textarea.cursor().1))
 }
 
-fn sync_chat_textarea_from_state(textarea: &mut TextArea<'static>, value: &str) {
-    // Chat input remains a single-line UI, but the widget may still hold raw pasted
-    // newlines or trailing spaces while editing. Only rebuild when the normalized
-    // text actually diverges so equivalent edits keep the cursor stable.
-    if normalized_chat_textarea_value(textarea) == value {
+fn sync_chat_textarea_from_state(textarea: &mut TextArea<'static>, value: &str, preserve_cursor: bool) {
+    // Rebuild chat input from its flattened single-line form so pasted multiline
+    // content cannot leave hidden rows behind inside the widget.
+    let single_line_value = flatten_chat_input_for_display(value);
+    if textarea.lines().join("\n") == single_line_value {
         return;
     }
-    sync_textarea_from_string(textarea, value);
-    textarea.move_cursor(CursorMove::End);
+    let cursor_col = if preserve_cursor {
+        chat_input_display_cursor_col(textarea).min(single_line_value.chars().count())
+    } else {
+        single_line_value.chars().count()
+    }
+    .min(u16::MAX as usize) as u16;
+    sync_textarea_from_string(textarea, single_line_value.as_str());
+    textarea.move_cursor(CursorMove::Jump(0, cursor_col));
 }
 
 fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
@@ -1072,7 +1089,8 @@ fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
         }
     }
 
-    let display_chat_input = normalized_chat_textarea_value(&textareas.chat_input);
+    let display_chat_input =
+        flatten_chat_input_for_display(textareas.chat_input.lines().join("\n").as_str());
     if state.chat_input != display_chat_input {
         state.chat_input = display_chat_input;
     }
