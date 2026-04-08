@@ -27,6 +27,7 @@ const MAX_CONCURRENT_CHAT_SEARCHES: usize = 10;
 pub(crate) struct ChatSearchBatch {
     pub(crate) items: Vec<SearchResultItem>,
     pub(crate) failed_memory_ids: Vec<String>,
+    pub(crate) join_error_count: usize,
 }
 
 pub(crate) async fn ask_memories(
@@ -102,6 +103,7 @@ where
     let ChatSearchBatch {
         items,
         failed_memory_ids,
+        join_error_count,
     } = search_targets_fn(use_mainnet, auth, targets.clone(), embedding).await?;
     let prompt_documents = select_chat_prompt_documents(
         scope,
@@ -117,13 +119,14 @@ where
         &history,
         &prompt_documents,
         language,
-        failed_memory_ids.len(),
+        failed_memory_ids.len() + join_error_count,
         active_memory_context.as_ref(),
     );
     let response = chat_endpoint_fn(prompt).await?;
     Ok(AskMemoriesOutput {
         response,
         failed_memory_ids,
+        join_error_count,
     })
 }
 
@@ -170,10 +173,14 @@ pub(crate) fn fold_chat_search_results(
 ) -> Result<ChatSearchBatch> {
     let mut items = Vec::new();
     let mut failed_memory_ids = Vec::new();
+    let mut success_count = 0usize;
     let mut first_error = None;
     for (memory_id, result) in results {
         match result {
-            Ok(mut next_items) => items.append(&mut next_items),
+            Ok(mut next_items) => {
+                success_count += 1;
+                items.append(&mut next_items);
+            }
             Err(error) => {
                 failed_memory_ids.push(memory_id);
                 if first_error.is_none() {
@@ -182,14 +189,15 @@ pub(crate) fn fold_chat_search_results(
             }
         }
     }
+    let join_error_count = join_errors.len();
     for error in join_errors {
-        failed_memory_ids.push("join-error".to_string());
         if first_error.is_none() {
             first_error = Some(error.into());
         }
     }
     if target_count > 0
-        && failed_memory_ids.len() == target_count
+        && success_count == 0
+        && failed_memory_ids.len() + join_error_count == target_count
         && let Some(error) = first_error
     {
         return Err(error);
@@ -197,5 +205,6 @@ pub(crate) fn fold_chat_search_results(
     Ok(ChatSearchBatch {
         items,
         failed_memory_ids,
+        join_error_count,
     })
 }

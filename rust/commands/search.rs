@@ -37,6 +37,7 @@ pub async fn handle(args: SearchArgs, ctx: &CommandContext) -> Result<()> {
             searched_memory_ids: batch.searched_memory_ids,
             result_count: batch.items.len(),
             failed_memory_ids: batch.failed_memory_ids,
+            join_error_count: batch.join_error_count,
             items: batch.items,
         }
     } else {
@@ -52,6 +53,7 @@ pub async fn handle(args: SearchArgs, ctx: &CommandContext) -> Result<()> {
             searched_memory_ids: Vec::new(),
             result_count: batch.items.len(),
             failed_memory_ids: Vec::new(),
+            join_error_count: 0,
             items: batch.items,
         }
     };
@@ -73,6 +75,12 @@ pub async fn handle(args: SearchArgs, ctx: &CommandContext) -> Result<()> {
                 output.failed_memory_ids.len()
             );
         }
+        if output.join_error_count > 0 {
+            println!(
+                "Note: {} background search task(s) failed before reporting a memory id.",
+                output.join_error_count
+            );
+        }
     }
     Ok(())
 }
@@ -88,6 +96,8 @@ struct SearchOutput {
     result_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     failed_memory_ids: Vec<String>,
+    #[serde(skip_serializing_if = "is_zero")]
+    join_error_count: usize,
     items: Vec<SearchHit>,
 }
 
@@ -95,7 +105,12 @@ struct SearchOutput {
 struct SearchBatch {
     searched_memory_ids: Vec<String>,
     failed_memory_ids: Vec<String>,
+    join_error_count: usize,
     items: Vec<SearchHit>,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 async fn searchable_memory_ids(agent: ic_agent::Agent) -> Result<Vec<String>> {
@@ -116,6 +131,7 @@ async fn search_single_memory(
     Ok(SearchBatch {
         searched_memory_ids: vec![memory_id],
         failed_memory_ids: Vec::new(),
+        join_error_count: 0,
         items: rows,
     })
 }
@@ -181,7 +197,6 @@ async fn search_across_memories(
         target_count,
         results,
         join_errors,
-        "join-error",
         "Search failed before any memory returned results.",
     )
     .map_err(anyhow::Error::msg)?;
@@ -190,6 +205,7 @@ async fn search_across_memories(
     Ok(SearchBatch {
         searched_memory_ids,
         failed_memory_ids: batch.failed_memory_ids,
+        join_error_count: batch.join_error_count,
         items: batch.items,
     })
 }
@@ -305,6 +321,7 @@ mod tests {
             searched_memory_ids: Vec::new(),
             result_count: 0,
             failed_memory_ids: Vec::new(),
+            join_error_count: 0,
             items: Vec::new(),
         })
         .expect("search output should serialize");
@@ -313,6 +330,29 @@ mod tests {
         assert_eq!(output["scope"], serde_json::json!("selected"));
         assert_eq!(output["result_count"], serde_json::json!(0));
         assert_eq!(output["items"], serde_json::json!([]));
+        assert!(output.get("join_error_count").is_none());
+    }
+
+    #[test]
+    fn search_output_serializes_join_error_count_separately_from_failed_memory_ids() {
+        let output = serde_json::to_value(SearchOutput {
+            query: "hello".to_string(),
+            scope: "all",
+            memory_id: None,
+            searched_memory_ids: vec!["aaaaa-aa".to_string(), "bbbbb-bb".to_string()],
+            result_count: 1,
+            failed_memory_ids: vec!["bbbbb-bb".to_string()],
+            join_error_count: 2,
+            items: vec![SearchHit {
+                memory_id: "aaaaa-aa".to_string(),
+                score: 0.8,
+                payload: "alpha".to_string(),
+            }],
+        })
+        .expect("search output should serialize");
+
+        assert_eq!(output["failed_memory_ids"], serde_json::json!(["bbbbb-bb"]));
+        assert_eq!(output["join_error_count"], serde_json::json!(2));
     }
 
     #[test]

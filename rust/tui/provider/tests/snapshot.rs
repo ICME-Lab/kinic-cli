@@ -606,6 +606,7 @@ fn moving_memory_selection_starts_generated_summary_and_shows_loading() {
     set_next_test_memory_summary_result(Ok(AskMemoriesOutput {
         response: "Auto summary".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = KinicProvider::new(live_config());
     provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();
@@ -702,6 +703,7 @@ fn completed_summary_for_previous_selection_is_cached_after_cursor_moves_again()
     set_next_test_memory_summary_result(Ok(AskMemoriesOutput {
         response: "Summary for beta".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = KinicProvider::new(live_config());
     provider.tab_id = KINIC_MEMORIES_TAB_ID.to_string();

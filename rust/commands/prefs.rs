@@ -15,6 +15,7 @@ use crate::{
     },
     clients::memory::MemoryClient,
     preferences::{self, UserPreferences},
+    shared::access::current_principal_has_memory_access,
 };
 
 pub async fn handle(args: PrefsArgs, global: &GlobalOpts) -> Result<()> {
@@ -218,11 +219,7 @@ async fn validate_manual_memory_access(global: &GlobalOpts, memory_id: &str) -> 
         .await
         .context("Failed to validate memory access via get_users")?;
 
-    if users.iter().any(|(principal_id, _)| {
-        Principal::from_text(principal_id)
-            .map(|principal| principal == current_principal)
-            .unwrap_or(false)
-    }) {
+    if current_principal_has_memory_access(&users, &current_principal) {
         Ok(())
     } else {
         bail!("Current principal does not have access to this memory");
@@ -480,5 +477,29 @@ mod tests {
             error.to_string(),
             "chat mmr lambda must be one of: 60, 70, 80, 90"
         );
+    }
+
+    #[test]
+    fn manual_memory_access_allows_explicit_current_principal() {
+        let current = Principal::from_text("aaaaa-aa").expect("principal");
+        let users = vec![("aaaaa-aa".to_string(), 3)];
+
+        assert!(current_principal_has_memory_access(&users, &current));
+    }
+
+    #[test]
+    fn manual_memory_access_allows_anonymous_role_without_explicit_membership() {
+        let current = Principal::from_text("aaaaa-aa").expect("principal");
+        let users = vec![(Principal::anonymous().to_text(), 3)];
+
+        assert!(current_principal_has_memory_access(&users, &current));
+    }
+
+    #[test]
+    fn manual_memory_access_rejects_current_principal_when_not_listed_and_not_anonymous() {
+        let current = Principal::from_text("aaaaa-aa").expect("principal");
+        let users = vec![("bbbbb-bb".to_string(), 3)];
+
+        assert!(!current_principal_has_memory_access(&users, &current));
     }
 }

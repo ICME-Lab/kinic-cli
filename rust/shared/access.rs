@@ -80,6 +80,33 @@ pub fn validate_role_assignment(principal_text: &str, role: MemoryRole) -> Resul
     Ok(())
 }
 
+pub fn validate_access_control_target(
+    principal_text: &str,
+    launcher_id: &str,
+    role: Option<MemoryRole>,
+) -> Result<Principal> {
+    let principal = parse_user_principal(principal_text)?;
+    ensure_not_launcher_principal(&principal, launcher_id)?;
+    if let Some(role) = role {
+        validate_role_assignment(principal_text, role)?;
+    }
+    Ok(principal)
+}
+
+pub fn current_principal_has_memory_access(
+    users: &[(String, u8)],
+    current_principal: &Principal,
+) -> bool {
+    users.iter().any(|(principal_id, _)| {
+        if principal_id.trim() == "anonymous" {
+            return true;
+        }
+        Principal::from_text(principal_id)
+            .map(|principal| principal == *current_principal || principal == Principal::anonymous())
+            .unwrap_or(false)
+    })
+}
+
 pub fn ensure_not_launcher_principal(principal: &Principal, launcher_id: &str) -> Result<()> {
     if principal.to_text() == launcher_id {
         bail!("launcher canister access cannot be modified");
@@ -116,6 +143,35 @@ mod tests {
     fn validate_role_assignment_rejects_anonymous_admin() {
         let error = validate_role_assignment("anonymous", MemoryRole::Admin).unwrap_err();
         assert_eq!(error.to_string(), "cannot grant admin role to anonymous");
+    }
+
+    #[test]
+    fn validate_access_control_target_rejects_launcher_principal() {
+        let error =
+            validate_access_control_target("aaaaa-aa", "aaaaa-aa", Some(MemoryRole::Reader))
+                .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "launcher canister access cannot be modified"
+        );
+    }
+
+    #[test]
+    fn current_principal_has_memory_access_accepts_explicit_and_anonymous_access() {
+        let current = Principal::from_text("aaaaa-aa").expect("principal");
+        let explicit = vec![("aaaaa-aa".to_string(), 3)];
+        let anonymous = vec![(Principal::anonymous().to_text(), 3)];
+
+        assert!(current_principal_has_memory_access(&explicit, &current));
+        assert!(current_principal_has_memory_access(&anonymous, &current));
+    }
+
+    #[test]
+    fn current_principal_has_memory_access_rejects_unrelated_users() {
+        let current = Principal::from_text("aaaaa-aa").expect("principal");
+        let users = vec![("bbbbb-bb".to_string(), 3)];
+
+        assert!(!current_principal_has_memory_access(&users, &current));
     }
 
     #[test]

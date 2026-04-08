@@ -134,6 +134,7 @@ fn chat_submit_starts_background_task_and_saves_user_message() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "saved".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = chat_state("What changed?");
@@ -191,6 +192,7 @@ fn chat_background_success_appends_assistant_and_persists_reply() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "Answer".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = chat_state("Question");
@@ -232,6 +234,7 @@ fn chat_background_partial_search_failure_notifies_status() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "Partial answer".to_string(),
         failed_memory_ids: vec!["bbbbb-bb".to_string()],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = chat_state("Question");
@@ -310,6 +313,7 @@ fn chat_background_success_does_not_overwrite_memory_content_summary() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "New chat answer".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     provider.memory_content_summaries.insert(
@@ -476,6 +480,7 @@ fn chat_submit_uses_latest_user_query_and_recent_visible_history() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = CoreState {
@@ -542,6 +547,7 @@ fn all_memories_chat_submit_uses_all_targets_and_separate_history_thread() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = CoreState {
@@ -850,6 +856,7 @@ fn chat_new_thread_switches_to_empty_thread_and_submit_uses_it() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     state.chat_input = "fresh".to_string();
     let _ = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
@@ -873,6 +880,7 @@ fn selected_chat_submit_includes_cached_memory_summary_context() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     provider.memory_content_summaries.insert(
@@ -905,6 +913,7 @@ fn selected_chat_submit_excludes_placeholder_memory_summary_context() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     provider

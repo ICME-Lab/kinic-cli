@@ -191,7 +191,8 @@ cargo run -- --identity alice search \
 ```
 
 When `--all` is used, results are merged and printed with the source memory id.
-With `--json`, the output also includes `searched_memory_ids` and `failed_memory_ids` when some memory searches fail.
+With `--json`, the output also includes `searched_memory_ids`, optional `failed_memory_ids`, and optional `join_error_count` when some background search tasks fail.
+`failed_memory_ids` always contains real memory canister ids only. `join_error_count` covers task panics/cancellation cases where no memory id could be reported.
 
 ### Show memory details
 
@@ -257,12 +258,14 @@ cargo run -- --identity alice config users remove \
 Notes:
 - `anonymous` assigns the role to everyone; admin cannot be granted to `anonymous`.
 - Principals are validated; invalid text fails fast.
+- The launcher canister principal cannot be changed or removed from the CLI.
 
 ### Manage local preferences shared with the TUI
 
 These commands read and write the same local settings file used by the TUI at `~/.config/kinic/tui.yaml`.
 They do not require `--identity` when they only update local preferences.
 `prefs add-memory --validate` is the exception and requires `--identity` or `--ii` because it verifies access against the target memory canister before saving.
+Validation accepts both explicit membership and memories that expose access through the anonymous principal.
 `prefs show` returns JSON so it can be consumed reliably by AI agents, shell scripts, and other tools.
 All `prefs` commands now return JSON so agents can consume both reads and mutations with one stable contract.
 

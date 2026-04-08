@@ -3,4 +3,4 @@
 //! What: forwards to crate-level shared logic without keeping a second implementation.
 //! Why: allow incremental migration of command imports while centralizing behavior.
 
-pub use crate::shared::access::{MemoryRole, parse_user_principal, validate_role_assignment};
+pub use crate::shared::access::{MemoryRole, validate_access_control_target};

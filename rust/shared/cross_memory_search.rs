@@ -18,6 +18,7 @@ pub struct SearchHit {
 pub struct FoldedSearchBatch<T> {
     pub items: Vec<T>,
     pub failed_memory_ids: Vec<String>,
+    pub join_error_count: usize,
 }
 
 pub fn searchable_memory_id_from_state(state: State) -> Option<String> {
@@ -56,7 +57,6 @@ pub fn fold_search_batches<T, E>(
     target_count: usize,
     results: Vec<(String, Result<Vec<T>, E>)>,
     join_errors: Vec<String>,
-    join_error_memory_id: &str,
     all_failed_message: &str,
 ) -> Result<FoldedSearchBatch<T>, String>
 where
@@ -64,11 +64,15 @@ where
 {
     let mut items = Vec::new();
     let mut failed_memory_ids = Vec::new();
+    let mut success_count = 0usize;
     let mut first_error = None;
 
     for (memory_id, result) in results {
         match result {
-            Ok(mut next_items) => items.append(&mut next_items),
+            Ok(mut next_items) => {
+                success_count += 1;
+                items.append(&mut next_items);
+            }
             Err(error) => {
                 failed_memory_ids.push(memory_id);
                 if first_error.is_none() {
@@ -78,20 +82,24 @@ where
         }
     }
 
+    let join_error_count = join_errors.len();
     for error in join_errors {
-        failed_memory_ids.push(join_error_memory_id.to_string());
         if first_error.is_none() {
             first_error = Some(error);
         }
     }
 
-    if target_count > 0 && failed_memory_ids.len() == target_count {
+    if target_count > 0
+        && success_count == 0
+        && failed_memory_ids.len() + join_error_count == target_count
+    {
         return Err(first_error.unwrap_or_else(|| all_failed_message.to_string()));
     }
 
     Ok(FoldedSearchBatch {
         items,
         failed_memory_ids,
+        join_error_count,
     })
 }
 
@@ -159,13 +167,13 @@ mod tests {
                 ("bbbbb-bb".to_string(), Err("boom")),
             ],
             Vec::new(),
-            "join-error",
             "all failed",
         )
         .expect("partial success should survive");
 
         assert_eq!(batch.items.len(), 1);
         assert_eq!(batch.failed_memory_ids, vec!["bbbbb-bb".to_string()]);
+        assert_eq!(batch.join_error_count, 0);
     }
 
     #[test]
@@ -174,11 +182,32 @@ mod tests {
             1,
             vec![("aaaaa-aa".to_string(), Err("boom"))],
             Vec::new(),
-            "join-error",
             "all failed",
         )
         .unwrap_err();
 
         assert_eq!(error, "boom");
+    }
+
+    #[test]
+    fn fold_search_batches_tracks_join_errors_without_breaking_failed_memory_ids_contract() {
+        let batch = fold_search_batches::<SearchHit, &str>(
+            2,
+            vec![(
+                "aaaaa-aa".to_string(),
+                Ok(vec![SearchHit {
+                    memory_id: "aaaaa-aa".to_string(),
+                    score: 0.5,
+                    payload: "alpha".to_string(),
+                }]),
+            )],
+            vec!["join exploded".to_string()],
+            "all failed",
+        )
+        .expect("partial success should survive");
+
+        assert_eq!(batch.items.len(), 1);
+        assert!(batch.failed_memory_ids.is_empty());
+        assert_eq!(batch.join_error_count, 1);
     }
 }

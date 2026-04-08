@@ -12,8 +12,8 @@ use crate::{
     ledger::{fetch_balance, fetch_fee, transfer},
     shared::{
         access::{
-            MemoryRole, ensure_not_launcher_principal, format_role, parse_user_principal,
-            validate_role_assignment, visible_memory_users,
+            MemoryRole, current_principal_has_memory_access, format_role,
+            validate_access_control_target, validate_role_assignment, visible_memory_users,
         },
         cross_memory_search::SearchHit,
     },
@@ -49,6 +49,7 @@ pub type SearchResultItem = SearchHit;
 pub struct AskMemoriesOutput {
     pub response: String,
     pub failed_memory_ids: Vec<String>,
+    pub join_error_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -492,11 +493,7 @@ pub async fn validate_manual_memory_access(
     let client = MemoryClient::new(agent, memory);
     let users = client.get_users().await?;
 
-    if users.iter().any(|(user_principal_id, _)| {
-        Principal::from_text(user_principal_id)
-            .map(|principal| principal == self_principal)
-            .unwrap_or(false)
-    }) {
+    if current_principal_has_memory_access(&users, &self_principal) {
         Ok(())
     } else {
         anyhow::bail!("Current principal does not have access to this memory")
@@ -640,8 +637,15 @@ fn build_access_control_request(
     role: AccessControlRole,
     launcher_id: &str,
 ) -> Result<AccessControlRequest> {
-    let principal = parse_access_control_principal(principal_id)?;
-    ensure_not_launcher_principal(&principal, launcher_id)?;
+    let requested_role = match action {
+        AccessControlAction::Remove => None,
+        AccessControlAction::Add | AccessControlAction::Change => Some(match role {
+            AccessControlRole::Admin => MemoryRole::Admin,
+            AccessControlRole::Writer => MemoryRole::Writer,
+            AccessControlRole::Reader => MemoryRole::Reader,
+        }),
+    };
+    let principal = validate_access_control_target(principal_id, launcher_id, requested_role)?;
     let role_code = match action {
         AccessControlAction::Remove => None,
         AccessControlAction::Add | AccessControlAction::Change => {
@@ -654,10 +658,6 @@ fn build_access_control_request(
         action,
         role_code,
     })
-}
-
-fn parse_access_control_principal(principal_id: &str) -> Result<Principal> {
-    parse_user_principal(principal_id)
 }
 
 fn role_code(role: AccessControlRole, principal_id: &str) -> Result<u8> {
@@ -818,6 +818,36 @@ mod tests {
 
         assert!(users.is_empty());
         assert_eq!(load_err.as_deref(), Some("canister rejected get_users"));
+    }
+
+    #[test]
+    fn build_access_control_request_rejects_launcher_principal() {
+        let error = build_access_control_request(
+            AccessControlAction::Change,
+            "aaaaa-aa",
+            AccessControlRole::Reader,
+            "aaaaa-aa",
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "launcher canister access cannot be modified"
+        );
+    }
+
+    #[test]
+    fn build_access_control_request_allows_non_launcher_self_target() {
+        let request = build_access_control_request(
+            AccessControlAction::Remove,
+            "aaaaa-aa",
+            AccessControlRole::Reader,
+            "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        )
+        .expect("non-launcher principal should remain mutable");
+
+        assert_eq!(request.principal.to_text(), "aaaaa-aa");
+        assert_eq!(request.role_code, None);
     }
 
     #[test]

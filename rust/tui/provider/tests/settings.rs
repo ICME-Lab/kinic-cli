@@ -522,3 +522,38 @@ fn validate_transfer_submit_rejects_invalid_principal_and_overspend() {
             .contains("Max sendable")
     );
 }
+
+#[test]
+fn validate_access_submit_rejects_launcher_and_allows_self_target() {
+    let provider = KinicProvider::new(live_config());
+    let launcher_state = CoreState {
+        access_control: tui_kit_runtime::AccessControlModalState {
+            memory_id: "bbbbb-bb".to_string(),
+            principal_id: crate::clients::LAUNCHER_CANISTER.to_string(),
+            action: AccessControlAction::Change,
+            role: AccessControlRole::Reader,
+            ..tui_kit_runtime::AccessControlModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider
+            .validate_access_submit(&launcher_state)
+            .expect_err("launcher principal should fail"),
+        "Launcher canister access cannot be modified."
+    );
+
+    let self_state = CoreState {
+        access_control: tui_kit_runtime::AccessControlModalState {
+            memory_id: "bbbbb-bb".to_string(),
+            principal_id: "aaaaa-aa".to_string(),
+            action: AccessControlAction::Remove,
+            role: AccessControlRole::Reader,
+            ..tui_kit_runtime::AccessControlModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    assert!(provider.validate_access_submit(&self_state).is_ok());
+}

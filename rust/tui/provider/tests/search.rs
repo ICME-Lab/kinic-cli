@@ -47,6 +47,7 @@ fn selected_search_output(
                 payload: payload.to_string(),
             }],
             failed_memory_ids: Vec::new(),
+            join_error_count: 0,
         }),
     }
 }
@@ -76,10 +77,8 @@ fn fold_live_search_results_counts_join_errors_during_partial_success() {
     .expect("partial success should still return a batch");
 
     assert_eq!(batch.items.len(), 1);
-    assert_eq!(
-        batch.failed_memory_ids,
-        vec![SEARCH_JOIN_ERROR_MEMORY_ID.to_string()]
-    );
+    assert!(batch.failed_memory_ids.is_empty());
+    assert_eq!(batch.join_error_count, 1);
 }
 
 #[test]
@@ -225,7 +224,8 @@ fn poll_background_reports_partial_search_failures_in_success_notification() {
                 score: 0.9,
                 payload: "alpha".to_string(),
             }],
-            failed_memory_ids: vec![SEARCH_JOIN_ERROR_MEMORY_ID.to_string()],
+            failed_memory_ids: vec![],
+            join_error_count: 1,
         }),
     })
     .unwrap();

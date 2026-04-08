@@ -48,6 +48,7 @@ fn fold_chat_search_results_returns_failed_ids_when_partial_results_exist() {
 
     assert_eq!(batch.items.len(), 1);
     assert_eq!(batch.failed_memory_ids, vec!["bbbbb-bb".to_string()]);
+    assert_eq!(batch.join_error_count, 0);
 }
 
 #[test]
@@ -67,7 +68,8 @@ fn fold_chat_search_results_counts_join_errors_as_failures() {
     .expect("partial failures should still return a batch");
 
     assert_eq!(batch.items.len(), 1);
-    assert_eq!(batch.failed_memory_ids, vec!["join-error".to_string()]);
+    assert!(batch.failed_memory_ids.is_empty());
+    assert_eq!(batch.join_error_count, 1);
 }
 
 #[test]
@@ -194,6 +196,7 @@ async fn ask_memories_with_services_runs_full_chat_flow_without_real_api_calls()
                         payload: "Release notes mention a fixed chat flow.".to_string(),
                     }],
                     failed_memory_ids: vec!["bbbbb-bb".to_string()],
+                    join_error_count: 0,
                 })
             }
         },
@@ -206,6 +209,7 @@ async fn ask_memories_with_services_runs_full_chat_flow_without_real_api_calls()
         AskMemoriesOutput {
             response: "final grounded answer".to_string(),
             failed_memory_ids: vec!["bbbbb-bb".to_string()],
+            join_error_count: 0,
         }
     );
 
@@ -292,6 +296,7 @@ async fn ask_memories_with_services_stops_before_embedding_when_rewrite_is_empty
                 Ok(ChatSearchBatch {
                     items: Vec::new(),
                     failed_memory_ids: Vec::new(),
+                    join_error_count: 0,
                 })
             }
         },
@@ -368,6 +373,7 @@ async fn ask_memories_with_services_omits_active_memory_context_when_not_provide
                     payload: "generic hit".to_string(),
                 }],
                 failed_memory_ids: Vec::new(),
+                join_error_count: 0,
             })
         },
     )

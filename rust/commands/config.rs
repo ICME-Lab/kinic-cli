@@ -17,7 +17,7 @@ use crate::{
 
 use super::{
     CommandContext,
-    helpers::{MemoryRole, parse_user_principal, validate_role_assignment},
+    helpers::{MemoryRole, validate_access_control_target},
 };
 
 pub async fn handle(args: ConfigArgs, ctx: &CommandContext) -> Result<()> {
@@ -75,9 +75,9 @@ async fn write_user(
     ctx: &CommandContext,
     action: ConfigWriteAction,
 ) -> Result<()> {
-    let principal = parse_user_principal(&args.principal)?;
     let role = MemoryRole::from_str(&args.role)?;
-    validate_role_assignment(&args.principal, role)?;
+    let launcher_id = launcher_id(ctx).await?;
+    let principal = validate_access_control_target(&args.principal, &launcher_id, Some(role))?;
 
     let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
     match action {
@@ -117,7 +117,8 @@ async fn write_user(
 }
 
 async fn remove_user(args: ConfigUserRemoveArgs, ctx: &CommandContext) -> Result<()> {
-    let principal = parse_user_principal(&args.principal)?;
+    let launcher_id = launcher_id(ctx).await?;
+    let principal = validate_access_control_target(&args.principal, &launcher_id, None)?;
     let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
 
     client
@@ -139,13 +140,46 @@ async fn remove_user(args: ConfigUserRemoveArgs, ctx: &CommandContext) -> Result
     Ok(())
 }
 
+async fn launcher_id(ctx: &CommandContext) -> Result<String> {
+    let agent = ctx.agent_factory.build().await?;
+    Ok(LauncherClient::new(agent).launcher_id().to_text())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::access::validate_access_control_target;
 
     #[test]
     fn config_write_action_uses_expected_verbs() {
         assert_eq!(ConfigWriteAction::Add.verb(), "added");
         assert_eq!(ConfigWriteAction::Change.verb(), "changed");
+    }
+
+    #[test]
+    fn cli_access_validation_rejects_launcher_principal_for_change_and_remove() {
+        let role_error =
+            validate_access_control_target("aaaaa-aa", "aaaaa-aa", Some(MemoryRole::Reader))
+                .unwrap_err();
+        let remove_error =
+            validate_access_control_target("aaaaa-aa", "aaaaa-aa", None).unwrap_err();
+
+        assert_eq!(
+            role_error.to_string(),
+            "launcher canister access cannot be modified"
+        );
+        assert_eq!(
+            remove_error.to_string(),
+            "launcher canister access cannot be modified"
+        );
+    }
+
+    #[test]
+    fn cli_access_validation_does_not_reject_self_target_by_itself() {
+        let principal =
+            validate_access_control_target("aaaaa-aa", "ryjl3-tyaaa-aaaaa-aaaba-cai", None)
+                .expect("non-launcher principal should remain mutable");
+
+        assert_eq!(principal.to_text(), "aaaaa-aa");
     }
 }

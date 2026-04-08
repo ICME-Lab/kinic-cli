@@ -90,7 +90,8 @@ For agents or scripts:
 cargo run -- --identity alice search --all --query "hello" --json
 ```
 
-When `--all` is used with `--json`, expect `searched_memory_ids[]` and possibly `failed_memory_ids[]`.
+When `--all` is used with `--json`, expect `searched_memory_ids[]` and possibly `failed_memory_ids[]` plus `join_error_count`.
+`failed_memory_ids[]` contains only real memory ids. `join_error_count` covers task panics or cancellation where no memory id is available.
 
 ### Manage prefs
 
@@ -113,6 +114,8 @@ Add a manual memory with validation:
 ```bash
 cargo run -- --identity alice prefs add-memory --memory-id <memory_id> --validate
 ```
+
+Anonymous-access memories should also pass validation because the check accepts the anonymous principal as a valid access grant.
 
 Treat all `prefs` output as JSON.
 
@@ -138,6 +141,7 @@ cargo run -- --identity alice config users remove --memory-id <memory_id> --prin
 ```
 
 Remember that `anonymous` cannot be granted `admin`.
+Remember that the launcher canister principal cannot be modified.
 
 ## Agent Guidance
 
@@ -146,7 +150,7 @@ Remember that `anonymous` cannot be granted `admin`.
   1. `list --json`
   2. `show --json`
   3. `search --json`
-- Use `search --all --json` when the task spans multiple memories, and handle optional `failed_memory_ids[]`.
+- Use `search --all --json` when the task spans multiple memories, and handle optional `failed_memory_ids[]` and `join_error_count`.
 - Summarize in the agent, not in the CLI.
 - Keep `ask-ai` as a convenience path, not the default integration path.
 

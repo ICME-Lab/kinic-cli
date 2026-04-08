@@ -206,7 +206,6 @@ struct PendingSearch {
 type MemorySearchTaskResult = (String, anyhow::Result<Vec<SearchResultItem>>);
 type MemorySearchJoinResult = Result<MemorySearchTaskResult, tokio::task::JoinError>;
 type NextMemorySearchTask = Option<MemorySearchJoinResult>;
-const SEARCH_JOIN_ERROR_MEMORY_ID: &str = "join-error";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LastSearchState {
@@ -218,6 +217,7 @@ struct LastSearchState {
 struct SearchBatchResult {
     items: Vec<SearchResultItem>,
     failed_memory_ids: Vec<String>,
+    join_error_count: usize,
 }
 
 fn fold_live_search_results(
@@ -232,12 +232,12 @@ fn fold_live_search_results(
             .into_iter()
             .map(|error| error.to_string())
             .collect(),
-        SEARCH_JOIN_ERROR_MEMORY_ID,
         "Search failed before any memory returned results.",
     )?;
     Ok(SearchBatchResult {
         items: folded.items,
         failed_memory_ids: folded.failed_memory_ids,
+        join_error_count: folded.join_error_count,
     })
 }
 
@@ -3313,23 +3313,31 @@ impl KinicProvider {
             return Err("Principal ID is required.".to_string());
         }
 
-        if principal_id == crate::clients::LAUNCHER_CANISTER {
-            return Err("Launcher canister access cannot be modified.".to_string());
-        }
-
-        if principal_id != "anonymous" {
-            Principal::from_text(principal_id)
-                .map_err(|_| format!("Invalid principal text: {principal_id}"))?;
-        }
-
         let action = state.access_control.action;
         let role = state.access_control.role;
-        if action != AccessControlAction::Remove
-            && role == AccessControlRole::Admin
-            && principal_id == "anonymous"
-        {
-            return Err("cannot grant admin role to anonymous".to_string());
-        }
+        let requested_role = match action {
+            AccessControlAction::Remove => None,
+            AccessControlAction::Add | AccessControlAction::Change => Some(match role {
+                AccessControlRole::Admin => crate::shared::access::MemoryRole::Admin,
+                AccessControlRole::Writer => crate::shared::access::MemoryRole::Writer,
+                AccessControlRole::Reader => crate::shared::access::MemoryRole::Reader,
+            }),
+        };
+        crate::shared::access::validate_access_control_target(
+            principal_id,
+            crate::clients::LAUNCHER_CANISTER,
+            requested_role,
+        )
+        .map_err(|error| {
+            let message = error.to_string();
+            if message == "launcher canister access cannot be modified" {
+                "Launcher canister access cannot be modified.".to_string()
+            } else if message.starts_with("invalid principal text:") {
+                format!("Invalid principal text: {principal_id}")
+            } else {
+                message
+            }
+        })?;
 
         Ok((
             memory_id.to_string(),
@@ -3624,7 +3632,7 @@ impl KinicProvider {
 
         let effects = match output.result {
             Ok(results) => {
-                let failed_count = results.failed_memory_ids.len();
+                let failed_count = results.failed_memory_ids.len() + results.join_error_count;
                 let mut items = results.items;
                 items.sort_by(|left, right| {
                     right
@@ -3846,7 +3854,7 @@ impl KinicProvider {
         let mut effects = vec![CoreEffect::SetChatLoading(false)];
         match output.result {
             Ok(success) => {
-                let failed_count = success.failed_memory_ids.len();
+                let failed_count = success.failed_memory_ids.len() + success.join_error_count;
                 let response = success.response;
                 if let Err(error) = self.append_chat_history_message(
                     output.history_thread_key.as_str(),
