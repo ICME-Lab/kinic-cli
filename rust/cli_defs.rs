@@ -67,6 +67,10 @@ pub enum Command {
     #[command(about = "List deployed memories. Requires --identity or --ii. Returns text output.")]
     List(ListArgs),
     #[command(
+        about = "Show details for a memory canister. Requires --identity or --ii. Returns text output."
+    )]
+    Show(ShowArgs),
+    #[command(
         about = "Insert text into an existing memory canister. Requires --identity or --ii. Returns text output."
     )]
     Insert(InsertArgs),
@@ -99,6 +103,10 @@ pub enum Command {
     )]
     Config(ConfigArgs),
     #[command(
+        about = "Rename a memory canister. Requires --identity or --ii. Returns text output."
+    )]
+    Rename(RenameArgs),
+    #[command(
         about = "Describe CLI capabilities for agents. Returns JSON.",
         after_help = "Returns:\n  JSON with top-level commands, auth requirements, output modes, and major arguments.\n\nExample:\n  kinic-cli capabilities"
     )]
@@ -120,6 +128,8 @@ pub enum Command {
         about = "Check KINIC token balance. Requires --identity or --ii. Returns text output."
     )]
     Balance(BalanceArgs),
+    #[command(about = "Transfer KINIC tokens. Requires --identity or --ii. Returns text output.")]
+    Transfer(TransferArgs),
     #[command(
         about = "Ask Kinic AI using memory search results. Requires --identity or --ii. Returns text output."
     )]
@@ -152,6 +162,16 @@ pub struct TuiArgs {}
 
 #[derive(Args, Debug)]
 pub struct ListArgs {}
+
+#[derive(Args, Debug)]
+pub struct ShowArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Principal of the memory canister to show"
+    )]
+    pub memory_id: String,
+}
 
 #[derive(Args, Debug)]
 #[command(group = ArgGroup::new("insert_input").required(true).args(["text", "file_path"]))]
@@ -237,13 +257,18 @@ pub struct ConvertPdfArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(group(
+    ArgGroup::new("search_target")
+        .required(true)
+        .multiple(false)
+        .args(["memory_id", "all"])
+))]
 pub struct SearchArgs {
-    #[arg(
-        long,
-        required = true,
-        help = "Principal of the memory canister to search"
-    )]
-    pub memory_id: String,
+    #[arg(long, help = "Principal of the memory canister to search")]
+    pub memory_id: Option<String>,
+
+    #[arg(long, help = "Search across every searchable memory canister")]
+    pub all: bool,
 
     #[arg(long, required = true, help = "Query text to embed and search")]
     pub query: String,
@@ -281,6 +306,36 @@ pub struct TaggedEmbeddingsArgs {
 
 #[derive(Args, Debug)]
 pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: ConfigCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigCommand {
+    #[command(about = "Manage users for a memory canister")]
+    Users(ConfigUsersArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ConfigUsersArgs {
+    #[command(subcommand)]
+    pub command: ConfigUsersCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigUsersCommand {
+    #[command(about = "List users for a memory canister")]
+    List(MemoryIdArgs),
+    #[command(about = "Add a user to a memory canister")]
+    Add(ConfigUserWriteArgs),
+    #[command(about = "Change a user's role on a memory canister")]
+    Change(ConfigUserWriteArgs),
+    #[command(about = "Remove a user from a memory canister")]
+    Remove(ConfigUserRemoveArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ConfigUserWriteArgs {
     #[arg(
         long,
         required = true,
@@ -290,11 +345,26 @@ pub struct ConfigArgs {
 
     #[arg(
         long,
-        value_names = ["USER_ID", "ROLE"],
-        num_args = 2,
-        help = "Add a user with role to the Kinic CLI config (placeholder)"
+        required = true,
+        help = "Principal to add or update, or anonymous"
     )]
-    pub add_user: Option<Vec<String>>,
+    pub principal: String,
+
+    #[arg(long, required = true, help = "Role: admin, writer, or reader")]
+    pub role: String,
+}
+
+#[derive(Args, Debug)]
+pub struct ConfigUserRemoveArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Principal of the target memory canister"
+    )]
+    pub memory_id: String,
+
+    #[arg(long, required = true, help = "Principal to remove, or anonymous")]
+    pub principal: String,
 }
 
 #[derive(Args, Debug)]
@@ -379,6 +449,19 @@ pub struct UpdateArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct RenameArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Principal of the target memory canister"
+    )]
+    pub memory_id: String,
+
+    #[arg(long, required = true, help = "New memory name")]
+    pub name: String,
+}
+
+#[derive(Args, Debug)]
 pub struct ResetArgs {
     #[arg(
         long,
@@ -393,6 +476,18 @@ pub struct ResetArgs {
 
 #[derive(Args, Debug)]
 pub struct BalanceArgs {}
+
+#[derive(Args, Debug)]
+pub struct TransferArgs {
+    #[arg(long, required = true, help = "Recipient principal")]
+    pub to: String,
+
+    #[arg(long, required = true, help = "Amount in KINIC, e.g. 1 or 0.25")]
+    pub amount: String,
+
+    #[arg(long, help = "Confirm that the transfer should be executed")]
+    pub yes: bool,
+}
 
 #[derive(Args, Debug)]
 pub struct AskAiArgs {

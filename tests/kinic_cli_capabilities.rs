@@ -76,8 +76,20 @@ fn capabilities_describes_major_arguments_for_network_commands() {
     assert_eq!(
         search["arguments"],
         json!([
-            { "name": "memory_id", "required": true, "kind": "principal" },
+            { "name": "memory_id", "required": false, "kind": "principal" },
+            { "name": "all", "required": false, "kind": "boolean" },
             { "name": "query", "required": true, "kind": "string" }
+        ])
+    );
+    assert_eq!(
+        search["arg_groups"],
+        json!([
+            {
+                "id": "search_target",
+                "required": true,
+                "multiple": false,
+                "members": ["memory_id", "all"]
+            }
         ])
     );
 
@@ -158,6 +170,54 @@ fn capabilities_prefs_subcommands_match_clap_definition() {
         .find(|command| command.get_name() == "prefs")
         .expect("prefs should exist in clap");
     let clap_names: Vec<String> = clap_prefs
+        .get_subcommands()
+        .map(|command| command.get_name().to_string())
+        .collect();
+
+    assert_eq!(
+        capability_names,
+        clap_names.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn capabilities_config_users_subcommands_match_clap_definition() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
+        .arg("capabilities")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let commands = parsed["commands"].as_array().unwrap();
+    let config = commands
+        .iter()
+        .find(|entry| entry["name"] == "config")
+        .expect("config command should be present");
+    let users = config["subcommands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "users")
+        .expect("config users should be present");
+    let capability_names: Vec<&str> = users["subcommands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap())
+        .collect();
+
+    let clap = Cli::command();
+    let clap_config = clap
+        .get_subcommands()
+        .find(|command| command.get_name() == "config")
+        .expect("config should exist in clap");
+    let clap_users = clap_config
+        .get_subcommands()
+        .find(|command| command.get_name() == "users")
+        .expect("config users should exist in clap");
+    let clap_names: Vec<String> = clap_users
         .get_subcommands()
         .map(|command| command.get_name().to_string())
         .collect();

@@ -10,6 +10,13 @@ use crate::{
     embedding::embedding_base_url,
     insert_service::{InsertRequest, execute_insert_request},
     ledger::{fetch_balance, fetch_fee, transfer},
+    shared::{
+        access::{
+            MemoryRole, ensure_not_launcher_principal, format_role, parse_user_principal,
+            validate_role_assignment, visible_memory_users,
+        },
+        cross_memory_search::SearchHit,
+    },
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
 };
@@ -36,12 +43,7 @@ pub struct MemorySummary {
     pub users: Option<Vec<MemoryUser>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SearchResultItem {
-    pub memory_id: String,
-    pub score: f32,
-    pub payload: String,
-}
+pub type SearchResultItem = SearchHit;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AskMemoriesOutput {
@@ -612,15 +614,6 @@ fn memory_summary_from_state(state: State) -> MemorySummary {
     }
 }
 
-fn role_name(role_code: u8) -> String {
-    match role_code {
-        1 => "admin".to_string(),
-        2 => "writer".to_string(),
-        3 => "reader".to_string(),
-        other => format!("unknown({other})"),
-    }
-}
-
 fn memory_users_from_query(
     users: Result<Vec<(String, u8)>, anyhow::Error>,
     launcher_id: &str,
@@ -632,12 +625,11 @@ fn memory_users_from_query(
 }
 
 fn decode_memory_users(users: Vec<(String, u8)>, launcher_id: &str) -> Vec<MemoryUser> {
-    users
+    visible_memory_users(users, launcher_id)
         .into_iter()
-        .filter(|(principal_id, _)| principal_id != launcher_id)
-        .map(|(principal_id, role_code)| MemoryUser {
-            principal_id,
-            role: role_name(role_code),
+        .map(|user| MemoryUser {
+            principal_id: user.principal_id,
+            role: format_role(user.role_code),
         })
         .collect()
 }
@@ -649,9 +641,7 @@ fn build_access_control_request(
     launcher_id: &str,
 ) -> Result<AccessControlRequest> {
     let principal = parse_access_control_principal(principal_id)?;
-    if principal.to_text() == launcher_id {
-        anyhow::bail!("launcher canister access cannot be modified");
-    }
+    ensure_not_launcher_principal(&principal, launcher_id)?;
     let role_code = match action {
         AccessControlAction::Remove => None,
         AccessControlAction::Add | AccessControlAction::Change => {
@@ -667,22 +657,17 @@ fn build_access_control_request(
 }
 
 fn parse_access_control_principal(principal_id: &str) -> Result<Principal> {
-    if principal_id == "anonymous" {
-        return Ok(Principal::anonymous());
-    }
-    Principal::from_text(principal_id)
-        .with_context(|| format!("invalid principal text: {principal_id}"))
+    parse_user_principal(principal_id)
 }
 
 fn role_code(role: AccessControlRole, principal_id: &str) -> Result<u8> {
-    if role == AccessControlRole::Admin && principal_id == "anonymous" {
-        anyhow::bail!("cannot grant admin role to anonymous");
-    }
-    Ok(match role {
-        AccessControlRole::Admin => 1,
-        AccessControlRole::Writer => 2,
-        AccessControlRole::Reader => 3,
-    })
+    let memory_role = match role {
+        AccessControlRole::Admin => MemoryRole::Admin,
+        AccessControlRole::Writer => MemoryRole::Writer,
+        AccessControlRole::Reader => MemoryRole::Reader,
+    };
+    validate_role_assignment(principal_id, memory_role)?;
+    Ok(memory_role.code())
 }
 
 fn short_error(message: &str) -> String {

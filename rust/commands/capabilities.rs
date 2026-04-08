@@ -57,6 +57,8 @@ struct SubcommandCapability {
     arguments: Vec<ArgumentCapability>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     arg_groups: Vec<ArgGroupCapability>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    subcommands: Vec<SubcommandCapability>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -121,16 +123,29 @@ fn subcommand_capabilities(
     command: &Command,
     parent_output_mode: &'static str,
 ) -> Vec<SubcommandCapability> {
+    subcommand_capabilities_with_path(command, command.get_name(), parent_output_mode)
+}
+
+fn subcommand_capabilities_with_path(
+    command: &Command,
+    parent_path: &str,
+    parent_output_mode: &'static str,
+) -> Vec<SubcommandCapability> {
     command
         .get_subcommands()
         .map(|subcommand| {
-            let path = format!("{}.{}", command.get_name(), subcommand.get_name());
+            let path = format!("{parent_path}.{}", subcommand.get_name());
             SubcommandCapability {
                 name: subcommand.get_name().to_string(),
                 summary: command_summary(subcommand),
                 output_mode: subcommand_output_mode(&path, parent_output_mode),
                 arguments: argument_capabilities(subcommand, &path),
                 arg_groups: arg_group_capabilities(subcommand),
+                subcommands: subcommand_capabilities_with_path(
+                    subcommand,
+                    &path,
+                    subcommand_output_mode(&path, parent_output_mode),
+                ),
             }
         })
         .collect()
@@ -254,6 +269,10 @@ fn subcommand_output_mode(path: &str, parent_output_mode: &'static str) -> &'sta
 }
 
 fn argument_kind(path: &str, name: &str) -> &'static str {
+    if name == "all" && path == "search" {
+        return "boolean";
+    }
+
     match (path, name) {
         (_, "memory_id") => "principal",
         (_, "file_path") => "path",
@@ -312,6 +331,28 @@ mod tests {
 
         assert_eq!(capability_subcommands, clap_subcommands);
         assert_eq!(prefs.output_mode, "json");
+    }
+
+    #[test]
+    fn capabilities_document_includes_nested_config_user_subcommands() {
+        let document = CapabilitiesDocument::new();
+        let config = document
+            .commands
+            .iter()
+            .find(|command| command.name == "config")
+            .expect("config command should exist");
+        let users = config
+            .subcommands
+            .iter()
+            .find(|subcommand| subcommand.name == "users")
+            .expect("config users subcommand should exist");
+        let leaf_names: Vec<&str> = users
+            .subcommands
+            .iter()
+            .map(|subcommand| subcommand.name.as_str())
+            .collect();
+
+        assert_eq!(leaf_names, vec!["list", "add", "change", "remove"]);
     }
 
     #[test]
@@ -376,5 +417,21 @@ mod tests {
             manual_argument_relations("insert", "text"),
             ArgumentRelations::default()
         );
+    }
+
+    #[test]
+    fn argument_kind_marks_search_all_as_boolean() {
+        let command = crate::cli::Cli::command();
+        let search = command
+            .get_subcommands()
+            .find(|subcommand| subcommand.get_name() == "search")
+            .expect("search command should exist");
+        let all = search
+            .get_arguments()
+            .find(|arg| arg.get_id().as_str() == "all")
+            .expect("all arg should exist");
+
+        assert!(matches!(all.get_action(), clap::ArgAction::SetTrue));
+        assert_eq!(argument_kind("search", "all"), "boolean");
     }
 }
