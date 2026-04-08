@@ -4,6 +4,7 @@ use crate::{agent::AgentFactory, cli::Command};
 
 pub mod ask_ai;
 pub mod balance;
+pub mod capabilities;
 pub mod config;
 pub mod convert_pdf;
 pub mod create;
@@ -12,6 +13,7 @@ pub mod insert;
 pub mod insert_pdf;
 pub mod insert_raw;
 pub mod list;
+pub mod prefs;
 pub mod reset;
 pub mod search;
 pub mod search_raw;
@@ -36,6 +38,10 @@ pub async fn run_command(command: Command, ctx: CommandContext) -> Result<()> {
         Command::TaggedEmbeddings(args) => tagged_embeddings::handle(args, &ctx).await,
         Command::ConvertPdf(args) => convert_pdf::handle(args).await,
         Command::Config(args) => config::handle(args, &ctx).await,
+        Command::Capabilities(_) => {
+            unreachable!("capabilities command is handled before agent setup")
+        }
+        Command::Prefs(_) => unreachable!("prefs command is handled before agent setup"),
         Command::Update(args) => update::handle(args, &ctx).await,
         Command::Reset(args) => reset::handle(args, &ctx).await,
         Command::Balance(args) => balance::handle(args, &ctx).await,

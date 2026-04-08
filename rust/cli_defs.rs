@@ -14,7 +14,8 @@ pub fn parse_identity_arg(value: &str) -> Result<String, String> {
 #[command(
     name = "kinic-cli",
     version,
-    about = "Kinic developer CLI for deploying and managing memories"
+    about = "Kinic developer CLI for memory operations and agent-friendly local preferences",
+    after_help = "Auth modes:\n  Network commands require --identity <NAME> or --ii unless noted otherwise.\n  The TUI requires --identity <NAME> and does not support --ii.\n\nAgent entrypoints:\n  kinic-cli capabilities\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id <MEMORY_ID>\n\nReturns:\n  capabilities and prefs commands return JSON.\n  Existing network commands keep their current text output."
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -59,42 +60,83 @@ pub struct GlobalOpts {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    #[command(about = "Deploy a new memory canister via the launcher")]
+    #[command(
+        about = "Deploy a new memory canister. Requires --identity or --ii. Returns text output."
+    )]
     Create(CreateArgs),
-    #[command(about = "List deployed memories and their principals")]
+    #[command(about = "List deployed memories. Requires --identity or --ii. Returns text output.")]
     List(ListArgs),
-    #[command(about = "Insert text into an existing memory canister")]
+    #[command(
+        about = "Insert text into an existing memory canister. Requires --identity or --ii. Returns text output."
+    )]
     Insert(InsertArgs),
-    #[command(about = "Insert a precomputed embedding into a memory canister")]
+    #[command(
+        about = "Insert a precomputed embedding into a memory canister. Requires --identity or --ii. Returns text output."
+    )]
     InsertRaw(InsertRawArgs),
-    #[command(about = "Insert a PDF (converted to markdown) into an existing memory canister")]
+    #[command(
+        about = "Insert a PDF converted to markdown into a memory canister. Requires --identity or --ii. Returns text output."
+    )]
     InsertPdf(InsertPdfArgs),
-    #[command(about = "Convert a PDF to markdown and print it (no insert)")]
+    #[command(
+        about = "Convert a PDF to markdown and print it. No identity required. Returns text output."
+    )]
     ConvertPdf(ConvertPdfArgs),
-    #[command(about = "Search within a memory canister using embeddings")]
+    #[command(
+        about = "Search within a memory canister using embeddings. Requires --identity or --ii. Returns text output."
+    )]
     Search(SearchArgs),
-    #[command(about = "Search within a memory canister using a precomputed embedding")]
+    #[command(
+        about = "Search within a memory canister using a precomputed embedding. Requires --identity or --ii. Returns text output."
+    )]
     SearchRaw(SearchRawArgs),
-    #[command(about = "Fetch embeddings for a tag from a memory canister")]
+    #[command(
+        about = "Fetch embeddings for a tag from a memory canister. Requires --identity or --ii. Returns text output."
+    )]
     TaggedEmbeddings(TaggedEmbeddingsArgs),
-    #[command(about = "Manage Kinic CLI configuration")]
+    #[command(
+        about = "Manage memory access control. Requires --identity or --ii. Returns text output."
+    )]
     Config(ConfigArgs),
-    #[command(about = "Update a memory canister instance")]
+    #[command(
+        about = "Describe CLI capabilities for agents. Returns JSON.",
+        after_help = "Returns:\n  JSON with top-level commands, auth requirements, output modes, and major arguments.\n\nExample:\n  kinic-cli capabilities"
+    )]
+    Capabilities(CapabilitiesArgs),
+    #[command(
+        about = "Manage local Kinic preferences shared with the TUI. All prefs commands return JSON.",
+        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id yta6k-5x777-77774-aaaaa-cai\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[]}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|null}"
+    )]
+    Prefs(PrefsArgs),
+    #[command(
+        about = "Update a memory canister instance. Requires --identity or --ii. Returns text output."
+    )]
     Update(UpdateArgs),
-    #[command(about = "Reset a memory canister and set embedding dimension")]
+    #[command(
+        about = "Reset a memory canister and set embedding dimension. Requires --identity or --ii. Returns text output."
+    )]
     Reset(ResetArgs),
-    #[command(about = "Check KINIC token balance for the current identity")]
+    #[command(
+        about = "Check KINIC token balance. Requires --identity or --ii. Returns text output."
+    )]
     Balance(BalanceArgs),
-    #[command(about = "Ask Kinic AI using memory search results (LLM placeholder)")]
+    #[command(
+        about = "Ask Kinic AI using memory search results. Requires --identity or --ii. Returns text output."
+    )]
     AskAi(AskAiArgs),
-    #[command(about = "Login via Internet Identity and store a delegation")]
+    #[command(
+        about = "Login via Internet Identity and store a delegation. No identity required. Returns text output."
+    )]
     Login(LoginArgs),
     #[command(
-        about = "Launch the Kinic terminal UI (requires global --identity)",
-        after_help = "Required invocation:\n  kinic-cli --identity <IDENTITY> tui"
+        about = "Launch the Kinic terminal UI. Requires global --identity. --ii is not supported. Returns an interactive TUI, not JSON.",
+        after_help = "Requires:\n  kinic-cli --identity <IDENTITY> tui\n\nReturns:\n  Interactive terminal UI.\n\nExample:\n  kinic-cli --identity alice tui"
     )]
     Tui(TuiArgs),
 }
+
+#[derive(Args, Debug, Default)]
+pub struct CapabilitiesArgs {}
 
 #[derive(Args, Debug)]
 pub struct CreateArgs {
@@ -253,6 +295,77 @@ pub struct ConfigArgs {
         help = "Add a user with role to the Kinic CLI config (placeholder)"
     )]
     pub add_user: Option<Vec<String>>,
+}
+
+#[derive(Args, Debug)]
+pub struct PrefsArgs {
+    #[command(subcommand)]
+    pub command: PrefsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PrefsCommand {
+    #[command(
+        about = "Show local preferences shared with the TUI. Returns JSON.",
+        after_help = "Returns:\n  {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[]}\n\nExample:\n  kinic-cli prefs show"
+    )]
+    Show,
+    #[command(
+        about = "Set the default memory id. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"default_memory_id\", \"action\": \"set\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs set-default-memory --memory-id yta6k-5x777-77774-aaaaa-cai"
+    )]
+    SetDefaultMemory(SetDefaultMemoryArgs),
+    #[command(
+        about = "Clear the default memory id. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"default_memory_id\", \"action\": \"clear\", \"status\": \"updated\"|\"unchanged\", \"value\": null}\n\nExample:\n  kinic-cli prefs clear-default-memory"
+    )]
+    ClearDefaultMemory,
+    #[command(
+        about = "Add a saved tag. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"saved_tags\", \"action\": \"add\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs add-tag --tag quarterly_report"
+    )]
+    AddTag(TagArgs),
+    #[command(
+        about = "Remove a saved tag. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"saved_tags\", \"action\": \"remove\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs remove-tag --tag quarterly_report"
+    )]
+    RemoveTag(TagArgs),
+    #[command(
+        about = "Add a manually tracked memory id. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"add\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai"
+    )]
+    AddMemory(MemoryIdArgs),
+    #[command(
+        about = "Remove a manually tracked memory id. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"remove\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs remove-memory --memory-id yta6k-5x777-77774-aaaaa-cai"
+    )]
+    RemoveMemory(MemoryIdArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct SetDefaultMemoryArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Principal of the default memory canister"
+    )]
+    pub memory_id: String,
+}
+
+#[derive(Args, Debug)]
+pub struct TagArgs {
+    #[arg(long, required = true, help = "Tag value to add or remove")]
+    pub tag: String,
+}
+
+#[derive(Args, Debug)]
+pub struct MemoryIdArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Principal of the memory canister to add or remove"
+    )]
+    pub memory_id: String,
 }
 
 #[derive(Args, Debug)]

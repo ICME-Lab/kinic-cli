@@ -10,7 +10,7 @@ use std::{
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::chat_prompt::ActiveMemoryContext;
-use super::settings::{self, PreferencesHealth, UserPreferences};
+use super::settings::{self, PreferencesHealth};
 use crate::{
     create_domain::derive_create_cost,
     embedding::fetch_embedding,
@@ -18,6 +18,7 @@ use crate::{
         InsertRequest, parse_embedding_json, validate_insert_request_fields,
         validate_insert_request_for_submit,
     },
+    preferences::{self, UserPreferences},
     tui::TuiAuth,
 };
 use ic_agent::export::Principal;
@@ -365,7 +366,7 @@ impl<'a> DefaultMemorySelection<'a> {
 }
 
 fn saved_tag_selection(preferences: &UserPreferences) -> Vec<String> {
-    settings::normalize_saved_tags(preferences.saved_tags.clone())
+    preferences::normalize_saved_tags(preferences.saved_tags.clone())
 }
 
 fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> {
@@ -450,32 +451,32 @@ fn picker_items_for_context(
                 .unwrap_or_default(),
             _ => Vec::new(),
         },
-        PickerContext::ChatResultLimit => settings::chat_result_limit_options()
+        PickerContext::ChatResultLimit => preferences::chat_result_limit_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
                     value.to_string(),
-                    settings::chat_result_limit_display(*value),
+                    preferences::chat_result_limit_display(*value),
                     user_preferences.chat_overall_top_k == *value,
                 )
             })
             .collect(),
-        PickerContext::ChatPerMemoryLimit => settings::chat_per_memory_limit_options()
+        PickerContext::ChatPerMemoryLimit => preferences::chat_per_memory_limit_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
                     value.to_string(),
-                    settings::chat_per_memory_limit_display(*value),
+                    preferences::chat_per_memory_limit_display(*value),
                     user_preferences.chat_per_memory_cap == *value,
                 )
             })
             .collect(),
-        PickerContext::ChatDiversity => settings::chat_diversity_options()
+        PickerContext::ChatDiversity => preferences::chat_diversity_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
                     value.to_string(),
-                    settings::chat_diversity_display(*value),
+                    preferences::chat_diversity_display(*value),
                     user_preferences.chat_mmr_lambda == *value,
                 )
             })
@@ -589,7 +590,7 @@ fn reload_preferences_for_apply(
 
     #[cfg(not(test))]
     {
-        settings::load_user_preferences()
+        preferences::load_user_preferences()
     }
 }
 
@@ -601,7 +602,7 @@ fn save_user_preferences_for_apply(
         return Err(tui_kit_host::settings::SettingsError::NoConfigDir);
     }
 
-    settings::save_user_preferences(preferences)
+    preferences::save_user_preferences(preferences)
 }
 
 #[cfg(test)]
@@ -945,7 +946,7 @@ impl KinicProvider {
         let _settings_io_lock = settings_io_lock()
             .lock()
             .expect("settings io lock should be available");
-        let (user_preferences, preferences_health) = match settings::load_user_preferences() {
+        let (user_preferences, preferences_health) = match preferences::load_user_preferences() {
             Ok(preferences) => (preferences, PreferencesHealth::default()),
             Err(error) => (
                 UserPreferences::default(),
@@ -2391,7 +2392,7 @@ impl KinicProvider {
         let mut updated_preferences = self.user_preferences.clone();
         updated_preferences.saved_tags.push(normalized_tag.clone());
         updated_preferences.saved_tags =
-            settings::normalize_saved_tags(updated_preferences.saved_tags);
+            preferences::normalize_saved_tags(updated_preferences.saved_tags);
 
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -2432,7 +2433,7 @@ impl KinicProvider {
             .saved_tags
             .retain(|saved| saved != &normalized_tag);
         updated_preferences.saved_tags =
-            settings::normalize_saved_tags(updated_preferences.saved_tags);
+            preferences::normalize_saved_tags(updated_preferences.saved_tags);
 
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -2707,7 +2708,7 @@ impl KinicProvider {
         if self.user_preferences.chat_overall_top_k == value {
             return CoreEffect::Notify(format!(
                 "Chat result limit already set to {}",
-                settings::chat_result_limit_display(value)
+                preferences::chat_result_limit_display(value)
             ));
         }
         match self.update_user_preferences(|preferences| {
@@ -2715,7 +2716,7 @@ impl KinicProvider {
         }) {
             Ok(()) => CoreEffect::Notify(format!(
                 "Chat result limit set to {}",
-                settings::chat_result_limit_display(value)
+                preferences::chat_result_limit_display(value)
             )),
             Err(error) => CoreEffect::Notify(format!("Chat result limit save failed: {error}")),
         }
@@ -2725,7 +2726,7 @@ impl KinicProvider {
         if self.user_preferences.chat_per_memory_cap == value {
             return CoreEffect::Notify(format!(
                 "Per-memory limit already set to {}",
-                settings::chat_per_memory_limit_display(value)
+                preferences::chat_per_memory_limit_display(value)
             ));
         }
         match self.update_user_preferences(|preferences| {
@@ -2733,7 +2734,7 @@ impl KinicProvider {
         }) {
             Ok(()) => CoreEffect::Notify(format!(
                 "Per-memory limit set to {}",
-                settings::chat_per_memory_limit_display(value)
+                preferences::chat_per_memory_limit_display(value)
             )),
             Err(error) => CoreEffect::Notify(format!("Per-memory limit save failed: {error}")),
         }
@@ -2743,7 +2744,7 @@ impl KinicProvider {
         if self.user_preferences.chat_mmr_lambda == value {
             return CoreEffect::Notify(format!(
                 "Chat diversity already set to {}",
-                settings::chat_diversity_display(value)
+                preferences::chat_diversity_display(value)
             ));
         }
         match self.update_user_preferences(|preferences| {
@@ -2751,7 +2752,7 @@ impl KinicProvider {
         }) {
             Ok(()) => CoreEffect::Notify(format!(
                 "Chat diversity set to {}",
-                settings::chat_diversity_display(value)
+                preferences::chat_diversity_display(value)
             )),
             Err(error) => CoreEffect::Notify(format!("Chat diversity save failed: {error}")),
         }
