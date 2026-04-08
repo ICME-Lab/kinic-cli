@@ -50,6 +50,51 @@ Command-line companion for deploying and operating Kinic “memory” canisters.
 
 Use either `--identity` (dfx identity name stored in the system keychain) or `--ii` (Internet Identity login). Use `--ic` to talk to mainnet; omit it (or leave false) for the local replica. If you are not using `--ii`, `--identity <name>` is required for CLI commands.
 
+Agent-friendly discovery tips:
+- Start with `kinic-cli --help` for auth mode guidance and top-level entrypoints
+- Start with `kinic-cli capabilities` to get a JSON description of commands, auth requirements, output modes, major arguments, and arg-group constraints
+- Use `kinic-cli prefs --help` to inspect the JSON contract for shared local preferences
+- `capabilities` and `prefs` commands return JSON; existing network commands currently keep text output
+
+### Capabilities JSON
+
+Use this command when an agent needs a machine-readable description of the CLI before choosing a command:
+
+```bash
+cargo run -- capabilities
+```
+
+Example output:
+
+```json
+{
+  "cli": "kinic-cli",
+  "version": "0.1.2",
+  "auth_summary": "Network commands require --identity or --ii unless noted otherwise. The TUI requires --identity.",
+  "commands": [
+    {
+      "name": "prefs",
+      "summary": "Manage local Kinic preferences shared with the TUI.",
+      "requires_auth": false,
+      "auth_modes": [],
+      "output_mode": "json",
+      "interactive": false,
+      "arguments": [],
+      "subcommands": [
+        {
+          "name": "show",
+          "summary": "Show local preferences shared with the TUI.",
+          "output_mode": "json",
+          "arguments": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+For commands with compound input rules, `capabilities` also includes `arg_groups`. For example, `insert` exposes the required `insert_input` group so an agent can see that one of `text` or `file_path` must be provided. Arguments may also include `relations` with `requires` and `conflicts` when those constraints are available.
+
 ```bash
 cargo run -- --identity alice list
 cargo run -- --identity alice create \
@@ -138,6 +183,61 @@ cargo run -- --identity alice config \
 Notes:
 - `anonymous` assigns the role to everyone; admin cannot be granted to `anonymous`.
 - Principals are validated; invalid text fails fast.
+
+### Manage local preferences shared with the TUI
+
+These commands read and write the same local settings file used by the TUI at `~/.config/kinic/tui.yaml`.
+They do not require `--identity` because they only update local preferences.
+`prefs show` returns JSON so it can be consumed reliably by AI agents, shell scripts, and other tools.
+All `prefs` commands now return JSON so agents can consume both reads and mutations with one stable contract.
+
+Show the current shared preferences:
+
+```bash
+cargo run -- prefs show
+```
+
+Example output:
+
+```json
+{
+  "default_memory_id": null,
+  "saved_tags": [],
+  "manual_memory_ids": []
+}
+```
+
+Set or clear the default memory:
+
+```bash
+cargo run -- prefs set-default-memory --memory-id yta6k-5x777-77774-aaaaa-cai
+cargo run -- prefs clear-default-memory
+```
+
+Example mutation output:
+
+```json
+{
+  "resource": "default_memory_id",
+  "action": "set",
+  "status": "updated",
+  "value": "yta6k-5x777-77774-aaaaa-cai"
+}
+```
+
+Manage saved tags:
+
+```bash
+cargo run -- prefs add-tag --tag quarterly_report
+cargo run -- prefs remove-tag --tag quarterly_report
+```
+
+Manage manually tracked memories:
+
+```bash
+cargo run -- prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai
+cargo run -- prefs remove-memory --memory-id yta6k-5x777-77774-aaaaa-cai
+```
 
 ### Update a memory canister instance
 
