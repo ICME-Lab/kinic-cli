@@ -57,7 +57,12 @@ pub async fn run() -> Result<()> {
         _ => LevelFilter::TRACE,
     };
 
-    fmt().with_max_level(max).without_time().try_init().ok();
+    fmt()
+        .with_max_level(max)
+        .without_time()
+        .with_writer(std::io::stderr)
+        .try_init()
+        .ok();
 
     if matches!(&cli.command, cli::Command::Tui(_)) {
         return tui::run(&cli.global);

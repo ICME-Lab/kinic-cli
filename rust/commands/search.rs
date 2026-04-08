@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::info;
 
@@ -26,38 +27,75 @@ const MAX_CONCURRENT_SEARCHES: usize = 10;
 pub async fn handle(args: SearchArgs, ctx: &CommandContext) -> Result<()> {
     let agent = ctx.agent_factory.build().await?;
     let embedding = fetch_embedding(&args.query).await?;
-    let rows = if args.all {
+    let output = if args.all {
         let target_memory_ids = searchable_memory_ids(agent.clone()).await?;
-        search_across_memories(agent, target_memory_ids, embedding).await?
+        let batch = search_across_memories(agent, target_memory_ids, embedding).await?;
+        SearchOutput {
+            query: args.query.clone(),
+            scope: "all",
+            memory_id: None,
+            searched_memory_ids: batch.searched_memory_ids,
+            result_count: batch.items.len(),
+            failed_memory_ids: batch.failed_memory_ids,
+            items: batch.items,
+        }
     } else {
         let memory_id = args
             .memory_id
             .clone()
             .context("search requires --memory-id unless --all is set")?;
-        search_single_memory(agent, memory_id, embedding).await?
+        let batch = search_single_memory(agent, memory_id.clone(), embedding).await?;
+        SearchOutput {
+            query: args.query.clone(),
+            scope: "selected",
+            memory_id: Some(memory_id),
+            searched_memory_ids: Vec::new(),
+            result_count: batch.items.len(),
+            failed_memory_ids: Vec::new(),
+            items: batch.items,
+        }
     };
 
     info!(
         query = %args.query,
-        result_count = rows.len(),
+        result_count = output.items.len(),
         searched_all = args.all,
         "search completed"
     );
 
-    if rows.is_empty() {
-        println!("No matches found for query \"{}\".", args.query);
-        return Ok(());
-    }
-
-    println!("Search results for \"{}\":", args.query);
-    for row in rows {
-        if args.all {
-            println!("- [{}] [{:.4}] {}", row.memory_id, row.score, row.payload);
-        } else {
-            println!("- [{:.4}] {}", row.score, row.payload);
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        print_search_text(&args.query, args.all, &output.items);
+        if !output.failed_memory_ids.is_empty() {
+            println!(
+                "Note: {} memory searches failed while collecting results.",
+                output.failed_memory_ids.len()
+            );
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+struct SearchOutput {
+    query: String,
+    scope: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memory_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    searched_memory_ids: Vec<String>,
+    result_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    failed_memory_ids: Vec<String>,
+    items: Vec<SearchHit>,
+}
+
+#[derive(Debug, PartialEq)]
+struct SearchBatch {
+    searched_memory_ids: Vec<String>,
+    failed_memory_ids: Vec<String>,
+    items: Vec<SearchHit>,
 }
 
 async fn searchable_memory_ids(agent: ic_agent::Agent) -> Result<Vec<String>> {
@@ -70,6 +108,19 @@ async fn searchable_memory_ids(agent: ic_agent::Agent) -> Result<Vec<String>> {
 }
 
 async fn search_single_memory(
+    agent: ic_agent::Agent,
+    memory_id: String,
+    embedding: Vec<f32>,
+) -> Result<SearchBatch> {
+    let rows = search_single_memory_items(agent, memory_id.clone(), embedding).await?;
+    Ok(SearchBatch {
+        searched_memory_ids: vec![memory_id],
+        failed_memory_ids: Vec::new(),
+        items: rows,
+    })
+}
+
+async fn search_single_memory_items(
     agent: ic_agent::Agent,
     memory_id: String,
     embedding: Vec<f32>,
@@ -94,8 +145,9 @@ async fn search_across_memories(
     agent: ic_agent::Agent,
     memory_ids: Vec<String>,
     embedding: Vec<f32>,
-) -> Result<Vec<SearchHit>> {
+) -> Result<SearchBatch> {
     let target_count = memory_ids.len();
+    let searched_memory_ids = memory_ids.clone();
     let concurrency = usize::min(MAX_CONCURRENT_SEARCHES, memory_ids.len().max(1));
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut tasks = JoinSet::new();
@@ -109,7 +161,7 @@ async fn search_across_memories(
                 .acquire_owned()
                 .await
                 .expect("search semaphore should remain open");
-            let result = search_single_memory(agent, memory_id.clone(), embedding).await;
+            let result = search_single_memory_items(agent, memory_id.clone(), embedding).await;
             drop(permit);
             (memory_id, result)
         });
@@ -135,19 +187,82 @@ async fn search_across_memories(
     .map_err(anyhow::Error::msg)?;
 
     sort_search_hits(&mut batch.items);
-    if !batch.failed_memory_ids.is_empty() {
-        println!(
-            "Note: {} memory searches failed while collecting results.",
-            batch.failed_memory_ids.len()
-        );
-    }
-    Ok(batch.items)
+    Ok(SearchBatch {
+        searched_memory_ids,
+        failed_memory_ids: batch.failed_memory_ids,
+        items: batch.items,
+    })
 }
 
 fn build_memory_client(agent: ic_agent::Agent, memory_id: &str) -> Result<MemoryClient> {
     let memory = ic_agent::export::Principal::from_text(memory_id)
         .context("Failed to parse memory canister id")?;
     Ok(MemoryClient::new(agent, memory))
+}
+
+fn print_search_text(query: &str, searched_all: bool, rows: &[SearchHit]) {
+    if rows.is_empty() {
+        println!("No matches found for query \"{}\".", query);
+        return;
+    }
+
+    println!("Search results for \"{}\":", query);
+    for row in rows {
+        let display = SearchTextRow::from_payload(&row.payload);
+        if searched_all {
+            println!(
+                "- [{}] [{:.4}] {}",
+                row.memory_id, row.score, display.summary
+            );
+        } else {
+            println!("- [{:.4}] {}", row.score, display.summary);
+        }
+        if let Some(tag) = display.tag {
+            println!("  tag={tag}");
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SearchTextRow {
+    summary: String,
+    tag: Option<String>,
+}
+
+impl SearchTextRow {
+    fn from_payload(payload: &str) -> Self {
+        let trimmed = payload.trim();
+        let Some(value) = serde_json::from_str::<serde_json::Value>(trimmed).ok() else {
+            return Self {
+                summary: trimmed.to_string(),
+                tag: None,
+            };
+        };
+        let Some(object) = value.as_object() else {
+            return Self {
+                summary: trimmed.to_string(),
+                tag: None,
+            };
+        };
+
+        let sentence = object
+            .get("sentence")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let tag = object
+            .get("tag")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        Self {
+            summary: sentence.unwrap_or_else(|| trimmed.to_string()),
+            tag,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -179,5 +294,41 @@ mod tests {
         assert_eq!(rows[0].memory_id, "aaaaa-aa");
         assert_eq!(rows[1].memory_id, "ccccc-cc");
         assert_eq!(rows[2].memory_id, "bbbbb-bb");
+    }
+
+    #[test]
+    fn search_output_serializes_empty_results_for_json_consumers() {
+        let output = serde_json::to_value(SearchOutput {
+            query: "hello".to_string(),
+            scope: "selected",
+            memory_id: Some("aaaaa-aa".to_string()),
+            searched_memory_ids: Vec::new(),
+            result_count: 0,
+            failed_memory_ids: Vec::new(),
+            items: Vec::new(),
+        })
+        .expect("search output should serialize");
+
+        assert_eq!(output["query"], serde_json::json!("hello"));
+        assert_eq!(output["scope"], serde_json::json!("selected"));
+        assert_eq!(output["result_count"], serde_json::json!(0));
+        assert_eq!(output["items"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn search_text_row_prefers_sentence_and_tag_from_json_payload() {
+        let row =
+            SearchTextRow::from_payload(r##"{"sentence":"# Run tests with output","tag":"docs"}"##);
+
+        assert_eq!(row.summary, "# Run tests with output");
+        assert_eq!(row.tag.as_deref(), Some("docs"));
+    }
+
+    #[test]
+    fn search_text_row_falls_back_to_raw_payload() {
+        let row = SearchTextRow::from_payload("plain text payload");
+
+        assert_eq!(row.summary, "plain text payload");
+        assert_eq!(row.tag, None);
     }
 }

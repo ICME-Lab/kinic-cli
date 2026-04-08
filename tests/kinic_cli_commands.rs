@@ -86,3 +86,33 @@ fn transfer_requires_explicit_yes_flag_to_parse_as_true() {
         other => panic!("unexpected command: {other:?}"),
     }
 }
+
+#[test]
+fn read_commands_accept_json_flag() {
+    let list = Cli::try_parse_from(["kinic-cli", "list", "--json"]).expect("list should parse");
+    let show = Cli::try_parse_from(["kinic-cli", "show", "--memory-id", "aaaaa-aa", "--json"])
+        .expect("show should parse");
+    let search = Cli::try_parse_from([
+        "kinic-cli",
+        "search",
+        "--memory-id",
+        "aaaaa-aa",
+        "--query",
+        "hello",
+        "--json",
+    ])
+    .expect("search should parse");
+
+    match list.command {
+        Command::List(args) => assert!(args.json),
+        other => panic!("unexpected command: {other:?}"),
+    }
+    match show.command {
+        Command::Show(args) => assert!(args.json),
+        other => panic!("unexpected command: {other:?}"),
+    }
+    match search.command {
+        Command::Search(args) => assert!(args.json),
+        other => panic!("unexpected command: {other:?}"),
+    }
+}

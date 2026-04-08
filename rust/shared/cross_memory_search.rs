@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 
 use crate::clients::launcher::State;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct SearchHit {
     pub memory_id: String,
     pub score: f32,
