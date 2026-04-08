@@ -14,6 +14,7 @@ pub(crate) mod preferences;
 mod prompt_utils;
 #[cfg(feature = "python-bindings")]
 mod python;
+pub(crate) mod shared;
 pub mod tui;
 
 use anyhow::{Result, anyhow};
@@ -67,7 +68,12 @@ pub async fn run() -> Result<()> {
         cli::Command::Prefs(args) => prefs::handle(args),
         command => {
             if cli.global.ii
-                && matches!(&command, cli::Command::Create(_) | cli::Command::Balance(_))
+                && matches!(
+                    &command,
+                    cli::Command::Create(_)
+                        | cli::Command::Balance(_)
+                        | cli::Command::Transfer(_)
+                )
                 && !cfg!(feature = "experimental")
             {
                 anyhow::bail!(

@@ -19,6 +19,7 @@ use crate::{
         validate_insert_request_for_submit,
     },
     preferences::{self, UserPreferences},
+    shared::cross_memory_search::{collect_searchable_memory_ids, fold_search_batches},
     tui::TuiAuth,
 };
 use ic_agent::export::Principal;
@@ -224,37 +225,19 @@ fn fold_live_search_results(
     results: Vec<MemorySearchTaskResult>,
     join_errors: Vec<tokio::task::JoinError>,
 ) -> Result<SearchBatchResult, String> {
-    let mut items = Vec::new();
-    let mut failed_memory_ids = Vec::new();
-    let mut first_error = None;
-
-    for (memory_id, result) in results {
-        match result {
-            Ok(mut next_items) => items.append(&mut next_items),
-            Err(error) => {
-                failed_memory_ids.push(memory_id);
-                if first_error.is_none() {
-                    first_error = Some(error.to_string());
-                }
-            }
-        }
-    }
-
-    for error in join_errors {
-        failed_memory_ids.push(SEARCH_JOIN_ERROR_MEMORY_ID.to_string());
-        if first_error.is_none() {
-            first_error = Some(error.to_string());
-        }
-    }
-
-    if target_count > 0 && failed_memory_ids.len() == target_count {
-        return Err(first_error
-            .unwrap_or_else(|| "Search failed before any memory returned results.".to_string()));
-    }
-
+    let folded = fold_search_batches(
+        target_count,
+        results,
+        join_errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect(),
+        SEARCH_JOIN_ERROR_MEMORY_ID,
+        "Search failed before any memory returned results.",
+    )?;
     Ok(SearchBatchResult {
-        items,
-        failed_memory_ids,
+        items: folded.items,
+        failed_memory_ids: folded.failed_memory_ids,
     })
 }
 
@@ -3463,18 +3446,12 @@ impl KinicProvider {
 
     fn search_target_memory_ids(&self, scope: SearchScope) -> Result<Vec<String>, String> {
         match scope {
-            SearchScope::All => {
-                let targets = self
-                    .memory_records
+            SearchScope::All => collect_searchable_memory_ids(
+                self.memory_records
                     .iter()
-                    .filter_map(|record| record.searchable_memory_id.clone())
-                    .collect::<Vec<_>>();
-                if targets.is_empty() {
-                    Err("No searchable memories are available yet.".to_string())
-                } else {
-                    Ok(targets)
-                }
-            }
+                    .map(|record| record.searchable_memory_id.clone()),
+                "No searchable memories are available yet.",
+            ),
             SearchScope::Selected => {
                 let active_memory_id = self.cursor_memory_id.as_deref().ok_or_else(|| {
                     "Select a memory in the list before running search.".to_string()

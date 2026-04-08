@@ -415,14 +415,16 @@ km.add_user("<memory canister id>", "w7x7r-cok77-7x4qo-hqaaa-aaaaa-b", "writer")
 CLI example:
 ```bash
 # Give everyone reader access
-cargo run -- --identity <name> config \
+cargo run -- --identity <name> config users add \
   --memory-id <memory canister id> \
-  --add-user anonymous reader
+  --principal anonymous \
+  --role reader
 
 # Grant writer access to a specific principal
-cargo run -- --identity <name> config \
+cargo run -- --identity <name> config users add \
   --memory-id <memory canister id> \
-  --add-user w7x7r-cok77-7x4qo-hqaaa-aaaaa-b writer
+  --principal w7x7r-cok77-7x4qo-hqaaa-aaaaa-b \
+  --role writer
 ```
 
 Notes:

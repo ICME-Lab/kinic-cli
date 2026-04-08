@@ -170,14 +170,54 @@ cargo run -- --identity alice search \
 
 The CLI fetches an embedding for the query and prints the scored matches returned by the memory canister.
 
-### Manage config (add user)
-
-Grant a role for a user on a memory canister:
+Search across all searchable memories:
 
 ```bash
-cargo run -- --identity alice config \
+cargo run -- --identity alice search \
+  --all \
+  --query "Hello"
+```
+
+When `--all` is used, results are merged and printed with the source memory id.
+
+### Show memory details
+
+```bash
+cargo run -- --identity alice show \
+  --memory-id yta6k-5x777-77774-aaaaa-cai
+```
+
+The command prints the memory name, version, dimension, owners, stable memory size, cycle amount, and users.
+
+### Rename a memory
+
+```bash
+cargo run -- --identity alice rename \
   --memory-id yta6k-5x777-77774-aaaaa-cai \
-  --add-user <principal|anonymous> <admin|writer|reader>
+  --name "Renamed demo memory"
+```
+
+### Manage config (add user)
+
+Manage users for a memory canister:
+
+```bash
+cargo run -- --identity alice config users list \
+  --memory-id yta6k-5x777-77774-aaaaa-cai
+
+cargo run -- --identity alice config users add \
+  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --principal <principal|anonymous> \
+  --role <admin|writer|reader>
+
+cargo run -- --identity alice config users change \
+  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --principal <principal|anonymous> \
+  --role <admin|writer|reader>
+
+cargo run -- --identity alice config users remove \
+  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --principal <principal|anonymous>
 ```
 
 Notes:
@@ -255,6 +295,22 @@ Query the ledger for the current identity’s balance (base units):
 ```bash
 cargo run -- --identity alice balance
 ```
+
+### Transfer KINIC
+
+Transfer KINIC to another principal:
+
+```bash
+cargo run -- --identity alice transfer \
+  --to 2vxsx-fae \
+  --amount 1.25 \
+  --yes
+```
+
+Notes:
+- `--yes` is required to execute the transfer.
+- `--amount` accepts KINIC decimal text and is converted to e8s internally.
+- The CLI fetches the current ledger fee for every transfer.
 
 ### Ask AI (LLM placeholder)
 
