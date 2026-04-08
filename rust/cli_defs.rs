@@ -113,7 +113,7 @@ pub enum Command {
     Capabilities(CapabilitiesArgs),
     #[command(
         about = "Manage local Kinic preferences shared with the TUI. All prefs commands return JSON.",
-        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id yta6k-5x777-77774-aaaaa-cai\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[]}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|null}"
+        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id yta6k-5x777-77774-aaaaa-cai\n  kinic-cli prefs set-chat-overall-top-k --value 10\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|integer|null}"
     )]
     Prefs(PrefsArgs),
     #[command(
@@ -377,7 +377,7 @@ pub struct PrefsArgs {
 pub enum PrefsCommand {
     #[command(
         about = "Show local preferences shared with the TUI. Returns JSON.",
-        after_help = "Returns:\n  {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[]}\n\nExample:\n  kinic-cli prefs show"
+        after_help = "Returns:\n  {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer}\n\nExample:\n  kinic-cli prefs show"
     )]
     Show,
     #[command(
@@ -402,14 +402,29 @@ pub enum PrefsCommand {
     RemoveTag(TagArgs),
     #[command(
         about = "Add a manually tracked memory id. Returns JSON.",
-        after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"add\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai"
+        after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"add\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExamples:\n  kinic-cli prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai\n  kinic-cli --identity alice prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai --validate"
     )]
-    AddMemory(MemoryIdArgs),
+    AddMemory(AddMemoryArgs),
     #[command(
         about = "Remove a manually tracked memory id. Returns JSON.",
         after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"remove\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs remove-memory --memory-id yta6k-5x777-77774-aaaaa-cai"
     )]
     RemoveMemory(MemoryIdArgs),
+    #[command(
+        about = "Set the all-memories chat retrieval result limit. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"chat_overall_top_k\", \"action\": \"set\", \"status\": \"updated\"|\"unchanged\", \"value\": integer}\n\nExample:\n  kinic-cli prefs set-chat-overall-top-k --value 10"
+    )]
+    SetChatOverallTopK(ChatOverallTopKArgs),
+    #[command(
+        about = "Set the per-memory chat retrieval cap. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"chat_per_memory_cap\", \"action\": \"set\", \"status\": \"updated\"|\"unchanged\", \"value\": integer}\n\nExample:\n  kinic-cli prefs set-chat-per-memory-cap --value 4"
+    )]
+    SetChatPerMemoryCap(ChatPerMemoryCapArgs),
+    #[command(
+        about = "Set the chat retrieval MMR lambda percentage. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"chat_mmr_lambda\", \"action\": \"set\", \"status\": \"updated\"|\"unchanged\", \"value\": integer}\n\nExample:\n  kinic-cli prefs set-chat-mmr-lambda --value 80"
+    )]
+    SetChatMmrLambda(ChatMmrLambdaArgs),
 }
 
 #[derive(Args, Debug)]
@@ -436,6 +451,52 @@ pub struct MemoryIdArgs {
         help = "Principal of the memory canister to add or remove"
     )]
     pub memory_id: String,
+}
+
+#[derive(Args, Debug)]
+pub struct AddMemoryArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Principal of the memory canister to add"
+    )]
+    pub memory_id: String,
+
+    #[arg(
+        long,
+        help = "Validate access through get_users() using --identity or --ii before saving"
+    )]
+    pub validate: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ChatOverallTopKArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Number of documents to keep after global reranking"
+    )]
+    pub value: usize,
+}
+
+#[derive(Args, Debug)]
+pub struct ChatPerMemoryCapArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Maximum documents to keep from each memory"
+    )]
+    pub value: usize,
+}
+
+#[derive(Args, Debug)]
+pub struct ChatMmrLambdaArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "MMR lambda percentage, one of 60, 70, 80, 90"
+    )]
+    pub value: u8,
 }
 
 #[derive(Args, Debug)]

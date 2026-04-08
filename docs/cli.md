@@ -227,7 +227,8 @@ Notes:
 ### Manage local preferences shared with the TUI
 
 These commands read and write the same local settings file used by the TUI at `~/.config/kinic/tui.yaml`.
-They do not require `--identity` because they only update local preferences.
+They do not require `--identity` when they only update local preferences.
+`prefs add-memory --validate` is the exception and requires `--identity` or `--ii` because it verifies access against the target memory canister before saving.
 `prefs show` returns JSON so it can be consumed reliably by AI agents, shell scripts, and other tools.
 All `prefs` commands now return JSON so agents can consume both reads and mutations with one stable contract.
 
@@ -243,7 +244,10 @@ Example output:
 {
   "default_memory_id": null,
   "saved_tags": [],
-  "manual_memory_ids": []
+  "manual_memory_ids": [],
+  "chat_overall_top_k": 8,
+  "chat_per_memory_cap": 3,
+  "chat_mmr_lambda": 70
 }
 ```
 
@@ -276,7 +280,16 @@ Manage manually tracked memories:
 
 ```bash
 cargo run -- prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai
+cargo run -- --identity alice prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai --validate
 cargo run -- prefs remove-memory --memory-id yta6k-5x777-77774-aaaaa-cai
+```
+
+Manage chat retrieval tuning used by `all memories` chat:
+
+```bash
+cargo run -- prefs set-chat-overall-top-k --value 10
+cargo run -- prefs set-chat-per-memory-cap --value 4
+cargo run -- prefs set-chat-mmr-lambda --value 80
 ```
 
 ### Update a memory canister instance

@@ -274,6 +274,10 @@ fn argument_kind(path: &str, name: &str) -> &'static str {
     }
 
     match (path, name) {
+        ("prefs.add-memory", "validate") => "boolean",
+        ("prefs.set-chat-overall-top-k", "value")
+        | ("prefs.set-chat-per-memory-cap", "value")
+        | ("prefs.set-chat-mmr-lambda", "value") => "integer",
         (_, "memory_id") => "principal",
         (_, "file_path") => "path",
         (_, "embedding") => "json_array",

@@ -55,6 +55,9 @@ fn prefs_show_runs_without_identity() {
             "default_memory_id": null,
             "saved_tags": [],
             "manual_memory_ids": [],
+            "chat_overall_top_k": 8,
+            "chat_per_memory_cap": 3,
+            "chat_mmr_lambda": 70,
         })
     );
 }
@@ -160,6 +163,9 @@ fn prefs_mutations_update_shared_yaml_and_preserve_chat_fields() {
                 "yta6k-5x777-77774-aaaaa-cai",
                 "ryjl3-tyaaa-aaaaa-aaaba-cai"
             ],
+            "chat_overall_top_k": 10,
+            "chat_per_memory_cap": 4,
+            "chat_mmr_lambda": 80,
         })
     );
 }
@@ -241,4 +247,74 @@ fn prefs_clear_default_memory_updates_yaml() {
     assert!(!yaml.contains("default_memory_id: aaaaa-aa"));
     assert!(yaml.contains("saved_tags: []"));
     assert!(yaml.contains("manual_memory_ids: []"));
+}
+
+#[test]
+fn prefs_chat_retrieval_mutations_update_yaml_and_show_output() {
+    let config_dir = temp_config_dir("chat-retrieval");
+
+    let output = prefs_command(&config_dir)
+        .args(["prefs", "set-chat-overall-top-k", "--value", "10"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("json response should parse");
+    assert_eq!(
+        parsed,
+        json!({
+            "resource": "chat_overall_top_k",
+            "action": "set",
+            "status": "updated",
+            "value": 10
+        })
+    );
+
+    let output = prefs_command(&config_dir)
+        .args(["prefs", "set-chat-per-memory-cap", "--value", "4"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let output = prefs_command(&config_dir)
+        .args(["prefs", "set-chat-mmr-lambda", "--value", "80"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let yaml = read_prefs_yaml(&config_dir);
+    assert!(yaml.contains("chat_overall_top_k: 10"));
+    assert!(yaml.contains("chat_per_memory_cap: 4"));
+    assert!(yaml.contains("chat_mmr_lambda: 80"));
+
+    let output = prefs_command(&config_dir)
+        .args(["prefs", "show"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("show output should parse");
+    assert_eq!(parsed["chat_overall_top_k"], json!(10));
+    assert_eq!(parsed["chat_per_memory_cap"], json!(4));
+    assert_eq!(parsed["chat_mmr_lambda"], json!(80));
+}
+
+#[test]
+fn prefs_add_memory_validate_requires_identity_or_ii() {
+    let config_dir = temp_config_dir("add-memory-validate");
+
+    let output = prefs_command(&config_dir)
+        .args([
+            "prefs",
+            "add-memory",
+            "--memory-id",
+            "ryjl3-tyaaa-aaaaa-aaaba-cai",
+            "--validate",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--identity is required unless --ii is set"));
 }
