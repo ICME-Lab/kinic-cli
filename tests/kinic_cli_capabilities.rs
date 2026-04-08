@@ -46,6 +46,13 @@ fn capabilities_describes_prefs_and_tui_contracts() {
             .iter()
             .any(|entry| entry["name"] == "set-default-memory")
     );
+    assert!(
+        prefs["subcommands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["name"] == "set-chat-overall-top-k")
+    );
 
     let tui = commands
         .iter()

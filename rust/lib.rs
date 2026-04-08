@@ -65,14 +65,12 @@ pub async fn run() -> Result<()> {
 
     match cli.command {
         cli::Command::Capabilities(args) => capabilities::handle(args),
-        cli::Command::Prefs(args) => prefs::handle(args),
+        cli::Command::Prefs(args) => prefs::handle(args, &cli.global).await,
         command => {
             if cli.global.ii
                 && matches!(
                     &command,
-                    cli::Command::Create(_)
-                        | cli::Command::Balance(_)
-                        | cli::Command::Transfer(_)
+                    cli::Command::Create(_) | cli::Command::Balance(_) | cli::Command::Transfer(_)
                 )
                 && !cfg!(feature = "experimental")
             {
@@ -157,7 +155,9 @@ fn validate_keyring_identity(cli: &Cli) -> Result<()> {
     Err(clap_error.into())
 }
 
-fn build_cli_command_context(global: &cli::GlobalOpts) -> Result<(AgentFactory, Option<PathBuf>)> {
+pub(crate) fn build_cli_command_context(
+    global: &cli::GlobalOpts,
+) -> Result<(AgentFactory, Option<PathBuf>)> {
     if global.ii {
         let identity_path = resolve_identity_path(global)?;
         let delegated = identity_store::load_delegated_identity(&identity_path)?;
