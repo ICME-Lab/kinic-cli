@@ -28,6 +28,7 @@ pub fn matching_slash_commands(input: &str) -> Vec<&'static str> {
         .collect()
 }
 
+/// Resolve a slash command from the normalized submit payload.
 pub fn chat_slash_command_action(input: &str) -> Option<CoreAction> {
     match input.trim() {
         "/new" => Some(CoreAction::ChatNewThread),
@@ -44,15 +45,27 @@ pub fn selected_slash_command_action(input: &str, selected: usize) -> Option<Cor
         .and_then(chat_slash_command_action)
 }
 
-/// Collapse multiline chat input to one line for in-progress display.
+/// Collapse multiline chat input to one line for in-progress display and editing.
 /// This preserves user-typed spacing and only replaces line breaks with spaces.
 pub fn flatten_chat_input_for_display(value: &str) -> String {
-    value.split('\n').collect::<Vec<_>>().join(" ")
+    canonicalize_chat_line_endings(value)
+        .split('\n')
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
-/// Collapse multiline chat input to one line (trimmed lines joined with spaces).
+/// Collapse multiline chat input to the final submit/command-match form.
+/// Each line is trimmed before joining so pasted newlines do not leak layout-only spacing.
 pub fn normalize_chat_input_lines(value: &str) -> String {
-    value.lines().map(str::trim).collect::<Vec<_>>().join(" ")
+    canonicalize_chat_line_endings(value)
+        .lines()
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn canonicalize_chat_line_endings(value: &str) -> String {
+    value.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 #[cfg(test)]
@@ -73,7 +86,17 @@ mod tests {
     }
 
     #[test]
+    fn flatten_chat_input_for_display_normalizes_crlf_and_cr() {
+        assert_eq!(flatten_chat_input_for_display("a\r\nb\rc"), "a b c");
+    }
+
+    #[test]
     fn normalize_chat_input_lines_joins_trimmed_lines() {
         assert_eq!(normalize_chat_input_lines("a\n  b  \n c"), "a b c");
+    }
+
+    #[test]
+    fn normalize_chat_input_lines_handles_crlf_and_cr() {
+        assert_eq!(normalize_chat_input_lines("a\r\n  b \rc"), "a b c");
     }
 }

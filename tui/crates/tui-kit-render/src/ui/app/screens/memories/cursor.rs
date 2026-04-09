@@ -157,4 +157,28 @@ mod tests {
                 .is_some()
         );
     }
+
+    #[test]
+    #[ignore = "Complex Unicode grapheme handling is not implemented yet"]
+    fn memories_chat_cursor_keeps_family_emoji_as_single_visible_cluster() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .focus(Focus::Chat)
+            .show_chat(true)
+            .chat_input("👨‍👩‍👧‍👦a")
+            .chat_input_cursor(Some((0, 1)));
+
+        let first = ui
+            .memories_cursor_position_for_area(Rect::new(0, 0, 120, 40))
+            .expect("cursor after emoji cluster");
+        let second = TuiKitUi::new(&theme)
+            .focus(Focus::Chat)
+            .show_chat(true)
+            .chat_input("👨‍👩‍👧‍👦a")
+            .chat_input_cursor(Some((0, 2)))
+            .memories_cursor_position_for_area(Rect::new(0, 0, 120, 40))
+            .expect("cursor after following character");
+
+        assert!(second.0 > first.0);
+    }
 }
