@@ -12,6 +12,7 @@ use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::chat_prompt::ActiveMemoryContext;
 use super::settings::{self, PreferencesHealth};
 use crate::{
+    agent::{KeychainErrorCode, extract_keychain_error_code},
     create_domain::derive_create_cost,
     embedding::fetch_embedding,
     insert_service::{
@@ -3763,10 +3764,11 @@ impl KinicProvider {
                 self.memory_records.clear();
                 self.result_records.clear();
                 self.memories_mode = MemoriesMode::Browser;
+                let notify_message = format_live_load_failure_message(&error);
                 self.all = vec![load_error_record(error)];
                 self.cursor_memory_id = None;
                 self.last_search_state = None;
-                let mut effects = vec![CoreEffect::Notify("Unable to load memories.".to_string())];
+                let mut effects = vec![CoreEffect::Notify(notify_message)];
                 if self.cursor_memory_id != previous_cursor_memory_id {
                     self.invalidate_pending_search();
                     effects.extend(self.load_active_chat_history_effects(state));
@@ -5150,14 +5152,35 @@ fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
 
+fn format_live_load_failure_message(error: &str) -> String {
+    format!("Unable to load memories. Cause: {}", short_error(error))
+}
+
 fn load_error_record(error: String) -> KinicRecord {
+    let subtitle =
+        keychain_context_note(error.as_str()).unwrap_or("Check your identity or network configuration.");
     KinicRecord::new(
         "kinic-live-error",
         "Unable to load memories",
         "memories",
-        "Check your identity or network configuration.",
+        subtitle,
         format!("## Live Load Error\n\n{error}"),
     )
+}
+
+fn keychain_context_note(error: &str) -> Option<&'static str> {
+    match extract_keychain_error_code(error) {
+        Some(KeychainErrorCode::LookupFailed) => {
+            Some("Check the macOS Keychain entry and whether approval was delayed or interrupted.")
+        }
+        Some(KeychainErrorCode::AccessDenied | KeychainErrorCode::InteractionNotAllowed) => {
+            Some("Check the macOS Keychain prompt and the selected identity entry.")
+        }
+        Some(KeychainErrorCode::KeychainError) => {
+            Some("Check the macOS Keychain entry and local security settings.")
+        }
+        None => None,
+    }
 }
 
 fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {

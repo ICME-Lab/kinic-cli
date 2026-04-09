@@ -119,6 +119,10 @@ fn poll_initial_memories_background_surfaces_error_row_and_selected_detail() {
     assert_eq!(provider.memories_mode, MemoriesMode::Browser);
     assert_eq!(provider.all.len(), 1);
     assert_eq!(provider.all[0].id, "kinic-live-error");
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Unable to load memories. Cause: boom"
+    )));
     assert_eq!(
         output
             .snapshot
@@ -127,6 +131,68 @@ fn poll_initial_memories_background_surfaces_error_row_and_selected_detail() {
             .map(|detail| detail.id.as_str()),
         Some("kinic-live-error")
     );
+}
+
+#[test]
+fn poll_initial_memories_background_uses_keychain_specific_failure_notice() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel();
+    provider.pending_initial_memories = Some(rx);
+    provider.initial_memories_in_flight = true;
+    tx.send(InitialMemoriesTaskOutput {
+        result: Err(
+            "[KEYCHAIN_ACCESS_DENIED] Keychain access was not granted for identity \"alice\". Approve the macOS Keychain prompt, unlock the keychain if needed, and try again. Cause: User interaction is not allowed".to_string(),
+        ),
+    })
+    .unwrap();
+
+    let output = provider
+        .poll_initial_memories_background(&CoreState::default())
+        .expect("background result");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message.contains("Unable to load memories. Cause: [KEYCHAIN_ACCESS_DENIED]")
+    )));
+    assert_eq!(
+        provider.all[0].summary,
+        "Check the macOS Keychain prompt and the selected identity entry."
+    );
+    assert!(
+        provider.all[0]
+            .content_md
+            .contains("Approve the macOS Keychain prompt")
+    );
+}
+
+#[test]
+fn poll_initial_memories_background_uses_lookup_failed_notice_without_missing_claim() {
+    let mut provider = KinicProvider::new(live_config());
+    let (tx, rx) = mpsc::channel();
+    provider.pending_initial_memories = Some(rx);
+    provider.initial_memories_in_flight = true;
+    tx.send(InitialMemoriesTaskOutput {
+        result: Err(
+            "[KEYCHAIN_LOOKUP_FAILED] Keychain lookup for identity \"alice\" could not be confirmed. The entry may be missing, access may have been delayed, or macOS may not have completed the lookup. Expected entry: \"internet_computer_identity_alice\".".to_string(),
+        ),
+    })
+    .unwrap();
+
+    let output = provider
+        .poll_initial_memories_background(&CoreState::default())
+        .expect("background result");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message.contains("Unable to load memories. Cause: [KEYCHAIN_LOOKUP_FAILED]")
+    )));
+    assert_eq!(
+        provider.all[0].summary,
+        "Check the macOS Keychain entry and whether approval was delayed or interrupted."
+    );
+    assert!(!provider.all[0].content_md.contains("was not found"));
 }
 
 #[test]

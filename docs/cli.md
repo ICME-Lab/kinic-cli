@@ -58,6 +58,7 @@ Agent-friendly discovery tips:
 - Start with `kinic-cli capabilities` to get a JSON description of commands, auth requirements, output modes, major arguments, and arg-group constraints
 - Use `kinic-cli prefs --help` to inspect the JSON contract for shared local preferences
 - `capabilities` and `prefs` commands return JSON; `list`, `show`, and `search` also support `--json` for agent/script consumption while keeping human-friendly text output by default
+- Keychain failures use stable text prefixes such as `KEYCHAIN_LOOKUP_FAILED`, `KEYCHAIN_ACCESS_DENIED`, `KEYCHAIN_INTERACTION_NOT_ALLOWED`, and `KEYCHAIN_ERROR`; agents should branch on the leading `[KEYCHAIN_*]` code instead of parsing the rest of the sentence
 
 ### Capabilities JSON
 
@@ -380,6 +381,7 @@ cargo run -- --identity alice ask-ai \
 
 - **Replica already running**: stop lingering replicas with `dfx stop` before restarting.
 - **Keychain access errors**: ensure the CLI has permission to read the keychain entry, and prefer the arm64 build of `dfx`.
+- **Keychain failure codes**: CLI and TUI surface the same leading codes. `KEYCHAIN_LOOKUP_FAILED` means the lookup could not be confirmed and may reflect a missing entry, delayed approval, or incomplete macOS lookup. `KEYCHAIN_ACCESS_DENIED` means access was not granted or the keychain is locked. `KEYCHAIN_INTERACTION_NOT_ALLOWED` indicates the `-67671` arm64/x86 mismatch path, and `KEYCHAIN_ERROR` is the generic fallback.
 - **Embedding API failures**: set `EMBEDDING_API_ENDPOINT` and verify the endpoint responds to `/late-chunking` and `/embedding`.
 
 ## Python wrapper

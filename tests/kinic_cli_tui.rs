@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use _lib::agent::{KeychainErrorCode, extract_keychain_error_code};
+
 #[test]
 fn top_level_help_mentions_agent_entrypoints_and_auth_modes() {
     let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
@@ -109,4 +111,16 @@ fn tui_with_ii_returns_clap_argument_error() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("Internet Identity is not supported for the Kinic TUI yet"));
     assert!(stderr.contains("Usage: kinic-cli [OPTIONS] <COMMAND>"));
+}
+
+#[test]
+fn keychain_error_messages_use_stable_prefix_codes() {
+    assert_eq!(
+        extract_keychain_error_code("[KEYCHAIN_LOOKUP_FAILED] lookup"),
+        Some(KeychainErrorCode::LookupFailed)
+    );
+    assert_eq!(
+        extract_keychain_error_code("[KEYCHAIN_ACCESS_DENIED] denied"),
+        Some(KeychainErrorCode::AccessDenied)
+    );
 }

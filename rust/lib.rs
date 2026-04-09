@@ -46,16 +46,21 @@ pub(crate) const TUI_IDENTITY_REQUIRED_MESSAGE: &str = "--identity is required f
 pub(crate) const TUI_II_UNSUPPORTED_MESSAGE: &str =
     "Internet Identity is not supported for the Kinic TUI yet";
 
+fn log_level_for_verbose(verbose: u8) -> LevelFilter {
+    match verbose {
+        0 => LevelFilter::WARN,
+        1 => LevelFilter::INFO,
+        2 => LevelFilter::DEBUG,
+        _ => LevelFilter::TRACE,
+    }
+}
+
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     validate_tui_cli_args(&cli)?;
     validate_keyring_identity(&cli)?;
 
-    let max = match cli.global.verbose {
-        0 => LevelFilter::INFO,
-        1 => LevelFilter::DEBUG,
-        _ => LevelFilter::TRACE,
-    };
+    let max = log_level_for_verbose(cli.global.verbose);
 
     fmt()
         .with_max_level(max)
@@ -341,6 +346,19 @@ mod tests {
                 command: cli::PrefsCommand::Show
             })
         ));
+    }
+
+    #[test]
+    fn log_level_defaults_to_warn() {
+        assert_eq!(log_level_for_verbose(0), LevelFilter::WARN);
+    }
+
+    #[test]
+    fn log_level_maps_verbose_flags_progressively() {
+        assert_eq!(log_level_for_verbose(1), LevelFilter::INFO);
+        assert_eq!(log_level_for_verbose(2), LevelFilter::DEBUG);
+        assert_eq!(log_level_for_verbose(3), LevelFilter::TRACE);
+        assert_eq!(log_level_for_verbose(9), LevelFilter::TRACE);
     }
 }
 

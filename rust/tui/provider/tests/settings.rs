@@ -162,6 +162,42 @@ fn poll_background_keeps_previous_principal_when_refresh_reports_principal_error
 }
 
 #[test]
+fn poll_background_uses_keychain_specific_principal_error_message() {
+    let mut overview = principal_error_session_overview();
+    overview.principal_error = Some(
+        "[KEYCHAIN_ACCESS_DENIED] Keychain access was not granted for identity \"alice\". Approve the macOS Keychain prompt, unlock the keychain if needed, and try again. Cause: User interaction is not allowed"
+            .to_string(),
+    );
+    let (provider, output) =
+        run_session_settings_refresh(11, Some(refreshed_session_overview()), overview);
+
+    assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message.contains("Session settings refresh failed: [KEYCHAIN_ACCESS_DENIED]")
+    )));
+}
+
+#[test]
+fn poll_background_uses_lookup_failed_principal_error_message() {
+    let mut overview = principal_error_session_overview();
+    overview.principal_error = Some(
+        "[KEYCHAIN_LOOKUP_FAILED] Keychain lookup for identity \"alice\" could not be confirmed. The entry may be missing, access may have been delayed, or macOS may not have completed the lookup. Expected entry: \"internet_computer_identity_alice\"."
+            .to_string(),
+    );
+    let (provider, output) =
+        run_session_settings_refresh(12, Some(refreshed_session_overview()), overview);
+
+    assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message.contains("Session settings refresh failed: [KEYCHAIN_LOOKUP_FAILED]")
+    )));
+}
+
+#[test]
 fn poll_background_drops_stale_account_values_when_session_context_changes() {
     let (provider, _output) = run_session_settings_refresh(
         9,
