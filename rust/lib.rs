@@ -15,6 +15,7 @@ mod prompt_utils;
 #[cfg(feature = "python-bindings")]
 mod python;
 pub(crate) mod shared;
+pub mod tools;
 pub mod tui;
 
 use anyhow::{Result, anyhow};
@@ -27,6 +28,7 @@ use crate::{
     agent::AgentFactory,
     cli::Cli,
     commands::{CommandContext, capabilities, prefs, run_command},
+    tools::mcp,
 };
 
 pub(crate) const KEYRING_IDENTITY_REQUIRED_MESSAGE: &str =
@@ -45,6 +47,7 @@ use tokio::runtime::Runtime;
 pub(crate) const TUI_IDENTITY_REQUIRED_MESSAGE: &str = "--identity is required for the Kinic TUI";
 pub(crate) const TUI_II_UNSUPPORTED_MESSAGE: &str =
     "Internet Identity is not supported for the Kinic TUI yet";
+pub(crate) const TOOLS_ENV_ONLY_MESSAGE: &str = "tools serve uses KINIC_TOOL_IDENTITY and KINIC_TOOL_NETWORK only; global auth/network flags (--identity, --ii, --ic, --identity-path) are not supported";
 
 fn log_level_for_verbose(verbose: u8) -> LevelFilter {
     match verbose {
@@ -58,6 +61,7 @@ fn log_level_for_verbose(verbose: u8) -> LevelFilter {
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     validate_tui_cli_args(&cli)?;
+    validate_tools_cli_args(&cli)?;
     validate_keyring_identity(&cli)?;
 
     let max = log_level_for_verbose(cli.global.verbose);
@@ -76,6 +80,9 @@ pub async fn run() -> Result<()> {
     match cli.command {
         cli::Command::Capabilities(args) => capabilities::handle(args),
         cli::Command::Prefs(args) => prefs::handle(args, &cli.global).await,
+        cli::Command::Tools(args) => match args.command {
+            cli::ToolsCommand::Serve(args) => mcp::serve_mcp(&args).await,
+        },
         command => {
             if cli.global.ii
                 && matches!(
@@ -136,6 +143,26 @@ fn validate_tui_cli_args(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
+fn validate_tools_cli_args(cli: &Cli) -> Result<()> {
+    if !matches!(&cli.command, cli::Command::Tools(_)) {
+        return Ok(());
+    }
+
+    if cli.global.identity.is_none()
+        && !cli.global.ii
+        && !cli.global.ic
+        && cli.global.identity_path.is_none()
+    {
+        return Ok(());
+    }
+
+    let mut command = Cli::command();
+    let clap_error = command
+        .error(ErrorKind::ArgumentConflict, TOOLS_ENV_ONLY_MESSAGE)
+        .with_cmd(&command);
+    Err(clap_error.into())
+}
+
 fn validate_keyring_identity(cli: &Cli) -> Result<()> {
     if cli.global.ii {
         return Ok(());
@@ -150,6 +177,9 @@ fn validate_keyring_identity(cli: &Cli) -> Result<()> {
         return Ok(());
     }
     if matches!(&cli.command, cli::Command::Prefs(_)) {
+        return Ok(());
+    }
+    if matches!(&cli.command, cli::Command::Tools(_)) {
         return Ok(());
     }
     if cli.global.identity.is_some() {
@@ -334,6 +364,72 @@ mod tests {
         let cli = Cli::try_parse_from(["kinic-cli", "capabilities"]).expect("cli");
 
         validate_keyring_identity(&cli).expect("capabilities should not require identity");
+    }
+
+    #[test]
+    fn validate_keyring_identity_skips_tools_without_identity() {
+        let cli = Cli::try_parse_from(["kinic-cli", "tools", "serve"]).expect("cli");
+
+        validate_keyring_identity(&cli).expect("tools should not require identity");
+    }
+
+    #[test]
+    fn validate_tools_cli_args_accepts_tools_without_global_flags() {
+        let cli = Cli::try_parse_from(["kinic-cli", "tools", "serve"]).expect("cli");
+
+        validate_tools_cli_args(&cli).expect("tools should accept env-only launch");
+    }
+
+    #[test]
+    fn validate_tools_cli_args_rejects_identity_flag() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--identity", "alice", "tools", "serve"])
+            .expect("cli");
+
+        let error = validate_tools_cli_args(&cli).unwrap_err();
+        let clap_error = error.downcast_ref::<clap::Error>().expect("clap error");
+
+        assert_eq!(clap_error.kind(), ErrorKind::ArgumentConflict);
+        assert!(clap_error.to_string().contains(TOOLS_ENV_ONLY_MESSAGE));
+    }
+
+    #[test]
+    fn validate_tools_cli_args_rejects_ii_flag() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--ii", "tools", "serve"]).expect("cli");
+
+        let error = validate_tools_cli_args(&cli).unwrap_err();
+        let clap_error = error.downcast_ref::<clap::Error>().expect("clap error");
+
+        assert_eq!(clap_error.kind(), ErrorKind::ArgumentConflict);
+        assert!(clap_error.to_string().contains(TOOLS_ENV_ONLY_MESSAGE));
+    }
+
+    #[test]
+    fn validate_tools_cli_args_rejects_ic_flag() {
+        let cli = Cli::try_parse_from(["kinic-cli", "--ic", "tools", "serve"]).expect("cli");
+
+        let error = validate_tools_cli_args(&cli).unwrap_err();
+        let clap_error = error.downcast_ref::<clap::Error>().expect("clap error");
+
+        assert_eq!(clap_error.kind(), ErrorKind::ArgumentConflict);
+        assert!(clap_error.to_string().contains(TOOLS_ENV_ONLY_MESSAGE));
+    }
+
+    #[test]
+    fn validate_tools_cli_args_rejects_identity_path_flag() {
+        let cli = Cli::try_parse_from([
+            "kinic-cli",
+            "--identity-path",
+            "/tmp/identity.json",
+            "tools",
+            "serve",
+        ])
+        .expect("cli");
+
+        let error = validate_tools_cli_args(&cli).unwrap_err();
+        let clap_error = error.downcast_ref::<clap::Error>().expect("clap error");
+
+        assert_eq!(clap_error.kind(), ErrorKind::ArgumentConflict);
+        assert!(clap_error.to_string().contains(TOOLS_ENV_ONLY_MESSAGE));
     }
 
     #[test]

@@ -88,6 +88,33 @@ fn tui_help_mentions_global_identity_requirement() {
 }
 
 #[test]
+fn tools_help_mentions_env_only_configuration() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
+        .args(["tools", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("KINIC_TOOL_IDENTITY"));
+    assert!(stdout.contains("KINIC_TOOL_NETWORK=local|mainnet"));
+    assert!(stdout.contains("does not accept global --identity, --ii, --ic, or --identity-path"));
+}
+
+#[test]
+fn tools_with_identity_returns_clap_argument_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
+        .args(["--identity", "alice", "tools", "serve"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("tools serve uses KINIC_TOOL_IDENTITY and KINIC_TOOL_NETWORK only"));
+    assert!(stderr.contains("Usage: kinic-cli [OPTIONS] <COMMAND>"));
+}
+
+#[test]
 fn tui_without_identity_returns_clap_missing_required_argument() {
     let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
         .arg("tui")

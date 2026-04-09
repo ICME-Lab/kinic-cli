@@ -8,6 +8,7 @@ use serde::Serialize;
 use tracing::info;
 
 use crate::{
+    agent::AgentFactory,
     cli::ShowArgs,
     clients::launcher::LauncherClient,
     memory_client_builder::build_memory_client,
@@ -17,9 +18,43 @@ use crate::{
 use super::CommandContext;
 
 pub async fn handle(args: ShowArgs, ctx: &CommandContext) -> Result<()> {
-    let agent = ctx.agent_factory.build().await?;
+    let output = load_show_output(&ctx.agent_factory, &args.memory_id).await?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        print_show_text(&output);
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct ShowOutput {
+    pub memory_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub version: String,
+    pub dim: u64,
+    pub owners: Vec<String>,
+    pub stable_memory_size: u32,
+    pub cycle_amount: u64,
+    pub users: Vec<ShowUser>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct ShowUser {
+    pub principal_id: String,
+    pub role: String,
+}
+
+pub(crate) async fn load_show_output(
+    agent_factory: &AgentFactory,
+    memory_id: &str,
+) -> Result<ShowOutput> {
+    let agent = agent_factory.build().await?;
     let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
-    let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
+    let client = build_memory_client(agent_factory, memory_id).await?;
 
     let metadata = client
         .get_metadata()
@@ -42,7 +77,7 @@ pub async fn handle(args: ShowArgs, ctx: &CommandContext) -> Result<()> {
 
     let (name, description) = parse_memory_name_fields(&metadata.name);
     let visible_users = visible_memory_users(users, &launcher_id);
-    let output = ShowOutput {
+    Ok(ShowOutput {
         memory_id: client.canister_id().to_text(),
         name,
         description,
@@ -58,34 +93,7 @@ pub async fn handle(args: ShowArgs, ctx: &CommandContext) -> Result<()> {
                 role: format_role(user.role_code),
             })
             .collect(),
-    };
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        print_show_text(&output);
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-struct ShowOutput {
-    memory_id: String,
-    name: String,
-    description: Option<String>,
-    version: String,
-    dim: u64,
-    owners: Vec<String>,
-    stable_memory_size: u32,
-    cycle_amount: u64,
-    users: Vec<ShowUser>,
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-struct ShowUser {
-    principal_id: String,
-    role: String,
+    })
 }
 
 fn print_show_text(output: &ShowOutput) {

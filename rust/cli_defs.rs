@@ -139,6 +139,11 @@ pub enum Command {
     )]
     Login(LoginArgs),
     #[command(
+        about = "Expose Kinic memories as REST and MCP tools. Env-only: uses KINIC_TOOL_IDENTITY/KINIC_TOOL_NETWORK.",
+        after_help = "Configuration:\n  Set KINIC_TOOL_IDENTITY=<IDENTITY>\n  Set KINIC_TOOL_NETWORK=local|mainnet\n\nNotes:\n  tools serve does not accept global --identity, --ii, --ic, or --identity-path."
+    )]
+    Tools(ToolsArgs),
+    #[command(
         about = "Launch the Kinic terminal UI. Requires global --identity. --ii is not supported. Returns an interactive TUI, not JSON.",
         after_help = "Requires:\n  kinic-cli --identity <IDENTITY> tui\n\nReturns:\n  Interactive terminal UI.\n\nExample:\n  kinic-cli --identity alice tui"
     )]
@@ -159,6 +164,21 @@ pub struct CreateArgs {
 
 #[derive(Args, Debug, Default)]
 pub struct TuiArgs {}
+
+#[derive(Args, Debug)]
+pub struct ToolsArgs {
+    #[command(subcommand)]
+    pub command: ToolsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ToolsCommand {
+    #[command(about = "Run the Kinic MCP tool server over stdio. Uses environment variables only.")]
+    Serve(ToolsServeArgs),
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct ToolsServeArgs {}
 
 #[derive(Args, Debug, Default)]
 pub struct ListArgs {

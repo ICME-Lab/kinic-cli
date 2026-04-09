@@ -1,4 +1,4 @@
-use _lib::cli::{Cli, Command, ConfigCommand, ConfigUsersCommand};
+use _lib::cli::{Cli, Command, ConfigCommand, ConfigUsersCommand, ToolsCommand};
 use clap::Parser;
 
 #[test]
@@ -113,6 +113,16 @@ fn read_commands_accept_json_flag() {
     }
     match search.command {
         Command::Search(args) => assert!(args.json),
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn tools_commands_parse_without_identity() {
+    let serve = Cli::try_parse_from(["kinic-cli", "tools", "serve"]).expect("serve should parse");
+
+    match serve.command {
+        Command::Tools(args) => assert!(matches!(args.command, ToolsCommand::Serve(_))),
         other => panic!("unexpected command: {other:?}"),
     }
 }

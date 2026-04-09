@@ -54,6 +54,7 @@ pub async fn run_command(command: Command, ctx: CommandContext) -> Result<()> {
         Command::Transfer(args) => transfer::handle(args, &ctx).await,
         Command::AskAi(args) => ask_ai::handle(args, &ctx).await,
         Command::Login(args) => ii_login::handle(args, &ctx).await,
+        Command::Tools(_) => unreachable!("tools command is handled before agent setup"),
         Command::Tui(_) => unreachable!("TUI command is handled before command dispatch"),
     }
 }

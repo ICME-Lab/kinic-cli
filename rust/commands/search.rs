@@ -102,18 +102,18 @@ struct SearchOutput {
 }
 
 #[derive(Debug, PartialEq)]
-struct SearchBatch {
-    searched_memory_ids: Vec<String>,
-    failed_memory_ids: Vec<String>,
-    join_error_count: usize,
-    items: Vec<SearchHit>,
+pub(crate) struct SearchBatch {
+    pub searched_memory_ids: Vec<String>,
+    pub failed_memory_ids: Vec<String>,
+    pub join_error_count: usize,
+    pub items: Vec<SearchHit>,
 }
 
 fn is_zero(value: &usize) -> bool {
     *value == 0
 }
 
-async fn searchable_memory_ids(agent: ic_agent::Agent) -> Result<Vec<String>> {
+pub(crate) async fn searchable_memory_ids(agent: ic_agent::Agent) -> Result<Vec<String>> {
     let states = LauncherClient::new(agent).list_memories().await?;
     collect_searchable_memory_ids(
         states.into_iter().map(searchable_memory_id_from_state),
@@ -136,7 +136,7 @@ async fn search_single_memory(
     })
 }
 
-async fn search_single_memory_items(
+pub(crate) async fn search_single_memory_items(
     agent: ic_agent::Agent,
     memory_id: String,
     embedding: Vec<f32>,
@@ -157,7 +157,7 @@ async fn search_single_memory_items(
     Ok(rows)
 }
 
-async fn search_across_memories(
+pub(crate) async fn search_across_memories(
     agent: ic_agent::Agent,
     memory_ids: Vec<String>,
     embedding: Vec<f32>,
