@@ -798,10 +798,12 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
         key_event, code, ..
     } = input
     else {
-        textarea.insert_str(match input {
-            HostInputEvent::Paste(text) => text.as_str(),
-            HostInputEvent::Key { .. } => "",
-        });
+        let pasted = match input {
+            // Keep multiline textarea paste aligned with other paste flows.
+            HostInputEvent::Paste(text) => canonicalize_paste_line_endings(text),
+            HostInputEvent::Key { .. } => String::new(),
+        };
+        textarea.insert_str(pasted.as_str());
         sync_state_from_textareas(state, textareas);
         return Ok(true);
     };

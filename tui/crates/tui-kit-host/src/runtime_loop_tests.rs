@@ -406,6 +406,57 @@ fn textarea_input_updates_create_description_with_newlines() {
 }
 
 #[test]
+fn textarea_paste_normalizes_carriage_returns_in_create_description() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_CREATE_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        create_focus: tui_kit_runtime::CreateModalFocus::Description,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &host_paste("a\rb"),
+    )
+    .expect("textarea paste");
+
+    assert!(handled);
+    assert_eq!(state.create_description, "a\nb");
+}
+
+#[test]
+fn textarea_paste_normalizes_crlf_and_cr_in_insert_text() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
+        insert_focus: InsertFormFocus::Text,
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut textareas,
+        &host_paste("a\r\nb\rc"),
+    )
+    .expect("textarea paste");
+
+    assert!(handled);
+    assert_eq!(state.insert_text, "a\nb\nc");
+}
+
+#[test]
 fn textarea_up_on_first_create_description_row_moves_to_previous_field() {
     let mut provider = TestProvider::ok();
     let mut hooks = NoopRuntimeHooks;
@@ -739,6 +790,38 @@ fn chat_textarea_input_normalization_keeps_cursor_on_display_column() {
     assert_eq!(
         chat_input_cursor(Some(ActiveTextarea::ChatInput), &textarea),
         Some((0, 17))
+    );
+}
+
+#[test]
+fn chat_textarea_cursor_tracks_full_width_and_single_scalar_emoji() {
+    let mut textarea = chat_input_from_text("あいう🙂abc");
+
+    apply_chat_edit(&mut textarea, ChatEdit::MoveHome);
+    apply_chat_edit(&mut textarea, ChatEdit::MoveRight);
+    assert_eq!(
+        chat_input_cursor(Some(ActiveTextarea::ChatInput), &textarea),
+        Some((0, 1))
+    );
+
+    apply_chat_edit(&mut textarea, ChatEdit::MoveEnd);
+    assert_eq!(
+        chat_input_cursor(Some(ActiveTextarea::ChatInput), &textarea),
+        Some((0, "あいう🙂abc".chars().count()))
+    );
+}
+
+#[test]
+#[ignore = "Complex Unicode grapheme handling is not implemented yet"]
+fn chat_textarea_cursor_treats_combining_sequence_as_single_step() {
+    let mut textarea = chat_input_from_text("e\u{301}x");
+
+    apply_chat_edit(&mut textarea, ChatEdit::MoveHome);
+    apply_chat_edit(&mut textarea, ChatEdit::MoveRight);
+
+    assert_eq!(
+        chat_input_cursor(Some(ActiveTextarea::ChatInput), &textarea),
+        Some((0, 2))
     );
 }
 
