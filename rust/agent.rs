@@ -267,7 +267,10 @@ mod tests {
         assert_eq!(info.entry_name, "internet_computer_identity_alice");
         assert!(info.retryable);
         assert_eq!(info.user_action, "recheck_keychain_lookup_state");
-        assert!(info.to_agent_message().starts_with("[KEYCHAIN_LOOKUP_FAILED]"));
+        assert!(
+            info.to_agent_message()
+                .starts_with("[KEYCHAIN_LOOKUP_FAILED]")
+        );
         assert!(info.to_agent_message().contains("could not be confirmed"));
     }
 
@@ -285,7 +288,10 @@ mod tests {
             info.details.as_deref(),
             Some("User interaction is not allowed")
         );
-        assert!(info.to_agent_message().starts_with("[KEYCHAIN_ACCESS_DENIED]"));
+        assert!(
+            info.to_agent_message()
+                .starts_with("[KEYCHAIN_ACCESS_DENIED]")
+        );
     }
 
     #[test]

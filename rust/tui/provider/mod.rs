@@ -5157,8 +5157,8 @@ fn format_live_load_failure_message(error: &str) -> String {
 }
 
 fn load_error_record(error: String) -> KinicRecord {
-    let subtitle =
-        keychain_context_note(error.as_str()).unwrap_or("Check your identity or network configuration.");
+    let subtitle = keychain_context_note(error.as_str())
+        .unwrap_or("Check your identity or network configuration.");
     KinicRecord::new(
         "kinic-live-error",
         "Unable to load memories",

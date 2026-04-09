@@ -1,8 +1,8 @@
 use std::process::ExitCode;
 
-use anyhow::Error;
 use _lib as kinic_cli;
 use _lib::agent::extract_keychain_error_code;
+use anyhow::Error;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -51,12 +51,14 @@ mod tests {
 
     #[test]
     fn render_runtime_error_prefers_keychain_tagged_cause() {
-        let error = (|| -> anyhow::Result<()> {
-            Err(anyhow::anyhow!("[KEYCHAIN_ACCESS_DENIED] denied")).context("wrapper context")
-        })()
-        .unwrap_err();
+        let error: anyhow::Result<()> =
+            { Err(anyhow::anyhow!("[KEYCHAIN_ACCESS_DENIED] denied")).context("wrapper context") };
+        let error = error.unwrap_err();
 
-        assert_eq!(render_runtime_error(&error), "[KEYCHAIN_ACCESS_DENIED] denied");
+        assert_eq!(
+            render_runtime_error(&error),
+            "[KEYCHAIN_ACCESS_DENIED] denied"
+        );
     }
 
     #[test]
@@ -68,11 +70,11 @@ mod tests {
 
     #[test]
     fn render_runtime_error_includes_non_keychain_cause_chain() {
-        let error = (|| -> anyhow::Result<()> {
+        let error: anyhow::Result<()> = {
             Err(anyhow::anyhow!("transport backend refused connection"))
                 .context("failed to reach local replica")
-        })()
-        .unwrap_err();
+        };
+        let error = error.unwrap_err();
 
         assert_eq!(
             render_runtime_error(&error),
