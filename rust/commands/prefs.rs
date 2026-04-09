@@ -4,7 +4,7 @@
 //! and chat retrieval tuning.
 //! Why: keep the TUI as the single persistence layer while letting CLI users manage the same settings.
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use ic_agent::export::Principal;
 use serde::Serialize;
 
@@ -15,7 +15,6 @@ use crate::{
     },
     clients::memory::MemoryClient,
     preferences::{self, UserPreferences},
-    shared::access::current_principal_has_memory_access,
 };
 
 pub async fn handle(args: PrefsArgs, global: &GlobalOpts) -> Result<()> {
@@ -120,17 +119,17 @@ async fn add_memory(args: AddMemoryArgs, global: &GlobalOpts) -> Result<()> {
         ));
     }
 
-    if args.validate {
-        validate_manual_memory_access(global, memory_id.as_str()).await?;
-    }
+    let validated_name = if args.validate {
+        Some(validate_manual_memory_access(global, memory_id.as_str()).await?)
+    } else {
+        None
+    };
 
     preferences.manual_memory_ids.push(memory_id.clone());
     save_preferences(&preferences)?;
-    print_json_response(PrefsResponse::updated(
-        "manual_memory_ids",
-        "add",
-        Some(memory_id),
-    ))
+    let response = PrefsResponse::updated("manual_memory_ids", "add", Some(memory_id))
+        .with_memory_name(validated_name);
+    print_json_response(response)
 }
 
 fn remove_memory(args: MemoryIdArgs) -> Result<()> {
@@ -206,24 +205,15 @@ fn save_preferences(user_preferences: &UserPreferences) -> Result<()> {
     preferences::save_user_preferences(&normalized).context("Failed to save shared TUI preferences")
 }
 
-async fn validate_manual_memory_access(global: &GlobalOpts, memory_id: &str) -> Result<()> {
+async fn validate_manual_memory_access(global: &GlobalOpts, memory_id: &str) -> Result<String> {
     let (agent_factory, _) = crate::build_cli_command_context(global)?;
     let agent = agent_factory.build().await?;
-    let current_principal = agent
-        .get_principal()
-        .map_err(|error| anyhow!("Failed to derive principal for current identity: {error}"))?;
     let memory = Principal::from_text(memory_id).context("Failed to parse memory canister id")?;
     let client = MemoryClient::new(agent, memory);
-    let users = client
-        .get_users()
+    client
+        .get_name()
         .await
-        .context("Failed to validate memory access via get_users")?;
-
-    if current_principal_has_memory_access(&users, &current_principal) {
-        Ok(())
-    } else {
-        bail!("Current principal does not have access to this memory");
-    }
+        .context("Failed to validate memory access via get_name")
 }
 
 fn validate_memory_id(value: &str) -> Result<String> {
@@ -326,6 +316,8 @@ where
     action: &'static str,
     status: &'static str,
     value: T,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memory_name: Option<String>,
 }
 
 impl<T> PrefsResponse<T>
@@ -338,6 +330,7 @@ where
             action,
             status: "updated",
             value,
+            memory_name: None,
         }
     }
 
@@ -347,7 +340,13 @@ where
             action,
             status: "unchanged",
             value,
+            memory_name: None,
         }
+    }
+
+    fn with_memory_name(mut self, memory_name: Option<String>) -> Self {
+        self.memory_name = memory_name;
+        self
     }
 }
 
@@ -480,26 +479,25 @@ mod tests {
     }
 
     #[test]
-    fn manual_memory_access_allows_explicit_current_principal() {
-        let current = Principal::from_text("aaaaa-aa").expect("principal");
-        let users = vec![("aaaaa-aa".to_string(), 3)];
+    fn prefs_response_skips_memory_name_by_default() {
+        let json = serde_json::to_value(PrefsResponse::updated(
+            "manual_memory_ids",
+            "add",
+            Some("aaaaa-aa".to_string()),
+        ))
+        .expect("response should serialize");
 
-        assert!(current_principal_has_memory_access(&users, &current));
+        assert_eq!(json.get("memory_name"), None);
     }
 
     #[test]
-    fn manual_memory_access_allows_anonymous_role_without_explicit_membership() {
-        let current = Principal::from_text("aaaaa-aa").expect("principal");
-        let users = vec![(Principal::anonymous().to_text(), 3)];
+    fn prefs_response_serializes_memory_name_when_present() {
+        let json = serde_json::to_value(
+            PrefsResponse::updated("manual_memory_ids", "add", Some("aaaaa-aa".to_string()))
+                .with_memory_name(Some("Alpha Memory".to_string())),
+        )
+        .expect("response should serialize");
 
-        assert!(current_principal_has_memory_access(&users, &current));
-    }
-
-    #[test]
-    fn manual_memory_access_rejects_current_principal_when_not_listed_and_not_anonymous() {
-        let current = Principal::from_text("aaaaa-aa").expect("principal");
-        let users = vec![("bbbbb-bb".to_string(), 3)];
-
-        assert!(!current_principal_has_memory_access(&users, &current));
+        assert_eq!(json["memory_name"], serde_json::json!("Alpha Memory"));
     }
 }

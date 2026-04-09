@@ -142,6 +142,8 @@ cargo run -- --identity alice config users remove --memory-id <memory_id> --prin
 
 Remember that `anonymous` cannot be granted `admin`.
 Remember that the launcher canister principal cannot be modified.
+Remember that risky `change` and `remove` operations prompt for interactive confirmation when they would leave the memory with zero admins, or remove/downgrade your own admin access.
+Remember that those risky operations currently fail in non-interactive environments.
 
 ## Agent Guidance
 

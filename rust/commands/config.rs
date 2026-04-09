@@ -3,7 +3,8 @@
 //! What: lists, adds, changes, and removes memory users with shared validation rules.
 //! Why: keep access-control operations consistent with the TUI while exposing them in the CLI.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
+use ic_agent::export::Principal;
 use tracing::info;
 
 use crate::{
@@ -17,6 +18,7 @@ use crate::{
 
 use super::{
     CommandContext,
+    config_confirm::{AccessMutation, confirm_risky_access_change, evaluate_access_change_risks},
     helpers::{MemoryRole, validate_access_control_target},
 };
 
@@ -76,10 +78,24 @@ async fn write_user(
     action: ConfigWriteAction,
 ) -> Result<()> {
     let role = MemoryRole::from_str(&args.role)?;
-    let launcher_id = launcher_id(ctx).await?;
+    let (launcher_id, current_principal) = access_control_context(ctx).await?;
     let principal = validate_access_control_target(&args.principal, &launcher_id, Some(role))?;
-
     let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
+    if action == ConfigWriteAction::Change {
+        let users = client
+            .get_users()
+            .await
+            .context("Failed to fetch users from memory canister before change")?;
+        let risks = evaluate_access_change_risks(
+            &users,
+            &current_principal,
+            &principal,
+            AccessMutation::Change { next_role: role },
+            &launcher_id,
+        );
+        confirm_risky_access_change(&risks)?;
+    }
+
     match action {
         ConfigWriteAction::Add => {
             client
@@ -117,9 +133,21 @@ async fn write_user(
 }
 
 async fn remove_user(args: ConfigUserRemoveArgs, ctx: &CommandContext) -> Result<()> {
-    let launcher_id = launcher_id(ctx).await?;
+    let (launcher_id, current_principal) = access_control_context(ctx).await?;
     let principal = validate_access_control_target(&args.principal, &launcher_id, None)?;
     let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
+    let users = client
+        .get_users()
+        .await
+        .context("Failed to fetch users from memory canister before removal")?;
+    let risks = evaluate_access_change_risks(
+        &users,
+        &current_principal,
+        &principal,
+        AccessMutation::Remove,
+        &launcher_id,
+    );
+    confirm_risky_access_change(&risks)?;
 
     client
         .remove_user(principal)
@@ -140,9 +168,13 @@ async fn remove_user(args: ConfigUserRemoveArgs, ctx: &CommandContext) -> Result
     Ok(())
 }
 
-async fn launcher_id(ctx: &CommandContext) -> Result<String> {
+async fn access_control_context(ctx: &CommandContext) -> Result<(String, Principal)> {
     let agent = ctx.agent_factory.build().await?;
-    Ok(LauncherClient::new(agent).launcher_id().to_text())
+    let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
+    let current_principal = agent
+        .get_principal()
+        .map_err(|error| anyhow!("Failed to derive principal for current identity: {error}"))?;
+    Ok((launcher_id, current_principal))
 }
 
 #[cfg(test)]

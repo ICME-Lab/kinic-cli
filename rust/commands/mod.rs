@@ -6,6 +6,7 @@ pub mod ask_ai;
 pub mod balance;
 pub mod capabilities;
 pub mod config;
+pub mod config_confirm;
 pub mod convert_pdf;
 pub mod create;
 pub mod helpers;

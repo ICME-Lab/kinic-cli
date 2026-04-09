@@ -1171,7 +1171,7 @@ fn poll_add_memory_validation_background_saves_preference_and_reloads() {
     provider.add_memory_validation_task.in_flight = true;
     tx.send(AddMemoryValidationTaskOutput {
         memory_id: "bbbbb-bb".to_string(),
-        result: Ok(()),
+        result: Ok("Alpha Memory".to_string()),
     })
     .expect("send validation result");
 
@@ -1193,6 +1193,10 @@ fn poll_add_memory_validation_background_saves_preference_and_reloads() {
             .iter()
             .any(|effect| matches!(effect, CoreEffect::CloseAddMemory))
     );
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message) if message == "Added memory bbbbb-bb (Alpha Memory)."
+    )));
 }
 
 #[test]

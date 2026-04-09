@@ -736,7 +736,7 @@ struct AccessSubmitTaskOutput {
 
 struct AddMemoryValidationTaskOutput {
     memory_id: String,
-    result: Result<(), String>,
+    result: Result<String, String>,
 }
 
 struct RenameSubmitTaskOutput {
@@ -2616,11 +2616,6 @@ impl KinicProvider {
     }
 
     fn start_add_memory_validation(&mut self, memory_id: String) -> Result<CoreEffect, String> {
-        let principal_id = self
-            .config
-            .auth
-            .principal_text()
-            .map_err(|error| short_error(&error.to_string()))?;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
         spawn_task(&mut self.add_memory_validation_task, move |tx| {
@@ -2631,14 +2626,13 @@ impl KinicProvider {
                     use_mainnet,
                     auth,
                     memory_id.clone(),
-                    principal_id,
                 ))
                 .map_err(|error| error.to_string());
             let _ = tx.send(AddMemoryValidationTaskOutput { memory_id, result });
         });
 
         Ok(CoreEffect::Notify(
-            "Checking memory access via get_users()...".to_string(),
+            "Checking memory access via get_name()...".to_string(),
         ))
     }
 
@@ -3126,24 +3120,27 @@ impl KinicProvider {
 
         let mut effects = Vec::new();
         match output.result {
-            Ok(()) => match self.save_manual_memory_to_preferences(output.memory_id.as_str()) {
-                Ok(()) => {
-                    self.preferred_memory_after_refresh = Some(output.memory_id.clone());
-                    effects.push(CoreEffect::CloseAddMemory);
-                    effects.push(CoreEffect::Notify(format!(
-                        "Added memory {}.",
-                        output.memory_id
-                    )));
-                    if let Some(effect) = self.start_live_memories_load(None, true) {
-                        effects.push(effect);
+            Ok(memory_name) => {
+                match self.save_manual_memory_to_preferences(output.memory_id.as_str()) {
+                    Ok(()) => {
+                        self.preferred_memory_after_refresh = Some(output.memory_id.clone());
+                        effects.push(CoreEffect::CloseAddMemory);
+                        effects.push(CoreEffect::Notify(if memory_name.trim().is_empty() {
+                            format!("Added memory {}.", output.memory_id)
+                        } else {
+                            format!("Added memory {} ({memory_name}).", output.memory_id)
+                        }));
+                        if let Some(effect) = self.start_live_memories_load(None, true) {
+                            effects.push(effect);
+                        }
+                    }
+                    Err(error) => {
+                        effects.push(CoreEffect::AddMemoryFormError(Some(format!(
+                            "Manual memory save failed: {error}"
+                        ))));
                     }
                 }
-                Err(error) => {
-                    effects.push(CoreEffect::AddMemoryFormError(Some(format!(
-                        "Manual memory save failed: {error}"
-                    ))));
-                }
-            },
+            }
             Err(error) => {
                 effects.push(CoreEffect::AddMemoryFormError(Some(short_error(&error))));
             }

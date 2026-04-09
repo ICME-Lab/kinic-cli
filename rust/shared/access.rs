@@ -93,20 +93,6 @@ pub fn validate_access_control_target(
     Ok(principal)
 }
 
-pub fn current_principal_has_memory_access(
-    users: &[(String, u8)],
-    current_principal: &Principal,
-) -> bool {
-    users.iter().any(|(principal_id, _)| {
-        if principal_id.trim() == "anonymous" {
-            return true;
-        }
-        Principal::from_text(principal_id)
-            .map(|principal| principal == *current_principal || principal == Principal::anonymous())
-            .unwrap_or(false)
-    })
-}
-
 pub fn ensure_not_launcher_principal(principal: &Principal, launcher_id: &str) -> Result<()> {
     if principal.to_text() == launcher_id {
         bail!("launcher canister access cannot be modified");
@@ -154,24 +140,6 @@ mod tests {
             error.to_string(),
             "launcher canister access cannot be modified"
         );
-    }
-
-    #[test]
-    fn current_principal_has_memory_access_accepts_explicit_and_anonymous_access() {
-        let current = Principal::from_text("aaaaa-aa").expect("principal");
-        let explicit = vec![("aaaaa-aa".to_string(), 3)];
-        let anonymous = vec![(Principal::anonymous().to_text(), 3)];
-
-        assert!(current_principal_has_memory_access(&explicit, &current));
-        assert!(current_principal_has_memory_access(&anonymous, &current));
-    }
-
-    #[test]
-    fn current_principal_has_memory_access_rejects_unrelated_users() {
-        let current = Principal::from_text("aaaaa-aa").expect("principal");
-        let users = vec![("bbbbb-bb".to_string(), 3)];
-
-        assert!(!current_principal_has_memory_access(&users, &current));
     }
 
     #[test]

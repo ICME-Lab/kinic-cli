@@ -493,7 +493,7 @@ pub struct AddMemoryArgs {
 
     #[arg(
         long,
-        help = "Validate access through get_users() using --identity or --ii before saving"
+        help = "Validate readable access through get_name() using --identity or --ii before saving"
     )]
     pub validate: bool,
 }

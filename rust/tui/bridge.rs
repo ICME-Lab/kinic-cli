@@ -12,8 +12,8 @@ use crate::{
     ledger::{fetch_balance, fetch_fee, transfer},
     shared::{
         access::{
-            MemoryRole, current_principal_has_memory_access, format_role,
-            validate_access_control_target, validate_role_assignment, visible_memory_users,
+            MemoryRole, format_role, validate_access_control_target, validate_role_assignment,
+            visible_memory_users,
         },
         cross_memory_search::SearchHit,
     },
@@ -483,21 +483,12 @@ pub async fn validate_manual_memory_access(
     use_mainnet: bool,
     auth: TuiAuth,
     memory_id: String,
-    principal_id: String,
-) -> Result<()> {
+) -> Result<String> {
     let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
-    let self_principal =
-        Principal::from_text(&principal_id).context("Failed to parse current principal")?;
     let factory = resolve_agent_factory(use_mainnet, &auth)?;
     let agent = factory.build().await?;
     let client = MemoryClient::new(agent, memory);
-    let users = client.get_users().await?;
-
-    if current_principal_has_memory_access(&users, &self_principal) {
-        Ok(())
-    } else {
-        anyhow::bail!("Current principal does not have access to this memory")
-    }
+    client.get_name().await
 }
 
 pub async fn run_insert(

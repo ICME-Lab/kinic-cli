@@ -260,6 +260,8 @@ Notes:
 - `anonymous` assigns the role to everyone; admin cannot be granted to `anonymous`.
 - Principals are validated; invalid text fails fast.
 - The launcher canister principal cannot be changed or removed from the CLI.
+- Risky `config users change` and `config users remove` operations prompt for interactive confirmation when they would leave the memory with zero admins, or remove/downgrade your own admin access.
+- Those risky operations fail in non-interactive environments because the CLI does not provide a confirmation bypass flag yet.
 
 ### Manage local preferences shared with the TUI
 
