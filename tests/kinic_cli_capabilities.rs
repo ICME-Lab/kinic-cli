@@ -2,44 +2,66 @@ use std::process::Command;
 
 use _lib::cli::Cli;
 use clap::CommandFactory;
-use serde_json::json;
+use serde_json::{Value, json};
 
-#[test]
-fn capabilities_runs_without_identity_and_returns_json() {
+fn run_capabilities() -> Value {
     let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
         .arg("capabilities")
         .output()
         .unwrap();
 
     assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    serde_json::from_slice(&output.stdout).unwrap()
+}
 
+fn command_by_name<'a>(commands: &'a [Value], name: &str) -> &'a Value {
+    commands
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .unwrap_or_else(|| panic!("command `{name}` should be present"))
+}
+
+#[test]
+fn capabilities_runs_without_identity_and_returns_v1_json() {
+    let parsed = run_capabilities();
+
+    assert_eq!(parsed["schema_version"], 1);
     assert_eq!(parsed["cli"], "kinic-cli");
     assert_eq!(parsed["version"], env!("CARGO_PKG_VERSION"));
+    assert!(parsed["global_options"].is_array());
     assert!(parsed["commands"].is_array());
 }
 
 #[test]
-fn capabilities_describes_prefs_and_tui_contracts() {
-    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
-        .arg("capabilities")
-        .output()
-        .unwrap();
+fn capabilities_describes_global_options_and_conflicts() {
+    let parsed = run_capabilities();
+    let global_options = parsed["global_options"].as_array().unwrap();
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(global_options.iter().any(|entry| entry["name"] == "verbose"
+        && entry["scope"] == "global"
+        && entry["input_shape"] == "flag"
+        && entry["value_kind"] == "integer"));
+    assert!(
+        global_options
+            .iter()
+            .any(|entry| entry["name"] == "identity"
+                && entry["value_kind"] == "string"
+                && entry["relations"]["conflicts"] == json!(["ii"]))
+    );
+}
+
+#[test]
+fn capabilities_describes_prefs_and_tui_contracts() {
+    let parsed = run_capabilities();
     let commands = parsed["commands"].as_array().unwrap();
 
-    let prefs = commands
-        .iter()
-        .find(|entry| entry["name"] == "prefs")
-        .expect("prefs command should be present");
-    assert_eq!(prefs["requires_auth"], false);
-    assert_eq!(prefs["output_mode"], "json");
-    assert_eq!(prefs["supported_output_modes"], json!(["json"]));
-    assert!(prefs["subcommands"].is_array());
+    let prefs = command_by_name(commands, "prefs");
+    assert_eq!(prefs["auth"], json!({"required": false, "sources": []}));
+    assert_eq!(
+        prefs["output"],
+        json!({"default": "json", "supported": ["json"], "interactive": false})
+    );
+    assert_eq!(prefs["global_flags_supported"], json!(["verbose"]));
     assert!(
         prefs["subcommands"]
             .as_array()
@@ -47,76 +69,87 @@ fn capabilities_describes_prefs_and_tui_contracts() {
             .iter()
             .any(|entry| entry["name"] == "set-default-memory")
     );
-    assert!(
-        prefs["subcommands"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|entry| entry["name"] == "set-chat-overall-top-k")
+    let prefs_add_memory = prefs["subcommands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "add-memory")
+        .expect("prefs add-memory should be present");
+    assert_eq!(
+        prefs_add_memory["auth"],
+        json!({
+            "required": false,
+            "sources": [],
+            "conditional": [{
+                "when_argument_present": "validate",
+                "required": true,
+                "sources": ["global_identity", "global_ii"]
+            }]
+        })
     );
 
-    let tui = commands
+    let tui = command_by_name(commands, "tui");
+    assert_eq!(
+        tui["auth"],
+        json!({"required": true, "sources": ["global_identity"]})
+    );
+    assert_eq!(
+        tui["output"],
+        json!({"default": "interactive", "supported": ["interactive"], "interactive": true})
+    );
+    assert_eq!(
+        tui["global_flags_supported"],
+        json!(["verbose", "ic", "identity"])
+    );
+}
+
+#[test]
+fn capabilities_describes_tools_contract_and_env_auth() {
+    let parsed = run_capabilities();
+    let commands = parsed["commands"].as_array().unwrap();
+    let tools = command_by_name(commands, "tools");
+
+    assert_eq!(
+        tools["auth"],
+        json!({"required": true, "sources": ["environment_identity"]})
+    );
+    assert_eq!(tools["global_flags_supported"], json!(["verbose"]));
+
+    let serve = tools["subcommands"]
+        .as_array()
+        .unwrap()
         .iter()
-        .find(|entry| entry["name"] == "tui")
-        .expect("tui command should be present");
-    assert_eq!(tui["interactive"], true);
-    assert_eq!(tui["output_mode"], "interactive");
-    assert_eq!(tui["supported_output_modes"], json!(["interactive"]));
-    assert_eq!(tui["auth_modes"], json!(["identity"]));
+        .find(|entry| entry["name"] == "serve")
+        .expect("tools serve should be present");
+    assert_eq!(
+        serve["auth"],
+        json!({"required": true, "sources": ["environment_identity"]})
+    );
+    assert_eq!(serve["global_flags_supported"], json!(["verbose"]));
 }
 
 #[test]
 fn capabilities_describes_major_arguments_for_network_commands() {
-    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
-        .arg("capabilities")
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let parsed = run_capabilities();
     let commands = parsed["commands"].as_array().unwrap();
 
-    let search = commands
-        .iter()
-        .find(|entry| entry["name"] == "search")
-        .expect("search command should be present");
-    assert_eq!(search["auth_modes"], json!(["identity", "ii"]));
+    let search = command_by_name(commands, "search");
+    assert_eq!(
+        search["auth"],
+        json!({"required": true, "sources": ["global_identity", "global_ii"]})
+    );
+    assert_eq!(
+        search["output"],
+        json!({"default": "text", "supported": ["text", "json"], "interactive": false})
+    );
     assert_eq!(
         search["arguments"],
         json!([
-            { "name": "memory_id", "required": false, "kind": "principal" },
-            { "name": "all", "required": false, "kind": "boolean" },
-            { "name": "query", "required": true, "kind": "string" },
-            { "name": "json", "required": false, "kind": "boolean" }
+            { "name": "memory_id", "required": false, "input_shape": "single_value", "value_kind": "principal" },
+            { "name": "all", "required": false, "input_shape": "flag", "value_kind": "boolean" },
+            { "name": "query", "required": true, "input_shape": "single_value", "value_kind": "string" },
+            { "name": "json", "required": false, "input_shape": "flag", "value_kind": "boolean" }
         ])
-    );
-    assert_eq!(search["supported_output_modes"], json!(["text", "json"]));
-
-    let list = commands
-        .iter()
-        .find(|entry| entry["name"] == "list")
-        .expect("list command should be present");
-    assert_eq!(list["supported_output_modes"], json!(["text", "json"]));
-    assert!(
-        list["arguments"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|entry| entry == &json!({"name":"json","required":false,"kind":"boolean"}))
-    );
-
-    let show = commands
-        .iter()
-        .find(|entry| entry["name"] == "show")
-        .expect("show command should be present");
-    assert_eq!(show["supported_output_modes"], json!(["text", "json"]));
-    assert!(
-        show["arguments"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|entry| entry == &json!({"name":"json","required":false,"kind":"boolean"}))
     );
     assert_eq!(
         search["arg_groups"],
@@ -130,41 +163,25 @@ fn capabilities_describes_major_arguments_for_network_commands() {
         ])
     );
 
-    let insert = commands
-        .iter()
-        .find(|entry| entry["name"] == "insert")
-        .expect("insert command should be present");
-    assert_eq!(
-        insert["arg_groups"],
-        json!([
-            {
-                "id": "insert_input",
-                "required": true,
-                "multiple": false,
-                "members": ["text", "file_path"]
-            }
-        ])
+    let transfer = command_by_name(commands, "transfer");
+    assert!(
+        transfer["arguments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry
+                == &json!({
+                    "name": "yes",
+                    "required": false,
+                    "input_shape": "flag",
+                    "value_kind": "boolean"
+                }))
     );
-
-    let capabilities = commands
-        .iter()
-        .find(|entry| entry["name"] == "capabilities")
-        .expect("capabilities command should be present");
-    assert_eq!(capabilities["requires_auth"], false);
-    assert_eq!(capabilities["output_mode"], "json");
-    assert_eq!(capabilities["supported_output_modes"], json!(["json"]));
 }
 
 #[test]
 fn capabilities_command_names_match_clap_definition() {
-    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
-        .arg("capabilities")
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let parsed = run_capabilities();
     let commands = parsed["commands"].as_array().unwrap();
     let capability_names: Vec<&str> = commands
         .iter()
@@ -182,21 +199,12 @@ fn capabilities_command_names_match_clap_definition() {
 }
 
 #[test]
-fn capabilities_prefs_subcommands_match_clap_definition() {
-    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
-        .arg("capabilities")
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+fn capabilities_nested_subcommands_match_clap_definition() {
+    let parsed = run_capabilities();
     let commands = parsed["commands"].as_array().unwrap();
-    let prefs = commands
-        .iter()
-        .find(|entry| entry["name"] == "prefs")
-        .expect("prefs command should be present");
-    let capability_names: Vec<&str> = prefs["subcommands"]
+
+    let prefs = command_by_name(commands, "prefs");
+    let prefs_names: Vec<&str> = prefs["subcommands"]
         .as_array()
         .unwrap()
         .iter()
@@ -207,32 +215,19 @@ fn capabilities_prefs_subcommands_match_clap_definition() {
         .get_subcommands()
         .find(|command| command.get_name() == "prefs")
         .expect("prefs should exist in clap");
-    let clap_names: Vec<String> = clap_prefs
+    let clap_prefs_names: Vec<String> = clap_prefs
         .get_subcommands()
         .map(|command| command.get_name().to_string())
         .collect();
-
     assert_eq!(
-        capability_names,
-        clap_names.iter().map(String::as_str).collect::<Vec<_>>()
+        prefs_names,
+        clap_prefs_names
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
     );
-}
 
-#[test]
-fn capabilities_config_users_subcommands_match_clap_definition() {
-    let output = Command::new(env!("CARGO_BIN_EXE_kinic-cli"))
-        .arg("capabilities")
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    let commands = parsed["commands"].as_array().unwrap();
-    let config = commands
-        .iter()
-        .find(|entry| entry["name"] == "config")
-        .expect("config command should be present");
+    let config = command_by_name(commands, "config");
     let users = config["subcommands"]
         .as_array()
         .unwrap()
@@ -245,8 +240,6 @@ fn capabilities_config_users_subcommands_match_clap_definition() {
         .iter()
         .map(|entry| entry["name"].as_str().unwrap())
         .collect();
-
-    let clap = Cli::command();
     let clap_config = clap
         .get_subcommands()
         .find(|command| command.get_name() == "config")

@@ -39,6 +39,7 @@ pub struct GlobalOpts {
     #[arg(
         long,
         conflicts_with = "ii",
+        value_name = "NAME",
         value_parser = parse_identity_arg,
         help = "Dfx identity name used to load credentials from the system keyring"
     )]
@@ -61,25 +62,27 @@ pub struct GlobalOpts {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     #[command(
-        about = "Deploy a new memory canister. Requires --identity or --ii. Returns text output."
+        about = "Deploy a new memory canister. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Create(CreateArgs),
-    #[command(about = "List deployed memories. Requires --identity or --ii. Returns text output.")]
+    #[command(
+        about = "List deployed memories. Requires --identity <NAME> or --ii. Returns text output."
+    )]
     List(ListArgs),
     #[command(
-        about = "Show details for a memory canister. Requires --identity or --ii. Returns text output."
+        about = "Show details for a memory canister. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Show(ShowArgs),
     #[command(
-        about = "Insert text into an existing memory canister. Requires --identity or --ii. Returns text output."
+        about = "Insert text into an existing memory canister. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Insert(InsertArgs),
     #[command(
-        about = "Insert a precomputed embedding into a memory canister. Requires --identity or --ii. Returns text output."
+        about = "Insert a precomputed embedding into a memory canister. Requires --identity <NAME> or --ii. Returns text output."
     )]
     InsertRaw(InsertRawArgs),
     #[command(
-        about = "Insert a PDF converted to markdown into a memory canister. Requires --identity or --ii. Returns text output."
+        about = "Insert a PDF converted to markdown into a memory canister. Requires --identity <NAME> or --ii. Returns text output."
     )]
     InsertPdf(InsertPdfArgs),
     #[command(
@@ -87,23 +90,23 @@ pub enum Command {
     )]
     ConvertPdf(ConvertPdfArgs),
     #[command(
-        about = "Search within a memory canister using embeddings. Requires --identity or --ii. Returns text output."
+        about = "Search within a memory canister using embeddings. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Search(SearchArgs),
     #[command(
-        about = "Search within a memory canister using a precomputed embedding. Requires --identity or --ii. Returns text output."
+        about = "Search within a memory canister using a precomputed embedding. Requires --identity <NAME> or --ii. Returns text output."
     )]
     SearchRaw(SearchRawArgs),
     #[command(
-        about = "Fetch embeddings for a tag from a memory canister. Requires --identity or --ii. Returns text output."
+        about = "Fetch embeddings for a tag from a memory canister. Requires --identity <NAME> or --ii. Returns text output."
     )]
     TaggedEmbeddings(TaggedEmbeddingsArgs),
     #[command(
-        about = "Manage memory access control. Requires --identity or --ii. Returns text output."
+        about = "Manage memory access control. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Config(ConfigArgs),
     #[command(
-        about = "Rename a memory canister. Requires --identity or --ii. Returns text output."
+        about = "Rename a memory canister. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Rename(RenameArgs),
     #[command(
@@ -117,21 +120,23 @@ pub enum Command {
     )]
     Prefs(PrefsArgs),
     #[command(
-        about = "Update a memory canister instance. Requires --identity or --ii. Returns text output."
+        about = "Update a memory canister instance. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Update(UpdateArgs),
     #[command(
-        about = "Reset a memory canister and set embedding dimension. Requires --identity or --ii. Returns text output."
+        about = "Reset a memory canister and set embedding dimension. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Reset(ResetArgs),
     #[command(
-        about = "Check KINIC token balance. Requires --identity or --ii. Returns text output."
+        about = "Check KINIC token balance. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Balance(BalanceArgs),
-    #[command(about = "Transfer KINIC tokens. Requires --identity or --ii. Returns text output.")]
+    #[command(
+        about = "Transfer KINIC tokens. Requires --identity <NAME> or --ii. Returns text output."
+    )]
     Transfer(TransferArgs),
     #[command(
-        about = "Ask Kinic AI using memory search results. Requires --identity or --ii. Returns text output."
+        about = "Ask Kinic AI using memory search results. Requires --identity <NAME> or --ii. Returns text output."
     )]
     AskAi(AskAiArgs),
     #[command(
@@ -144,8 +149,8 @@ pub enum Command {
     )]
     Tools(ToolsArgs),
     #[command(
-        about = "Launch the Kinic terminal UI. Requires global --identity. --ii is not supported. Returns an interactive TUI, not JSON.",
-        after_help = "Requires:\n  kinic-cli --identity <IDENTITY> tui\n\nReturns:\n  Interactive terminal UI.\n\nExample:\n  kinic-cli --identity alice tui"
+        about = "Launch the Kinic terminal UI. Requires global --identity <NAME>. --ii is not supported. Returns an interactive TUI, not JSON.",
+        after_help = "Requires:\n  kinic-cli --identity <NAME> tui\n\nReturns:\n  Interactive terminal UI.\n\nExample:\n  kinic-cli --identity alice tui"
     )]
     Tui(TuiArgs),
 }

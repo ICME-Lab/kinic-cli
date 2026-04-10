@@ -82,9 +82,9 @@ fn tui_help_mentions_global_identity_requirement() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Requires global --identity."));
+    assert!(stdout.contains("Requires global --identity <NAME>."));
     assert!(stdout.contains("--ii is not supported."));
-    assert!(stdout.contains("kinic-cli --identity <IDENTITY> tui"));
+    assert!(stdout.contains("kinic-cli --identity <NAME> tui"));
 }
 
 #[test]

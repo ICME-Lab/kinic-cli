@@ -1,4 +1,4 @@
-# External Tool Integrations
+# MCP Integration
 
 Kinic can be exposed to external agent runtimes as a small tool surface backed by one fixed server identity.  
 This v1 integration layer is implemented in Rust and exposed only as a local MCP server over stdio.
@@ -12,7 +12,7 @@ This v1 integration layer is implemented in Rust and exposed only as a local MCP
 - `memory_search_all`
 - `memory_show`
 
-All responses are JSON objects:
+Successful tool responses are returned as MCP structured content containing JSON objects:
 
 - `memory_list` -> `{"items":[{"memory_id":"..."}]}`
 - `memory_create` -> `{"memory_id":"..."}`
@@ -79,9 +79,9 @@ This mode is intended for MCP clients that launch a local command.
 If Keychain access is denied or interrupted, startup fails immediately and MCP tools are not exposed.
 If you need to change identity or network, change `KINIC_TOOL_IDENTITY` / `KINIC_TOOL_NETWORK` and restart the MCP server instead of passing CLI global flags.
 
-## n8n
+## MCP clients
 
-Use n8n's `MCP Client Tool` or `MCP Client` node and configure the local command:
+Most MCP clients need the same three things:
 
 - command: `cargo`
 - arguments: `run -- tools serve`
@@ -89,20 +89,17 @@ Use n8n's `MCP Client Tool` or `MCP Client` node and configure the local command
   - `KINIC_TOOL_IDENTITY=alice`
   - `KINIC_TOOL_NETWORK=mainnet`
 
-Do not parse CLI text output for this path; use the MCP tool contract above as the integration boundary.
+Use the MCP tool contract above as the integration boundary instead of parsing CLI text output.
+If your MCP host cannot set environment variables directly, use a small wrapper script that exports `KINIC_TOOL_IDENTITY` and `KINIC_TOOL_NETWORK` before launching `cargo run -- tools serve`.
 
-If your n8n setup supports command-level environment variables, prefer setting them there instead of requiring a manual `export` in the shell session.
+### n8n
 
-## LM Studio
+Use n8n's `MCP Client Tool` or `MCP Client` node and enter the shared command, args, and environment values there.
+If your n8n setup supports command-level environment variables, prefer setting them in the node configuration instead of relying on a shell session `export`.
 
-Use LM Studio as an MCP client / host and install a local MCP server command that launches Kinic:
+### LM Studio
 
-```text
-command: cargo
-args: run -- tools serve
-```
-
-Set the MCP server environment so LM Studio always launches the same Kinic identity:
+Use LM Studio as an MCP host and express the same shared command, args, and environment in its MCP server JSON config:
 
 ```json
 {
@@ -127,15 +124,3 @@ Then allow your local model to call:
 - `memory_search`
 - `memory_search_all`
 - `memory_show`
-
-If your MCP host cannot set environment variables directly, use a small wrapper script that exports `KINIC_TOOL_IDENTITY` and `KINIC_TOOL_NETWORK` before launching `cargo run -- tools serve`.
-
-## Not supported in v1
-
-- REST transport
-- Ollama integration
-- `ask_ai`
-- PDF/file insertion
-- `add_user`
-- per-user identity switching
-- Internet Identity authentication

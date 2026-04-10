@@ -362,7 +362,7 @@ for score, payload in km.search(memory_id, "Hello"):
     print(f"{score:.4f} -> {payload}")
 ```
 
-For external agent runtimes such as n8n and LM Studio using local MCP, see [docs/external-tools.md](docs/external-tools.md). That guide now covers the six exposed tools, how `KINIC_TOOL_IDENTITY` and `KINIC_TOOL_NETWORK=local|mainnet` select the fixed MCP identity, when Keychain approval appears, how to pin the identity in LM Studio or n8n startup configuration, and why `tools serve` is env-only rather than driven by CLI global flags.
+For external agent runtimes such as n8n and LM Studio using local MCP, see [docs/mcp.md](docs/mcp.md). That guide now covers the six exposed tools, how `KINIC_TOOL_IDENTITY` and `KINIC_TOOL_NETWORK=local|mainnet` select the fixed MCP identity, when Keychain approval appears, how to pin the identity in LM Studio or n8n startup configuration, and why `tools serve` is env-only rather than driven by CLI global flags.
 
 You can tag inserted content such as `notes` or `summary_q1` and manage it later by tag.
 

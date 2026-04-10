@@ -1,73 +1,104 @@
 //! Agent-readable capability description for the Kinic CLI.
 //! Where: top-level `capabilities` command.
-//! What: builds JSON from clap command definitions plus a small semantic overlay.
-//! Why: reduces drift between CLI parsing and agent-facing discovery metadata.
+//! What: builds a machine-readable execution contract from clap definitions plus a small semantic overlay.
+//! Why: let agents plan valid CLI invocations without parsing help text or guessing auth/output rules.
 
 use anyhow::Result;
-use clap::{Arg, ArgGroup, Command, CommandFactory};
+use clap::{Arg, ArgAction, ArgGroup, Command, CommandFactory};
 use serde::Serialize;
 
 use crate::cli::{CapabilitiesArgs, Cli};
 
+const SCHEMA_VERSION: u8 = 1;
+const GLOBAL_FLAGS_ALL: &[&str] = &["verbose", "ic", "identity", "ii", "identity_path"];
+const GLOBAL_FLAGS_VERBOSE_ONLY: &[&str] = &["verbose"];
+const GLOBAL_FLAGS_LOGIN: &[&str] = &["verbose", "identity_path"];
+const GLOBAL_FLAGS_TUI: &[&str] = &["verbose", "ic", "identity"];
+
 pub fn handle(_args: CapabilitiesArgs) -> Result<()> {
-    let payload = CapabilitiesDocument::new();
-    println!("{}", serde_json::to_string_pretty(&payload)?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&CapabilitiesDocument::new())?
+    );
     Ok(())
 }
 
 #[derive(Debug, Serialize)]
 struct CapabilitiesDocument {
+    schema_version: u8,
     cli: &'static str,
     version: &'static str,
     auth_summary: &'static str,
-    commands: Vec<CommandCapability>,
+    global_options: Vec<GlobalOptionCapability>,
+    commands: Vec<CapabilityNode>,
 }
 
 impl CapabilitiesDocument {
     fn new() -> Self {
         Self {
+            schema_version: SCHEMA_VERSION,
             cli: "kinic-cli",
             version: env!("CARGO_PKG_VERSION"),
-            auth_summary: "Network commands require --identity or --ii unless noted otherwise. The TUI requires --identity.",
+            auth_summary: "Network commands use global --identity or --ii unless noted otherwise. The TUI requires --identity. tools serve is environment-auth only. Some commands expose conditional auth requirements based on flags such as --validate.",
+            global_options: global_option_capabilities(),
             commands: command_capabilities(),
         }
     }
 }
 
 #[derive(Debug, Serialize)]
-struct CommandCapability {
+struct GlobalOptionCapability {
+    scope: &'static str,
     name: String,
-    summary: String,
-    requires_auth: bool,
-    auth_modes: Vec<&'static str>,
-    output_mode: &'static str,
-    supported_output_modes: Vec<&'static str>,
-    interactive: bool,
-    arguments: Vec<ArgumentCapability>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    arg_groups: Vec<ArgGroupCapability>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    subcommands: Vec<SubcommandCapability>,
+    required: bool,
+    input_shape: &'static str,
+    value_kind: &'static str,
+    #[serde(skip_serializing_if = "ArgumentRelations::is_empty")]
+    relations: ArgumentRelations,
 }
 
 #[derive(Debug, Serialize)]
-struct SubcommandCapability {
+struct CapabilityNode {
     name: String,
     summary: String,
-    output_mode: &'static str,
-    supported_output_modes: Vec<&'static str>,
+    auth: AuthCapability,
+    output: OutputCapability,
+    global_flags_supported: Vec<&'static str>,
     arguments: Vec<ArgumentCapability>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     arg_groups: Vec<ArgGroupCapability>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    subcommands: Vec<SubcommandCapability>,
+    subcommands: Vec<CapabilityNode>,
+}
+
+#[derive(Debug, Serialize)]
+struct AuthCapability {
+    required: bool,
+    sources: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    conditional: Vec<ConditionalAuthCapability>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConditionalAuthCapability {
+    when_argument_present: String,
+    required: bool,
+    sources: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct OutputCapability {
+    default: &'static str,
+    supported: Vec<&'static str>,
+    interactive: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 struct ArgumentCapability {
     name: String,
     required: bool,
-    kind: &'static str,
+    input_shape: &'static str,
+    value_kind: &'static str,
     #[serde(skip_serializing_if = "ArgumentRelations::is_empty")]
     relations: ArgumentRelations,
 }
@@ -95,68 +126,179 @@ struct ArgGroupCapability {
 }
 
 #[derive(Clone, Copy)]
-struct CommandMetadata {
-    auth_modes: &'static [&'static str],
-    output_mode: &'static str,
-    supported_output_modes: &'static [&'static str],
+struct SemanticCommandContract {
+    auth_sources: &'static [&'static str],
+    conditional_auth: &'static [ConditionalAuthContract],
+    output_default: &'static str,
+    output_supported: &'static [&'static str],
     interactive: bool,
+    global_flags_supported: &'static [&'static str],
 }
 
-fn command_capabilities() -> Vec<CommandCapability> {
+#[derive(Clone, Copy)]
+struct ConditionalAuthContract {
+    when_argument_present: &'static str,
+    required: bool,
+    sources: &'static [&'static str],
+}
+
+const CONDITIONAL_AUTH_PREFS_ADD_MEMORY_VALIDATE: &[ConditionalAuthContract] =
+    &[ConditionalAuthContract {
+        when_argument_present: "validate",
+        required: true,
+        sources: &["global_identity", "global_ii"],
+    }];
+
+fn global_option_capabilities() -> Vec<GlobalOptionCapability> {
     Cli::command()
-        .get_subcommands()
-        .map(|command| {
-            let metadata = command_metadata(command.get_name());
-            CommandCapability {
-                name: command.get_name().to_string(),
-                summary: command_summary(command),
-                requires_auth: !metadata.auth_modes.is_empty(),
-                auth_modes: metadata.auth_modes.to_vec(),
-                output_mode: metadata.output_mode,
-                supported_output_modes: metadata.supported_output_modes.to_vec(),
-                interactive: metadata.interactive,
-                arguments: argument_capabilities(command, command.get_name()),
-                arg_groups: arg_group_capabilities(command),
-                subcommands: subcommand_capabilities(command, metadata.output_mode),
-            }
-        })
+        .get_arguments()
+        .filter_map(public_global_argument)
         .collect()
 }
 
-fn subcommand_capabilities(
-    command: &Command,
-    parent_output_mode: &'static str,
-) -> Vec<SubcommandCapability> {
-    subcommand_capabilities_with_path(command, command.get_name(), parent_output_mode)
+fn public_global_argument(arg: &Arg) -> Option<GlobalOptionCapability> {
+    let name = arg.get_id().as_str();
+    if matches!(name, "help" | "version") || arg.get_long().is_none() {
+        return None;
+    }
+    Some(GlobalOptionCapability {
+        scope: "global",
+        name: name.to_string(),
+        required: arg.is_required_set(),
+        input_shape: argument_input_shape(arg),
+        value_kind: argument_value_kind("global", arg),
+        relations: argument_relations(&Cli::command(), arg, "global"),
+    })
 }
 
-fn subcommand_capabilities_with_path(
-    command: &Command,
-    parent_path: &str,
-    parent_output_mode: &'static str,
-) -> Vec<SubcommandCapability> {
-    command
-        .get_subcommands()
-        .map(|subcommand| {
-            let path = format!("{parent_path}.{}", subcommand.get_name());
-            SubcommandCapability {
-                name: subcommand.get_name().to_string(),
-                summary: command_summary(subcommand),
-                output_mode: subcommand_output_mode(&path, parent_output_mode),
-                supported_output_modes: subcommand_supported_output_modes(
-                    &path,
-                    parent_output_mode,
-                ),
-                arguments: argument_capabilities(subcommand, &path),
-                arg_groups: arg_group_capabilities(subcommand),
-                subcommands: subcommand_capabilities_with_path(
-                    subcommand,
-                    &path,
-                    subcommand_output_mode(&path, parent_output_mode),
-                ),
-            }
-        })
+fn command_capabilities() -> Vec<CapabilityNode> {
+    let cli = Cli::command();
+    cli.get_subcommands()
+        .map(|command| capability_node(command, command.get_name()))
         .collect()
+}
+
+fn capability_node(command: &Command, path: &str) -> CapabilityNode {
+    let contract = semantic_command_contract(path);
+    CapabilityNode {
+        name: command.get_name().to_string(),
+        summary: command_summary(command),
+        auth: AuthCapability {
+            required: !contract.auth_sources.is_empty(),
+            sources: contract.auth_sources.to_vec(),
+            conditional: contract
+                .conditional_auth
+                .iter()
+                .map(|rule| ConditionalAuthCapability {
+                    when_argument_present: rule.when_argument_present.to_string(),
+                    required: rule.required,
+                    sources: rule.sources.to_vec(),
+                })
+                .collect(),
+        },
+        output: OutputCapability {
+            default: contract.output_default,
+            supported: contract.output_supported.to_vec(),
+            interactive: contract.interactive,
+        },
+        global_flags_supported: contract.global_flags_supported.to_vec(),
+        arguments: argument_capabilities(command, path),
+        arg_groups: arg_group_capabilities(command),
+        subcommands: command
+            .get_subcommands()
+            .map(|subcommand| {
+                capability_node(subcommand, &format!("{path}.{}", subcommand.get_name()))
+            })
+            .collect(),
+    }
+}
+
+fn semantic_command_contract(path: &str) -> SemanticCommandContract {
+    if path == "tools" || path.starts_with("tools.") {
+        return SemanticCommandContract {
+            auth_sources: &["environment_identity"],
+            conditional_auth: &[],
+            output_default: "text",
+            output_supported: &["text"],
+            interactive: false,
+            global_flags_supported: GLOBAL_FLAGS_VERBOSE_ONLY,
+        };
+    }
+
+    if path == "tui" {
+        return SemanticCommandContract {
+            auth_sources: &["global_identity"],
+            conditional_auth: &[],
+            output_default: "interactive",
+            output_supported: &["interactive"],
+            interactive: true,
+            global_flags_supported: GLOBAL_FLAGS_TUI,
+        };
+    }
+
+    if path == "prefs.add-memory" {
+        return SemanticCommandContract {
+            auth_sources: &[],
+            conditional_auth: CONDITIONAL_AUTH_PREFS_ADD_MEMORY_VALIDATE,
+            output_default: "json",
+            output_supported: &["json"],
+            interactive: false,
+            global_flags_supported: GLOBAL_FLAGS_VERBOSE_ONLY,
+        };
+    }
+
+    if path == "capabilities"
+        || path == "convert-pdf"
+        || path == "prefs"
+        || path.starts_with("prefs.")
+    {
+        return SemanticCommandContract {
+            auth_sources: &[],
+            conditional_auth: &[],
+            output_default: if path == "capabilities"
+                || path == "prefs"
+                || path.starts_with("prefs.")
+            {
+                "json"
+            } else {
+                "text"
+            },
+            output_supported: if path == "capabilities"
+                || path == "prefs"
+                || path.starts_with("prefs.")
+            {
+                &["json"]
+            } else {
+                &["text"]
+            },
+            interactive: false,
+            global_flags_supported: GLOBAL_FLAGS_VERBOSE_ONLY,
+        };
+    }
+
+    if path == "login" {
+        return SemanticCommandContract {
+            auth_sources: &[],
+            conditional_auth: &[],
+            output_default: "text",
+            output_supported: &["text"],
+            interactive: false,
+            global_flags_supported: GLOBAL_FLAGS_LOGIN,
+        };
+    }
+
+    SemanticCommandContract {
+        auth_sources: &["global_identity", "global_ii"],
+        conditional_auth: &[],
+        output_default: "text",
+        output_supported: if matches!(path, "list" | "show" | "search") {
+            &["text", "json"]
+        } else {
+            &["text"]
+        },
+        interactive: false,
+        global_flags_supported: GLOBAL_FLAGS_ALL,
+    }
 }
 
 fn argument_capabilities(command: &Command, path: &str) -> Vec<ArgumentCapability> {
@@ -174,9 +316,39 @@ fn public_argument(command: &Command, arg: &Arg, path: &str) -> Option<ArgumentC
     Some(ArgumentCapability {
         name: name.to_string(),
         required: arg.is_required_set(),
-        kind: argument_kind(path, name),
+        input_shape: argument_input_shape(arg),
+        value_kind: argument_value_kind(path, arg),
         relations: argument_relations(command, arg, path),
     })
+}
+
+fn argument_input_shape(arg: &Arg) -> &'static str {
+    match arg.get_action() {
+        ArgAction::SetTrue | ArgAction::SetFalse | ArgAction::Count => "flag",
+        ArgAction::Append => "multi_value",
+        _ => "single_value",
+    }
+}
+
+fn argument_value_kind(path: &str, arg: &Arg) -> &'static str {
+    match arg.get_action() {
+        ArgAction::SetTrue | ArgAction::SetFalse => "boolean",
+        ArgAction::Count => "integer",
+        _ => semantic_value_kind(path, arg.get_id().as_str()),
+    }
+}
+
+fn semantic_value_kind(path: &str, name: &str) -> &'static str {
+    match (path, name) {
+        (_, "memory_id" | "principal") | ("transfer", "to") => "principal",
+        (_, "file_path" | "identity_path") => "path",
+        (_, "embedding") => "json_array",
+        (_, "top_k" | "dim") => "integer",
+        ("prefs.set-chat-overall-top-k", "value")
+        | ("prefs.set-chat-per-memory-cap", "value")
+        | ("prefs.set-chat-mmr-lambda", "value") => "integer",
+        _ => "string",
+    }
 }
 
 fn argument_relations(command: &Command, arg: &Arg, path: &str) -> ArgumentRelations {
@@ -237,255 +409,4 @@ fn is_public_arg_group(group: &ArgGroup, public_argument_names: &[&str]) -> bool
     !(group.get_id().as_str().ends_with("Args")
         && !group.is_required_set()
         && member_names == public_argument_names)
-}
-
-fn command_metadata(name: &str) -> CommandMetadata {
-    match name {
-        "convert-pdf" | "capabilities" | "prefs" | "login" => CommandMetadata {
-            auth_modes: &[],
-            output_mode: if name == "capabilities" || name == "prefs" {
-                "json"
-            } else {
-                "text"
-            },
-            supported_output_modes: if name == "capabilities" || name == "prefs" {
-                &["json"]
-            } else {
-                &["text"]
-            },
-            interactive: false,
-        },
-        "tui" => CommandMetadata {
-            auth_modes: &["identity"],
-            output_mode: "interactive",
-            supported_output_modes: &["interactive"],
-            interactive: true,
-        },
-        _ => CommandMetadata {
-            auth_modes: &["identity", "ii"],
-            output_mode: "text",
-            supported_output_modes: if matches!(name, "list" | "show" | "search") {
-                &["text", "json"]
-            } else {
-                &["text"]
-            },
-            interactive: false,
-        },
-    }
-}
-
-fn subcommand_output_mode(path: &str, parent_output_mode: &'static str) -> &'static str {
-    match path {
-        "prefs.show"
-        | "prefs.set-default-memory"
-        | "prefs.clear-default-memory"
-        | "prefs.add-tag"
-        | "prefs.remove-tag"
-        | "prefs.add-memory"
-        | "prefs.remove-memory" => "json",
-        _ => parent_output_mode,
-    }
-}
-
-fn subcommand_supported_output_modes(
-    path: &str,
-    parent_output_mode: &'static str,
-) -> Vec<&'static str> {
-    match path {
-        "prefs.show"
-        | "prefs.set-default-memory"
-        | "prefs.clear-default-memory"
-        | "prefs.add-tag"
-        | "prefs.remove-tag"
-        | "prefs.add-memory"
-        | "prefs.remove-memory"
-        | "prefs.set-chat-overall-top-k"
-        | "prefs.set-chat-per-memory-cap"
-        | "prefs.set-chat-mmr-lambda" => vec!["json"],
-        _ => vec![parent_output_mode],
-    }
-}
-
-fn argument_kind(path: &str, name: &str) -> &'static str {
-    if matches!(
-        (path, name),
-        ("search", "all") | ("list", "json") | ("show", "json") | ("search", "json")
-    ) {
-        return "boolean";
-    }
-
-    match (path, name) {
-        ("prefs.add-memory", "validate") => "boolean",
-        ("prefs.set-chat-overall-top-k", "value")
-        | ("prefs.set-chat-per-memory-cap", "value")
-        | ("prefs.set-chat-mmr-lambda", "value") => "integer",
-        (_, "memory_id") => "principal",
-        (_, "file_path") => "path",
-        (_, "embedding") => "json_array",
-        (_, "top_k" | "dim") => "integer",
-        ("config", "add_user") => "principal_role_pair",
-        _ => "string",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use clap::{Arg, CommandFactory};
-
-    use super::*;
-    use crate::cli::Cli;
-
-    #[test]
-    fn capabilities_document_matches_top_level_clap_commands() {
-        let document = CapabilitiesDocument::new();
-        let clap_names: Vec<String> = Cli::command()
-            .get_subcommands()
-            .map(|command| command.get_name().to_string())
-            .collect();
-        let capability_names: Vec<String> = document
-            .commands
-            .iter()
-            .map(|command| command.name.clone())
-            .collect();
-
-        assert_eq!(capability_names, clap_names);
-    }
-
-    #[test]
-    fn capabilities_document_describes_prefs_subcommands_from_clap() {
-        let document = CapabilitiesDocument::new();
-        let prefs = document
-            .commands
-            .iter()
-            .find(|command| command.name == "prefs")
-            .expect("prefs command should exist");
-        let clap = Cli::command();
-        let clap_prefs = clap
-            .get_subcommands()
-            .find(|command| command.get_name() == "prefs")
-            .expect("prefs should exist in clap");
-        let clap_subcommands: Vec<String> = clap_prefs
-            .get_subcommands()
-            .map(|command| command.get_name().to_string())
-            .collect();
-        let capability_subcommands: Vec<String> = prefs
-            .subcommands
-            .iter()
-            .map(|command| command.name.clone())
-            .collect();
-
-        assert_eq!(capability_subcommands, clap_subcommands);
-        assert_eq!(prefs.output_mode, "json");
-        assert_eq!(prefs.supported_output_modes, vec!["json"]);
-    }
-
-    #[test]
-    fn capabilities_document_includes_nested_config_user_subcommands() {
-        let document = CapabilitiesDocument::new();
-        let config = document
-            .commands
-            .iter()
-            .find(|command| command.name == "config")
-            .expect("config command should exist");
-        let users = config
-            .subcommands
-            .iter()
-            .find(|subcommand| subcommand.name == "users")
-            .expect("config users subcommand should exist");
-        let leaf_names: Vec<&str> = users
-            .subcommands
-            .iter()
-            .map(|subcommand| subcommand.name.as_str())
-            .collect();
-
-        assert_eq!(leaf_names, vec!["list", "add", "change", "remove"]);
-    }
-
-    #[test]
-    fn capabilities_document_marks_tui_as_interactive_identity_only() {
-        let document = CapabilitiesDocument::new();
-        let tui = document
-            .commands
-            .iter()
-            .find(|command| command.name == "tui")
-            .expect("tui command should exist");
-
-        assert!(tui.requires_auth);
-        assert_eq!(tui.auth_modes, ["identity"]);
-        assert_eq!(tui.output_mode, "interactive");
-        assert_eq!(tui.supported_output_modes, vec!["interactive"]);
-        assert!(tui.interactive);
-    }
-
-    #[test]
-    fn capabilities_document_includes_insert_arg_group_constraints() {
-        let document = CapabilitiesDocument::new();
-        let insert = document
-            .commands
-            .iter()
-            .find(|command| command.name == "insert")
-            .expect("insert command should exist");
-
-        assert_eq!(
-            insert.arg_groups,
-            vec![ArgGroupCapability {
-                id: "insert_input".to_string(),
-                required: true,
-                multiple: false,
-                members: vec!["text".to_string(), "file_path".to_string()],
-            }]
-        );
-    }
-
-    #[test]
-    fn argument_relations_capture_public_conflicts() {
-        let command = Command::new("demo")
-            .arg(Arg::new("alpha").long("alpha").conflicts_with("beta"))
-            .arg(Arg::new("beta").long("beta"));
-        let alpha = command
-            .get_arguments()
-            .find(|arg| arg.get_id().as_str() == "alpha")
-            .expect("alpha should exist");
-
-        let relations = argument_relations(&command, alpha, "demo");
-
-        assert_eq!(
-            relations,
-            ArgumentRelations {
-                requires: Vec::new(),
-                conflicts: vec!["beta".to_string()],
-            }
-        );
-    }
-
-    #[test]
-    fn manual_argument_relations_default_to_empty_overlay() {
-        assert_eq!(
-            manual_argument_relations("insert", "text"),
-            ArgumentRelations::default()
-        );
-    }
-
-    #[test]
-    fn argument_kind_marks_search_all_as_boolean() {
-        let command = crate::cli::Cli::command();
-        let search = command
-            .get_subcommands()
-            .find(|subcommand| subcommand.get_name() == "search")
-            .expect("search command should exist");
-        let all = search
-            .get_arguments()
-            .find(|arg| arg.get_id().as_str() == "all")
-            .expect("all arg should exist");
-
-        assert!(matches!(all.get_action(), clap::ArgAction::SetTrue));
-        assert_eq!(argument_kind("search", "all"), "boolean");
-    }
-
-    #[test]
-    fn command_metadata_marks_json_capable_read_commands() {
-        let metadata = command_metadata("search");
-        assert_eq!(metadata.output_mode, "text");
-        assert_eq!(metadata.supported_output_modes, ["text", "json"]);
-    }
 }

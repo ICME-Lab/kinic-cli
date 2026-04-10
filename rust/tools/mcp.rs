@@ -6,7 +6,7 @@ use anyhow::Result;
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
-    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
     transport::stdio,
 };
@@ -134,9 +134,9 @@ pub async fn serve_mcp(_args: &ToolsServeArgs) -> Result<()> {
 }
 
 fn json_result<T: serde::Serialize>(value: &T) -> std::result::Result<CallToolResult, McpError> {
-    let payload = serde_json::to_string(value)
+    let payload = serde_json::to_value(value)
         .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-    Ok(CallToolResult::success(vec![Content::text(payload)]))
+    Ok(CallToolResult::structured(payload))
 }
 
 fn to_mcp_error(error: super::service::ToolServiceError) -> McpError {
@@ -173,5 +173,17 @@ mod tests {
                 "memory_show"
             ]
         );
+    }
+
+    #[test]
+    fn json_result_returns_structured_content() {
+        let result = json_result(&serde_json::json!({"items": []})).expect("json should serialize");
+
+        assert_eq!(
+            result.structured_content,
+            Some(serde_json::json!({"items": []}))
+        );
+        assert_eq!(result.content, None);
+        assert_eq!(result.is_error, Some(false));
     }
 }
