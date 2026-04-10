@@ -23,9 +23,13 @@ use crate::{
     shared::cross_memory_search::{collect_searchable_memory_ids, fold_search_batches},
     tui::TuiAuth,
 };
-use ic_agent::export::Principal;
-use kinic_amount::{
-    KinicAmountParseError, format_e8s_to_kinic_string_u128, parse_required_kinic_amount_to_e8s,
+use kinic_core::{
+    amount::{
+        KinicAmountParseError, format_e8s_to_kinic_string_u128, parse_required_kinic_amount_to_e8s,
+    },
+    prefs_policy,
+    principal::parse_required_principal,
+    tag,
 };
 use serde::Deserialize;
 use tokio::runtime::Runtime;
@@ -352,7 +356,7 @@ impl<'a> DefaultMemorySelection<'a> {
 }
 
 fn saved_tag_selection(preferences: &UserPreferences) -> Vec<String> {
-    preferences::normalize_saved_tags(preferences.saved_tags.clone())
+    tag::normalize_saved_tags(preferences.saved_tags.clone())
 }
 
 fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> {
@@ -437,7 +441,7 @@ fn picker_items_for_context(
                 .unwrap_or_default(),
             _ => Vec::new(),
         },
-        PickerContext::ChatResultLimit => preferences::chat_result_limit_options()
+        PickerContext::ChatResultLimit => prefs_policy::chat_result_limit_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
@@ -447,7 +451,7 @@ fn picker_items_for_context(
                 )
             })
             .collect(),
-        PickerContext::ChatPerMemoryLimit => preferences::chat_per_memory_limit_options()
+        PickerContext::ChatPerMemoryLimit => prefs_policy::chat_per_memory_limit_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
@@ -457,7 +461,7 @@ fn picker_items_for_context(
                 )
             })
             .collect(),
-        PickerContext::ChatDiversity => preferences::chat_diversity_options()
+        PickerContext::ChatDiversity => prefs_policy::chat_diversity_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
@@ -2377,8 +2381,7 @@ impl KinicProvider {
 
         let mut updated_preferences = self.user_preferences.clone();
         updated_preferences.saved_tags.push(normalized_tag.clone());
-        updated_preferences.saved_tags =
-            preferences::normalize_saved_tags(updated_preferences.saved_tags);
+        updated_preferences.saved_tags = tag::normalize_saved_tags(updated_preferences.saved_tags);
 
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -2418,8 +2421,7 @@ impl KinicProvider {
         updated_preferences
             .saved_tags
             .retain(|saved| saved != &normalized_tag);
-        updated_preferences.saved_tags =
-            preferences::normalize_saved_tags(updated_preferences.saved_tags);
+        updated_preferences.saved_tags = tag::normalize_saved_tags(updated_preferences.saved_tags);
 
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -3352,7 +3354,7 @@ impl KinicProvider {
         if memory_id.is_empty() {
             return Err("Memory canister id is required.".to_string());
         }
-        Principal::from_text(memory_id)
+        parse_required_principal(memory_id)
             .map_err(|_| format!("Invalid principal text: {memory_id}"))?;
         if self
             .user_preferences
@@ -3374,7 +3376,7 @@ impl KinicProvider {
         if memory_id.is_empty() {
             return Err("Select a memory before renaming.".to_string());
         }
-        Principal::from_text(memory_id)
+        parse_required_principal(memory_id)
             .map_err(|_| format!("Invalid principal text: {memory_id}"))?;
 
         let next_name = state.rename_memory.form.value.trim();
@@ -3390,7 +3392,7 @@ impl KinicProvider {
         if principal_id.is_empty() {
             return Err("Recipient principal is required.".to_string());
         }
-        Principal::from_text(principal_id)
+        parse_required_principal(principal_id)
             .map_err(|_| format!("Invalid principal text: {principal_id}"))?;
 
         let amount_text = state.transfer_modal.amount.trim();

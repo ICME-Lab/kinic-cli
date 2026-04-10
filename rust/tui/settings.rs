@@ -5,7 +5,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use kinic_amount::format_e8s_to_kinic_string_u128;
+use kinic_core::amount::format_e8s_to_kinic_string_u128;
 use serde::{Deserialize, Serialize};
 use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]

@@ -1998,13 +1998,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kinic-amount"
-version = "0.1.0"
-dependencies = [
- "candid",
-]
-
-[[package]]
 name = "kinic-cli"
 version = "0.1.2"
 dependencies = [
@@ -2020,7 +2013,7 @@ dependencies = [
  "ic-ed25519",
  "icrc-ledger-types",
  "keyring",
- "kinic-amount",
+ "kinic-core",
  "pdf-extract",
  "pem 3.0.6",
  "pkcs8",
@@ -2042,6 +2035,13 @@ dependencies = [
  "tui-kit-model",
  "tui-kit-render",
  "tui-kit-runtime",
+]
+
+[[package]]
+name = "kinic-core"
+version = "0.1.0"
+dependencies = [
+ "candid",
 ]
 
 [[package]]
@@ -3981,7 +3981,7 @@ name = "tui-kit-runtime"
 version = "0.1.0"
 dependencies = [
  "candid",
- "kinic-amount",
+ "kinic-core",
  "tui-kit-model",
 ]
 

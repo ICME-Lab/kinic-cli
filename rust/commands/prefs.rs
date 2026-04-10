@@ -5,7 +5,11 @@
 //! Why: keep the TUI as the single persistence layer while letting CLI users manage the same settings.
 
 use anyhow::{Context, Result, bail};
-use ic_agent::export::Principal;
+use kinic_core::{
+    prefs_policy,
+    principal::{PrincipalTextError, normalize_memory_id_text, parse_required_principal},
+    tag::{TagError, normalize_tag_text},
+};
 use serde::Serialize;
 
 use crate::{
@@ -208,7 +212,8 @@ fn save_preferences(user_preferences: &UserPreferences) -> Result<()> {
 async fn validate_manual_memory_access(global: &GlobalOpts, memory_id: &str) -> Result<String> {
     let (agent_factory, _) = crate::build_cli_command_context(global)?;
     let agent = agent_factory.build().await?;
-    let memory = Principal::from_text(memory_id).context("Failed to parse memory canister id")?;
+    let memory = parse_required_principal(memory_id)
+        .map_err(|_| anyhow::anyhow!("Failed to parse memory canister id"))?;
     let client = MemoryClient::new(agent, memory);
     client
         .get_name()
@@ -218,53 +223,47 @@ async fn validate_manual_memory_access(global: &GlobalOpts, memory_id: &str) -> 
 
 fn validate_memory_id(value: &str) -> Result<String> {
     let trimmed = value.trim();
-    if trimmed.is_empty() {
-        bail!("memory id must not be empty");
+    match normalize_memory_id_text(value) {
+        Ok(memory_id) => Ok(memory_id),
+        Err(PrincipalTextError::Empty) => bail!("memory id must not be empty"),
+        Err(PrincipalTextError::Invalid) => bail!("invalid principal text: {trimmed}"),
     }
-
-    Principal::from_text(trimmed).with_context(|| format!("invalid principal text: {trimmed}"))?;
-    Ok(trimmed.to_string())
 }
 
 fn validate_tag(value: &str) -> Result<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        bail!("tag must not be empty");
+    match normalize_tag_text(value) {
+        Ok(tag) => Ok(tag),
+        Err(TagError::Empty) => bail!("tag must not be empty"),
     }
-
-    Ok(trimmed.to_string())
 }
 
 fn validate_chat_overall_top_k(value: usize) -> Result<usize> {
-    if preferences::chat_result_limit_options().contains(&value) {
-        Ok(value)
-    } else {
-        bail!(
+    match prefs_policy::validate_chat_overall_top_k(value) {
+        Ok(value) => Ok(value),
+        Err(_) => bail!(
             "chat overall top-k must be one of: {}",
-            display_options_usize(preferences::chat_result_limit_options())
-        );
+            display_options_usize(prefs_policy::chat_result_limit_options())
+        ),
     }
 }
 
 fn validate_chat_per_memory_cap(value: usize) -> Result<usize> {
-    if preferences::chat_per_memory_limit_options().contains(&value) {
-        Ok(value)
-    } else {
-        bail!(
+    match prefs_policy::validate_chat_per_memory_cap(value) {
+        Ok(value) => Ok(value),
+        Err(_) => bail!(
             "chat per-memory cap must be one of: {}",
-            display_options_usize(preferences::chat_per_memory_limit_options())
-        );
+            display_options_usize(prefs_policy::chat_per_memory_limit_options())
+        ),
     }
 }
 
 fn validate_chat_mmr_lambda(value: u8) -> Result<u8> {
-    if preferences::chat_diversity_options().contains(&value) {
-        Ok(value)
-    } else {
-        bail!(
+    match prefs_policy::validate_chat_mmr_lambda(value) {
+        Ok(value) => Ok(value),
+        Err(_) => bail!(
             "chat mmr lambda must be one of: {}",
-            display_options_u8(preferences::chat_diversity_options())
-        );
+            display_options_u8(prefs_policy::chat_diversity_options())
+        ),
     }
 }
 

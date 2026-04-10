@@ -23,7 +23,7 @@ use crate::{
 
 use anyhow::{Context, Result};
 use ic_agent::{Agent, export::Principal};
-use kinic_amount::format_e8s_to_kinic_string_nat;
+use kinic_core::amount::format_e8s_to_kinic_string_nat;
 use tui_kit_runtime::{AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

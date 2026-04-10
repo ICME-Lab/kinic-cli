@@ -3,6 +3,7 @@
 //! What: owns the on-disk schema plus normalization and YAML persistence helpers.
 //! Why: avoid coupling CLI preference management to TUI-specific screen and chat-history code.
 
+use kinic_core::{prefs_policy, tag};
 use serde::{Deserialize, Serialize};
 use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
@@ -12,12 +13,9 @@ use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 const APP_NAMESPACE: &str = "kinic";
 #[cfg(not(test))]
 const SETTINGS_FILE_NAME: &str = "tui.yaml";
-pub const DEFAULT_CHAT_OVERALL_TOP_K: usize = 8;
-pub const DEFAULT_CHAT_PER_MEMORY_CAP: usize = 3;
-pub const DEFAULT_CHAT_MMR_LAMBDA: u8 = 70;
-const CHAT_RESULT_LIMIT_OPTIONS: &[usize] = &[4, 6, 8, 10, 12];
-const CHAT_PER_MEMORY_LIMIT_OPTIONS: &[usize] = &[1, 2, 3, 4];
-const CHAT_DIVERSITY_OPTIONS: &[u8] = &[60, 70, 80, 90];
+pub use kinic_core::prefs_policy::{
+    DEFAULT_CHAT_MMR_LAMBDA, DEFAULT_CHAT_OVERALL_TOP_K, DEFAULT_CHAT_PER_MEMORY_CAP,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 // The current on-disk schema is intentionally fixed; unsupported legacy shapes fail to decode.
@@ -84,13 +82,7 @@ pub fn save_user_preferences(preferences: &UserPreferences) -> Result<(), Settin
 }
 
 pub fn normalize_saved_tags(mut tags: Vec<String>) -> Vec<String> {
-    tags = tags
-        .into_iter()
-        .map(|tag| tag.trim().to_string())
-        .filter(|tag| !tag.is_empty())
-        .collect();
-    tags.sort();
-    tags.dedup();
+    tags = tag::normalize_saved_tags(tags);
     tags
 }
 
@@ -105,39 +97,15 @@ pub fn normalize_user_preferences(mut preferences: UserPreferences) -> UserPrefe
 }
 
 pub fn normalize_chat_overall_top_k(value: usize) -> usize {
-    if CHAT_RESULT_LIMIT_OPTIONS.contains(&value) {
-        value
-    } else {
-        DEFAULT_CHAT_OVERALL_TOP_K
-    }
+    prefs_policy::normalize_chat_overall_top_k(value)
 }
 
 pub fn normalize_chat_per_memory_cap(value: usize) -> usize {
-    if CHAT_PER_MEMORY_LIMIT_OPTIONS.contains(&value) {
-        value
-    } else {
-        DEFAULT_CHAT_PER_MEMORY_CAP
-    }
+    prefs_policy::normalize_chat_per_memory_cap(value)
 }
 
 pub fn normalize_chat_mmr_lambda(value: u8) -> u8 {
-    if CHAT_DIVERSITY_OPTIONS.contains(&value) {
-        value
-    } else {
-        DEFAULT_CHAT_MMR_LAMBDA
-    }
-}
-
-pub fn chat_result_limit_options() -> &'static [usize] {
-    CHAT_RESULT_LIMIT_OPTIONS
-}
-
-pub fn chat_per_memory_limit_options() -> &'static [usize] {
-    CHAT_PER_MEMORY_LIMIT_OPTIONS
-}
-
-pub fn chat_diversity_options() -> &'static [u8] {
-    CHAT_DIVERSITY_OPTIONS
+    prefs_policy::normalize_chat_mmr_lambda(value)
 }
 
 pub fn chat_result_limit_display(value: usize) -> String {

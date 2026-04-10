@@ -5,7 +5,7 @@
 
 use candid::Nat;
 
-use crate::KINIC_FRACTION_DIGITS;
+use super::KINIC_FRACTION_DIGITS;
 
 /// Formats ledger base units into a fixed 8-digit KINIC decimal string.
 pub fn format_e8s_to_kinic_string_u128(value: u128) -> String {

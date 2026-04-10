@@ -3,7 +3,7 @@
 //! What: validates incremental input and parses partial decimal text during editing.
 //! Why: keep in-progress editor behavior aligned with strict submit parsing.
 
-use crate::{
+use super::{
     E8S_PER_KINIC, KINIC_FRACTION_DIGITS,
     parsing::{parse_kinic_fraction_part, parse_kinic_whole_part, split_kinic_amount_parts},
 };
@@ -36,8 +36,8 @@ pub fn parse_editing_kinic_display_to_e8s(value: &str) -> Option<u128> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::E8S_PER_KINIC;
     use super::{editing_kinic_amount_accepts_char, parse_editing_kinic_display_to_e8s};
-    use crate::E8S_PER_KINIC;
 
     #[test]
     fn parse_editing_kinic_display_to_e8s_allows_empty_and_partial_editor_values() {

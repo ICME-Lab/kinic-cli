@@ -1,13 +1,13 @@
 [package]
-name = "kinic-amount"
+name = "kinic-core"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.86"
 license = "MIT"
-description = "Shared KINIC amount parsing and formatting rules"
+description = "Shared KINIC domain rules for CLI and TUI flows"
 
 [lib]
-name = "kinic_amount"
+name = "kinic_core"
 path = "src/lib.rs"
 
 [dependencies]

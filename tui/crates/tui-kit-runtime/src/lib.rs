@@ -15,7 +15,7 @@ pub use form_descriptor::{
     form_char_input_command, form_command_to_action, form_descriptor, form_enter_command,
     form_horizontal_change_command, form_shows_horizontal_change_hint,
 };
-pub use kinic_amount::{
+pub use kinic_core::amount::{
     KinicAmountParseError, editing_kinic_amount_accepts_char, format_e8s_to_kinic_string_nat,
     format_e8s_to_kinic_string_u128, parse_editing_kinic_display_to_e8s,
     parse_required_kinic_amount_to_e8s,

@@ -3,8 +3,9 @@
 //! What: provides role conversion, principal parsing, validation, and user list normalization.
 //! Why: keep access-control rules and user rendering inputs identical across interfaces.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use ic_agent::export::Principal;
+use kinic_core::principal::{PrincipalTextError, parse_required_principal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryRole {
@@ -70,7 +71,11 @@ pub fn parse_user_principal(value: &str) -> Result<Principal> {
         return Ok(Principal::anonymous());
     }
 
-    Principal::from_text(trimmed).with_context(|| format!("invalid principal text: {trimmed}"))
+    match parse_required_principal(trimmed) {
+        Ok(principal) => Ok(principal),
+        Err(PrincipalTextError::Empty) => bail!("principal must not be empty"),
+        Err(PrincipalTextError::Invalid) => bail!("invalid principal text: {trimmed}"),
+    }
 }
 
 pub fn validate_role_assignment(principal_text: &str, role: MemoryRole) -> Result<()> {
@@ -129,6 +134,18 @@ mod tests {
     fn validate_role_assignment_rejects_anonymous_admin() {
         let error = validate_role_assignment("anonymous", MemoryRole::Admin).unwrap_err();
         assert_eq!(error.to_string(), "cannot grant admin role to anonymous");
+    }
+
+    #[test]
+    fn parse_user_principal_rejects_empty_values() {
+        let error = parse_user_principal("   ").unwrap_err();
+        assert_eq!(error.to_string(), "principal must not be empty");
+    }
+
+    #[test]
+    fn parse_user_principal_rejects_invalid_text() {
+        let error = parse_user_principal("not-a-principal").unwrap_err();
+        assert_eq!(error.to_string(), "invalid principal text: not-a-principal");
     }
 
     #[test]

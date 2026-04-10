@@ -224,18 +224,14 @@ fn parse_identity_from_pem_bytes(pem_bytes: &[u8]) -> Result<Arc<dyn Identity>> 
     let mut last_decode_error = None;
     for pem in &pems {
         match pem.tag() {
-            "PRIVATE KEY" => {
-                match BasicIdentity::from_pem(Cursor::new(pem_text.clone())) {
-                    Ok(identity) => return Ok(Arc::new(identity)),
-                    Err(error) => last_decode_error = Some(error.into()),
-                }
-            }
-            "EC PRIVATE KEY" => {
-                match Secp256k1Identity::from_pem(Cursor::new(pem_text.clone())) {
-                    Ok(identity) => return Ok(Arc::new(identity)),
-                    Err(error) => last_decode_error = Some(error.into()),
-                }
-            }
+            "PRIVATE KEY" => match BasicIdentity::from_pem(Cursor::new(pem_text.clone())) {
+                Ok(identity) => return Ok(Arc::new(identity)),
+                Err(error) => last_decode_error = Some(error.into()),
+            },
+            "EC PRIVATE KEY" => match Secp256k1Identity::from_pem(Cursor::new(pem_text.clone())) {
+                Ok(identity) => return Ok(Arc::new(identity)),
+                Err(error) => last_decode_error = Some(error.into()),
+            },
             _ => {}
         }
     }
@@ -388,7 +384,11 @@ BgUrgQQACg==
             Err(error) => error,
         };
 
-        assert!(error.to_string().contains("Unsupported PEM tags: EC PARAMETERS"));
+        assert!(
+            error
+                .to_string()
+                .contains("Unsupported PEM tags: EC PARAMETERS")
+        );
     }
 
     #[test]

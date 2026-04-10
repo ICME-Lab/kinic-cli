@@ -3,7 +3,7 @@
 //! What: parses decimal KINIC text into e8s with structured errors.
 //! Why: keep validation logic aligned while leaving user-facing copy to callers.
 
-use crate::{E8S_PER_KINIC, KINIC_FRACTION_DIGITS};
+use super::{E8S_PER_KINIC, KINIC_FRACTION_DIGITS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KinicAmountParseError {
@@ -82,8 +82,8 @@ pub(crate) fn parse_kinic_fraction_part(fraction: &str) -> Result<u128, KinicAmo
 
 #[cfg(test)]
 mod tests {
+    use super::super::KINIC_FRACTION_DIGITS;
     use super::{KinicAmountParseError, parse_required_kinic_amount_to_e8s};
-    use crate::KINIC_FRACTION_DIGITS;
 
     #[test]
     fn parse_required_kinic_amount_to_e8s_rejects_invalid_input() {

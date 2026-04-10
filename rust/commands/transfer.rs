@@ -3,11 +3,13 @@
 //! What: validates recipient and amount, fetches the current ledger fee, and submits transfer.
 //! Why: expose the same ledger transfer capability the TUI already uses with explicit CLI safety.
 
-use anyhow::{Context, Result, bail};
-use ic_agent::export::Principal;
-use kinic_amount::{
-    KinicAmountParseError, format_e8s_to_kinic_string_u128, normalize_kinic_display,
-    parse_required_kinic_amount_to_e8s,
+use anyhow::{Result, bail};
+use kinic_core::{
+    amount::{
+        KinicAmountParseError, format_e8s_to_kinic_string_u128, normalize_kinic_display,
+        parse_required_kinic_amount_to_e8s,
+    },
+    principal::{PrincipalTextError, parse_required_principal},
 };
 use tracing::info;
 
@@ -22,8 +24,11 @@ pub async fn handle(args: TransferArgs, ctx: &CommandContext) -> Result<()> {
         bail!("transfer requires --yes to execute");
     }
 
-    let recipient = Principal::from_text(args.to.trim())
-        .with_context(|| format!("invalid principal text: {}", args.to.trim()))?;
+    let recipient = parse_required_principal(args.to.trim()).map_err(|error| match error {
+        PrincipalTextError::Empty | PrincipalTextError::Invalid => {
+            anyhow::anyhow!("invalid principal text: {}", args.to.trim())
+        }
+    })?;
     let amount_e8s = parse_cli_amount_to_e8s(&args.amount)?;
     let agent = ctx.agent_factory.build().await?;
     let fee_e8s = fetch_fee(&agent).await?;

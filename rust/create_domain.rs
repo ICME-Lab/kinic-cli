@@ -4,7 +4,7 @@
 //! Why: keep create rules in one non-UI module so command and TUI paths stay aligned.
 
 use candid::Nat;
-use kinic_amount::{format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128};
+use kinic_core::amount::{format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128};
 use tui_kit_runtime::DerivedCreateCost;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
