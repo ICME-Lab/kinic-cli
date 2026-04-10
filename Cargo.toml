@@ -39,6 +39,7 @@ ring = "0.17.14"
 der = "0.7.10"
 pkcs8 = "0.10.2"
 ic-ed25519 = "0.2.0"
+kinic-amount = { path = "crates/kinic-amount" }
 tui-kit-host = { path = "tui/crates/tui-kit-host" }
 tui-kit-runtime = { path = "tui/crates/tui-kit-runtime" }
 tui-kit-model = { path = "tui/crates/tui-kit-model" }
@@ -65,6 +66,7 @@ path = "rust/cli.rs"
 [workspace]
 members = [
     ".",
+    "crates/kinic-amount",
     "tui/crates/tui-kit",
     "tui/crates/tui-kit-host",
     "tui/crates/tui-kit-runtime",

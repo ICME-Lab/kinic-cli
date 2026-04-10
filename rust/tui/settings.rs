@@ -5,6 +5,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use kinic_amount::format_e8s_to_kinic_string_u128;
 use serde::{Deserialize, Serialize};
 use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
@@ -13,7 +14,6 @@ use tui_kit_runtime::{
     SETTINGS_ENTRY_CHAT_DIVERSITY_ID, SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID,
     SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID, SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview,
     SessionSettingsSnapshot, SettingsEntry, SettingsSection, SettingsSnapshot,
-    format_e8s_to_kinic_string_u128,
 };
 
 use crate::preferences::{

@@ -24,6 +24,9 @@ use crate::{
     tui::TuiAuth,
 };
 use ic_agent::export::Principal;
+use kinic_amount::{
+    KinicAmountParseError, format_e8s_to_kinic_string_u128, parse_required_kinic_amount_to_e8s,
+};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
@@ -34,7 +37,6 @@ use tui_kit_runtime::{
     LoadedCreateCost, PaneFocus, PickerConfirmKind, PickerContext, PickerItem, PickerItemKind,
     PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SearchScope,
     SessionAccountOverview, SessionSettingsSnapshot, TransferModalMode,
-    format_e8s_to_kinic_string_u128,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -3395,7 +3397,8 @@ impl KinicProvider {
         if amount_text.is_empty() {
             return Err("Amount is required.".to_string());
         }
-        let amount_base_units = parse_kinic_amount_to_e8s(amount_text)?;
+        let amount_base_units = parse_required_kinic_amount_to_e8s(amount_text)
+            .map_err(format_transfer_amount_parse_error)?;
         if amount_base_units == 0 {
             return Err("Amount must be greater than zero.".to_string());
         }
@@ -4991,48 +4994,19 @@ impl DataProvider for KinicProvider {
     }
 }
 
-fn parse_kinic_amount_to_e8s(value: &str) -> Result<u128, String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err("Amount is required.".to_string());
+fn format_transfer_amount_parse_error(error: KinicAmountParseError) -> String {
+    match error {
+        KinicAmountParseError::Empty => "Amount is required.".to_string(),
+        KinicAmountParseError::Negative => "Amount must be a positive decimal number.".to_string(),
+        KinicAmountParseError::TooManyParts => {
+            "Amount must be a decimal number with up to 8 fraction digits.".to_string()
+        }
+        KinicAmountParseError::NonDigit => "Amount must contain digits only.".to_string(),
+        KinicAmountParseError::TooManyFractionDigits => {
+            "Amount supports up to 8 decimal places.".to_string()
+        }
+        KinicAmountParseError::Overflow => "Amount exceeds supported range.".to_string(),
     }
-    let parts: Vec<&str> = trimmed.split('.').collect();
-    if parts.len() > 2 {
-        return Err("Amount must be a decimal number with up to 8 fraction digits.".to_string());
-    }
-    let whole = parts[0];
-    let fraction = if parts.len() == 2 { parts[1] } else { "" };
-    if whole.is_empty() && fraction.is_empty() {
-        return Err("Amount is required.".to_string());
-    }
-    if !whole.chars().all(|char| char.is_ascii_digit())
-        || !fraction.chars().all(|char| char.is_ascii_digit())
-    {
-        return Err("Amount must contain digits only.".to_string());
-    }
-    if fraction.len() > 8 {
-        return Err("Amount supports up to 8 decimal places.".to_string());
-    }
-
-    let whole_value = if whole.is_empty() {
-        0u128
-    } else {
-        whole
-            .parse::<u128>()
-            .map_err(|_| "Amount exceeds supported range.".to_string())?
-    };
-    let fractional_text = format!("{fraction:0<8}");
-    let fractional_value = if fractional_text.is_empty() {
-        0u128
-    } else {
-        fractional_text
-            .parse::<u128>()
-            .map_err(|_| "Amount exceeds supported range.".to_string())?
-    };
-    whole_value
-        .checked_mul(100_000_000u128)
-        .and_then(|value| value.checked_add(fractional_value))
-        .ok_or_else(|| "Amount exceeds supported range.".to_string())
 }
 
 fn format_transfer_error(error: &bridge::TransferKinicError) -> String {

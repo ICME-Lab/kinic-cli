@@ -5,6 +5,10 @@
 
 use anyhow::{Context, Result, bail};
 use ic_agent::export::Principal;
+use kinic_amount::{
+    KinicAmountParseError, format_e8s_to_kinic_string_u128, normalize_kinic_display,
+    parse_required_kinic_amount_to_e8s,
+};
 use tracing::info;
 
 use crate::{
@@ -13,9 +17,6 @@ use crate::{
 };
 
 use super::CommandContext;
-
-const E8S_PER_KINIC: u128 = 100_000_000;
-
 pub async fn handle(args: TransferArgs, ctx: &CommandContext) -> Result<()> {
     if !args.yes {
         bail!("transfer requires --yes to execute");
@@ -23,7 +24,7 @@ pub async fn handle(args: TransferArgs, ctx: &CommandContext) -> Result<()> {
 
     let recipient = Principal::from_text(args.to.trim())
         .with_context(|| format!("invalid principal text: {}", args.to.trim()))?;
-    let amount_e8s = parse_kinic_amount_to_e8s(&args.amount)?;
+    let amount_e8s = parse_cli_amount_to_e8s(&args.amount)?;
     let agent = ctx.agent_factory.build().await?;
     let fee_e8s = fetch_fee(&agent).await?;
     let block_index = transfer(&agent, recipient, amount_e8s, fee_e8s).await?;
@@ -44,74 +45,34 @@ pub async fn handle(args: TransferArgs, ctx: &CommandContext) -> Result<()> {
         amount_e8s
     );
     println!(
-        "Fee: {:.8} KINIC ({} e8s)",
-        fee_e8s as f64 / E8S_PER_KINIC as f64,
+        "Fee: {} KINIC ({} e8s)",
+        format_e8s_to_kinic_string_u128(fee_e8s),
         fee_e8s
     );
     println!("Block index: {block_index}");
     Ok(())
 }
 
-fn parse_kinic_amount_to_e8s(raw: &str) -> Result<u128> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        bail!("amount must not be empty");
+fn map_cli_kinic_amount_error(error: KinicAmountParseError) -> anyhow::Error {
+    match error {
+        KinicAmountParseError::Empty => anyhow::anyhow!("amount must not be empty"),
+        KinicAmountParseError::Negative => anyhow::anyhow!("amount must be positive"),
+        KinicAmountParseError::TooManyParts | KinicAmountParseError::NonDigit => {
+            anyhow::anyhow!("amount must be a decimal KINIC value, e.g. 1 or 0.25")
+        }
+        KinicAmountParseError::TooManyFractionDigits => {
+            anyhow::anyhow!("amount supports at most 8 decimal places")
+        }
+        KinicAmountParseError::Overflow => anyhow::anyhow!("amount exceeds supported range"),
     }
-    if trimmed.starts_with('-') {
-        bail!("amount must be positive");
-    }
-
-    let parts = trimmed.split('.').collect::<Vec<_>>();
-    if parts.len() > 2
-        || parts
-            .iter()
-            .any(|part| !part.chars().all(|ch| ch.is_ascii_digit()))
-    {
-        bail!("amount must be a decimal KINIC value, e.g. 1 or 0.25");
-    }
-
-    let whole = parts[0]
-        .parse::<u128>()
-        .with_context(|| format!("invalid whole amount: {}", parts[0]))?;
-    let fractional_text = if parts.len() == 2 { parts[1] } else { "" };
-    if fractional_text.len() > 8 {
-        bail!("amount supports at most 8 decimal places");
-    }
-
-    let mut fractional = fractional_text.to_string();
-    while fractional.len() < 8 {
-        fractional.push('0');
-    }
-    let fractional_e8s = if fractional.is_empty() {
-        0
-    } else {
-        fractional
-            .parse::<u128>()
-            .with_context(|| format!("invalid fractional amount: {fractional_text}"))?
-    };
-
-    let total = whole
-        .checked_mul(E8S_PER_KINIC)
-        .and_then(|base| base.checked_add(fractional_e8s))
-        .context("amount exceeds supported range")?;
-    if total == 0 {
-        bail!("amount must be greater than zero");
-    }
-    Ok(total)
 }
 
-fn normalize_kinic_display(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if let Some((whole, fraction)) = trimmed.split_once('.') {
-        let normalized_fraction = fraction.trim_end_matches('0');
-        if normalized_fraction.is_empty() {
-            whole.to_string()
-        } else {
-            format!("{whole}.{normalized_fraction}")
-        }
-    } else {
-        trimmed.to_string()
+fn parse_cli_amount_to_e8s(raw: &str) -> Result<u128> {
+    let amount_e8s = parse_required_kinic_amount_to_e8s(raw).map_err(map_cli_kinic_amount_error)?;
+    if amount_e8s == 0 {
+        bail!("amount must be greater than zero");
     }
+    Ok(amount_e8s)
 }
 
 #[cfg(test)]
@@ -121,18 +82,18 @@ mod tests {
     #[test]
     fn parse_kinic_amount_to_e8s_supports_whole_and_fractional_values() {
         assert_eq!(
-            parse_kinic_amount_to_e8s("1").expect("whole amount"),
+            parse_cli_amount_to_e8s("1").expect("whole amount"),
             100_000_000
         );
         assert_eq!(
-            parse_kinic_amount_to_e8s("0.25").expect("fractional amount"),
+            parse_cli_amount_to_e8s("0.25").expect("fractional amount"),
             25_000_000
         );
     }
 
     #[test]
     fn parse_kinic_amount_to_e8s_rejects_too_many_decimals() {
-        let error = parse_kinic_amount_to_e8s("0.000000001").unwrap_err();
+        let error = parse_cli_amount_to_e8s("0.000000001").unwrap_err();
         assert_eq!(
             error.to_string(),
             "amount supports at most 8 decimal places"
@@ -141,7 +102,20 @@ mod tests {
 
     #[test]
     fn parse_kinic_amount_to_e8s_rejects_zero() {
-        let error = parse_kinic_amount_to_e8s("0").unwrap_err();
+        let error = parse_cli_amount_to_e8s("0").unwrap_err();
         assert_eq!(error.to_string(), "amount must be greater than zero");
+    }
+
+    #[test]
+    fn fee_line_uses_shared_kinic_formatter() {
+        let fee_e8s = 100_000u128;
+
+        let line = format!(
+            "Fee: {} KINIC ({} e8s)",
+            format_e8s_to_kinic_string_u128(fee_e8s),
+            fee_e8s
+        );
+
+        assert_eq!(line, "Fee: 0.00100000 KINIC (100000 e8s)");
     }
 }

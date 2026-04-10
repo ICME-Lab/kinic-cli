@@ -12,7 +12,7 @@ use tui_kit_runtime::RemoveMemoryModalState;
 use tui_kit_runtime::{
     AccessControlAction, AccessControlFocus, AccessControlMode, AccessControlRole,
     CreateModalFocus, CreateSubmitState, RenameModalFocus, SettingsSnapshot, TransferModalFocus,
-    TransferModalMode, format_e8s_to_kinic_string_u128,
+    TransferModalMode, format_e8s_to_kinic_string_u128, parse_editing_kinic_display_to_e8s,
 };
 
 use super::TuiKitUi;
@@ -926,7 +926,7 @@ fn transfer_amount_display(ui: &TuiKitUi<'_>) -> String {
 }
 
 fn transfer_total_display(ui: &TuiKitUi<'_>) -> String {
-    let amount_base_units = parse_kinic_display_to_e8s(ui.transfer_modal.amount.as_str());
+    let amount_base_units = parse_editing_kinic_display_to_e8s(ui.transfer_modal.amount.as_str());
     match (amount_base_units, ui.transfer_modal.fee_base_units) {
         (Some(amount), Some(fee)) => {
             format!(
@@ -936,34 +936,6 @@ fn transfer_total_display(ui: &TuiKitUi<'_>) -> String {
         }
         _ => "unavailable".to_string(),
     }
-}
-
-fn parse_kinic_display_to_e8s(value: &str) -> Option<u128> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Some(0);
-    }
-    let parts: Vec<&str> = trimmed.split('.').collect();
-    if parts.len() > 2 {
-        return None;
-    }
-    let whole = parts[0];
-    let fraction = if parts.len() == 2 { parts[1] } else { "" };
-    if !whole.chars().all(|char| char.is_ascii_digit())
-        || !fraction.chars().all(|char| char.is_ascii_digit())
-        || fraction.len() > 8
-    {
-        return None;
-    }
-    let whole_value = if whole.is_empty() {
-        0u128
-    } else {
-        whole.parse::<u128>().ok()?
-    };
-    let fractional_value = format!("{fraction:0<8}").parse::<u128>().ok()?;
-    whole_value
-        .checked_mul(100_000_000u128)?
-        .checked_add(fractional_value)
 }
 
 fn add_user_principal_line(ui: &TuiKitUi<'_>) -> Line<'static> {

@@ -1,0 +1,14 @@
+[package]
+name = "kinic-amount"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+license = "MIT"
+description = "Shared KINIC amount parsing and formatting rules"
+
+[lib]
+name = "kinic_amount"
+path = "src/lib.rs"
+
+[dependencies]
+candid = "0.10.20"

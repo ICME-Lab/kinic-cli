@@ -560,6 +560,28 @@ fn validate_transfer_submit_rejects_invalid_principal_and_overspend() {
 }
 
 #[test]
+fn validate_transfer_submit_rejects_negative_amount_with_precise_message() {
+    let provider = KinicProvider::new(live_config());
+    let negative_amount_state = CoreState {
+        transfer_modal: TransferModalState {
+            principal_id: "aaaaa-aa".to_string(),
+            amount: "-1".to_string(),
+            fee_base_units: Some(100_000),
+            available_balance_base_units: Some(1_000_000_000),
+            ..TransferModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider
+            .validate_transfer_submit(&negative_amount_state)
+            .expect_err("negative amount"),
+        "Amount must be a positive decimal number."
+    );
+}
+
+#[test]
 fn validate_access_submit_rejects_launcher_and_allows_self_target() {
     let provider = KinicProvider::new(live_config());
     let launcher_state = CoreState {

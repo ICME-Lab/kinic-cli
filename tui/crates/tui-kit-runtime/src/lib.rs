@@ -5,6 +5,7 @@
 
 pub mod chat_commands;
 mod form_descriptor;
+mod input_rules;
 pub mod kinic_tabs;
 
 use candid::Nat;
@@ -13,6 +14,11 @@ pub use form_descriptor::{
     core_action_to_form_command, current_form_focus, current_form_focus_for_tab,
     form_char_input_command, form_command_to_action, form_descriptor, form_enter_command,
     form_horizontal_change_command, form_shows_horizontal_change_hint,
+};
+pub use kinic_amount::{
+    KinicAmountParseError, editing_kinic_amount_accepts_char, format_e8s_to_kinic_string_nat,
+    format_e8s_to_kinic_string_u128, parse_editing_kinic_display_to_e8s,
+    parse_required_kinic_amount_to_e8s,
 };
 use std::path::PathBuf;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemKind, UiItemSummary};
@@ -26,25 +32,6 @@ pub const SETTINGS_ENTRY_CHAT_DIVERSITY_ID: &str = "chat_diversity";
 pub const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
     "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
 ];
-
-/// Transfer amount accepts ASCII digits and a single decimal separator.
-/// Fractional precision is capped at 8 places to match ledger parsing.
-pub fn transfer_amount_accepts_char(current: &str, next: char) -> bool {
-    if next.is_ascii_digit() {
-        let fraction_len = current
-            .split_once('.')
-            .map_or(0, |(_, fraction)| fraction.chars().count());
-        return !current.contains('.') || fraction_len < 8;
-    }
-
-    next == '.' && !current.contains('.')
-}
-
-/// Principal-like identifiers in the TUI use lowercase text, digits, and hyphens.
-/// Final validity still belongs to `Principal::from_text(...)` at submit time.
-pub fn principal_text_accepts_char(next: char) -> bool {
-    next.is_ascii_lowercase() || next.is_ascii_digit() || next == '-'
-}
 
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -606,27 +593,6 @@ impl SessionAccountOverview {
     }
 }
 
-pub fn format_e8s_to_kinic_string_u128(value: u128) -> String {
-    format_e8s_to_kinic_string_str(value.to_string().as_str())
-}
-
-pub fn format_e8s_to_kinic_string_nat(value: &Nat) -> String {
-    format_e8s_to_kinic_string_str(value.to_string().as_str())
-}
-
-fn format_e8s_to_kinic_string_str(value: &str) -> String {
-    const SCALE: usize = 8;
-
-    let digits = value.replace('_', "");
-    if digits.len() <= SCALE {
-        return format!("0.{:0>width$}", digits, width = SCALE);
-    }
-
-    let split_at = digits.len() - SCALE;
-    let (whole, fraction) = digits.split_at(split_at);
-    format!("{whole}.{fraction}")
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SettingsEntry {
     pub id: String,
@@ -1026,31 +992,6 @@ pub struct ProviderOutput {
     pub effects: Vec<CoreEffect>,
 }
 
-#[cfg(test)]
-mod formatter_tests {
-    use super::{format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128};
-    use candid::Nat;
-
-    #[test]
-    fn format_e8s_to_kinic_string_u128_keeps_eight_fraction_digits() {
-        assert_eq!(
-            format_e8s_to_kinic_string_u128(123_456_789u128),
-            "1.23456789"
-        );
-        assert_eq!(format_e8s_to_kinic_string_u128(42u128), "0.00000042");
-    }
-
-    #[test]
-    fn format_e8s_to_kinic_string_nat_supports_values_larger_than_u128() {
-        let large = Nat::parse(b"340282366920938463463374607431768211456").expect("valid Nat");
-
-        assert_eq!(
-            format_e8s_to_kinic_string_nat(&large),
-            "3402823669209384634633746074317.68211456"
-        );
-    }
-}
-
 /// Input key abstraction for shared key->action mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreKey {
@@ -1135,7 +1076,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             {
                 return;
             }
-            if principal_text_accepts_char(*c) {
+            if input_rules::principal_text_accepts_char(*c) {
                 state.access_control.principal_id.push(*c);
             } else {
                 return;
@@ -1245,7 +1186,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             close_add_memory_modal(state);
         }
         CoreAction::AddMemoryInput(c) => {
-            if !principal_text_accepts_char(*c) {
+            if !input_rules::principal_text_accepts_char(*c) {
                 return;
             }
             apply_text_input_modal_command(
@@ -1353,14 +1294,14 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
             match state.transfer_modal.focus {
                 TransferModalFocus::Principal => {
-                    if principal_text_accepts_char(*c) {
+                    if input_rules::principal_text_accepts_char(*c) {
                         state.transfer_modal.principal_id.push(*c);
                     } else {
                         return;
                     }
                 }
                 TransferModalFocus::Amount => {
-                    if transfer_amount_accepts_char(&state.transfer_modal.amount, *c) {
+                    if editing_kinic_amount_accepts_char(&state.transfer_modal.amount, *c) {
                         state.transfer_modal.amount.push(*c);
                     } else {
                         return;
