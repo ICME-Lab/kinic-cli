@@ -220,18 +220,32 @@ pub fn load_identity_from_keyring(suffix: &str) -> Result<Arc<dyn Identity>> {
 
 fn parse_identity_from_pem_bytes(pem_bytes: &[u8]) -> Result<Arc<dyn Identity>> {
     let pem_text = String::from_utf8(pem_bytes.to_vec())?;
-    let pem = pem::parse(pem_text.as_bytes())?;
-    match pem.tag() {
-        "PRIVATE KEY" => {
-            let identity = BasicIdentity::from_pem(Cursor::new(pem_text))?;
-            Ok(Arc::new(identity))
+    let pems = pem::parse_many(pem_text.as_bytes())?;
+    let mut last_decode_error = None;
+    for pem in &pems {
+        match pem.tag() {
+            "PRIVATE KEY" => {
+                match BasicIdentity::from_pem(Cursor::new(pem_text.clone())) {
+                    Ok(identity) => return Ok(Arc::new(identity)),
+                    Err(error) => last_decode_error = Some(error.into()),
+                }
+            }
+            "EC PRIVATE KEY" => {
+                match Secp256k1Identity::from_pem(Cursor::new(pem_text.clone())) {
+                    Ok(identity) => return Ok(Arc::new(identity)),
+                    Err(error) => last_decode_error = Some(error.into()),
+                }
+            }
+            _ => {}
         }
-        "EC PRIVATE KEY" => {
-            let identity = Secp256k1Identity::from_pem(Cursor::new(pem_text))?;
-            Ok(Arc::new(identity))
-        }
-        _ => anyhow::bail!("Unsupported PEM tag: {}", pem.tag()),
     }
+
+    if let Some(error) = last_decode_error {
+        return Err(error);
+    }
+
+    let tags = pems.iter().map(|pem| pem.tag()).collect::<Vec<_>>();
+    anyhow::bail!("Unsupported PEM tags: {}", tags.join(", "))
 }
 
 fn load_pem_from_keyring(suffix: &str) -> anyhow::Result<Vec<u8>> {
@@ -326,6 +340,70 @@ mod tests {
         assert_eq!(info.code, KeychainErrorCode::KeychainError);
         assert!(info.retryable);
         assert_eq!(info.user_action, "inspect_keychain_error");
+    }
+
+    #[test]
+    fn parse_identity_from_pem_bytes_accepts_ec_parameters_before_private_key() {
+        let pem = "-----BEGIN EC PARAMETERS-----
+BgUrgQQACg==
+-----END EC PARAMETERS-----
+-----BEGIN EC PRIVATE KEY-----
+MHQCAQEEIAgy7nZEcVHkQ4Z1Kdqby8SwyAiyKDQmtbEHTIM+WNeBoAcGBSuBBAAK
+oUQDQgAEgO87rJ1ozzdMvJyZQ+GABDqUxGLvgnAnTlcInV3NuhuPv4O3VGzMGzeB
+N3d26cRxD99TPtm8uo2OuzKhSiq6EQ==
+-----END EC PRIVATE KEY-----
+";
+
+        let identity = parse_identity_from_pem_bytes(pem.as_bytes()).unwrap();
+
+        assert!(identity.sender().is_ok());
+    }
+
+    #[test]
+    fn parse_identity_from_pem_bytes_skips_failed_private_key_before_valid_ec_key() {
+        let pem = "-----BEGIN PRIVATE KEY-----
+AQID
+-----END PRIVATE KEY-----
+-----BEGIN EC PRIVATE KEY-----
+MHQCAQEEIAgy7nZEcVHkQ4Z1Kdqby8SwyAiyKDQmtbEHTIM+WNeBoAcGBSuBBAAK
+oUQDQgAEgO87rJ1ozzdMvJyZQ+GABDqUxGLvgnAnTlcInV3NuhuPv4O3VGzMGzeB
+N3d26cRxD99TPtm8uo2OuzKhSiq6EQ==
+-----END EC PRIVATE KEY-----
+";
+
+        let identity = parse_identity_from_pem_bytes(pem.as_bytes()).unwrap();
+
+        assert!(identity.sender().is_ok());
+    }
+
+    #[test]
+    fn parse_identity_from_pem_bytes_reports_unsupported_tags_when_no_key_block_exists() {
+        let pem = "-----BEGIN EC PARAMETERS-----
+BgUrgQQACg==
+-----END EC PARAMETERS-----
+";
+
+        let error = match parse_identity_from_pem_bytes(pem.as_bytes()) {
+            Ok(_) => panic!("expected unsupported tag error"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("Unsupported PEM tags: EC PARAMETERS"));
+    }
+
+    #[test]
+    fn parse_identity_from_pem_bytes_returns_decode_error_when_all_supported_keys_fail() {
+        let pem = "-----BEGIN PRIVATE KEY-----
+AQID
+-----END PRIVATE KEY-----
+";
+
+        let error = match parse_identity_from_pem_bytes(pem.as_bytes()) {
+            Ok(_) => panic!("expected decode error"),
+            Err(error) => error,
+        };
+
+        assert!(!error.to_string().contains("Unsupported PEM tags"));
     }
 
     #[test]
