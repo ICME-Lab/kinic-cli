@@ -2,7 +2,8 @@ use super::*;
 
 fn memory_details(name: &str) -> bridge::MemoryDetails {
     bridge::MemoryDetails {
-        name: name.to_string(),
+        display_name: name.to_string(),
+        metadata_name: name.to_string(),
         version: "1.0.0".to_string(),
         dim: Some(8),
         owners: vec![],
@@ -70,6 +71,60 @@ fn poll_initial_memories_background_prefetches_current_cursor_too() {
             .memory_detail_prefetch
             .in_flight_memory_ids
             .contains("bbbbb-bb")
+    );
+}
+
+#[test]
+fn loaded_memory_detail_name_updates_insert_placeholder() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+    provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "first")];
+    provider.memory_summaries[0].name = "aaaaa-aa".to_string();
+    provider.refresh_memory_records_from_summaries();
+
+    let effects = provider.apply_memory_detail_result(
+        "aaaaa-aa".to_string(),
+        Ok(memory_details("Alpha loaded")),
+        false,
+    );
+
+    assert!(effects.is_empty());
+    let snapshot = provider.build_snapshot(&CoreState::default());
+    assert_eq!(
+        snapshot.insert_memory_placeholder.as_deref(),
+        Some("Alpha loaded")
+    );
+}
+
+#[test]
+fn loaded_memory_detail_preserves_metadata_description() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "first")];
+    provider.refresh_memory_records_from_summaries();
+
+    let effects = provider.apply_memory_detail_result(
+        "aaaaa-aa".to_string(),
+        Ok(bridge::MemoryDetails {
+            display_name: "Alpha loaded".to_string(),
+            metadata_name: "{\"name\":\"Alpha loaded\",\"description\":\"Quarterly goals\"}"
+                .to_string(),
+            version: "1.0.0".to_string(),
+            dim: Some(8),
+            owners: vec![],
+            stable_memory_size: Some(1),
+            cycle_amount: Some(1),
+            users: vec![],
+            users_load_error: None,
+        }),
+        false,
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(provider.memory_records[0].title, "Alpha loaded");
+    assert!(
+        provider.memory_records[0]
+            .content_md
+            .contains("Quarterly goals")
     );
 }
 

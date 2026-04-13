@@ -2509,11 +2509,6 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     state.insert_expected_dim_loading = snapshot.insert_expected_dim_loading;
     state.insert_current_dim = snapshot.insert_current_dim;
     state.insert_validation_message = snapshot.insert_validation_message;
-    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty()
-    {
-        state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
-    }
-
     let selectable_len = selectable_len(state);
     if let Some(selected_index) = snapshot_selected_index {
         state.selected_index = if selectable_len == 0 {
@@ -4440,7 +4435,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_snapshot_sets_insert_memory_id_from_saved_default_on_insert_tab() {
+    fn apply_snapshot_keeps_insert_memory_id_empty_when_only_default_exists() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
             ..CoreState::default()
@@ -4452,7 +4447,7 @@ mod tests {
 
         apply_snapshot(&mut state, snapshot);
 
-        assert_eq!(state.insert_memory_id, "aaaaa-aa");
+        assert_eq!(state.insert_memory_id, "");
     }
 
     #[test]

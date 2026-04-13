@@ -1936,7 +1936,9 @@ impl KinicProvider {
                     .iter_mut()
                     .find(|summary| summary.id == memory_id)
                 {
-                    summary.name = details.name;
+                    summary.name = parse_memory_metadata(details.metadata_name.as_str())
+                        .map(|_| details.metadata_name)
+                        .unwrap_or(details.display_name);
                     summary.version = details.version;
                     summary.dim = details.dim;
                     summary.owners = Some(details.owners);

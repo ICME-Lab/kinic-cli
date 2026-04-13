@@ -75,7 +75,8 @@ pub struct MemoryUser {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryDetails {
-    pub name: String,
+    pub display_name: String,
+    pub metadata_name: String,
     pub version: String,
     pub dim: Option<u64>,
     pub owners: Vec<String>,
@@ -406,12 +407,21 @@ pub async fn load_memory_details(
     let agent = factory.build().await?;
     let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
     let client = MemoryClient::new(agent, memory);
-    let metadata = client.get_metadata().await?;
-    let (dim, users) = tokio::join!(client.get_dim(), client.get_users());
+    // TUI title uses the human-facing canister name contract from `get_name()`.
+    // `metadata.name` may contain the raw metadata envelope and should not drive labels.
+    let (display_name, metadata, dim, users) = tokio::join!(
+        client.get_name(),
+        client.get_metadata(),
+        client.get_dim(),
+        client.get_users()
+    );
+    let display_name = display_name?;
+    let metadata = metadata?;
     let (users, users_load_error) = memory_users_from_query(users, &launcher_id);
 
     Ok(MemoryDetails {
-        name: metadata.name,
+        display_name,
+        metadata_name: metadata.name,
         version: metadata.version,
         dim: dim.ok(),
         owners: metadata.owners,

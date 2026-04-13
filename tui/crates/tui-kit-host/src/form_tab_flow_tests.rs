@@ -239,7 +239,7 @@ fn reset_insert_form_state_clears_insert_fields() {
     reset_form_state_for_tab(&mut state, KINIC_INSERT_TAB_ID);
 
     assert_eq!(state.insert_mode, InsertMode::File);
-    assert_eq!(state.insert_memory_id, "bbbbb-bb");
+    assert_eq!(state.insert_memory_id, "");
     assert_eq!(state.insert_tag, "");
     assert_eq!(state.insert_file_path_input, "");
     assert_eq!(state.insert_selected_file_path, None);

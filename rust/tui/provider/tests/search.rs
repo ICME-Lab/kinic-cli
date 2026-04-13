@@ -18,7 +18,8 @@ fn panic_join_error(message: &str) -> tokio::task::JoinError {
 
 fn memory_details(name: &str) -> bridge::MemoryDetails {
     bridge::MemoryDetails {
-        name: name.to_string(),
+        display_name: name.to_string(),
+        metadata_name: name.to_string(),
         version: "1.0.0".to_string(),
         dim: Some(8),
         owners: vec![],
@@ -435,7 +436,8 @@ fn poll_background_ignores_stale_memory_detail_results() {
         request_id: 1,
         memory_id: "aaaaa-aa".to_string(),
         result: Ok(bridge::MemoryDetails {
-            name: "Updated".to_string(),
+            display_name: "Updated".to_string(),
+            metadata_name: "Updated".to_string(),
             version: "1.0.0".to_string(),
             dim: Some(8),
             owners: vec![],
