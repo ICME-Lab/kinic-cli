@@ -144,7 +144,7 @@ pub enum Command {
     )]
     Login(LoginArgs),
     #[command(
-        about = "Expose Kinic memories as REST and MCP tools. Env-only: uses KINIC_TOOL_IDENTITY/KINIC_TOOL_NETWORK.",
+        about = "Expose Kinic memories as MCP tools. Env-only: uses KINIC_TOOL_IDENTITY/KINIC_TOOL_NETWORK.",
         after_help = "Configuration:\n  Set KINIC_TOOL_IDENTITY=<IDENTITY>\n  Set KINIC_TOOL_NETWORK=local|mainnet\n\nNotes:\n  tools serve does not accept global --identity, --ii, --ic, or --identity-path."
     )]
     Tools(ToolsArgs),
@@ -178,7 +178,7 @@ pub struct ToolsArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum ToolsCommand {
-    #[command(about = "Run the Kinic MCP tool server over stdio. Uses environment variables only.")]
+    #[command(about = "Run the Kinic MCP tool server over stdio. Env-only.")]
     Serve(ToolsServeArgs),
 }
 
@@ -498,7 +498,7 @@ pub struct AddMemoryArgs {
 
     #[arg(
         long,
-        help = "Validate readable access through get_name() using --identity or --ii before saving"
+        help = "Check memory reachability and visible metadata through get_name() using --identity or --ii before saving"
     )]
     pub validate: bool,
 }

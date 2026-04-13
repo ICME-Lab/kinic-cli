@@ -96,6 +96,8 @@ fn tools_help_mentions_env_only_configuration() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Expose Kinic memories as MCP tools."));
+    assert!(!stdout.contains("REST and MCP"));
     assert!(stdout.contains("KINIC_TOOL_IDENTITY"));
     assert!(stdout.contains("KINIC_TOOL_NETWORK=local|mainnet"));
     assert!(stdout.contains("does not accept global --identity, --ii, --ic, or --identity-path"));

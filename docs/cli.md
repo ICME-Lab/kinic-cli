@@ -297,8 +297,8 @@ Notes:
 
 These commands read and write the same local settings file used by the TUI at `~/.config/kinic/tui.yaml`.
 They do not require `--identity` when they only update local preferences.
-`prefs add-memory --validate` is the exception and requires `--identity` or `--ii` because it verifies access against the target memory canister before saving.
-Validation accepts both explicit membership and memories that expose access through the anonymous principal.
+`prefs add-memory --validate` is the exception and requires `--identity` or `--ii` because it checks whether `get_name()` can reach the target memory canister before saving.
+That validation confirms reachability and visible metadata only; it does not guarantee membership or later search/chat access.
 `prefs show` returns JSON so it can be consumed reliably by AI agents, shell scripts, and other tools.
 All `prefs` commands now return JSON so agents can consume both reads and mutations with one stable contract.
 

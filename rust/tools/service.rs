@@ -22,7 +22,7 @@ use crate::{
 };
 
 use super::service_helpers::{
-    internal_error, list_item_from_state, parse_network, require_non_empty,
+    internal_error, list_item_from_state, parse_network, require_non_empty, require_principal_text,
 };
 use super::types::{
     MemoryCreateRequest, MemoryCreateResponse, MemoryInsertMarkdownRequest,
@@ -122,7 +122,7 @@ impl ToolService {
         &self,
         request: MemoryInsertMarkdownRequest,
     ) -> Result<MemoryInsertMarkdownResponse, ToolServiceError> {
-        let memory_id = require_non_empty("memory_id", &request.memory_id)?;
+        let memory_id = require_principal_text("memory_id", &request.memory_id)?;
         let tag = require_non_empty("tag", &request.tag)?;
         let text = require_non_empty("text", &request.text)?;
         let client = build_memory_client(&self.agent_factory, &memory_id)
@@ -150,7 +150,7 @@ impl ToolService {
         &self,
         request: MemorySearchRequest,
     ) -> Result<MemorySearchResponse, ToolServiceError> {
-        let memory_id = require_non_empty("memory_id", &request.memory_id)?;
+        let memory_id = require_principal_text("memory_id", &request.memory_id)?;
         let query = require_non_empty("query", &request.query)?;
         let embedding = fetch_embedding(&query).await.map_err(internal_error)?;
         let client = build_memory_client(&self.agent_factory, &memory_id)
@@ -189,7 +189,7 @@ impl ToolService {
         &self,
         request: MemoryShowRequest,
     ) -> Result<ShowOutput, ToolServiceError> {
-        let memory_id = require_non_empty("memory_id", &request.memory_id)?;
+        let memory_id = require_principal_text("memory_id", &request.memory_id)?;
         load_show_output(&self.agent_factory, &memory_id)
             .await
             .map_err(internal_error)
@@ -214,7 +214,9 @@ async fn search_memory(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::types::{MemorySearchAllRequest, MemoryShowRequest};
+    use crate::tools::types::{
+        MemoryInsertMarkdownRequest, MemorySearchAllRequest, MemorySearchRequest, MemoryShowRequest,
+    };
     use ic_agent::identity::AnonymousIdentity;
 
     #[tokio::test]
@@ -278,5 +280,50 @@ mod tests {
             .expect_err("blank memory id should fail");
 
         assert_eq!(error.to_string(), "memory_id must not be empty.");
+    }
+
+    #[tokio::test]
+    async fn memory_insert_markdown_rejects_invalid_memory_id() {
+        let service = ToolService::from_resolved_identity(true, Arc::new(AnonymousIdentity {}));
+
+        let error = service
+            .memory_insert_markdown(MemoryInsertMarkdownRequest {
+                memory_id: "not-a-principal".to_string(),
+                tag: "notes".to_string(),
+                text: "body".to_string(),
+            })
+            .await
+            .expect_err("invalid memory id should fail");
+
+        assert_eq!(error.to_string(), "memory_id must be a valid principal.");
+    }
+
+    #[tokio::test]
+    async fn memory_search_rejects_invalid_memory_id() {
+        let service = ToolService::from_resolved_identity(true, Arc::new(AnonymousIdentity {}));
+
+        let error = service
+            .memory_search(MemorySearchRequest {
+                memory_id: "not-a-principal".to_string(),
+                query: "hello".to_string(),
+            })
+            .await
+            .expect_err("invalid memory id should fail");
+
+        assert_eq!(error.to_string(), "memory_id must be a valid principal.");
+    }
+
+    #[tokio::test]
+    async fn memory_show_rejects_invalid_memory_id() {
+        let service = ToolService::from_resolved_identity(true, Arc::new(AnonymousIdentity {}));
+
+        let error = service
+            .memory_show(MemoryShowRequest {
+                memory_id: "not-a-principal".to_string(),
+            })
+            .await
+            .expect_err("invalid memory id should fail");
+
+        assert_eq!(error.to_string(), "memory_id must be a valid principal.");
     }
 }

@@ -2,6 +2,8 @@
 // What: small validation and normalization helpers for the MCP tool service.
 // Why: keep the main service module focused on orchestration and JSON contracts.
 
+use ic_agent::export::Principal;
+
 use crate::{clients::launcher::State, tools::types::MemoryListItem};
 
 use super::service::ToolServiceError;
@@ -25,6 +27,13 @@ pub(super) fn require_non_empty(field: &str, value: &str) -> Result<String, Tool
         )));
     }
     Ok(trimmed.to_string())
+}
+
+pub(super) fn require_principal_text(field: &str, value: &str) -> Result<String, ToolServiceError> {
+    let trimmed = require_non_empty(field, value)?;
+    Principal::from_text(&trimmed)
+        .map_err(|_| ToolServiceError::Validation(format!("{field} must be a valid principal.")))?;
+    Ok(trimmed)
 }
 
 pub(super) fn parse_network(value: &str) -> Result<bool, ToolServiceError> {
@@ -65,6 +74,13 @@ mod tests {
     fn require_non_empty_rejects_blank_strings() {
         let error = require_non_empty("tag", "   ").expect_err("blank should fail");
         assert_eq!(error.to_string(), "tag must not be empty.");
+    }
+
+    #[test]
+    fn require_principal_text_rejects_invalid_principal() {
+        let error = require_principal_text("memory_id", "not-a-principal")
+            .expect_err("invalid should fail");
+        assert_eq!(error.to_string(), "memory_id must be a valid principal.");
     }
 
     #[test]

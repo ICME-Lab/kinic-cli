@@ -18,10 +18,13 @@ pub use kinic_core::prefs_policy::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// The current on-disk schema is intentionally fixed; unsupported legacy shapes fail to decode.
+// Missing legacy fields are backfilled with defaults and unknown fields are ignored.
+// Type mismatches and malformed YAML still fail to decode so broken settings stay explicit.
 pub struct UserPreferences {
     pub default_memory_id: Option<String>,
+    #[serde(default)]
     pub saved_tags: Vec<String>,
+    #[serde(default)]
     pub manual_memory_ids: Vec<String>,
     #[serde(default = "default_chat_overall_top_k")]
     pub chat_overall_top_k: usize,
@@ -158,9 +161,49 @@ future_setting: true
     }
 
     #[test]
-    fn user_preferences_rejects_missing_saved_tags() {
-        let result = serde_yaml::from_str::<UserPreferences>("default_memory_id: aaaaa-aa\n");
-        assert!(result.is_err());
+    fn user_preferences_backfills_missing_legacy_fields() {
+        let preferences: UserPreferences =
+            serde_yaml::from_str("default_memory_id: aaaaa-aa\n").expect("legacy yaml should load");
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.default_memory_id.as_deref(), Some("aaaaa-aa"));
+        assert!(normalized.saved_tags.is_empty());
+        assert!(normalized.manual_memory_ids.is_empty());
+        assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
+        assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
+        assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
+    }
+
+    #[test]
+    fn user_preferences_backfills_missing_manual_memory_ids() {
+        let preferences: UserPreferences = serde_yaml::from_str(
+            r#"
+default_memory_id: aaaaa-aa
+saved_tags:
+  - docs
+"#,
+        )
+        .expect("legacy yaml without manual memories should load");
+
+        assert_eq!(preferences.default_memory_id.as_deref(), Some("aaaaa-aa"));
+        assert_eq!(preferences.saved_tags, vec!["docs".to_string()]);
+        assert!(preferences.manual_memory_ids.is_empty());
+    }
+
+    #[test]
+    fn user_preferences_backfills_missing_saved_tags() {
+        let preferences: UserPreferences = serde_yaml::from_str(
+            r#"
+default_memory_id: aaaaa-aa
+manual_memory_ids:
+  - bbbbb-bb
+"#,
+        )
+        .expect("legacy yaml without saved tags should load");
+
+        assert_eq!(preferences.default_memory_id.as_deref(), Some("aaaaa-aa"));
+        assert!(preferences.saved_tags.is_empty());
+        assert_eq!(preferences.manual_memory_ids, vec!["bbbbb-bb".to_string()]);
     }
 
     #[test]
@@ -180,5 +223,54 @@ manual_memory_ids:
         assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
         assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
         assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
+    }
+
+    #[test]
+    fn user_preferences_rejects_invalid_saved_tags_type() {
+        let result = serde_yaml::from_str::<UserPreferences>(
+            r#"
+default_memory_id: aaaaa-aa
+saved_tags: 1
+"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn user_preferences_rejects_invalid_manual_memory_ids_type() {
+        let result = serde_yaml::from_str::<UserPreferences>(
+            r#"
+default_memory_id: aaaaa-aa
+manual_memory_ids: true
+"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn user_preferences_rejects_invalid_default_memory_id_type() {
+        let result = serde_yaml::from_str::<UserPreferences>(
+            r#"
+default_memory_id:
+  nested: value
+"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn user_preferences_rejects_malformed_yaml() {
+        let result = serde_yaml::from_str::<UserPreferences>(
+            r#"
+saved_tags:
+  - docs
+manual_memory_ids: [
+"#,
+        );
+
+        assert!(result.is_err());
     }
 }

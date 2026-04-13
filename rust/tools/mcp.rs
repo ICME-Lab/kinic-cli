@@ -140,13 +140,23 @@ fn json_result<T: serde::Serialize>(value: &T) -> std::result::Result<CallToolRe
 }
 
 fn to_mcp_error(error: super::service::ToolServiceError) -> McpError {
-    McpError::internal_error(error.to_string(), None)
+    match error {
+        super::service::ToolServiceError::Validation(message) => {
+            McpError::invalid_params(message, None)
+        }
+        super::service::ToolServiceError::Config(message)
+        | super::service::ToolServiceError::Internal(message) => {
+            McpError::internal_error(message, None)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::service::ToolServiceError;
     use ic_agent::identity::AnonymousIdentity;
+    use rmcp::model::ErrorCode;
 
     #[test]
     fn tool_router_exposes_six_tools() {
@@ -185,5 +195,18 @@ mod tests {
         );
         assert_eq!(result.content, None);
         assert_eq!(result.is_error, Some(false));
+    }
+
+    #[test]
+    fn validation_errors_map_to_invalid_params() {
+        let error = to_mcp_error(ToolServiceError::Validation(
+            "memory_id must be a valid principal.".to_string(),
+        ));
+
+        assert_eq!(
+            error.message.as_ref(),
+            "memory_id must be a valid principal."
+        );
+        assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
     }
 }
