@@ -16,6 +16,7 @@ use crate::{
             visible_memory_users,
         },
         cross_memory_search::SearchHit,
+        memory_metadata::encode_renamed_memory_metadata,
     },
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
@@ -102,6 +103,11 @@ pub struct InsertMemorySuccess {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferKinicSuccess {
     pub block_index: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameMemorySuccess {
+    pub stored_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -460,7 +466,7 @@ pub async fn rename_memory(
     auth: TuiAuth,
     memory_id: String,
     name: String,
-) -> Result<(), RenameMemoryError> {
+) -> Result<RenameMemorySuccess, RenameMemoryError> {
     let factory = resolve_agent_factory(use_mainnet, &auth)
         .map_err(|error| RenameMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
     let agent = factory
@@ -470,11 +476,21 @@ pub async fn rename_memory(
     let memory = Principal::from_text(&memory_id)
         .map_err(|error| RenameMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let client = MemoryClient::new(agent, memory);
+    let metadata = client
+        .get_metadata()
+        .await
+        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
+    let payload = encode_renamed_memory_metadata(&metadata.name, &name)
+        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
 
     client
-        .change_name(&name)
+        .change_name(&payload)
         .await
-        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))
+        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
+
+    Ok(RenameMemorySuccess {
+        stored_name: payload,
+    })
 }
 
 pub async fn validate_manual_memory_access(

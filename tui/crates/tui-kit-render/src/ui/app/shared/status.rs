@@ -415,7 +415,7 @@ fn status_message_prefix<'a>(
 
     let separator = " │ ";
     let separator_width = UnicodeWidthStr::width(separator).min(u16::MAX as usize) as u16;
-    if max_width <= separator_width {
+    if max_width <= separator_width.saturating_add(2) {
         return vec![Span::styled(
             trim_to_width(message, max_width),
             message_style,
@@ -749,6 +749,19 @@ mod tests {
         assert!(line.contains("? help q"));
         assert!(line.contains("Tab focus"));
         assert!(line.contains("…"));
+    }
+
+    #[test]
+    fn status_message_prefix_handles_tiny_width_without_underflow() {
+        let spans = status_message_prefix(
+            "preferences load failed",
+            4,
+            Style::default(),
+            Style::default(),
+        );
+
+        assert!(line_width(&spans) <= 4);
+        assert_eq!(Line::from(spans).to_string(), "pr…");
     }
 
     #[test]

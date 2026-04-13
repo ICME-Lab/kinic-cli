@@ -184,6 +184,7 @@ fn poll_rename_submit_background_updates_memory_name_and_closes_overlay() {
     tx.send(RenameSubmitTaskOutput {
         memory_id: "aaaaa-aa".to_string(),
         next_name: "New Name".to_string(),
+        stored_name: Some("{\"name\":\"New Name\"}".to_string()),
         result: Ok(()),
     })
     .expect("rename result should send");
@@ -193,7 +194,7 @@ fn poll_rename_submit_background_updates_memory_name_and_closes_overlay() {
         .expect("rename background output");
 
     assert!(!provider.rename_submit_task.in_flight);
-    assert_eq!(provider.memory_summaries[0].name, "New Name");
+    assert_eq!(provider.memory_summaries[0].name, "{\"name\":\"New Name\"}");
     assert!(
         output
             .effects
@@ -206,6 +207,36 @@ fn poll_rename_submit_background_updates_memory_name_and_closes_overlay() {
     )));
     assert_eq!(provider.memory_records[0].title, "New Name");
     assert!(provider.memory_records[0].summary.contains("aaaaa-aa"));
+}
+
+#[test]
+fn open_rename_memory_does_not_parse_jsonish_metadata_name() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![MemorySummary {
+        id: "aaaaa-aa".to_string(),
+        status: "running".to_string(),
+        detail: "detail".to_string(),
+        searchable_memory_id: Some("aaaaa-aa".to_string()),
+        name: "prefix \"name\":\"fake\"".to_string(),
+        version: "1.0.0".to_string(),
+        dim: None,
+        owners: None,
+        stable_memory_size: None,
+        cycle_amount: None,
+        users: None,
+    }];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+
+    let output = provider
+        .handle_action(&CoreAction::OpenRenameMemory, &CoreState::default())
+        .expect("rename open output");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::OpenRenameMemory { memory_id, current_name }
+            if memory_id == "aaaaa-aa" && current_name == "prefix \"name\":\"fake\""
+    )));
 }
 
 #[test]

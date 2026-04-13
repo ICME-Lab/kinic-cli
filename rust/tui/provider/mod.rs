@@ -20,7 +20,10 @@ use crate::{
         validate_insert_request_for_submit,
     },
     preferences::{self, UserPreferences},
-    shared::cross_memory_search::{collect_searchable_memory_ids, fold_search_batches},
+    shared::{
+        cross_memory_search::{collect_searchable_memory_ids, fold_search_batches},
+        memory_metadata::parse_memory_metadata,
+    },
     tui::TuiAuth,
 };
 use kinic_core::{
@@ -748,6 +751,7 @@ struct AddMemoryValidationTaskOutput {
 struct RenameSubmitTaskOutput {
     memory_id: String,
     next_name: String,
+    stored_name: Option<String>,
     result: Result<(), bridge::RenameMemoryError>,
 }
 
@@ -2651,9 +2655,14 @@ impl KinicProvider {
                 memory_id.clone(),
                 next_name.clone(),
             ));
+            let (stored_name, result) = match result {
+                Ok(output) => (Some(output.stored_name), Ok(())),
+                Err(error) => (None, Err(error)),
+            };
             let _ = tx.send(RenameSubmitTaskOutput {
                 memory_id,
                 next_name,
+                stored_name,
                 result,
             });
         });
@@ -3177,7 +3186,10 @@ impl KinicProvider {
                     .iter_mut()
                     .find(|summary| summary.id == output.memory_id)
                 {
-                    summary.name = output.next_name.clone();
+                    summary.name = output
+                        .stored_name
+                        .clone()
+                        .unwrap_or_else(|| output.next_name.clone());
                 }
                 self.refresh_memory_records_from_summaries();
                 self.loaded_memory_details.remove(&output.memory_id);
@@ -5158,16 +5170,20 @@ fn keychain_context_note(error: &str) -> Option<&'static str> {
 
 fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
     let detail = parse_memory_detail(memory.detail.as_str());
-    let metadata_name = parse_detail_object(memory.name.as_str()).unwrap_or((None, None));
+    let metadata_name = parse_memory_metadata(memory.name.as_str());
     let resolved_name = detail
         .name
         .as_deref()
-        .or(metadata_name.0.as_deref())
+        .or(metadata_name
+            .as_ref()
+            .and_then(|value| value.name.as_deref()))
         .map(str::to_string);
     let resolved_description = detail
         .description
         .as_deref()
-        .or(metadata_name.1.as_deref())
+        .or(metadata_name
+            .as_ref()
+            .and_then(|value| value.description.as_deref()))
         .map(str::to_string);
     let users_section = render_memory_users_markdown(&memory.users);
     let dim = memory
@@ -5221,7 +5237,7 @@ fn display_memory_name(name: &str, detail_name: Option<&str>) -> String {
 
 fn resolved_memory_name(name: &str, detail: &str) -> String {
     let detail_name = parse_memory_detail(detail).name;
-    let metadata_name = parse_detail_object(name).and_then(|(resolved_name, _)| resolved_name);
+    let metadata_name = parse_memory_metadata(name).and_then(|metadata| metadata.name);
     display_memory_name(name, detail_name.as_deref().or(metadata_name.as_deref()))
 }
 
@@ -5278,8 +5294,11 @@ fn parse_memory_detail(detail: &str) -> ParsedMemoryDetail {
         };
     }
 
-    if let Some((name, description)) = parse_detail_object(trimmed) {
-        return ParsedMemoryDetail { name, description };
+    if let Some(metadata) = parse_memory_metadata(trimmed) {
+        return ParsedMemoryDetail {
+            name: metadata.name,
+            description: metadata.description,
+        };
     }
 
     ParsedMemoryDetail {
@@ -5293,71 +5312,6 @@ fn is_memory_boilerplate_detail(detail: &str) -> bool {
         detail,
         "Memory is ready for search and writes." | "Launcher is setting up this memory."
     )
-}
-
-fn parse_detail_object(detail: &str) -> Option<(Option<String>, Option<String>)> {
-    parse_detail_json_object(detail)
-        .or_else(|| parse_detail_jsonish_object(detail))
-        .and_then(|value| {
-            let name = value
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            let description = value
-                .get("description")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            (name.is_some() || description.is_some()).then_some((name, description))
-        })
-}
-
-fn parse_detail_json_object(detail: &str) -> Option<serde_json::Value> {
-    let value = serde_json::from_str::<serde_json::Value>(detail).ok()?;
-    value.is_object().then_some(value)
-}
-
-fn parse_detail_jsonish_object(detail: &str) -> Option<serde_json::Value> {
-    let name = extract_jsonish_field(detail, "name");
-    let description = extract_jsonish_field(detail, "description");
-
-    if name.is_none() && description.is_none() {
-        return None;
-    }
-
-    let mut object = serde_json::Map::new();
-    if let Some(name) = name {
-        object.insert("name".to_string(), serde_json::Value::String(name));
-    }
-    if let Some(description) = description {
-        object.insert(
-            "description".to_string(),
-            serde_json::Value::String(description),
-        );
-    }
-    Some(serde_json::Value::Object(object))
-}
-
-fn extract_jsonish_field(detail: &str, key: &str) -> Option<String> {
-    let patterns = [format!("\"{key}\":\""), format!("{key}\":\"")];
-    for pattern in patterns {
-        let Some(found_at) = detail.find(&pattern) else {
-            continue;
-        };
-        let start = found_at + pattern.len();
-        let tail = &detail[start..];
-        let Some(end) = tail.find('"') else {
-            continue;
-        };
-        let value = tail[..end].trim();
-        if !value.is_empty() {
-            return Some(value.to_string());
-        }
-    }
-    None
 }
 
 fn render_memory_users_markdown(users: &Option<Vec<bridge::MemoryUser>>) -> String {

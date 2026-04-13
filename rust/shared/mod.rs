@@ -5,3 +5,4 @@
 
 pub mod access;
 pub mod cross_memory_search;
+pub mod memory_metadata;

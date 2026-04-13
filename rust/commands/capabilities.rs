@@ -12,6 +12,8 @@ use crate::cli::{CapabilitiesArgs, Cli};
 const SCHEMA_VERSION: u8 = 1;
 const GLOBAL_FLAGS_ALL: &[&str] = &["verbose", "ic", "identity", "ii", "identity_path"];
 const GLOBAL_FLAGS_VERBOSE_ONLY: &[&str] = &["verbose"];
+const GLOBAL_FLAGS_PREFS_ADD_MEMORY: &[&str] =
+    &["verbose", "ic", "identity", "ii", "identity_path"];
 const GLOBAL_FLAGS_LOGIN: &[&str] = &["verbose", "identity_path"];
 const GLOBAL_FLAGS_TUI: &[&str] = &["verbose", "ic", "identity"];
 
@@ -243,7 +245,7 @@ fn semantic_command_contract(path: &str) -> SemanticCommandContract {
             output_default: "json",
             output_supported: &["json"],
             interactive: false,
-            global_flags_supported: GLOBAL_FLAGS_VERBOSE_ONLY,
+            global_flags_supported: GLOBAL_FLAGS_PREFS_ADD_MEMORY,
         };
     }
 

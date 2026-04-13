@@ -1,12 +1,15 @@
 //! Memory rename command for the Kinic CLI.
 //! Where: handles `kinic-cli rename`.
-//! What: validates the target and forwards the new name to `change_name`.
-//! Why: expose the existing rename API without requiring the TUI.
+//! What: validates the target and updates the strict metadata envelope.
+//! Why: preserve description while fixing the `metadata.name` contract.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use tracing::info;
 
-use crate::{cli::RenameArgs, memory_client_builder::build_memory_client};
+use crate::{
+    cli::RenameArgs, memory_client_builder::build_memory_client,
+    shared::memory_metadata::encode_renamed_memory_metadata,
+};
 
 use super::CommandContext;
 
@@ -14,7 +17,13 @@ pub async fn handle(args: RenameArgs, ctx: &CommandContext) -> Result<()> {
     let next_name = validate_name(&args.name)?;
 
     let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
-    client.change_name(next_name).await?;
+    let metadata = client
+        .get_metadata()
+        .await
+        .context("Failed to fetch metadata from memory canister before rename")?;
+    let payload = encode_renamed_memory_metadata(&metadata.name, next_name)
+        .context("Failed to encode memory metadata for rename")?;
+    client.change_name(&payload).await?;
 
     info!(
         canister_id = %client.canister_id(),

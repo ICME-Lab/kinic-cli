@@ -87,6 +87,10 @@ fn capabilities_describes_prefs_and_tui_contracts() {
             }]
         })
     );
+    assert_eq!(
+        prefs_add_memory["global_flags_supported"],
+        json!(["verbose", "ic", "identity", "ii", "identity_path"])
+    );
 
     let tui = command_by_name(commands, "tui");
     assert_eq!(

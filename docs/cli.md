@@ -125,7 +125,9 @@ Example output:
 }
 ```
 
-`global_options` describes top-level flags such as `--identity`, `--ii`, and `--ic`. Each command also reports `global_flags_supported` so agents can see which global flags are valid for that path. `auth.sources` distinguishes between global CLI auth (for example `global_identity`) and environment-driven auth (`environment_identity` for `tools serve`).
+`global_options` describes top-level flags such as `--identity`, `--ii`, and `--ic`. Each command also reports `global_flags_supported` so agents can see which global flags are valid for that path and construct valid invocations without guessing hidden top-level options. `auth.sources` distinguishes between global CLI auth (for example `global_identity`) and environment-driven auth (`environment_identity` for `tools serve`).
+
+`prefs add-memory` stays local by default, but `prefs add-memory --validate` performs a network call and therefore requires either `--identity <name>` or `--ii`.
 
 For commands with compound input rules, `capabilities` also includes `arg_groups`. Arguments now separate `input_shape` (`flag`, `single_value`, `multi_value`) from `value_kind` (`boolean`, `integer`, `string`, `principal`, `path`, `json_array`) so agents can distinguish presence flags from value-taking arguments.
 
@@ -224,7 +226,7 @@ cargo run -- --ic --identity alice search \
 ```
 
 When `--all` is used, results are merged and printed with the source memory id.
-With `--json`, the output also includes `searched_memory_ids`, optional `failed_memory_ids`, and optional `join_error_count` when some background search tasks fail.
+With `--json`, both selected-search and all-search output include `searched_memory_ids`. All-search may also include optional `failed_memory_ids` and optional `join_error_count` when some background search tasks fail.
 `failed_memory_ids` always contains real memory canister ids only. `join_error_count` covers task panics/cancellation cases where no memory id could be reported.
 
 ### Show memory details
@@ -387,7 +389,7 @@ Transfer KINIC to another principal:
 
 ```bash
 cargo run -- --ic --identity alice transfer \
-  --to 2vxsx-fae \
+  --to RECIPIENT_PRINCIPAL \
   --amount 1.25 \
   --yes
 ```

@@ -13,6 +13,7 @@ use crate::{
     clients::launcher::LauncherClient,
     memory_client_builder::build_memory_client,
     shared::access::{format_role, visible_memory_users},
+    shared::memory_metadata::parse_memory_name_fields,
 };
 
 use super::CommandContext;
@@ -124,83 +125,6 @@ fn print_show_text(output: &ShowOutput) {
     }
 }
 
-fn parse_memory_name_fields(raw: &str) -> (String, Option<String>) {
-    let trimmed = raw.trim();
-    if let Some((name, description)) = parse_detail_object(trimmed) {
-        let normalized_name = name
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| trimmed.to_string());
-        return (normalized_name, description);
-    }
-
-    (trimmed.to_string(), None)
-}
-
-fn parse_detail_object(detail: &str) -> Option<(Option<String>, Option<String>)> {
-    parse_detail_json_object(detail)
-        .or_else(|| parse_detail_jsonish_object(detail))
-        .and_then(|value| {
-            let name = value
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            let description = value
-                .get("description")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            (name.is_some() || description.is_some()).then_some((name, description))
-        })
-}
-
-fn parse_detail_json_object(detail: &str) -> Option<serde_json::Value> {
-    let value = serde_json::from_str::<serde_json::Value>(detail).ok()?;
-    value.is_object().then_some(value)
-}
-
-fn parse_detail_jsonish_object(detail: &str) -> Option<serde_json::Value> {
-    let name = extract_jsonish_field(detail, "name");
-    let description = extract_jsonish_field(detail, "description");
-
-    if name.is_none() && description.is_none() {
-        return None;
-    }
-
-    let mut object = serde_json::Map::new();
-    if let Some(name) = name {
-        object.insert("name".to_string(), serde_json::Value::String(name));
-    }
-    if let Some(description) = description {
-        object.insert(
-            "description".to_string(),
-            serde_json::Value::String(description),
-        );
-    }
-    Some(serde_json::Value::Object(object))
-}
-
-fn extract_jsonish_field(detail: &str, key: &str) -> Option<String> {
-    let patterns = [format!("\"{key}\":\""), format!("{key}\":\"")];
-    for pattern in patterns {
-        let Some(found_at) = detail.find(&pattern) else {
-            continue;
-        };
-        let start = found_at + pattern.len();
-        let tail = &detail[start..];
-        let Some(end) = tail.find('"') else {
-            continue;
-        };
-        let value = tail[..end].trim();
-        if !value.is_empty() {
-            return Some(value.to_string());
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +171,14 @@ mod tests {
         let (name, description) = parse_memory_name_fields("Alpha Memory");
 
         assert_eq!(name, "Alpha Memory");
+        assert_eq!(description, None);
+    }
+
+    #[test]
+    fn parse_memory_name_fields_does_not_parse_jsonish_strings() {
+        let (name, description) = parse_memory_name_fields("prefix \"name\":\"fake\"");
+
+        assert_eq!(name, "prefix \"name\":\"fake\"");
         assert_eq!(description, None);
     }
 }

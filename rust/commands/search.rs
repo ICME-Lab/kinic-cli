@@ -50,7 +50,7 @@ pub async fn handle(args: SearchArgs, ctx: &CommandContext) -> Result<()> {
             query: args.query.clone(),
             scope: "selected",
             memory_id: Some(memory_id),
-            searched_memory_ids: Vec::new(),
+            searched_memory_ids: batch.searched_memory_ids,
             result_count: batch.items.len(),
             failed_memory_ids: Vec::new(),
             join_error_count: 0,
@@ -318,7 +318,7 @@ mod tests {
             query: "hello".to_string(),
             scope: "selected",
             memory_id: Some("aaaaa-aa".to_string()),
-            searched_memory_ids: Vec::new(),
+            searched_memory_ids: vec!["aaaaa-aa".to_string()],
             result_count: 0,
             failed_memory_ids: Vec::new(),
             join_error_count: 0,
@@ -328,6 +328,10 @@ mod tests {
 
         assert_eq!(output["query"], serde_json::json!("hello"));
         assert_eq!(output["scope"], serde_json::json!("selected"));
+        assert_eq!(
+            output["searched_memory_ids"],
+            serde_json::json!(["aaaaa-aa"])
+        );
         assert_eq!(output["result_count"], serde_json::json!(0));
         assert_eq!(output["items"], serde_json::json!([]));
         assert!(output.get("join_error_count").is_none());
