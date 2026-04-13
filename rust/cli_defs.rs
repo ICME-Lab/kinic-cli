@@ -15,7 +15,7 @@ pub fn parse_identity_arg(value: &str) -> Result<String, String> {
     name = "kinic-cli",
     version,
     about = "Kinic developer CLI for memory operations and agent-friendly local preferences",
-    after_help = "Auth modes:\n  Network commands require --identity <NAME> or --ii unless noted otherwise.\n  The TUI requires --identity <NAME> and does not support --ii.\n\nAgent entrypoints:\n  kinic-cli capabilities\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id <MEMORY_ID>\n\nReturns:\n  capabilities and prefs commands return JSON.\n  Existing network commands keep their current text output."
+    after_help = "Auth modes:\n  Network commands require --identity <NAME> or --ii unless noted otherwise.\n  The TUI requires --identity <NAME> and does not support --ii.\n\nAgent entrypoints:\n  kinic-cli capabilities\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id MEMORY_ID\n\nReturns:\n  capabilities and prefs commands return JSON.\n  Existing network commands keep their current text output."
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -116,7 +116,7 @@ pub enum Command {
     Capabilities(CapabilitiesArgs),
     #[command(
         about = "Manage local Kinic preferences shared with the TUI. All prefs commands return JSON.",
-        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id yta6k-5x777-77774-aaaaa-cai\n  kinic-cli prefs set-chat-overall-top-k --value 10\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|integer|null}"
+        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id MEMORY_CANISTER_ID\n  kinic-cli prefs set-chat-overall-top-k --value 10\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|integer|null}"
     )]
     Prefs(PrefsArgs),
     #[command(
@@ -416,7 +416,7 @@ pub enum PrefsCommand {
     Show,
     #[command(
         about = "Set the default memory id. Returns JSON.",
-        after_help = "Returns:\n  {\"resource\": \"default_memory_id\", \"action\": \"set\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs set-default-memory --memory-id yta6k-5x777-77774-aaaaa-cai"
+        after_help = "Returns:\n  {\"resource\": \"default_memory_id\", \"action\": \"set\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs set-default-memory --memory-id MEMORY_CANISTER_ID"
     )]
     SetDefaultMemory(SetDefaultMemoryArgs),
     #[command(
@@ -436,12 +436,12 @@ pub enum PrefsCommand {
     RemoveTag(TagArgs),
     #[command(
         about = "Add a manually tracked memory id. Returns JSON.",
-        after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"add\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExamples:\n  kinic-cli prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai\n  kinic-cli --identity alice prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai --validate"
+        after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"add\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExamples:\n  kinic-cli prefs add-memory --memory-id MEMORY_CANISTER_ID\n  kinic-cli --identity alice prefs add-memory --memory-id MEMORY_CANISTER_ID --validate"
     )]
     AddMemory(AddMemoryArgs),
     #[command(
         about = "Remove a manually tracked memory id. Returns JSON.",
-        after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"remove\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs remove-memory --memory-id yta6k-5x777-77774-aaaaa-cai"
+        after_help = "Returns:\n  {\"resource\": \"manual_memory_ids\", \"action\": \"remove\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs remove-memory --memory-id MEMORY_CANISTER_ID"
     )]
     RemoveMemory(MemoryIdArgs),
     #[command(

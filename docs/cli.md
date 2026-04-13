@@ -169,16 +169,18 @@ cargo run -- convert-pdf --file-path ./docs/report.pdf
 
 ```bash
 cargo run -- --ic --identity alice insert-pdf \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --memory-id MEMORY_CANISTER_ID \
   --file-path ./docs/report.pdf \
   --tag quarterly_report
 ```
+
+Replace `MEMORY_CANISTER_ID` with the target memory canister ID from `list --json` or `show`.
 
 ### Insert example
 
 ```bash
 cargo run -- --ic --identity alice insert \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --memory-id MEMORY_CANISTER_ID \
   --text "# Notes\n\nHello Kinic!" \
   --tag diary_7th_Nov_2025
 ```
@@ -187,7 +189,7 @@ You can also read the input from disk:
 
 ```bash
 cargo run -- --ic --identity alice insert \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --memory-id MEMORY_CANISTER_ID \
   --file-path ./notes/weekly.md \
   --tag diary_weekly
 ```
@@ -198,7 +200,7 @@ Exactly one of `--text` or `--file-path` must be supplied. The command calls the
 
 ```bash
 cargo run -- --ic --identity alice search \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --memory-id MEMORY_CANISTER_ID \
   --query "Hello"
 ```
 
@@ -208,7 +210,7 @@ For AI agents or scripts, use JSON output:
 
 ```bash
 cargo run -- --ic --identity alice search \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --memory-id MEMORY_CANISTER_ID \
   --query "Hello" \
   --json
 ```
@@ -229,10 +231,10 @@ With `--json`, the output also includes `searched_memory_ids`, optional `failed_
 
 ```bash
 cargo run -- --ic --identity alice show \
-  --memory-id yta6k-5x777-77774-aaaaa-cai
+  --memory-id MEMORY_CANISTER_ID
 
 cargo run -- --ic --identity alice show \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --memory-id MEMORY_CANISTER_ID \
   --json
 ```
 
@@ -259,7 +261,7 @@ For agent-driven usage, prefer:
 
 ```bash
 cargo run -- --ic --identity alice rename \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+  --memory-id MEMORY_CANISTER_ID \
   --name "Renamed demo memory"
 ```
 
@@ -269,21 +271,21 @@ Manage users for a memory canister:
 
 ```bash
 cargo run -- --ic --identity alice config users list \
-  --memory-id yta6k-5x777-77774-aaaaa-cai
+  --memory-id MEMORY_CANISTER_ID
 
 cargo run -- --ic --identity alice config users add \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
-  --principal <principal|anonymous> \
-  --role <admin|writer|reader>
+  --memory-id MEMORY_CANISTER_ID \
+  --principal PRINCIPAL_OR_ANONYMOUS \
+  --role ROLE
 
 cargo run -- --ic --identity alice config users change \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
-  --principal <principal|anonymous> \
-  --role <admin|writer|reader>
+  --memory-id MEMORY_CANISTER_ID \
+  --principal PRINCIPAL_OR_ANONYMOUS \
+  --role ROLE
 
 cargo run -- --ic --identity alice config users remove \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
-  --principal <principal|anonymous>
+  --memory-id MEMORY_CANISTER_ID \
+  --principal PRINCIPAL_OR_ANONYMOUS
 ```
 
 Notes:
@@ -324,7 +326,7 @@ Example output:
 Set or clear the default memory:
 
 ```bash
-cargo run -- prefs set-default-memory --memory-id yta6k-5x777-77774-aaaaa-cai
+cargo run -- prefs set-default-memory --memory-id MEMORY_CANISTER_ID
 cargo run -- prefs clear-default-memory
 ```
 
@@ -335,7 +337,7 @@ Example mutation output:
   "resource": "default_memory_id",
   "action": "set",
   "status": "updated",
-  "value": "yta6k-5x777-77774-aaaaa-cai"
+  "value": "MEMORY_CANISTER_ID"
 }
 ```
 
@@ -349,9 +351,9 @@ cargo run -- prefs remove-tag --tag quarterly_report
 Manage manually tracked memories:
 
 ```bash
-cargo run -- prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai
-cargo run -- --ic --identity alice prefs add-memory --memory-id yta6k-5x777-77774-aaaaa-cai --validate
-cargo run -- prefs remove-memory --memory-id yta6k-5x777-77774-aaaaa-cai
+cargo run -- prefs add-memory --memory-id MEMORY_CANISTER_ID
+cargo run -- --ic --identity alice prefs add-memory --memory-id MEMORY_CANISTER_ID --validate
+cargo run -- prefs remove-memory --memory-id MEMORY_CANISTER_ID
 ```
 
 Manage chat retrieval tuning used by `all memories` chat:
@@ -368,7 +370,7 @@ Trigger the launcher’s `update_instance` for a given memory id:
 
 ```bash
 cargo run -- --ic --identity alice update \
-  --memory-id yta6k-5x777-77774-aaaaa-cai
+  --memory-id MEMORY_CANISTER_ID
 ```
 
 ### Check token balance

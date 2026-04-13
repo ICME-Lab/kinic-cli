@@ -1,9 +1,9 @@
 ---
-name: kinic-cli-user
+name: kinic-cli
 description: Explain day-to-day kinic-cli usage for memory canister workflows, including auth mode selection, discovery commands, prefs, TUI entrypoints, and agent-friendly JSON usage. Use when a user asks how to operate the CLI, which command to run, how to inspect or search memories, how to manage prefs, or how to consume kinic-cli from an AI agent or script.
 ---
 
-# Kinic CLI User
+# Kinic CLI
 
 ## Overview
 
@@ -17,15 +17,24 @@ Use this skill as the short entrypoint, not the full manual.
 ## Routing
 
 1. Pick the auth mode first.
-2. Decide whether the task is:
+2. Pick the network first.
+3. Decide whether the task is:
    - read-only network access
    - local preference management
    - state-changing network access
    - interactive TUI usage
-   - agent or MCP integration
-3. Prefer `capabilities` for machine discovery.
-4. Prefer `list`, `show`, and `search` for retrieval.
-5. Prefer `--json` only on commands that actually support it.
+4. Prefer `capabilities` for machine discovery.
+5. Prefer `list`, `show`, and `search` for retrieval.
+6. Prefer `--json` only on commands that actually support it.
+
+## Network Choice
+
+- Use `--ic` for mainnet.
+- Omit `--ic` for the local replica.
+- If the user says `mainnet`, `production`, or references a real deployed canister → include `--ic`.
+- If the user says `local`, `replica`, `dfx start`, or is running local setup scripts → omit `--ic`.
+- `prefs` and `capabilities` are local-only helpers and do not need `--ic`.
+- When the network is not stated, prefer asking or make the assumption explicit before giving a state-changing command.
 
 ## Auth Modes
 
@@ -212,18 +221,6 @@ Use:
 cargo run -- --ic --identity alice tui
 ```
 
-### Expose tools for MCP integration
-
-Use:
-
-```bash
-cargo run -- tools serve
-```
-
-Remember that `tools serve` is env-driven.
-It is for tool-server integration, not normal day-to-day memory inspection.
-Use `KINIC_TOOL_NETWORK=mainnet` when you want the tool server to talk to mainnet.
-
 ## Agent Guidance
 
 - Start with `cargo run -- capabilities` when an agent needs machine-readable discovery.
@@ -247,6 +244,7 @@ Use `KINIC_TOOL_NETWORK=mainnet` when you want the tool server to talk to mainne
 ## Boundaries
 
 - Do not invent command flags that are not in `docs/cli.md`, `--help`, or `capabilities`.
+- MCP integration is outside this CLI skill. See [`docs/mcp.md`](../docs/mcp.md) when the task is about `tools serve` or MCP server setup.
 - Do not parse human text output when `--json` is available and the caller is a machine.
 - Do not recommend generation-oriented shortcuts when the task only needs retrieval evidence.
 - Do not recommend `tui` for automation or machine consumption.

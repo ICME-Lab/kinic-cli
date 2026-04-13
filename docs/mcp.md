@@ -2,6 +2,7 @@
 
 Kinic can be exposed to external agent runtimes as a small tool surface backed by one fixed server identity.  
 This v1 integration layer is implemented in Rust and exposed only as a local MCP server over stdio.
+The server identifies itself during MCP initialization as `kinic-mcp` with the current crate version.
 
 ## Supported tools
 
@@ -12,7 +13,8 @@ This v1 integration layer is implemented in Rust and exposed only as a local MCP
 - `memory_search_all`
 - `memory_show`
 
-Successful tool responses are returned as MCP structured content containing JSON objects:
+Successful tool responses are returned as MCP structured content containing JSON objects.
+This server intentionally uses structured-only success payloads and does not mirror the JSON into text content:
 
 - `memory_list` -> `{"items":[{"memory_id":"..."}]}`
 - `memory_create` -> `{"memory_id":"..."}`
@@ -78,6 +80,7 @@ cargo run -- tools serve
 This mode is intended for MCP clients that launch a local command.
 If Keychain access is denied or interrupted, startup fails immediately and MCP tools are not exposed.
 If you need to change identity or network, change `KINIC_TOOL_IDENTITY` / `KINIC_TOOL_NETWORK` and restart the MCP server instead of passing CLI global flags.
+If startup fails because of configuration or internal server problems, the MCP client receives only a generalized internal error while detailed diagnostics stay in server logs.
 
 ## MCP clients
 

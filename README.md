@@ -411,21 +411,21 @@ km = KinicMemories("<identity>")
 km.add_user("<memory canister id>", "anonymous", "reader")
 
 # Grant writer access to a specific principal
-km.add_user("<memory canister id>", "w7x7r-cok77-7x4qo-hqaaa-aaaaa-b", "writer")
+km.add_user("<memory canister id>", "<principal id>", "writer")
 ```
 
 CLI example:
 ```bash
 # Give everyone reader access
 cargo run -- --identity <name> config users add \
-  --memory-id <memory canister id> \
+  --memory-id MEMORY_CANISTER_ID \
   --principal anonymous \
   --role reader
 
 # Grant writer access to a specific principal
 cargo run -- --identity <name> config users add \
-  --memory-id <memory canister id> \
-  --principal w7x7r-cok77-7x4qo-hqaaa-aaaaa-b \
+  --memory-id MEMORY_CANISTER_ID \
+  --principal PRINCIPAL_ID \
   --role writer
 ```
 
@@ -441,7 +441,7 @@ Notes:
 Trigger the launcher’s `update_instance` for a given memory id:
 ```bash
 cargo run -- --identity <name> update \
-  --memory-id <memory canister id>
+  --memory-id MEMORY_CANISTER_ID
 ```
 
 ## Check token balance (CLI)
@@ -530,7 +530,7 @@ Run the complete example at `python/examples/memories_demo.py`:
 # With existing memory
 uv run python python/examples/memories_demo.py \
   --identity <name> \
-  --memory-id <memory canister id>
+  --memory-id MEMORY_CANISTER_ID
 
 # Deploy new memory
 uv run python python/examples/memories_demo.py --identity <name>
@@ -543,7 +543,7 @@ Ask AI example at `python/examples/ask_ai.py`:
 ```bash
 uv run python python/examples/ask_ai.py \
   --identity <name> \
-  --memory-id <memory canister id> \
+  --memory-id MEMORY_CANISTER_ID \
   --query "What is xxxx?" \
   --top-k 3
 ```

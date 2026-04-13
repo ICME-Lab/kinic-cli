@@ -1,4 +1,4 @@
 interface:
-  display_name: "Kinic CLI User"
+  display_name: "Kinic CLI"
   short_description: "Guide day-to-day kinic-cli usage and JSON-oriented workflows."
-  default_prompt: "Use $kinic-cli-user to explain the right kinic-cli command, auth mode, and JSON output path for the user's task."
+  default_prompt: "Use $kinic-cli to explain the right kinic-cli command, auth mode, and JSON output path for the user's task."

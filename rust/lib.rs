@@ -81,7 +81,7 @@ pub async fn run() -> Result<()> {
         cli::Command::Capabilities(args) => capabilities::handle(args),
         cli::Command::Prefs(args) => prefs::handle(args, &cli.global).await,
         cli::Command::Tools(args) => match args.command {
-            cli::ToolsCommand::Serve(args) => mcp::serve_mcp(&args).await,
+            cli::ToolsCommand::Serve(_) => mcp::serve_mcp().await,
         },
         command => {
             if cli.global.ii
