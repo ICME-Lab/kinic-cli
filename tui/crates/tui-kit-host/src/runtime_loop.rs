@@ -7,12 +7,13 @@ use tui_kit_render::theme::Theme;
 use tui_kit_render::ui::app::list_viewport_height_for_area_with_tabs;
 use tui_kit_render::ui::{AnimationState, Focus, TabId, TuiKitUi, UiConfig};
 use tui_kit_runtime::{
-    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, PickerState, apply_snapshot,
+    CoreAction, CoreEffect, CoreState, DataProvider, PaneFocus, PickerState, ProviderRenderState,
+    apply_snapshot,
     chat_commands::{
         UNKNOWN_SLASH_COMMAND_MESSAGE, chat_slash_command_action, flatten_chat_input_for_display,
         matching_slash_commands, normalize_chat_input_lines, selected_slash_command_action,
     },
-    dispatch_action, is_insert_form_locked,
+    dispatch_action_with_render_state, is_insert_form_locked,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, TabKind, tab_kind,
     },
@@ -151,9 +152,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
         let mut last_tab_id = state.current_tab_id.clone();
         let mut list_scroll_offset: usize = 0;
         let mut textareas = FormTextareas::default();
+        let mut provider_render_state = ProviderRenderState::default();
 
         if let Ok(snapshot) = provider.initialize() {
-            apply_snapshot(&mut state, snapshot);
+            provider_render_state = apply_snapshot(&mut state, snapshot);
         }
         sync_form_textareas_from_state(&mut textareas, &state);
 
@@ -199,7 +201,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .current_tab_id(TabId::new(state.current_tab_id.clone()))
                     .focus(focus)
                     .status_message(state.status_message.as_deref().unwrap_or("ready"))
-                    .selected_memory_label(state.selected_memory_label.as_deref())
+                    .selected_memory(provider_render_state.selected_memory.as_ref())
                     .chat_scope_label_value(state.chat_scope_label.as_deref())
                     .show_help(show_help)
                     .show_settings(show_settings)
@@ -220,7 +222,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .picker(&state.picker)
                     .saved_default_memory_id(state.saved_default_memory_id.as_deref())
                     .insert_mode(state.insert_mode)
-                    .insert_memory_id(&state.insert_memory_id)
+                    .selected_memory(provider_render_state.selected_memory.as_ref())
                     .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())
                     .insert_expected_dim(state.insert_expected_dim)
                     .insert_expected_dim_loading(state.insert_expected_dim_loading)
@@ -278,12 +280,25 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 continue;
             };
             if matches!(input, HostInputEvent::Paste(_))
-                && handle_textarea_input(provider, &mut state, hooks, &mut textareas, &input)?
+                && handle_textarea_input(
+                    provider,
+                    &mut state,
+                    hooks,
+                    &mut provider_render_state,
+                    &mut textareas,
+                    &input,
+                )?
             {
                 continue;
             }
             if let HostInputEvent::Paste(text) = &input {
-                if handle_paste_input(provider, &mut state, hooks, text.as_str())? {
+                if handle_paste_input(
+                    provider,
+                    &mut state,
+                    hooks,
+                    &mut provider_render_state,
+                    text.as_str(),
+                )? {
                     continue;
                 }
             }
@@ -297,7 +312,14 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             };
 
             if let (Some(code), Some(modifiers)) = (code, modifiers) {
-                match handle_overlay_input(provider, &mut state, show_settings, code, modifiers) {
+                match handle_overlay_input(
+                    provider,
+                    &mut state,
+                    &mut provider_render_state,
+                    show_settings,
+                    code,
+                    modifiers,
+                ) {
                     OverlayInputResult::NotHandled => {}
                     OverlayInputResult::Consumed => continue,
                     OverlayInputResult::CloseSettings => {
@@ -316,7 +338,14 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 }
             }
 
-            if handle_textarea_input(provider, &mut state, hooks, &mut textareas, &input)? {
+            if handle_textarea_input(
+                provider,
+                &mut state,
+                hooks,
+                &mut provider_render_state,
+                &mut textareas,
+                &input,
+            )? {
                 continue;
             }
 
@@ -344,6 +373,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                             provider,
                             &mut state,
                             hooks,
+                            &mut provider_render_state,
                             &CoreAction::ToggleChat,
                         ) {
                             state.status_message = Some(error);
@@ -359,15 +389,26 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         continue;
                     }
                     HostGlobalCommand::BackToMemoriesTab => {
-                        if let Err(error) =
-                            switch_to_tab(provider, &mut state, hooks, KINIC_MEMORIES_TAB_ID)
-                        {
+                        if let Err(error) = switch_to_tab(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &mut provider_render_state,
+                            KINIC_MEMORIES_TAB_ID,
+                        ) {
                             state.status_message = Some(error);
                         }
                         continue;
                     }
                     HostGlobalCommand::OpenCreateTab => {
-                        open_form_tab(provider, &mut state, hooks, KINIC_CREATE_TAB_ID, true);
+                        open_form_tab(
+                            provider,
+                            &mut state,
+                            hooks,
+                            &mut provider_render_state,
+                            KINIC_CREATE_TAB_ID,
+                            true,
+                        );
                         continue;
                     }
                     HostGlobalCommand::ToggleHelp => {
@@ -379,6 +420,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                             provider,
                             &mut state,
                             hooks,
+                            &mut provider_render_state,
                             &CoreAction::ToggleChat,
                         ) {
                             state.status_message = Some(error);
@@ -390,6 +432,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                             provider,
                             &mut state,
                             hooks,
+                            &mut provider_render_state,
                             &CoreAction::ToggleSettings,
                         ) {
                             Ok(()) => show_settings = true,
@@ -402,6 +445,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                             provider,
                             &mut state,
                             hooks,
+                            &mut provider_render_state,
                             &CoreAction::SetDefaultMemoryFromSelection,
                         ) {
                             state.status_message = Some(error);
@@ -413,6 +457,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                             provider,
                             &mut state,
                             hooks,
+                            &mut provider_render_state,
                             &CoreAction::OpenRenameMemory,
                         ) {
                             state.status_message = Some(error);
@@ -432,6 +477,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                             provider,
                             &mut state,
                             hooks,
+                            &mut provider_render_state,
                             &CoreAction::RefreshCurrentView,
                         ) {
                             state.status_message = Some(error);
@@ -443,6 +489,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                             provider,
                             &mut state,
                             hooks,
+                            &mut provider_render_state,
                             &CoreAction::SetQuery(String::new()),
                         ) {
                             state.status_message = Some(error);
@@ -510,7 +557,8 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     continue;
                 }
                 match dispatch_action_with_persistent_clear(provider, &mut state, &action) {
-                    Ok(effects) => {
+                    Ok((effects, next_render_state)) => {
+                        provider_render_state = next_render_state;
                         if matches!(&action, CoreAction::SetTab(_)) {
                             normalize_focus_after_set_tab(&mut state);
                         }
@@ -603,6 +651,7 @@ fn build_ui<'a>(
     theme: &'a Theme,
     cfg: &RuntimeLoopConfig,
     state: &'a CoreState,
+    provider_render_state: &'a ProviderRenderState,
     textareas: &'a FormTextareas,
     list_scroll_offset: usize,
     inspector_scroll: usize,
@@ -623,7 +672,7 @@ fn build_ui<'a>(
         .current_tab_id(TabId::new(state.current_tab_id.clone()))
         .focus(focus)
         .status_message(state.status_message.as_deref().unwrap_or("ready"))
-        .selected_memory_label(state.selected_memory_label.as_deref())
+        .selected_memory(provider_render_state.selected_memory.as_ref())
         .chat_scope_label_value(state.chat_scope_label.as_deref())
         .show_help(show_help)
         .show_settings(show_settings)
@@ -644,7 +693,7 @@ fn build_ui<'a>(
         .picker(&state.picker)
         .saved_default_memory_id(state.saved_default_memory_id.as_deref())
         .insert_mode(state.insert_mode)
-        .insert_memory_id(&state.insert_memory_id)
+        .selected_memory(provider_render_state.selected_memory.as_ref())
         .insert_memory_placeholder(state.insert_memory_placeholder.as_deref())
         .insert_expected_dim(state.insert_expected_dim)
         .insert_expected_dim_loading(state.insert_expected_dim_loading)
@@ -694,6 +743,7 @@ fn build_ui<'a>(
 fn handle_overlay_input<P: DataProvider>(
     provider: &mut P,
     state: &mut CoreState,
+    provider_render_state: &mut ProviderRenderState,
     show_settings: bool,
     code: crossterm::event::KeyCode,
     modifiers: crossterm::event::KeyModifiers,
@@ -702,6 +752,7 @@ fn handle_overlay_input<P: DataProvider>(
         return dispatch_overlay_action(
             provider,
             state,
+            provider_render_state,
             access_control_overlay_action(code, modifiers, state),
             false,
         );
@@ -711,6 +762,7 @@ fn handle_overlay_input<P: DataProvider>(
         return dispatch_overlay_action(
             provider,
             state,
+            provider_render_state,
             add_memory_overlay_action(code, modifiers, state),
             false,
         );
@@ -720,6 +772,7 @@ fn handle_overlay_input<P: DataProvider>(
         return dispatch_overlay_action(
             provider,
             state,
+            provider_render_state,
             remove_memory_overlay_action(code, modifiers, state),
             false,
         );
@@ -729,6 +782,7 @@ fn handle_overlay_input<P: DataProvider>(
         return dispatch_overlay_action(
             provider,
             state,
+            provider_render_state,
             rename_overlay_action(code, modifiers, state),
             false,
         );
@@ -738,6 +792,7 @@ fn handle_overlay_input<P: DataProvider>(
         return dispatch_overlay_action(
             provider,
             state,
+            provider_render_state,
             transfer_overlay_action(code, modifiers, state),
             false,
         );
@@ -747,6 +802,7 @@ fn handle_overlay_input<P: DataProvider>(
         return dispatch_overlay_action(
             provider,
             state,
+            provider_render_state,
             picker_overlay_action(&state.picker, code, modifiers),
             true,
         );
@@ -762,6 +818,7 @@ fn handle_overlay_input<P: DataProvider>(
 fn dispatch_overlay_action<P: DataProvider>(
     provider: &mut P,
     state: &mut CoreState,
+    provider_render_state: &mut ProviderRenderState,
     action: Option<CoreAction>,
     clear_persistent: bool,
 ) -> OverlayInputResult {
@@ -771,10 +828,13 @@ fn dispatch_overlay_action<P: DataProvider>(
     let result = if clear_persistent {
         dispatch_action_with_persistent_clear(provider, state, &action)
     } else {
-        dispatch_action(provider, state, &action)
+        dispatch_action_with_render_state(provider, state, &action)
     };
     match result {
-        Ok(effects) => OverlayInputResult::ApplyEffects(effects),
+        Ok((effects, next_render_state)) => {
+            *provider_render_state = next_render_state;
+            OverlayInputResult::ApplyEffects(effects)
+        }
         Err(error) => OverlayInputResult::DispatchError(dispatch_error_message(&error)),
     }
 }
@@ -783,10 +843,18 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
     hooks: &mut H,
+    provider_render_state: &mut ProviderRenderState,
     textareas: &mut FormTextareas,
     input: &HostInputEvent,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    if let Some(handled) = handle_chat_input_event(provider, state, hooks, textareas, input)? {
+    if let Some(handled) = handle_chat_input_event(
+        provider,
+        state,
+        hooks,
+        provider_render_state,
+        textareas,
+        input,
+    )? {
         return Ok(handled);
     }
 
@@ -818,7 +886,7 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
         return Ok(true);
     };
 
-    match dispatch_with_effects(provider, state, hooks, &action) {
+    match dispatch_with_effects(provider, state, hooks, provider_render_state, &action) {
         Ok(()) => Ok(true),
         Err(error) => {
             state.status_message = Some(error);
@@ -831,6 +899,7 @@ fn handle_chat_input_event<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
     hooks: &mut H,
+    provider_render_state: &mut ProviderRenderState,
     textareas: &mut FormTextareas,
     input: &HostInputEvent,
 ) -> Result<Option<bool>, Box<dyn std::error::Error>> {
@@ -862,11 +931,22 @@ fn handle_chat_input_event<P: DataProvider, H: RuntimeLoopHooks<P>>(
                         sync_state_from_chat_input(state, textareas);
                         Ok(Some(true))
                     }
-                    ChatInputAction::Submit => {
-                        handle_chat_submit_or_command(provider, state, hooks, textareas).map(Some)
-                    }
+                    ChatInputAction::Submit => handle_chat_submit_or_command(
+                        provider,
+                        state,
+                        hooks,
+                        provider_render_state,
+                        textareas,
+                    )
+                    .map(Some),
                     ChatInputAction::Dispatch(core_action) => {
-                        match dispatch_with_effects(provider, state, hooks, &core_action) {
+                        match dispatch_with_effects(
+                            provider,
+                            state,
+                            hooks,
+                            provider_render_state,
+                            &core_action,
+                        ) {
                             Ok(()) => Ok(Some(true)),
                             Err(error) => {
                                 state.status_message = Some(error);
@@ -886,6 +966,7 @@ fn handle_paste_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
     hooks: &mut H,
+    provider_render_state: &mut ProviderRenderState,
     text: &str,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let normalized = flatten_single_line_paste(text);
@@ -895,7 +976,8 @@ fn handle_paste_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
 
     if let Some(actions) = paste_actions_for_state(state, normalized.as_str()) {
         for action in actions {
-            dispatch_with_effects(provider, state, hooks, &action).map_err(io::Error::other)?;
+            dispatch_with_effects(provider, state, hooks, provider_render_state, &action)
+                .map_err(io::Error::other)?;
         }
         return Ok(true);
     }
@@ -907,6 +989,7 @@ fn handle_chat_submit_or_command<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
     hooks: &mut H,
+    provider_render_state: &mut ProviderRenderState,
     textareas: &mut FormTextareas,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     // Submit and slash-command matching operate on the normalized single-line payload.
@@ -918,7 +1001,13 @@ fn handle_chat_submit_or_command<P: DataProvider, H: RuntimeLoopHooks<P>>(
     {
         state.chat_input.clear();
         textareas.chat_command_selected = 0;
-        return match dispatch_with_effects(provider, state, hooks, &command_action) {
+        return match dispatch_with_effects(
+            provider,
+            state,
+            hooks,
+            provider_render_state,
+            &command_action,
+        ) {
             Ok(()) => Ok(true),
             Err(error) => {
                 state.status_message = Some(error);
@@ -932,7 +1021,13 @@ fn handle_chat_submit_or_command<P: DataProvider, H: RuntimeLoopHooks<P>>(
         return Ok(true);
     }
 
-    match dispatch_with_effects(provider, state, hooks, &CoreAction::ChatSubmit) {
+    match dispatch_with_effects(
+        provider,
+        state,
+        hooks,
+        provider_render_state,
+        &CoreAction::ChatSubmit,
+    ) {
         Ok(()) => Ok(true),
         Err(error) => {
             state.status_message = Some(error);
@@ -1730,13 +1825,14 @@ fn open_form_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
     hooks: &mut H,
+    provider_render_state: &mut ProviderRenderState,
     tab_id: &str,
     reset_form_state: bool,
 ) {
     let should_reset_form_state = reset_form_state
         && state.current_tab_id != tab_id
         && matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm);
-    match dispatch_tab_with_rollback(provider, state, hooks, tab_id) {
+    match dispatch_tab_with_rollback(provider, state, hooks, provider_render_state, tab_id) {
         Ok(()) => {
             if should_reset_form_state {
                 reset_form_state_for_tab(state, tab_id);
@@ -1751,10 +1847,12 @@ fn dispatch_with_effects<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
     hooks: &mut H,
+    provider_render_state: &mut ProviderRenderState,
     action: &CoreAction,
 ) -> Result<(), String> {
     match dispatch_action_with_persistent_clear(provider, state, action) {
-        Ok(effects) => {
+        Ok((effects, next_render_state)) => {
+            *provider_render_state = next_render_state;
             hooks.on_effects(provider, state, &effects);
             execute_effects_to_status(state, effects);
             Ok(())
@@ -1767,12 +1865,12 @@ fn dispatch_action_with_persistent_clear(
     provider: &mut impl DataProvider,
     state: &mut CoreState,
     action: &CoreAction,
-) -> tui_kit_runtime::CoreResult<Vec<CoreEffect>> {
+) -> tui_kit_runtime::CoreResult<(Vec<CoreEffect>, ProviderRenderState)> {
     if should_clear_persistent_status(action) {
         state.persistent_status_message = None;
         state.status_message = None;
     }
-    dispatch_action(provider, state, action)
+    dispatch_action_with_render_state(provider, state, action)
 }
 
 fn should_clear_persistent_status(action: &CoreAction) -> bool {
@@ -1821,9 +1919,10 @@ fn switch_to_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
     hooks: &mut H,
+    provider_render_state: &mut ProviderRenderState,
     tab_id: &str,
 ) -> Result<(), String> {
-    dispatch_tab_with_rollback(provider, state, hooks, tab_id)?;
+    dispatch_tab_with_rollback(provider, state, hooks, provider_render_state, tab_id)?;
     normalize_focus_after_set_tab(state);
     Ok(())
 }
@@ -1832,13 +1931,22 @@ fn dispatch_tab_with_rollback<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider: &mut P,
     state: &mut CoreState,
     hooks: &mut H,
+    provider_render_state: &mut ProviderRenderState,
     tab_id: &str,
 ) -> Result<(), String> {
     let previous_state = state.clone();
-    match dispatch_with_effects(provider, state, hooks, &CoreAction::SetTab(tab_id.into())) {
+    let previous_render_state = provider_render_state.clone();
+    match dispatch_with_effects(
+        provider,
+        state,
+        hooks,
+        provider_render_state,
+        &CoreAction::SetTab(tab_id.into()),
+    ) {
         Ok(()) => Ok(()),
         Err(error) => {
             *state = previous_state;
+            *provider_render_state = previous_render_state;
             Err(error)
         }
     }

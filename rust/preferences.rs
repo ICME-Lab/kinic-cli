@@ -3,7 +3,7 @@
 //! What: owns the on-disk schema plus normalization and YAML persistence helpers.
 //! Why: avoid coupling CLI preference management to TUI-specific screen and chat-history code.
 
-use kinic_core::{prefs_policy, tag};
+use kinic_core::{prefs_policy, principal::normalize_memory_id_text, tag};
 use serde::{Deserialize, Serialize};
 use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
@@ -90,6 +90,7 @@ pub fn normalize_saved_tags(mut tags: Vec<String>) -> Vec<String> {
 }
 
 pub fn normalize_user_preferences(mut preferences: UserPreferences) -> UserPreferences {
+    preferences.default_memory_id = normalize_default_memory_id(preferences.default_memory_id);
     preferences.saved_tags = normalize_saved_tags(preferences.saved_tags);
     preferences.manual_memory_ids = normalize_manual_memory_ids(preferences.manual_memory_ids);
     preferences.chat_overall_top_k = normalize_chat_overall_top_k(preferences.chat_overall_top_k);
@@ -123,12 +124,15 @@ pub fn chat_diversity_display(value: u8) -> String {
     format!("{:.2}", f32::from(value) / 100.0)
 }
 
+fn normalize_default_memory_id(memory_id: Option<String>) -> Option<String> {
+    memory_id.and_then(|value| normalize_memory_id_text(&value).ok())
+}
+
 fn normalize_manual_memory_ids(memory_ids: Vec<String>) -> Vec<String> {
     let mut unique = Vec::new();
     for memory_id in memory_ids
         .into_iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+        .filter_map(|value| normalize_memory_id_text(&value).ok())
     {
         if !unique.iter().any(|existing| existing == &memory_id) {
             unique.push(memory_id);
@@ -272,5 +276,56 @@ manual_memory_ids: [
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn user_preferences_normalizes_trimmed_default_memory_id() {
+        let preferences = UserPreferences {
+            default_memory_id: Some("  aaaaa-aa  ".to_string()),
+            ..UserPreferences::default()
+        };
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.default_memory_id.as_deref(), Some("aaaaa-aa"));
+    }
+
+    #[test]
+    fn user_preferences_drops_invalid_default_memory_id() {
+        let preferences = UserPreferences {
+            default_memory_id: Some("broken".to_string()),
+            ..UserPreferences::default()
+        };
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.default_memory_id, None);
+    }
+
+    #[test]
+    fn user_preferences_normalizes_and_filters_manual_memory_ids() {
+        let preferences = UserPreferences {
+            manual_memory_ids: vec![
+                "  aaaaa-aa  ".to_string(),
+                "broken".to_string(),
+                "aaaaa-aa".to_string(),
+                "   ".to_string(),
+            ],
+            ..UserPreferences::default()
+        };
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.manual_memory_ids, vec!["aaaaa-aa".to_string()]);
+    }
+
+    #[test]
+    fn user_preferences_yaml_with_whitespace_default_memory_id_normalizes_on_load_path() {
+        let preferences: UserPreferences = serde_yaml::from_str(
+            r#"
+default_memory_id: "  aaaaa-aa  "
+"#,
+        )
+        .expect("quoted yaml should load");
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.default_memory_id.as_deref(), Some("aaaaa-aa"));
     }
 }

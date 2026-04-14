@@ -1,9 +1,5 @@
 use super::*;
 
-fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
-    provider.cursor_memory_id = Some(memory_id.to_string());
-}
-
 fn panic_join_error(message: &str) -> tokio::task::JoinError {
     let runtime = Runtime::new().expect("test runtime should build");
     let message = message.to_string();
@@ -323,7 +319,7 @@ fn poll_background_discards_stale_search_results_after_context_changes() {
                             ..CoreState::default()
                         },
                     )
-                    .expect("cursor update should succeed");
+                    .expect("active memory update should succeed");
             }
             "query_clear" => {
                 provider
@@ -489,16 +485,16 @@ fn poll_background_applies_prefetched_memory_details_without_notifications() {
 }
 
 #[test]
-fn cursor_memory_detail_load_skips_duplicate_when_prefetch_is_in_flight() {
+fn active_memory_detail_load_skips_duplicate_when_prefetch_is_in_flight() {
     let mut provider = KinicProvider::new(live_config());
     provider.memories_mode = MemoriesMode::Browser;
-    provider.cursor_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "aaaaa-aa");
     provider
         .memory_detail_prefetch
         .in_flight_memory_ids
         .insert("aaaaa-aa".to_string());
 
-    provider.start_cursor_memory_detail_load();
+    provider.start_active_memory_detail_load();
 
     assert!(!provider.pending_memory_detail.in_flight);
     assert!(provider.pending_memory_detail.receiver.is_none());
@@ -539,11 +535,11 @@ fn sync_active_memory_ignores_query_when_browser_records_are_loaded() {
     provider.query = "beta".to_string();
 
     provider.sync_memory_browser_selection();
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(active_memory_id(&provider), Some("aaaaa-aa"));
 
     provider.query = "gamma".to_string();
     provider.sync_memory_browser_selection();
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(active_memory_id(&provider), Some("aaaaa-aa"));
     let snapshot = provider.build_snapshot(&CoreState::default());
     assert_eq!(snapshot.items.len(), 2);
     assert_eq!(
@@ -556,7 +552,7 @@ fn sync_active_memory_ignores_query_when_browser_records_are_loaded() {
 
     provider.query.clear();
     provider.sync_memory_browser_selection();
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(active_memory_id(&provider), Some("aaaaa-aa"));
     assert_eq!(
         provider
             .build_snapshot(&CoreState::default())
@@ -589,7 +585,7 @@ fn memory_navigation_ignores_query_filtered_visibility() {
         )
         .expect("move next should succeed");
 
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert!(output.snapshot.is_some());
     provider
         .handle_action(
@@ -600,7 +596,7 @@ fn memory_navigation_ignores_query_filtered_visibility() {
             },
         )
         .expect("move home should succeed");
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(active_memory_id(&provider), Some("aaaaa-aa"));
 
     let output = provider
         .handle_action(
@@ -611,7 +607,7 @@ fn memory_navigation_ignores_query_filtered_visibility() {
             },
         )
         .expect("move end should succeed");
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("ccccc-cc"));
+    assert_eq!(active_memory_id(&provider), Some("ccccc-cc"));
     assert_eq!(
         output
             .snapshot

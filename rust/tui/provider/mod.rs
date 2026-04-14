@@ -41,8 +41,8 @@ use tokio_util::sync::CancellationToken;
 use tui_kit_runtime::{
     AccessControlAction, AccessControlMode, AccessControlRole, ChatScope, CoreAction, CoreEffect,
     CoreResult, CoreState, CreateCostState, DataProvider, FILE_MODE_ALLOWED_EXTENSIONS, InsertMode,
-    LoadedCreateCost, PaneFocus, PickerConfirmKind, PickerContext, PickerItem, PickerItemKind,
-    PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SearchScope,
+    LoadedCreateCost, MemorySelection, PaneFocus, PickerConfirmKind, PickerContext, PickerItem,
+    PickerItemKind, PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SearchScope,
     SessionAccountOverview, SessionSettingsSnapshot, TransferModalMode,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
@@ -144,7 +144,7 @@ pub struct KinicProvider {
     session_overview: SessionAccountOverview,
     user_preferences: UserPreferences,
     preferences_health: PreferencesHealth,
-    cursor_memory_id: Option<String>,
+    active_memory: Option<MemorySelection>,
     memory_summaries: Vec<MemorySummary>,
     memory_records: Vec<KinicRecord>,
     result_records: Vec<KinicRecord>,
@@ -377,14 +377,12 @@ fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> 
 fn picker_selected_id_for_context(
     context: PickerContext,
     state: &CoreState,
+    active_memory: Option<&MemorySelection>,
     user_preferences: &UserPreferences,
 ) -> Option<String> {
     match context {
         PickerContext::DefaultMemory => state.saved_default_memory_id.clone(),
-        PickerContext::InsertTarget => {
-            let insert_memory_id = state.insert_memory_id.trim();
-            (!insert_memory_id.is_empty()).then(|| insert_memory_id.to_string())
-        }
+        PickerContext::InsertTarget => active_memory.map(|selection| selection.id.clone()),
         PickerContext::InsertTag => {
             let insert_tag = state.insert_tag.trim();
             (!insert_tag.is_empty()).then(|| insert_tag.to_string())
@@ -965,7 +963,7 @@ impl KinicProvider {
             session_overview,
             user_preferences,
             preferences_health,
-            cursor_memory_id: None,
+            active_memory: None,
             memory_summaries: Vec::new(),
             memory_records: Vec::new(),
             result_records: Vec::new(),
@@ -1040,7 +1038,7 @@ impl KinicProvider {
         reset_request_task(&mut self.pending_memory_detail);
         self.pending_memory_detail_memory_id = None;
         self.memory_detail_prefetch.reset();
-        self.cursor_memory_id = None;
+        self.clear_active_memory();
         self.active_chat_thread = None;
         self.initial_memories_in_flight = true;
         let auth = self.config.auth.clone();
@@ -1106,7 +1104,7 @@ impl KinicProvider {
         if self.memories_mode != MemoriesMode::Browser {
             return false;
         }
-        let previous_cursor_memory_id = self.cursor_memory_id.clone();
+        let previous_active_memory = self.active_memory.clone();
 
         let visible_ids = self
             .visible_memory_records()
@@ -1115,26 +1113,26 @@ impl KinicProvider {
             .collect::<Vec<_>>();
 
         if visible_ids.is_empty() {
-            self.cursor_memory_id = None;
-            return self.cursor_memory_id != previous_cursor_memory_id;
+            self.clear_active_memory();
+            return self.active_memory != previous_active_memory;
         }
 
         if !self
-            .cursor_memory_id
-            .as_ref()
+            .active_memory_id()
             .is_some_and(|memory_id| visible_ids.iter().any(|id| id == memory_id))
+            && let Some(memory_id) = visible_ids.first()
         {
-            self.cursor_memory_id = visible_ids.first().cloned();
+            self.set_active_memory_by_id(memory_id.clone());
         }
 
-        self.cursor_memory_id != previous_cursor_memory_id
+        self.active_memory != previous_active_memory
     }
 
-    /// Aligns provider cursor with [`CoreState::selected_index`] for browser list interactions.
+    /// Aligns provider active memory with [`CoreState::selected_index`] for browser list interactions.
     /// `all memories` chat still keeps the browser selection so detail/search/default-memory
     /// actions keep pointing at the visible list selection. In [`MemoriesMode::Results`], list
     /// selection follows a different path; chat scope sync is intentionally browser-first here.
-    fn sync_cursor_to_chat_scope_for_browser(&mut self, state: &CoreState) {
+    fn sync_active_memory_to_chat_scope_for_browser(&mut self, state: &CoreState) {
         if state.current_tab_id.as_str() != KINIC_MEMORIES_TAB_ID {
             return;
         }
@@ -1152,18 +1150,18 @@ impl KinicProvider {
             })
             .map(|item| item.id.clone())
         {
-            self.cursor_memory_id = Some(id);
+            self.set_active_memory_by_id(id);
         }
     }
 
-    fn cursor_visible_memory_index(&self) -> Option<usize> {
-        let active_id = self.cursor_memory_id.as_deref()?;
+    fn active_memory_visible_index(&self) -> Option<usize> {
+        let active_id = self.active_memory_id()?;
         self.visible_memory_records()
             .into_iter()
             .position(|record| record.id == active_id)
     }
 
-    fn navigate_memory_cursor(&mut self, state: &CoreState, action: &CoreAction) {
+    fn navigate_active_memory(&mut self, state: &CoreState, action: &CoreAction) {
         if !self.should_handle_memory_navigation(state) || self.is_add_memory_action_selected(state)
         {
             return;
@@ -1180,7 +1178,7 @@ impl KinicProvider {
             index
         } else {
             let visible_count = visible_records.len();
-            let current = self.cursor_visible_memory_index().unwrap_or(0);
+            let current = self.active_memory_visible_index().unwrap_or(0);
             let last = visible_count.saturating_sub(1);
             match action {
                 CoreAction::MoveNext => {
@@ -1210,7 +1208,7 @@ impl KinicProvider {
         let Some(record) = visible_records.get(target_index) else {
             return;
         };
-        self.cursor_memory_id = Some(record.id.clone());
+        self.set_active_memory_by_id(record.id.clone());
     }
 
     fn network_label(&self) -> &str {
@@ -1375,22 +1373,18 @@ impl KinicProvider {
     fn active_chat_scope_memory_id(&self, state: &CoreState) -> Option<String> {
         match state.chat_scope {
             ChatScope::All => None,
-            ChatScope::Selected => state
-                .selected_index
-                .and_then(|idx| state.list_items.get(idx))
-                .filter(|item| {
-                    matches!(
-                        &item.kind,
-                        tui_kit_model::UiItemKind::Custom(kind) if kind == "memory"
-                    )
-                })
-                .map(|item| item.id.clone())
-                .or_else(|| self.cursor_memory_id.clone()),
+            ChatScope::Selected => self.active_memory_id().map(str::to_string),
         }
     }
 
     fn chat_scope_label(&self, state: &CoreState) -> Option<String> {
         let memory_id = self.active_chat_scope_memory_id(state)?;
+        if self.active_memory_id() == Some(memory_id.as_str())
+            && let Some(label) = self.active_memory_label().map(str::trim)
+            && !label.is_empty()
+        {
+            return Some(label.to_string());
+        }
         self.memory_records
             .iter()
             .find(|record| record.id == memory_id)
@@ -1596,18 +1590,75 @@ impl KinicProvider {
         self.snapshot_output(state, vec![effect])
     }
 
-    fn selected_memory_summary(&self) -> Option<&MemorySummary> {
-        let active_id = self.cursor_memory_id.as_deref()?;
+    fn active_memory_summary(&self) -> Option<&MemorySummary> {
+        let active_id = self.active_memory_id()?;
         self.memory_summaries
             .iter()
             .find(|summary| summary.id == active_id)
     }
 
-    fn selected_memory_record(&self) -> Option<&KinicRecord> {
-        let selected_id = self.cursor_memory_id.as_deref()?;
+    fn active_memory_record(&self) -> Option<&KinicRecord> {
+        let selected_id = self.active_memory_id()?;
         self.memory_records
             .iter()
             .find(|record| record.id == selected_id)
+    }
+
+    fn active_memory_id(&self) -> Option<&str> {
+        self.active_memory
+            .as_ref()
+            .map(|selection| selection.id.as_str())
+    }
+
+    fn active_memory_label(&self) -> Option<&str> {
+        self.active_memory
+            .as_ref()
+            .map(|selection| selection.label.as_str())
+    }
+
+    fn memory_selection_for_id(&self, id: &str) -> MemorySelection {
+        let label = self
+            .memory_records
+            .iter()
+            .find(|record| record.id == id)
+            .map(|record| record.title.trim())
+            .filter(|title| !title.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.default_memory_selection().title_for_id(id))
+            .unwrap_or_else(|| id.to_string());
+
+        MemorySelection {
+            id: id.to_string(),
+            label,
+        }
+    }
+
+    fn set_active_memory_by_id(&mut self, id: impl Into<String>) -> bool {
+        let id = id.into();
+        self.set_active_memory(self.memory_selection_for_id(id.as_str()))
+    }
+
+    fn set_active_memory(&mut self, selection: MemorySelection) -> bool {
+        if self.active_memory.as_ref() == Some(&selection) {
+            return false;
+        }
+        self.active_memory = Some(selection);
+        true
+    }
+
+    fn clear_active_memory(&mut self) -> bool {
+        if self.active_memory.is_none() {
+            return false;
+        }
+        self.active_memory = None;
+        true
+    }
+
+    fn refresh_active_memory_label(&mut self, memory_id: &str) -> bool {
+        if self.active_memory_id() != Some(memory_id) {
+            return false;
+        }
+        self.set_active_memory_by_id(memory_id.to_string())
     }
 
     fn memory_summary_display_text(&self, memory_id: &str) -> Option<String> {
@@ -1657,7 +1708,7 @@ impl KinicProvider {
         if self.is_add_memory_action_selected(state) {
             return None;
         }
-        let summary = self.selected_memory_summary()?;
+        let summary = self.active_memory_summary()?;
         summary.searchable_memory_id.as_ref().map(|_| {
             (
                 summary,
@@ -1667,7 +1718,7 @@ impl KinicProvider {
     }
 
     fn active_memory_is_manual(&self) -> bool {
-        let Some(active_id) = self.cursor_memory_id.as_deref() else {
+        let Some(active_id) = self.active_memory_id() else {
             return false;
         };
         self.user_preferences
@@ -1680,7 +1731,7 @@ impl KinicProvider {
         &'a self,
         state: &CoreState,
     ) -> Vec<MemoryContentSelection<'a>> {
-        let Some(summary) = self.selected_memory_summary() else {
+        let Some(summary) = self.active_memory_summary() else {
             return vec![MemoryContentSelection::AddUser];
         };
         let mut selections = Vec::new();
@@ -1744,7 +1795,7 @@ impl KinicProvider {
             return;
         };
         let users = self
-            .selected_memory_summary()
+            .active_memory_summary()
             .and_then(|summary| summary.users.as_ref());
         section.body_lines = render_access_lines(users, current_selection.as_ref());
 
@@ -1766,17 +1817,8 @@ impl KinicProvider {
         }
     }
 
-    fn selected_insert_memory_id(&self, state: &CoreState) -> Option<String> {
-        let insert_memory_id = state.insert_memory_id.trim();
-        if !insert_memory_id.is_empty() {
-            return Some(insert_memory_id.to_string());
-        }
-
-        let default_memory_id = self.user_preferences.default_memory_id.as_deref()?;
-        self.memory_records
-            .iter()
-            .find(|record| record.id == default_memory_id)
-            .map(|record| record.id.clone())
+    fn effective_insert_memory_id(&self) -> Option<String> {
+        self.active_memory_id().map(str::to_string)
     }
 
     fn reset_insert_dim(&mut self) {
@@ -1787,8 +1829,8 @@ impl KinicProvider {
         self.pending_insert_dim = None;
     }
 
-    fn start_insert_dim_load(&mut self, state: &CoreState) {
-        let Some(memory_id) = self.selected_insert_memory_id(state) else {
+    fn start_insert_dim_load(&mut self) {
+        let Some(memory_id) = self.effective_insert_memory_id() else {
             return;
         };
         if self.insert_expected_dim_memory_id.as_deref() == Some(memory_id.as_str())
@@ -1945,8 +1987,9 @@ impl KinicProvider {
                     summary.stable_memory_size = details.stable_memory_size;
                     summary.cycle_amount = details.cycle_amount;
                     summary.users = Some(details.users);
-                    self.loaded_memory_details.insert(memory_id);
+                    self.loaded_memory_details.insert(memory_id.clone());
                     self.refresh_memory_records_from_summaries();
+                    self.refresh_active_memory_label(memory_id.as_str());
                 }
                 if notify && let Some(message) = details.users_load_error.as_ref() {
                     effects.push(CoreEffect::Notify(format!(
@@ -1965,11 +2008,11 @@ impl KinicProvider {
         effects
     }
 
-    fn start_cursor_memory_detail_load(&mut self) {
+    fn start_active_memory_detail_load(&mut self) {
         if self.memories_mode != MemoriesMode::Browser {
             return;
         }
-        let Some(memory_id) = self.cursor_memory_id.clone() else {
+        let Some(memory_id) = self.active_memory_id().map(str::to_string) else {
             return;
         };
         if self.loaded_memory_details.contains(memory_id.as_str()) {
@@ -2015,7 +2058,7 @@ impl KinicProvider {
         if self.memories_mode != MemoriesMode::Browser {
             return;
         }
-        let Some(record) = self.selected_memory_record() else {
+        let Some(record) = self.active_memory_record() else {
             return;
         };
         #[cfg(test)]
@@ -2132,7 +2175,7 @@ impl KinicProvider {
         let default_memory = self.default_memory_selection();
         let default_memory_items = default_memory.available_memory_ids();
         let default_memory_labels = default_memory.selector_labels();
-        let insert_memory_placeholder = self.insert_memory_placeholder_label(state);
+        let insert_memory_placeholder = self.insert_memory_placeholder_label();
         let picker = match &state.picker {
             PickerState::Closed => PickerState::Closed,
             PickerState::Input {
@@ -2158,7 +2201,12 @@ impl KinicProvider {
                     &self.user_preferences,
                 );
                 let preferred_selected_id = selected_id.clone().or_else(|| {
-                    picker_selected_id_for_context(*context, state, &self.user_preferences)
+                    picker_selected_id_for_context(
+                        *context,
+                        state,
+                        self.active_memory.as_ref(),
+                        &self.user_preferences,
+                    )
                 });
                 let resolved_index = picker_selected_index(
                     &items,
@@ -2206,13 +2254,13 @@ impl KinicProvider {
         let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
         } else if self.memories_mode == MemoriesMode::Browser {
-            if self.cursor_memory_id.is_none() && self.memory_records.is_empty() {
+            if self.active_memory.is_none() && self.memory_records.is_empty() {
                 filtered
                     .first()
                     .copied()
                     .map(|record| self.selected_content_for_record(record, state))
             } else {
-                self.selected_memory_record()
+                self.active_memory_record()
                     .map(|record| self.selected_content_for_record(record, state))
             }
         } else {
@@ -2226,7 +2274,7 @@ impl KinicProvider {
         } else if self.is_add_memory_action_selected(state) {
             Some(filtered.len())
         } else if self.memories_mode == MemoriesMode::Browser {
-            self.cursor_visible_memory_index()
+            self.active_memory_visible_index()
                 .or_else(|| (!filtered.is_empty()).then_some(0))
         } else {
             let current = state.selected_index.unwrap_or(0);
@@ -2242,7 +2290,7 @@ impl KinicProvider {
             selected_context: None,
             total_count: filtered.len(),
             status_message: Some(self.status_message(state, filtered.len())),
-            selected_memory_label: self.selected_memory_label(),
+            selected_memory: self.active_memory.clone(),
             chat_scope_label: self.chat_scope_label(state),
             create_cost_state: self.create_cost_state.clone(),
             create_submit_state: state.create_submit_state.clone(),
@@ -2257,17 +2305,15 @@ impl KinicProvider {
             saved_default_memory_id: self.user_preferences.default_memory_id.clone(),
             insert_memory_placeholder,
             insert_expected_dim: self
-                .selected_insert_memory_id(state)
+                .effective_insert_memory_id()
                 .filter(|memory_id| {
                     self.insert_expected_dim_memory_id.as_deref() == Some(memory_id.as_str())
                 })
                 .and(self.insert_expected_dim),
             insert_expected_dim_loading: self.insert_expected_dim_loading
-                && self
-                    .selected_insert_memory_id(state)
-                    .is_some_and(|memory_id| {
-                        self.insert_expected_dim_memory_id.as_deref() == Some(memory_id.as_str())
-                    }),
+                && self.effective_insert_memory_id().is_some_and(|memory_id| {
+                    self.insert_expected_dim_memory_id.as_deref() == Some(memory_id.as_str())
+                }),
             insert_current_dim,
             insert_validation_message,
         }
@@ -2288,24 +2334,6 @@ impl KinicProvider {
         )
     }
 
-    fn selected_memory_label(&self) -> Option<String> {
-        self.selected_memory_record()
-            .map(|record| {
-                let title = record.title.trim();
-                if title.is_empty() {
-                    record.id.clone()
-                } else {
-                    title.to_string()
-                }
-            })
-            .or_else(|| {
-                self.cursor_memory_id
-                    .as_deref()
-                    .and_then(|memory_id| self.default_memory_selection().title_for_id(memory_id))
-            })
-            .or_else(|| self.cursor_memory_id.clone())
-    }
-
     fn insert_validation_message(&self, state: &CoreState) -> Option<String> {
         if !matches!(state.insert_mode, InsertMode::ManualEmbedding)
             || state.insert_embedding.trim().is_empty()
@@ -2313,7 +2341,7 @@ impl KinicProvider {
             return None;
         }
 
-        let selected_memory_id = self.selected_insert_memory_id(state)?;
+        let selected_memory_id = self.effective_insert_memory_id()?;
         if self.insert_expected_dim_memory_id.as_deref() != Some(selected_memory_id.as_str()) {
             return None;
         }
@@ -2350,8 +2378,8 @@ impl KinicProvider {
         snapshot
     }
 
-    fn insert_memory_placeholder_label(&self, state: &CoreState) -> Option<String> {
-        if !state.insert_memory_id.trim().is_empty() {
+    fn insert_memory_placeholder_label(&self) -> Option<String> {
+        if self.active_memory.is_some() {
             return None;
         }
         let default_memory_id = self.user_preferences.default_memory_id.as_deref()?;
@@ -2470,14 +2498,25 @@ impl KinicProvider {
         item: &PickerItem,
     ) -> Vec<CoreEffect> {
         match context {
-            PickerContext::DefaultMemory => vec![
-                self.default_memory_controller()
-                    .set_default_memory_preference(item.id.clone()),
-            ],
-            PickerContext::InsertTarget => vec![
-                CoreEffect::SetInsertMemoryId(item.id.clone()),
-                CoreEffect::Notify(format!("Selected target memory {}", item.id)),
-            ],
+            PickerContext::DefaultMemory => {
+                let selection = self.memory_selection_for_id(item.id.as_str());
+                self.set_active_memory(selection);
+                vec![
+                    self.default_memory_controller()
+                        .set_default_memory_preference(item.id.clone()),
+                ]
+            }
+            PickerContext::InsertTarget => {
+                let selection = MemorySelection {
+                    id: item.id.clone(),
+                    label: item.label.clone(),
+                };
+                self.set_active_memory(selection);
+                vec![CoreEffect::Notify(format!(
+                    "Selected target memory {}",
+                    item.label
+                ))]
+            }
             PickerContext::InsertTag => Vec::new(),
             PickerContext::TagManagement => vec![
                 CoreEffect::SetInsertTag(item.id.clone()),
@@ -2859,7 +2898,7 @@ impl KinicProvider {
     }
 
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
-        let memory_id = self.selected_insert_memory_id(state).unwrap_or_default();
+        let memory_id = self.effective_insert_memory_id().unwrap_or_default();
         let tag = state.insert_tag.trim().to_string();
         let file_path = resolved_insert_file_path(state);
 
@@ -2986,15 +3025,11 @@ impl KinicProvider {
         validate_insert_request_for_submit(&request).map_err(|error| error.to_string())
     }
 
-    fn validate_insert_expected_dim(
-        &self,
-        request: &InsertRequest,
-        state: &CoreState,
-    ) -> Result<(), String> {
+    fn validate_insert_expected_dim(&self, request: &InsertRequest) -> Result<(), String> {
         let InsertRequest::Raw { embedding_json, .. } = request else {
             return Ok(());
         };
-        let Some(selected_memory_id) = self.selected_insert_memory_id(state) else {
+        let Some(selected_memory_id) = self.effective_insert_memory_id() else {
             return Ok(());
         };
         if self.insert_expected_dim_memory_id.as_deref() != Some(selected_memory_id.as_str()) {
@@ -3097,8 +3132,8 @@ impl KinicProvider {
                 effects.push(CoreEffect::CloseAccessControl);
                 effects.push(CoreEffect::Notify("Access updated.".to_string()));
                 self.loaded_memory_details.remove(&output.memory_id);
-                if self.cursor_memory_id.as_deref() == Some(output.memory_id.as_str()) {
-                    self.start_cursor_memory_detail_load();
+                if self.active_memory_id() == Some(output.memory_id.as_str()) {
+                    self.start_active_memory_detail_load();
                 }
             }
             Err(error) => {
@@ -3194,9 +3229,10 @@ impl KinicProvider {
                         .unwrap_or_else(|| output.next_name.clone());
                 }
                 self.refresh_memory_records_from_summaries();
+                self.refresh_active_memory_label(output.memory_id.as_str());
                 self.loaded_memory_details.remove(&output.memory_id);
-                if self.cursor_memory_id.as_deref() == Some(output.memory_id.as_str()) {
-                    self.start_cursor_memory_detail_load();
+                if self.active_memory_id() == Some(output.memory_id.as_str()) {
+                    self.start_active_memory_detail_load();
                 }
                 effects.push(CoreEffect::CloseRenameMemory);
                 effects.push(CoreEffect::Notify(format!(
@@ -3453,13 +3489,13 @@ impl KinicProvider {
         })
     }
 
-    fn selected_memory_id_for_default(&self, state: &CoreState) -> Option<String> {
+    fn active_memory_id_for_default_selection(&self, state: &CoreState) -> Option<String> {
         match self.memories_mode {
             MemoriesMode::Browser => {
                 if self.is_add_memory_action_selected(state) {
                     None
                 } else {
-                    self.cursor_memory_id.clone()
+                    self.active_memory_id().map(str::to_string)
                 }
             }
             MemoriesMode::Results => self
@@ -3478,7 +3514,7 @@ impl KinicProvider {
                 "No searchable memories are available yet.",
             ),
             SearchScope::Selected => {
-                let active_memory_id = self.cursor_memory_id.as_deref().ok_or_else(|| {
+                let active_memory_id = self.active_memory_id().ok_or_else(|| {
                     "Select a memory in the list before running search.".to_string()
                 })?;
                 let record = self
@@ -3734,7 +3770,7 @@ impl KinicProvider {
         self.initial_memories_in_flight = false;
         match output.result {
             Ok(memories) => {
-                let previous_cursor_memory_id = self.cursor_memory_id.clone();
+                let previous_active_memory = self.active_memory.clone();
                 self.memory_summaries = memories;
                 self.refresh_memory_records_from_summaries();
                 let initial_memory_id = self
@@ -3750,23 +3786,29 @@ impl KinicProvider {
                             .preferred_initial_memory_id()
                     })
                     .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
-                if self.cursor_memory_id.is_none()
-                    || self.cursor_memory_id.as_ref().is_some_and(|memory_id| {
+                if self.active_memory_id().is_none()
+                    || self.active_memory_id().is_some_and(|memory_id| {
                         !self
                             .memory_records
                             .iter()
-                            .any(|record| &record.id == memory_id)
+                            .any(|record| record.id == memory_id)
                     })
                 {
-                    self.cursor_memory_id = initial_memory_id.clone();
+                    if let Some(memory_id) = initial_memory_id {
+                        self.set_active_memory_by_id(memory_id);
+                    } else {
+                        self.clear_active_memory();
+                    }
+                } else if let Some(memory_id) = self.active_memory_id().map(str::to_string) {
+                    self.set_active_memory_by_id(memory_id);
                 }
                 self.last_search_state = None;
                 self.start_memory_detail_prefetch_for_records();
-                self.start_cursor_memory_detail_load();
+                self.start_active_memory_detail_load();
                 self.start_selected_memory_summary_load(false);
-                self.start_insert_dim_load(state);
+                self.start_insert_dim_load();
                 let mut effects = Vec::new();
-                if self.cursor_memory_id != previous_cursor_memory_id {
+                if self.active_memory != previous_active_memory {
                     self.invalidate_pending_search();
                     effects.extend(self.load_active_chat_history_effects(state));
                 }
@@ -3776,16 +3818,16 @@ impl KinicProvider {
                 })
             }
             Err(error) => {
-                let previous_cursor_memory_id = self.cursor_memory_id.clone();
+                let previous_active_memory = self.active_memory.clone();
                 self.memory_records.clear();
                 self.result_records.clear();
                 self.memories_mode = MemoriesMode::Browser;
                 let notify_message = format_live_load_failure_message(&error);
                 self.all = vec![load_error_record(error)];
-                self.cursor_memory_id = None;
+                self.clear_active_memory();
                 self.last_search_state = None;
                 let mut effects = vec![CoreEffect::Notify(notify_message)];
-                if self.cursor_memory_id != previous_cursor_memory_id {
+                if self.active_memory != previous_active_memory {
                     self.invalidate_pending_search();
                     effects.extend(self.load_active_chat_history_effects(state));
                 }
@@ -3997,11 +4039,10 @@ impl KinicProvider {
             return Some(self.stale_request_output(state));
         }
 
-        let previous_cursor_memory_id = self.cursor_memory_id.clone();
+        let previous_active_memory = self.active_memory.clone();
         let mut effects = Vec::new();
         match output.result {
             Ok(success) => {
-                self.cursor_memory_id = Some(success.id.clone());
                 if let Some(memories) = success.memories {
                     self.memory_summaries = memories;
                     self.loaded_memory_details.clear();
@@ -4022,12 +4063,13 @@ impl KinicProvider {
                         }
                     }
                 }
+                self.set_active_memory_by_id(success.id.clone());
                 self.memories_mode = MemoriesMode::Browser;
                 self.result_records.clear();
                 self.invalidate_pending_search();
                 self.last_search_state = None;
                 self.start_memory_detail_prefetch_for_records();
-                self.start_cursor_memory_detail_load();
+                self.start_active_memory_detail_load();
                 self.start_selected_memory_summary_load(false);
                 let _ = self.start_create_cost_refresh();
                 effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
@@ -4049,7 +4091,7 @@ impl KinicProvider {
                 )));
             }
         }
-        if self.cursor_memory_id != previous_cursor_memory_id {
+        if self.active_memory != previous_active_memory {
             effects.push(CoreEffect::SetMemoryContentActionIndex(0));
             effects.extend(self.load_active_chat_history_effects(state));
         }
@@ -4184,7 +4226,7 @@ impl KinicProvider {
         let effects = match output.result {
             Ok(success) => {
                 self.invalidate_memory_summary(success.memory_id.as_str());
-                if self.cursor_memory_id.as_deref() == Some(success.memory_id.as_str()) {
+                if self.active_memory_id() == Some(success.memory_id.as_str()) {
                     self.start_selected_memory_summary_load(true);
                 }
                 vec![
@@ -4311,7 +4353,7 @@ impl DataProvider for KinicProvider {
         action: &CoreAction,
         state: &CoreState,
     ) -> CoreResult<ProviderOutput> {
-        let previous_cursor_memory_id = self.cursor_memory_id.clone();
+        let previous_active_memory = self.active_memory.clone();
         let mut effects = Vec::new();
         let mut close_picker_after_submit = false;
         match action {
@@ -4343,7 +4385,7 @@ impl DataProvider for KinicProvider {
                 self.invalidate_pending_search();
             }
             CoreAction::ChatScopePrev | CoreAction::ChatScopeNext | CoreAction::ChatScopeAll => {
-                self.sync_cursor_to_chat_scope_for_browser(state);
+                self.sync_active_memory_to_chat_scope_for_browser(state);
                 effects.extend(self.load_active_chat_history_effects(state));
             }
             CoreAction::ChatNewThread => {
@@ -4376,22 +4418,22 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::MoveNext if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MovePrev if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MoveHome if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MoveEnd if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MovePageDown if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MovePageUp if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::OpenSelected => {
                 if self.is_add_memory_action_selected(state) {
@@ -4402,7 +4444,7 @@ impl DataProvider for KinicProvider {
             CoreAction::SetTab(id) => {
                 effects.extend(self.set_tab(id.0.as_str()));
                 if id.0.as_str() == KINIC_INSERT_TAB_ID {
-                    self.start_insert_dim_load(state);
+                    self.start_insert_dim_load();
                 }
             }
             CoreAction::ChatSubmit => {
@@ -4485,7 +4527,7 @@ impl DataProvider for KinicProvider {
                 let request = self.build_insert_request(state);
                 if let Err(error) = self.validate_insert_state(state) {
                     effects.push(CoreEffect::InsertFormError(Some(error)));
-                } else if let Err(error) = self.validate_insert_expected_dim(&request, state) {
+                } else if let Err(error) = self.validate_insert_expected_dim(&request) {
                     effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if self.insert_submit_task.in_flight {
                     effects.push(CoreEffect::Notify(
@@ -4581,7 +4623,7 @@ impl DataProvider for KinicProvider {
                 });
             }
             CoreAction::MemoryContentOpenSelected => {
-                let Some(memory_id) = self.cursor_memory_id.clone() else {
+                let Some(memory_id) = self.active_memory_id().map(str::to_string) else {
                     effects.push(CoreEffect::Notify(
                         "Select a memory before running this action.".to_string(),
                     ));
@@ -4730,7 +4772,7 @@ impl DataProvider for KinicProvider {
                     });
                 }
 
-                let Some(memory_id) = self.cursor_memory_id.clone() else {
+                let Some(memory_id) = self.active_memory_id().map(str::to_string) else {
                     effects.push(CoreEffect::RemoveMemoryFormError(Some(
                         "Select a memory before removing it.".to_string(),
                     )));
@@ -4753,10 +4795,14 @@ impl DataProvider for KinicProvider {
                 match self.remove_manual_memory_from_preferences(memory_id.as_str()) {
                     Ok(()) => {
                         self.remove_manual_memory_locally(memory_id.as_str());
-                        self.cursor_memory_id = next_memory_id;
+                        if let Some(memory_id) = next_memory_id {
+                            self.set_active_memory_by_id(memory_id);
+                        } else {
+                            self.clear_active_memory();
+                        }
                         let _ = self.sync_memory_browser_selection();
                         self.invalidate_pending_search();
-                        self.start_cursor_memory_detail_load();
+                        self.start_active_memory_detail_load();
                         effects.push(CoreEffect::CloseRemoveMemory);
                         effects.push(CoreEffect::SetMemoryContentActionIndex(0));
                         effects.push(CoreEffect::Notify(format!(
@@ -4916,7 +4962,7 @@ impl DataProvider for KinicProvider {
                 }
             },
             CoreAction::SetDefaultMemoryFromSelection => {
-                let Some(memory_id) = self.selected_memory_id_for_default(state) else {
+                let Some(memory_id) = self.active_memory_id_for_default_selection(state) else {
                     effects.push(CoreEffect::Notify(
                         "Select a memory before setting the default.".to_string(),
                     ));
@@ -4968,17 +5014,17 @@ impl DataProvider for KinicProvider {
             }
             _ => self.build_snapshot(state),
         };
-        let chat_scope_follows_cursor = state.chat_scope == ChatScope::Selected
+        let chat_scope_follows_active_memory = state.chat_scope == ChatScope::Selected
             && !matches!(
                 action,
                 CoreAction::ChatScopePrev | CoreAction::ChatScopeNext | CoreAction::ChatScopeAll
             );
-        if self.cursor_memory_id != previous_cursor_memory_id {
+        if self.active_memory != previous_active_memory {
             self.invalidate_pending_search();
-            self.start_cursor_memory_detail_load();
+            self.start_active_memory_detail_load();
             self.start_selected_memory_summary_load(false);
             effects.push(CoreEffect::SetMemoryContentActionIndex(0));
-            if chat_scope_follows_cursor {
+            if chat_scope_follows_active_memory {
                 effects.extend(self.load_active_chat_history_effects(state));
             }
         }

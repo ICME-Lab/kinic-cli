@@ -361,11 +361,21 @@ fn multiline_cursor_x(line: &str, cursor_col: usize, max_width: u16) -> u16 {
 }
 
 fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
+    if let Some(selected_memory) = ui.selected_memory {
+        let selected_memory_label = selected_memory.label.trim();
+        if !selected_memory_label.is_empty() {
+            return selected_memory_label.to_string();
+        }
+        let selected_memory_id = selected_memory.id.trim();
+        if !selected_memory_id.is_empty() {
+            return selected_memory_id.to_string();
+        }
+    }
     let placeholder = ui
         .insert_memory_placeholder
         .map(|label| format!("<default memory: {label}>"))
         .unwrap_or_else(|| "<target memory canister>".to_string());
-    display_value(ui.insert_memory_id, &placeholder)
+    display_value("", &placeholder)
 }
 
 fn mode_value(mode: InsertMode) -> String {
@@ -463,13 +473,29 @@ mod tests {
     }
 
     #[test]
-    fn memory_id_value_prefers_explicit_insert_memory_id() {
+    fn memory_id_value_falls_back_to_selected_memory_id() {
         let theme = Theme::default();
+        let selected_memory = tui_kit_runtime::MemorySelection {
+            id: "bbbbb-bb".to_string(),
+            label: String::new(),
+        };
         let ui = TuiKitUi::new(&theme)
             .insert_memory_placeholder(Some("Alpha Memory"))
-            .insert_memory_id("bbbbb-bb");
+            .selected_memory(Some(&selected_memory));
 
         assert_eq!(memory_id_value(&ui), "bbbbb-bb");
+    }
+
+    #[test]
+    fn memory_id_value_prefers_selected_memory_label_over_canister_id() {
+        let theme = Theme::default();
+        let selected_memory = tui_kit_runtime::MemorySelection {
+            id: "bbbbb-bb".to_string(),
+            label: "Beta Memory".to_string(),
+        };
+        let ui = TuiKitUi::new(&theme).selected_memory(Some(&selected_memory));
+
+        assert_eq!(memory_id_value(&ui), "Beta Memory");
     }
 
     #[test]

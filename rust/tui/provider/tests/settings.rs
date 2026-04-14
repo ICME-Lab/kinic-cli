@@ -1,9 +1,5 @@
 use super::*;
 
-fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
-    provider.cursor_memory_id = Some(memory_id.to_string());
-}
-
 fn run_session_settings_refresh(
     request_id: u64,
     seed_overview: Option<SessionAccountOverview>,
@@ -291,7 +287,7 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
 
     assert!(!provider.create_submit_task.in_flight);
     assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(active_memory_id(&provider), Some("aaaaa-aa"));
     assert_eq!(
         provider.user_preferences.default_memory_id.as_deref(),
         Some("bbbbb-bb")

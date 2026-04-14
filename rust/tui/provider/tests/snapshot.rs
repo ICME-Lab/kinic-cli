@@ -7,10 +7,6 @@ use std::{
 };
 use tui_kit_runtime::{RemoveMemoryModalState, dispatch_action};
 
-fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
-    provider.cursor_memory_id = Some(memory_id.to_string());
-}
-
 fn snapshot_test_guard() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     match LOCK.get_or_init(|| Mutex::new(())).lock() {
@@ -30,7 +26,7 @@ fn poll_background_until_ready(provider: &mut KinicProvider, state: &CoreState) 
 }
 
 #[test]
-fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {
+fn build_snapshot_prefers_active_memory_for_insert_selector() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_records = vec![
         live_memory("aaaaa-aa", "Alpha Memory"),
@@ -38,6 +34,7 @@ fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {
     ];
     provider.all = provider.memory_records.clone();
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "bbbbb-bb");
 
     let snapshot = provider.build_snapshot(&CoreState {
         picker: PickerState::List {
@@ -47,47 +44,6 @@ fn build_snapshot_prefers_saved_default_for_insert_selector_and_placeholder() {
             selected_id: None,
             mode: PickerListMode::Browsing,
         },
-        ..CoreState::default()
-    });
-
-    assert_eq!(
-        snapshot.picker,
-        PickerState::List {
-            context: PickerContext::InsertTarget,
-            items: vec![
-                PickerItem::option("aaaaa-aa", "Alpha Memory", true),
-                PickerItem::option("bbbbb-bb", "Beta Memory", false),
-            ],
-            selected_index: 0,
-            selected_id: Some("aaaaa-aa".to_string()),
-            mode: PickerListMode::Browsing,
-        }
-    );
-    assert_eq!(
-        snapshot.insert_memory_placeholder.as_deref(),
-        Some("Alpha Memory")
-    );
-}
-
-#[test]
-fn build_snapshot_prefers_explicit_insert_memory_id_for_insert_selector() {
-    let mut provider = KinicProvider::new(live_config());
-    provider.memory_records = vec![
-        live_memory("aaaaa-aa", "Alpha Memory"),
-        live_memory("bbbbb-bb", "Beta Memory"),
-    ];
-    provider.all = provider.memory_records.clone();
-    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
-
-    let snapshot = provider.build_snapshot(&CoreState {
-        picker: PickerState::List {
-            context: PickerContext::InsertTarget,
-            items: Vec::new(),
-            selected_index: 0,
-            selected_id: None,
-            mode: PickerListMode::Browsing,
-        },
-        insert_memory_id: "bbbbb-bb".to_string(),
         ..CoreState::default()
     });
 
@@ -108,7 +64,7 @@ fn build_snapshot_prefers_explicit_insert_memory_id_for_insert_selector() {
 }
 
 #[test]
-fn submit_insert_target_selector_updates_insert_memory_only() {
+fn submit_insert_target_selector_projects_selected_memory_in_snapshot() {
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
     let state = CoreState {
@@ -133,13 +89,19 @@ fn submit_insert_target_selector_updates_insert_memory_only() {
         provider.user_preferences.default_memory_id.as_deref(),
         Some("aaaaa-aa")
     );
+    assert_eq!(
+        output
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.selected_memory.as_ref()),
+        Some(&MemorySelection {
+            id: "bbbbb-bb".to_string(),
+            label: "Beta Memory".to_string(),
+        })
+    );
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::SetInsertMemoryId(memory_id) if memory_id == "bbbbb-bb"
-    )));
-    assert!(output.effects.iter().any(|effect| matches!(
-        effect,
-        CoreEffect::Notify(message) if message == "Selected target memory bbbbb-bb"
+        CoreEffect::Notify(message) if message == "Selected target memory Beta Memory"
     )));
 }
 
@@ -698,7 +660,7 @@ fn generated_summary_failure_shows_unavailable_for_selected_memory() {
 }
 
 #[test]
-fn completed_summary_for_previous_selection_is_cached_after_cursor_moves_again() {
+fn completed_summary_for_previous_selection_is_cached_after_active_memory_moves_again() {
     let _guard = snapshot_test_guard();
     set_next_test_memory_summary_result(Ok(AskMemoriesOutput {
         response: "Summary for beta".to_string(),
@@ -726,7 +688,7 @@ fn completed_summary_for_previous_selection_is_cached_after_cursor_moves_again()
     let _ = dispatch_action(&mut provider, &mut state, &CoreAction::MoveNext)
         .expect("second move next should dispatch");
 
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("ccccc-cc"));
+    assert_eq!(active_memory_id(&provider), Some("ccccc-cc"));
     let _ = poll_background_until_ready(&mut provider, &state);
 
     assert_eq!(
@@ -1088,7 +1050,7 @@ fn remove_manual_memory_submit_updates_preferences_and_active_selection() {
         Vec::<String>::new()
     );
     assert_eq!(provider.user_preferences.default_memory_id, None);
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert!(
         provider
             .memory_records

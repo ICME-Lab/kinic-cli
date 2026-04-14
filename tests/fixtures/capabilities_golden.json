@@ -1,0 +1,1326 @@
+{
+  "schema_version": 1,
+  "cli": "kinic-cli",
+  "version": "0.1.2",
+  "auth_summary": "Network commands use global --identity or --ii unless noted otherwise. The TUI requires --identity. tools serve is environment-auth only. Some commands expose conditional auth requirements based on flags such as --validate.",
+  "global_options": [
+    {
+      "scope": "global",
+      "name": "verbose",
+      "required": false,
+      "input_shape": "flag",
+      "value_kind": "integer"
+    },
+    {
+      "scope": "global",
+      "name": "ic",
+      "required": false,
+      "input_shape": "flag",
+      "value_kind": "boolean"
+    },
+    {
+      "scope": "global",
+      "name": "identity",
+      "required": false,
+      "input_shape": "single_value",
+      "value_kind": "string",
+      "relations": {
+        "conflicts": [
+          "ii"
+        ]
+      }
+    },
+    {
+      "scope": "global",
+      "name": "ii",
+      "required": false,
+      "input_shape": "flag",
+      "value_kind": "boolean"
+    },
+    {
+      "scope": "global",
+      "name": "identity_path",
+      "required": false,
+      "input_shape": "single_value",
+      "value_kind": "path"
+    }
+  ],
+  "commands": [
+    {
+      "name": "create",
+      "summary": "Deploy a new memory canister. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "name",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        },
+        {
+          "name": "description",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "summary": "List deployed memories. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text",
+          "json"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "json",
+          "required": false,
+          "input_shape": "flag",
+          "value_kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "summary": "Show details for a memory canister. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text",
+          "json"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "json",
+          "required": false,
+          "input_shape": "flag",
+          "value_kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "insert",
+      "summary": "Insert text into an existing memory canister. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "text",
+          "required": false,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        },
+        {
+          "name": "file_path",
+          "required": false,
+          "input_shape": "single_value",
+          "value_kind": "path"
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        }
+      ],
+      "arg_groups": [
+        {
+          "id": "insert_input",
+          "required": true,
+          "multiple": false,
+          "members": [
+            "text",
+            "file_path"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "insert-raw",
+      "summary": "Insert a precomputed embedding into a memory canister. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "embedding",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "json_array"
+        },
+        {
+          "name": "text",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "insert-pdf",
+      "summary": "Insert a PDF converted to markdown into a memory canister. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "file_path",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "path"
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "convert-pdf",
+      "summary": "Convert a PDF to markdown and print it. No identity required. Returns text output.",
+      "auth": {
+        "required": false,
+        "sources": []
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose"
+      ],
+      "arguments": [
+        {
+          "name": "file_path",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "path"
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "summary": "Search within a memory canister using embeddings. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text",
+          "json"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": false,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "all",
+          "required": false,
+          "input_shape": "flag",
+          "value_kind": "boolean"
+        },
+        {
+          "name": "query",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        },
+        {
+          "name": "json",
+          "required": false,
+          "input_shape": "flag",
+          "value_kind": "boolean"
+        }
+      ],
+      "arg_groups": [
+        {
+          "id": "search_target",
+          "required": true,
+          "multiple": false,
+          "members": [
+            "memory_id",
+            "all"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "search-raw",
+      "summary": "Search within a memory canister using a precomputed embedding. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "embedding",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "json_array"
+        }
+      ]
+    },
+    {
+      "name": "tagged-embeddings",
+      "summary": "Fetch embeddings for a tag from a memory canister. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "summary": "Manage memory access control. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [],
+      "subcommands": [
+        {
+          "name": "users",
+          "summary": "Manage users for a memory canister",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [],
+          "subcommands": [
+            {
+              "name": "list",
+              "summary": "List users for a memory canister",
+              "auth": {
+                "required": true,
+                "sources": [
+                  "global_identity",
+                  "global_ii"
+                ]
+              },
+              "output": {
+                "default": "text",
+                "supported": [
+                  "text"
+                ],
+                "interactive": false
+              },
+              "global_flags_supported": [
+                "verbose",
+                "ic",
+                "identity",
+                "ii",
+                "identity_path"
+              ],
+              "arguments": [
+                {
+                  "name": "memory_id",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "principal"
+                }
+              ]
+            },
+            {
+              "name": "add",
+              "summary": "Add a user to a memory canister",
+              "auth": {
+                "required": true,
+                "sources": [
+                  "global_identity",
+                  "global_ii"
+                ]
+              },
+              "output": {
+                "default": "text",
+                "supported": [
+                  "text"
+                ],
+                "interactive": false
+              },
+              "global_flags_supported": [
+                "verbose",
+                "ic",
+                "identity",
+                "ii",
+                "identity_path"
+              ],
+              "arguments": [
+                {
+                  "name": "memory_id",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "principal"
+                },
+                {
+                  "name": "principal",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "principal"
+                },
+                {
+                  "name": "role",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "string"
+                }
+              ]
+            },
+            {
+              "name": "change",
+              "summary": "Change a user's role on a memory canister",
+              "auth": {
+                "required": true,
+                "sources": [
+                  "global_identity",
+                  "global_ii"
+                ]
+              },
+              "output": {
+                "default": "text",
+                "supported": [
+                  "text"
+                ],
+                "interactive": false
+              },
+              "global_flags_supported": [
+                "verbose",
+                "ic",
+                "identity",
+                "ii",
+                "identity_path"
+              ],
+              "arguments": [
+                {
+                  "name": "memory_id",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "principal"
+                },
+                {
+                  "name": "principal",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "principal"
+                },
+                {
+                  "name": "role",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "string"
+                }
+              ]
+            },
+            {
+              "name": "remove",
+              "summary": "Remove a user from a memory canister",
+              "auth": {
+                "required": true,
+                "sources": [
+                  "global_identity",
+                  "global_ii"
+                ]
+              },
+              "output": {
+                "default": "text",
+                "supported": [
+                  "text"
+                ],
+                "interactive": false
+              },
+              "global_flags_supported": [
+                "verbose",
+                "ic",
+                "identity",
+                "ii",
+                "identity_path"
+              ],
+              "arguments": [
+                {
+                  "name": "memory_id",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "principal"
+                },
+                {
+                  "name": "principal",
+                  "required": true,
+                  "input_shape": "single_value",
+                  "value_kind": "principal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rename",
+      "summary": "Rename a memory canister. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "name",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "capabilities",
+      "summary": "Describe CLI capabilities for agents. Returns JSON.",
+      "auth": {
+        "required": false,
+        "sources": []
+      },
+      "output": {
+        "default": "json",
+        "supported": [
+          "json"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose"
+      ],
+      "arguments": []
+    },
+    {
+      "name": "prefs",
+      "summary": "Manage local Kinic preferences shared with the TUI. All prefs commands return JSON.",
+      "auth": {
+        "required": false,
+        "sources": []
+      },
+      "output": {
+        "default": "json",
+        "supported": [
+          "json"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose"
+      ],
+      "arguments": [],
+      "subcommands": [
+        {
+          "name": "show",
+          "summary": "Show local preferences shared with the TUI. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": []
+        },
+        {
+          "name": "set-default-memory",
+          "summary": "Set the default memory id. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "memory_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "principal"
+            }
+          ]
+        },
+        {
+          "name": "clear-default-memory",
+          "summary": "Clear the default memory id. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": []
+        },
+        {
+          "name": "add-tag",
+          "summary": "Add a saved tag. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "tag",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            }
+          ]
+        },
+        {
+          "name": "remove-tag",
+          "summary": "Remove a saved tag. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "tag",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            }
+          ]
+        },
+        {
+          "name": "add-memory",
+          "summary": "Add a manually tracked memory id. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": [],
+            "conditional": [
+              {
+                "when_argument_present": "validate",
+                "required": true,
+                "sources": [
+                  "global_identity",
+                  "global_ii"
+                ]
+              }
+            ]
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [
+            {
+              "name": "memory_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "principal"
+            },
+            {
+              "name": "validate",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            }
+          ]
+        },
+        {
+          "name": "remove-memory",
+          "summary": "Remove a manually tracked memory id. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "memory_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "principal"
+            }
+          ]
+        },
+        {
+          "name": "set-chat-overall-top-k",
+          "summary": "Set the all-memories chat retrieval result limit. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "value",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "integer"
+            }
+          ]
+        },
+        {
+          "name": "set-chat-per-memory-cap",
+          "summary": "Set the per-memory chat retrieval cap. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "value",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "integer"
+            }
+          ]
+        },
+        {
+          "name": "set-chat-mmr-lambda",
+          "summary": "Set the chat retrieval MMR lambda percentage. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "value",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "integer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "summary": "Update a memory canister instance. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        }
+      ]
+    },
+    {
+      "name": "reset",
+      "summary": "Reset a memory canister and set embedding dimension. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "dim",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "integer"
+        }
+      ]
+    },
+    {
+      "name": "balance",
+      "summary": "Check KINIC token balance. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": []
+    },
+    {
+      "name": "transfer",
+      "summary": "Transfer KINIC tokens. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "to",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "amount",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        },
+        {
+          "name": "yes",
+          "required": false,
+          "input_shape": "flag",
+          "value_kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ask-ai",
+      "summary": "Ask Kinic AI using memory search results. Requires --identity <NAME> or --ii. Returns text output.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [
+        {
+          "name": "memory_id",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "principal"
+        },
+        {
+          "name": "query",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        },
+        {
+          "name": "top_k",
+          "required": false,
+          "input_shape": "single_value",
+          "value_kind": "integer"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "summary": "Login via Internet Identity and store a delegation. No identity required. Returns text output.",
+      "auth": {
+        "required": false,
+        "sources": []
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "identity_path"
+      ],
+      "arguments": []
+    },
+    {
+      "name": "tools",
+      "summary": "Expose Kinic memories as MCP tools. Env-only: uses KINIC_TOOL_IDENTITY/KINIC_TOOL_NETWORK.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "environment_identity"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose"
+      ],
+      "arguments": [],
+      "subcommands": [
+        {
+          "name": "serve",
+          "summary": "Run the Kinic MCP tool server over stdio. Env-only.",
+          "auth": {
+            "required": true,
+            "sources": [
+              "environment_identity"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": []
+        }
+      ]
+    },
+    {
+      "name": "tui",
+      "summary": "Launch the Kinic terminal UI. Requires global --identity <NAME>. --ii is not supported. Returns an interactive TUI, not JSON.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity"
+        ]
+      },
+      "output": {
+        "default": "interactive",
+        "supported": [
+          "interactive"
+        ],
+        "interactive": true
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity"
+      ],
+      "arguments": []
+    }
+  ]
+}

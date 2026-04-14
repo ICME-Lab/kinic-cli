@@ -27,10 +27,6 @@ fn expected_active_memory_context() -> ActiveMemoryContext {
     }
 }
 
-fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
-    provider.cursor_memory_id = Some(memory_id.to_string());
-}
-
 fn chat_state(query: &str) -> CoreState {
     CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
@@ -463,7 +459,7 @@ fn memory_switch_loads_chat_history_for_new_active_memory() {
         .expect("open selected should dispatch");
     execute_effects_to_status(&mut state, effects);
 
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -647,7 +643,7 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
     assert_eq!(state.chat_scope, ChatScope::Selected);
     assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -659,7 +655,7 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
 
     assert_eq!(state.chat_scope, ChatScope::All);
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "global".to_string())]
@@ -672,7 +668,7 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
     assert_eq!(state.chat_scope, ChatScope::Selected);
     assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -711,7 +707,7 @@ fn chat_scope_cycles_across_visible_memories_before_returning_to_all() {
     assert_eq!(state.chat_scope, ChatScope::Selected);
     assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -723,7 +719,7 @@ fn chat_scope_cycles_across_visible_memories_before_returning_to_all() {
 
     assert_eq!(state.chat_scope, ChatScope::All);
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
 }
 
 #[test]
@@ -794,14 +790,16 @@ fn chat_scope_all_keeps_browser_selection_for_selected_memory_actions() {
 
     assert_eq!(state.chat_scope, ChatScope::All);
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
 
     let search_targets = provider
         .search_target_memory_ids(SearchScope::Selected)
         .expect("selected memory search should still resolve from the list selection");
     assert_eq!(search_targets, vec!["bbbbb-bb".to_string()]);
     assert_eq!(
-        provider.selected_memory_id_for_default(&state).as_deref(),
+        provider
+            .active_memory_id_for_default_selection(&state)
+            .as_deref(),
         Some("bbbbb-bb")
     );
 }
@@ -905,7 +903,7 @@ fn selected_chat_submit_includes_cached_memory_summary_context() {
 }
 
 #[test]
-fn selected_chat_submit_excludes_placeholder_memory_summary_context() {
+fn selected_chat_submit_excludes_unavailable_memory_summary_context() {
     let _guard = chat_test_guard();
     let _ = take_test_chat_submit_result();
     let _ = take_last_test_chat_request();

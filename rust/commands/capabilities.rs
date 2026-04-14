@@ -1,21 +1,20 @@
 //! Agent-readable capability description for the Kinic CLI.
 //! Where: top-level `capabilities` command.
-//! What: builds a machine-readable execution contract from clap definitions plus a small semantic overlay.
+//! What: builds a machine-readable execution contract from clap definitions plus [`crate::cli_policy`].
 //! Why: let agents plan valid CLI invocations without parsing help text or guessing auth/output rules.
+//!
+//! ## Layers
+//! - **Clap introspection**: command tree, arguments, required flags, conflicts, arg groups, summaries.
+//! - **Semantic overlay**: auth/output/global-flag policy per command path from [`crate::cli_policy`].
 
 use anyhow::Result;
 use clap::{Arg, ArgAction, ArgGroup, Command, CommandFactory};
 use serde::Serialize;
 
 use crate::cli::{CapabilitiesArgs, Cli};
+use crate::cli_policy::{self, CommandPolicy};
 
 const SCHEMA_VERSION: u8 = 1;
-const GLOBAL_FLAGS_ALL: &[&str] = &["verbose", "ic", "identity", "ii", "identity_path"];
-const GLOBAL_FLAGS_VERBOSE_ONLY: &[&str] = &["verbose"];
-const GLOBAL_FLAGS_PREFS_ADD_MEMORY: &[&str] =
-    &["verbose", "ic", "identity", "ii", "identity_path"];
-const GLOBAL_FLAGS_LOGIN: &[&str] = &["verbose", "identity_path"];
-const GLOBAL_FLAGS_TUI: &[&str] = &["verbose", "ic", "identity"];
 
 pub fn handle(_args: CapabilitiesArgs) -> Result<()> {
     println!(
@@ -41,7 +40,7 @@ impl CapabilitiesDocument {
             schema_version: SCHEMA_VERSION,
             cli: "kinic-cli",
             version: env!("CARGO_PKG_VERSION"),
-            auth_summary: "Network commands use global --identity or --ii unless noted otherwise. The TUI requires --identity. tools serve is environment-auth only. Some commands expose conditional auth requirements based on flags such as --validate.",
+            auth_summary: cli_policy::AUTH_SUMMARY,
             global_options: global_option_capabilities(),
             commands: command_capabilities(),
         }
@@ -55,8 +54,8 @@ struct GlobalOptionCapability {
     required: bool,
     input_shape: &'static str,
     value_kind: &'static str,
-    #[serde(skip_serializing_if = "ArgumentRelations::is_empty")]
-    relations: ArgumentRelations,
+    #[serde(skip_serializing_if = "ArgumentConflicts::is_empty")]
+    relations: ArgumentConflicts,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,21 +100,20 @@ struct ArgumentCapability {
     required: bool,
     input_shape: &'static str,
     value_kind: &'static str,
-    #[serde(skip_serializing_if = "ArgumentRelations::is_empty")]
-    relations: ArgumentRelations,
+    #[serde(skip_serializing_if = "ArgumentConflicts::is_empty")]
+    relations: ArgumentConflicts,
 }
 
+/// Clap-exposed conflicts only (`requires` is not serialized; use `arg_groups` and runtime validation).
 #[derive(Debug, Serialize, PartialEq, Eq, Default)]
-struct ArgumentRelations {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    requires: Vec<String>,
+struct ArgumentConflicts {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     conflicts: Vec<String>,
 }
 
-impl ArgumentRelations {
+impl ArgumentConflicts {
     fn is_empty(&self) -> bool {
-        self.requires.is_empty() && self.conflicts.is_empty()
+        self.conflicts.is_empty()
     }
 }
 
@@ -126,30 +124,6 @@ struct ArgGroupCapability {
     multiple: bool,
     members: Vec<String>,
 }
-
-#[derive(Clone, Copy)]
-struct SemanticCommandContract {
-    auth_sources: &'static [&'static str],
-    conditional_auth: &'static [ConditionalAuthContract],
-    output_default: &'static str,
-    output_supported: &'static [&'static str],
-    interactive: bool,
-    global_flags_supported: &'static [&'static str],
-}
-
-#[derive(Clone, Copy)]
-struct ConditionalAuthContract {
-    when_argument_present: &'static str,
-    required: bool,
-    sources: &'static [&'static str],
-}
-
-const CONDITIONAL_AUTH_PREFS_ADD_MEMORY_VALIDATE: &[ConditionalAuthContract] =
-    &[ConditionalAuthContract {
-        when_argument_present: "validate",
-        required: true,
-        sources: &["global_identity", "global_ii"],
-    }];
 
 fn global_option_capabilities() -> Vec<GlobalOptionCapability> {
     Cli::command()
@@ -169,7 +143,7 @@ fn public_global_argument(arg: &Arg) -> Option<GlobalOptionCapability> {
         required: arg.is_required_set(),
         input_shape: argument_input_shape(arg),
         value_kind: argument_value_kind("global", arg),
-        relations: argument_relations(&Cli::command(), arg, "global"),
+        relations: argument_conflicts(&Cli::command(), arg),
     })
 }
 
@@ -181,14 +155,18 @@ fn command_capabilities() -> Vec<CapabilityNode> {
 }
 
 fn capability_node(command: &Command, path: &str) -> CapabilityNode {
-    let contract = semantic_command_contract(path);
+    let policy = cli_policy::command_policy_for_path(path);
+    capability_node_inner(command, path, policy)
+}
+
+fn capability_node_inner(command: &Command, path: &str, policy: CommandPolicy) -> CapabilityNode {
     CapabilityNode {
         name: command.get_name().to_string(),
         summary: command_summary(command),
         auth: AuthCapability {
-            required: !contract.auth_sources.is_empty(),
-            sources: contract.auth_sources.to_vec(),
-            conditional: contract
+            required: !policy.auth_sources.is_empty(),
+            sources: policy.auth_sources.to_vec(),
+            conditional: policy
                 .conditional_auth
                 .iter()
                 .map(|rule| ConditionalAuthCapability {
@@ -199,107 +177,21 @@ fn capability_node(command: &Command, path: &str) -> CapabilityNode {
                 .collect(),
         },
         output: OutputCapability {
-            default: contract.output_default,
-            supported: contract.output_supported.to_vec(),
-            interactive: contract.interactive,
+            default: policy.output_default,
+            supported: policy.output_supported.to_vec(),
+            interactive: policy.interactive,
         },
-        global_flags_supported: contract.global_flags_supported.to_vec(),
+        global_flags_supported: policy.global_flags_supported.to_vec(),
         arguments: argument_capabilities(command, path),
         arg_groups: arg_group_capabilities(command),
         subcommands: command
             .get_subcommands()
             .map(|subcommand| {
-                capability_node(subcommand, &format!("{path}.{}", subcommand.get_name()))
+                let sub_path = format!("{path}.{}", subcommand.get_name());
+                let sub_policy = cli_policy::command_policy_for_path(&sub_path);
+                capability_node_inner(subcommand, &sub_path, sub_policy)
             })
             .collect(),
-    }
-}
-
-fn semantic_command_contract(path: &str) -> SemanticCommandContract {
-    if path == "tools" || path.starts_with("tools.") {
-        return SemanticCommandContract {
-            auth_sources: &["environment_identity"],
-            conditional_auth: &[],
-            output_default: "text",
-            output_supported: &["text"],
-            interactive: false,
-            global_flags_supported: GLOBAL_FLAGS_VERBOSE_ONLY,
-        };
-    }
-
-    if path == "tui" {
-        return SemanticCommandContract {
-            auth_sources: &["global_identity"],
-            conditional_auth: &[],
-            output_default: "interactive",
-            output_supported: &["interactive"],
-            interactive: true,
-            global_flags_supported: GLOBAL_FLAGS_TUI,
-        };
-    }
-
-    if path == "prefs.add-memory" {
-        return SemanticCommandContract {
-            auth_sources: &[],
-            conditional_auth: CONDITIONAL_AUTH_PREFS_ADD_MEMORY_VALIDATE,
-            output_default: "json",
-            output_supported: &["json"],
-            interactive: false,
-            global_flags_supported: GLOBAL_FLAGS_PREFS_ADD_MEMORY,
-        };
-    }
-
-    if path == "capabilities"
-        || path == "convert-pdf"
-        || path == "prefs"
-        || path.starts_with("prefs.")
-    {
-        return SemanticCommandContract {
-            auth_sources: &[],
-            conditional_auth: &[],
-            output_default: if path == "capabilities"
-                || path == "prefs"
-                || path.starts_with("prefs.")
-            {
-                "json"
-            } else {
-                "text"
-            },
-            output_supported: if path == "capabilities"
-                || path == "prefs"
-                || path.starts_with("prefs.")
-            {
-                &["json"]
-            } else {
-                &["text"]
-            },
-            interactive: false,
-            global_flags_supported: GLOBAL_FLAGS_VERBOSE_ONLY,
-        };
-    }
-
-    if path == "login" {
-        return SemanticCommandContract {
-            auth_sources: &[],
-            conditional_auth: &[],
-            output_default: "text",
-            output_supported: &["text"],
-            interactive: false,
-            global_flags_supported: GLOBAL_FLAGS_LOGIN,
-        };
-    }
-
-    SemanticCommandContract {
-        auth_sources: &["global_identity", "global_ii"],
-        conditional_auth: &[],
-        output_default: "text",
-        output_supported: if matches!(path, "list" | "show" | "search") {
-            &["text", "json"]
-        } else {
-            &["text"]
-        },
-        interactive: false,
-        global_flags_supported: GLOBAL_FLAGS_ALL,
     }
 }
 
@@ -320,7 +212,7 @@ fn public_argument(command: &Command, arg: &Arg, path: &str) -> Option<ArgumentC
         required: arg.is_required_set(),
         input_shape: argument_input_shape(arg),
         value_kind: argument_value_kind(path, arg),
-        relations: argument_relations(command, arg, path),
+        relations: argument_conflicts(command, arg),
     })
 }
 
@@ -353,21 +245,15 @@ fn semantic_value_kind(path: &str, name: &str) -> &'static str {
     }
 }
 
-fn argument_relations(command: &Command, arg: &Arg, path: &str) -> ArgumentRelations {
-    let mut relations = manual_argument_relations(path, arg.get_id().as_str());
-    relations.conflicts.extend(
-        command
+fn argument_conflicts(command: &Command, arg: &Arg) -> ArgumentConflicts {
+    ArgumentConflicts {
+        conflicts: command
             .get_arg_conflicts_with(arg)
             .into_iter()
             .filter(|conflict| conflict.get_long().is_some())
-            .map(|conflict| conflict.get_id().as_str().to_string()),
-    );
-    relations
-}
-
-fn manual_argument_relations(path: &str, name: &str) -> ArgumentRelations {
-    let _ = (path, name);
-    ArgumentRelations::default()
+            .map(|conflict| conflict.get_id().as_str().to_string())
+            .collect(),
+    }
 }
 
 fn command_summary(command: &Command) -> String {

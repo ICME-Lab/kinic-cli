@@ -400,7 +400,10 @@ mod tests {
         let preferences = UserPreferences {
             default_memory_id: Some("aaaaa-aa".to_string()),
             saved_tags: vec![" docs ".to_string(), "docs".to_string(), "zeta".to_string()],
-            manual_memory_ids: vec!["bbbbb-bb".to_string(), "bbbbb-bb".to_string()],
+            manual_memory_ids: vec![
+                "ryjl3-tyaaa-aaaaa-aaaba-cai".to_string(),
+                "ryjl3-tyaaa-aaaaa-aaaba-cai".to_string(),
+            ],
             chat_overall_top_k: DEFAULT_CHAT_OVERALL_TOP_K,
             chat_per_memory_cap: DEFAULT_CHAT_PER_MEMORY_CAP,
             chat_mmr_lambda: DEFAULT_CHAT_MMR_LAMBDA,
@@ -413,7 +416,10 @@ mod tests {
             normalized.saved_tags,
             vec!["docs".to_string(), "zeta".to_string()]
         );
-        assert_eq!(normalized.manual_memory_ids, vec!["bbbbb-bb".to_string()]);
+        assert_eq!(
+            normalized.manual_memory_ids,
+            vec!["ryjl3-tyaaa-aaaaa-aaaba-cai".to_string()]
+        );
         assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
         assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
         assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);

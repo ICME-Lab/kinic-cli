@@ -35,12 +35,12 @@ fn poll_initial_memories_background_applies_loaded_memories_and_prefers_saved_de
 
     assert!(!provider.initial_memories_in_flight);
     assert_eq!(provider.memory_records.len(), 2);
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert!(output.snapshot.is_some());
 }
 
 #[test]
-fn poll_initial_memories_background_prefetches_current_cursor_too() {
+fn poll_initial_memories_background_prefetches_active_memory_too() {
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.default_memory_id = Some("bbbbb-bb".to_string());
     let (tx, rx) = mpsc::channel();
@@ -75,32 +75,11 @@ fn poll_initial_memories_background_prefetches_current_cursor_too() {
 }
 
 #[test]
-fn loaded_memory_detail_name_updates_insert_placeholder() {
-    let mut provider = KinicProvider::new(live_config());
-    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
-    provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "first")];
-    provider.memory_summaries[0].name = "aaaaa-aa".to_string();
-    provider.refresh_memory_records_from_summaries();
-
-    let effects = provider.apply_memory_detail_result(
-        "aaaaa-aa".to_string(),
-        Ok(memory_details("Alpha loaded")),
-        false,
-    );
-
-    assert!(effects.is_empty());
-    let snapshot = provider.build_snapshot(&CoreState::default());
-    assert_eq!(
-        snapshot.insert_memory_placeholder.as_deref(),
-        Some("Alpha loaded")
-    );
-}
-
-#[test]
 fn loaded_memory_detail_preserves_metadata_description() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "first")];
     provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
 
     let effects = provider.apply_memory_detail_result(
         "aaaaa-aa".to_string(),
@@ -121,6 +100,14 @@ fn loaded_memory_detail_preserves_metadata_description() {
 
     assert!(effects.is_empty());
     assert_eq!(provider.memory_records[0].title, "Alpha loaded");
+    assert_eq!(
+        provider
+            .build_snapshot(&CoreState::default())
+            .selected_memory
+            .as_ref()
+            .map(|selection| selection.label.as_str()),
+        Some("Alpha loaded")
+    );
     assert!(
         provider.memory_records[0]
             .content_md
@@ -147,7 +134,7 @@ fn poll_initial_memories_background_falls_back_to_first_when_default_missing() {
         .poll_initial_memories_background(&CoreState::default())
         .expect("initial memories output");
 
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(active_memory_id(&provider), Some("aaaaa-aa"));
 }
 
 #[test]

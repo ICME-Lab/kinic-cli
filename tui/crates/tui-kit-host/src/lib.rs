@@ -9,11 +9,11 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use std::time::Duration;
 use tui_kit_runtime::{
     CoreAction, CoreEffect, CoreKey, CoreState, CoreTabId, CreateCostState, CreateModalFocus,
-    CreateSubmitState, PaneFocus, PickerContext, PickerState, action_for_key, apply_modal_error,
-    close_access_control_modal, close_add_memory_modal, close_remove_memory_modal,
-    close_rename_memory_modal, close_transfer_modal, open_access_control_modal,
-    open_add_memory_modal, open_remove_memory_modal, open_rename_memory_modal,
-    open_transfer_confirm, open_transfer_modal, tab_focus_policy,
+    CreateSubmitState, PaneFocus, action_for_key, apply_modal_error, close_access_control_modal,
+    close_add_memory_modal, close_remove_memory_modal, close_rename_memory_modal,
+    close_transfer_modal, open_access_control_modal, open_add_memory_modal,
+    open_remove_memory_modal, open_rename_memory_modal, open_transfer_confirm, open_transfer_modal,
+    tab_focus_policy,
 };
 
 /// Fallback tab ids used when host does not provide explicit tabs.
@@ -371,19 +371,6 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.insert_embedding.clear();
                 state.insert_submit_state = CreateSubmitState::Idle;
                 state.insert_spinner_frame = 0;
-                state.insert_error = None;
-            }
-            CoreEffect::SetInsertMemoryId(memory_id) => {
-                state.insert_memory_id = memory_id.clone();
-                state.insert_memory_placeholder = None;
-                if let PickerState::List {
-                    context: PickerContext::InsertTarget,
-                    selected_id,
-                    ..
-                } = &mut state.picker
-                {
-                    *selected_id = Some(memory_id);
-                }
                 state.insert_error = None;
             }
             CoreEffect::SetInsertTag(tag) => {

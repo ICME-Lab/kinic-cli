@@ -66,7 +66,6 @@ fn reset_create_fields(state: &mut CoreState) {
 
 fn reset_insert_fields(state: &mut CoreState) {
     state.insert_mode = tui_kit_runtime::InsertMode::default();
-    state.insert_memory_id.clear();
     state.insert_tag.clear();
     state.insert_text.clear();
     state.insert_file_path_input.clear();

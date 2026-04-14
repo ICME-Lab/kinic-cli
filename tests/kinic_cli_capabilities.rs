@@ -1,6 +1,7 @@
 use std::process::Command;
 
 use _lib::cli::Cli;
+use clap::Command as ClapCommand;
 use clap::CommandFactory;
 use serde_json::{Value, json};
 
@@ -19,6 +20,48 @@ fn command_by_name<'a>(commands: &'a [Value], name: &str) -> &'a Value {
         .iter()
         .find(|entry| entry["name"] == name)
         .unwrap_or_else(|| panic!("command `{name}` should be present"))
+}
+
+/// Every `capabilities` node must mirror clap subcommand names at the same depth.
+fn assert_capabilities_subcommand_tree_matches_clap(cap: &[Value], clap_cmd: &ClapCommand) {
+    let cap_names: Vec<&str> = cap.iter().map(|v| v["name"].as_str().unwrap()).collect();
+    let clap_names: Vec<String> = clap_cmd
+        .get_subcommands()
+        .map(|c| c.get_name().to_string())
+        .collect();
+    assert_eq!(
+        cap_names,
+        clap_names.iter().map(String::as_str).collect::<Vec<_>>(),
+        "subcommand name mismatch under `{}`",
+        clap_cmd.get_name()
+    );
+    for (entry, clap_sub) in cap.iter().zip(clap_cmd.get_subcommands()) {
+        let children = entry
+            .get("subcommands")
+            .and_then(|x| x.as_array())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let clap_child_count = clap_sub.get_subcommands().count();
+        if clap_child_count == 0 {
+            assert!(
+                children.is_empty(),
+                "capabilities should not list subcommands for leaf `{}`",
+                clap_sub.get_name()
+            );
+        } else {
+            assert_capabilities_subcommand_tree_matches_clap(children, clap_sub);
+        }
+    }
+}
+
+#[test]
+fn capabilities_output_matches_golden_fixture() {
+    let actual = run_capabilities();
+    let mut expected: Value =
+        serde_json::from_str(include_str!("fixtures/capabilities_golden.json")).unwrap();
+    // Version tracks Cargo.toml; golden is updated when the contract shape changes.
+    expected["version"] = actual["version"].clone();
+    assert_eq!(actual, expected);
 }
 
 #[test]
@@ -184,81 +227,9 @@ fn capabilities_describes_major_arguments_for_network_commands() {
 }
 
 #[test]
-fn capabilities_command_names_match_clap_definition() {
+fn capabilities_subcommand_tree_matches_clap_at_all_depths() {
     let parsed = run_capabilities();
     let commands = parsed["commands"].as_array().unwrap();
-    let capability_names: Vec<&str> = commands
-        .iter()
-        .map(|entry| entry["name"].as_str().unwrap())
-        .collect();
-    let clap_names: Vec<String> = Cli::command()
-        .get_subcommands()
-        .map(|command| command.get_name().to_string())
-        .collect();
-
-    assert_eq!(
-        capability_names,
-        clap_names.iter().map(String::as_str).collect::<Vec<_>>()
-    );
-}
-
-#[test]
-fn capabilities_nested_subcommands_match_clap_definition() {
-    let parsed = run_capabilities();
-    let commands = parsed["commands"].as_array().unwrap();
-
-    let prefs = command_by_name(commands, "prefs");
-    let prefs_names: Vec<&str> = prefs["subcommands"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|entry| entry["name"].as_str().unwrap())
-        .collect();
     let clap = Cli::command();
-    let clap_prefs = clap
-        .get_subcommands()
-        .find(|command| command.get_name() == "prefs")
-        .expect("prefs should exist in clap");
-    let clap_prefs_names: Vec<String> = clap_prefs
-        .get_subcommands()
-        .map(|command| command.get_name().to_string())
-        .collect();
-    assert_eq!(
-        prefs_names,
-        clap_prefs_names
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-    );
-
-    let config = command_by_name(commands, "config");
-    let users = config["subcommands"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|entry| entry["name"] == "users")
-        .expect("config users should be present");
-    let capability_names: Vec<&str> = users["subcommands"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|entry| entry["name"].as_str().unwrap())
-        .collect();
-    let clap_config = clap
-        .get_subcommands()
-        .find(|command| command.get_name() == "config")
-        .expect("config should exist in clap");
-    let clap_users = clap_config
-        .get_subcommands()
-        .find(|command| command.get_name() == "users")
-        .expect("config users should exist in clap");
-    let clap_names: Vec<String> = clap_users
-        .get_subcommands()
-        .map(|command| command.get_name().to_string())
-        .collect();
-
-    assert_eq!(
-        capability_names,
-        clap_names.iter().map(String::as_str).collect::<Vec<_>>()
-    );
+    assert_capabilities_subcommand_tree_matches_clap(commands, &clap);
 }

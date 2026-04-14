@@ -1,6 +1,7 @@
 pub mod agent;
 #[path = "cli_defs.rs"]
 pub mod cli;
+pub mod cli_policy;
 pub(crate) mod clients;
 mod commands;
 pub(crate) mod create_domain;
@@ -167,19 +168,7 @@ fn validate_keyring_identity(cli: &Cli) -> Result<()> {
     if cli.global.ii {
         return Ok(());
     }
-    if matches!(&cli.command, cli::Command::Login(_)) {
-        return Ok(());
-    }
-    if matches!(&cli.command, cli::Command::Tui(_)) {
-        return Ok(());
-    }
-    if matches!(&cli.command, cli::Command::Capabilities(_)) {
-        return Ok(());
-    }
-    if matches!(&cli.command, cli::Command::Prefs(_)) {
-        return Ok(());
-    }
-    if matches!(&cli.command, cli::Command::Tools(_)) {
+    if crate::cli_policy::skips_keyring_identity_requirement(&cli.command) {
         return Ok(());
     }
     if cli.global.identity.is_some() {

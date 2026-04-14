@@ -1,9 +1,5 @@
 use super::*;
 
-fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
-    provider.cursor_memory_id = Some(memory_id.to_string());
-}
-
 #[test]
 fn open_rename_memory_uses_active_memory_name() {
     let mut provider = KinicProvider::new(live_config());
@@ -178,6 +174,7 @@ fn poll_rename_submit_background_updates_memory_name_and_closes_overlay() {
     provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "detail")];
     provider.memory_summaries[0].name = "Old Name".to_string();
     provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
     let (tx, rx) = mpsc::channel();
     provider.rename_submit_task.receiver = Some(rx);
     provider.rename_submit_task.in_flight = true;
@@ -195,6 +192,14 @@ fn poll_rename_submit_background_updates_memory_name_and_closes_overlay() {
 
     assert!(!provider.rename_submit_task.in_flight);
     assert_eq!(provider.memory_summaries[0].name, "{\"name\":\"New Name\"}");
+    assert_eq!(
+        output
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.selected_memory.as_ref())
+            .map(|selection| selection.label.as_str()),
+        Some("New Name")
+    );
     assert!(
         output
             .effects

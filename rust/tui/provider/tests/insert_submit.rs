@@ -5,7 +5,6 @@ use super::*;
 fn raw_insert_state(text: &str, embedding: &str) -> CoreState {
     CoreState {
         insert_mode: InsertMode::ManualEmbedding,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: text.to_string(),
         insert_embedding: embedding.to_string(),
@@ -16,16 +15,21 @@ fn raw_insert_state(text: &str, embedding: &str) -> CoreState {
 fn file_insert_state(file_path: &str) -> CoreState {
     CoreState {
         insert_mode: InsertMode::File,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path_input: file_path.to_string(),
         ..CoreState::default()
     }
 }
 
+fn provider_with_active_memory(memory_id: &str) -> KinicProvider {
+    let mut provider = KinicProvider::new(live_config());
+    set_memory_selection(&mut provider, memory_id);
+    provider
+}
+
 #[test]
 fn insert_submit_rejects_invalid_embedding_json_before_background_submit() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     let output = provider
         .handle_action(
             &CoreAction::InsertSubmit,
@@ -41,13 +45,13 @@ fn insert_submit_rejects_invalid_embedding_json_before_background_submit() {
 }
 
 #[test]
-fn build_insert_request_prefers_explicit_memory_over_saved_default() {
+fn build_insert_request_uses_active_memory_over_saved_default() {
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
+    set_memory_selection(&mut provider, "bbbbb-bb");
 
     let request = provider.build_insert_request(&CoreState {
         insert_mode: InsertMode::ManualEmbedding,
-        insert_memory_id: "bbbbb-bb".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "payload".to_string(),
         insert_embedding: "[0.1]".to_string(),
@@ -61,32 +65,10 @@ fn build_insert_request_prefers_explicit_memory_over_saved_default() {
 }
 
 #[test]
-fn build_insert_request_uses_saved_default_memory_when_insert_target_is_blank() {
-    let mut provider = KinicProvider::new(live_config());
-    provider.memory_records = vec![live_memory("aaaaa-aa", "Alpha Memory")];
-    provider.all = provider.memory_records.clone();
-    provider.user_preferences.default_memory_id = Some("aaaaa-aa".to_string());
-
-    let request = provider.build_insert_request(&CoreState {
-        insert_mode: InsertMode::ManualEmbedding,
-        insert_tag: "docs".to_string(),
-        insert_text: "payload".to_string(),
-        insert_embedding: "[0.1]".to_string(),
-        ..CoreState::default()
-    });
-
-    assert!(matches!(
-        request,
-        InsertRequest::Raw { memory_id, .. } if memory_id == "aaaaa-aa"
-    ));
-}
-
-#[test]
 fn build_insert_request_uses_inline_text_mode_without_file_path() {
-    let provider = KinicProvider::new(live_config());
+    let provider = provider_with_active_memory("aaaaa-aa");
     let request = provider.build_insert_request(&CoreState {
         insert_mode: InsertMode::InlineText,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "hello".to_string(),
         insert_file_path_input: "/tmp/ignored.md".to_string(),
@@ -106,10 +88,9 @@ fn build_insert_request_uses_inline_text_mode_without_file_path() {
 
 #[test]
 fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
-    let provider = KinicProvider::new(live_config());
+    let provider = provider_with_active_memory("aaaaa-aa");
     let request = provider.build_insert_request(&CoreState {
         insert_mode: InsertMode::File,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_text: "ignored".to_string(),
         insert_file_path_input: "/tmp/doc.md".to_string(),
@@ -129,10 +110,9 @@ fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
 
 #[test]
 fn build_insert_request_prefers_selected_file_path_over_manual_input() {
-    let provider = KinicProvider::new(live_config());
+    let provider = provider_with_active_memory("aaaaa-aa");
     let request = provider.build_insert_request(&CoreState {
         insert_mode: InsertMode::File,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path_input: "/tmp/manual.md".to_string(),
         insert_selected_file_path: Some(PathBuf::from("/tmp/dialog.pdf")),
@@ -151,10 +131,9 @@ fn build_insert_request_prefers_selected_file_path_over_manual_input() {
 
 #[test]
 fn build_insert_request_uses_file_mode_for_pdf_paths() {
-    let provider = KinicProvider::new(live_config());
+    let provider = provider_with_active_memory("aaaaa-aa");
     let request = provider.build_insert_request(&CoreState {
         insert_mode: InsertMode::File,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path_input: "/tmp/doc.PDF".to_string(),
         ..CoreState::default()
@@ -176,13 +155,12 @@ fn build_insert_request_preserves_non_utf8_selected_file_path() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
-    let provider = KinicProvider::new(live_config());
+    let provider = provider_with_active_memory("aaaaa-aa");
     let selected_path = PathBuf::from(OsString::from_vec(vec![
         b'/', b't', b'm', b'p', b'/', 0xf0, 0x80, b'.', b'm', b'd',
     ]));
     let request = provider.build_insert_request(&CoreState {
         insert_mode: InsertMode::File,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_selected_file_path: Some(selected_path.clone()),
         ..CoreState::default()
@@ -223,7 +201,7 @@ fn format_insert_submit_error_reports_error_stage() {
 
 #[test]
 fn insert_submit_rejects_blank_raw_text() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     let output = provider
         .handle_action(&CoreAction::InsertSubmit, &raw_insert_state("   ", "[0.1]"))
         .expect("insert submit should succeed");
@@ -237,7 +215,7 @@ fn insert_submit_rejects_blank_raw_text() {
 
 #[test]
 fn insert_submit_rejects_missing_file_path_for_file_mode() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     let output = provider
         .handle_action(&CoreAction::InsertSubmit, &file_insert_state(""))
         .expect("insert submit should succeed");
@@ -251,7 +229,7 @@ fn insert_submit_rejects_missing_file_path_for_file_mode() {
 
 #[test]
 fn insert_submit_rejects_existing_pdf_submit_after_validation() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     let file_path = write_temp_file_with_extension("pdf", "not really a pdf");
     let output = provider
         .handle_action(&CoreAction::InsertSubmit, &file_insert_state(&file_path))
@@ -267,7 +245,7 @@ fn insert_submit_rejects_existing_pdf_submit_after_validation() {
 
 #[test]
 fn insert_submit_rejects_nonexistent_normal_file_path_before_background_submit() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     let output = provider
         .handle_action(
             &CoreAction::InsertSubmit,
@@ -284,7 +262,7 @@ fn insert_submit_rejects_nonexistent_normal_file_path_before_background_submit()
 
 #[test]
 fn insert_submit_rejects_unsupported_file_extension_before_background_submit() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     let output = provider
         .handle_action(
             &CoreAction::InsertSubmit,
@@ -302,13 +280,12 @@ fn insert_submit_rejects_unsupported_file_extension_before_background_submit() {
 
 #[test]
 fn insert_submit_rejects_missing_text_for_inline_text_mode() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     let output = provider
         .handle_action(
             &CoreAction::InsertSubmit,
             &CoreState {
                 insert_mode: InsertMode::InlineText,
-                insert_memory_id: "aaaaa-aa".to_string(),
                 insert_tag: "docs".to_string(),
                 insert_text: "   ".to_string(),
                 ..CoreState::default()
@@ -417,7 +394,7 @@ fn insert_success_status_emits_persistent_notify() {
 
 #[test]
 fn insert_submit_reports_in_flight_insert_requests() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     provider.insert_submit_task.in_flight = true;
 
     let output = provider
@@ -425,7 +402,6 @@ fn insert_submit_reports_in_flight_insert_requests() {
             &CoreAction::InsertSubmit,
             &CoreState {
                 insert_mode: InsertMode::InlineText,
-                insert_memory_id: "aaaaa-aa".to_string(),
                 insert_tag: "docs".to_string(),
                 insert_text: "payload".to_string(),
                 ..CoreState::default()
@@ -441,7 +417,7 @@ fn insert_submit_reports_in_flight_insert_requests() {
 
 #[test]
 fn insert_submit_blocks_after_insert_dim_task_returns_error() {
-    let mut provider = KinicProvider::new(live_config());
+    let mut provider = provider_with_active_memory("aaaaa-aa");
     let (tx, rx) = std::sync::mpsc::channel();
     provider.insert_expected_dim_memory_id = Some("aaaaa-aa".to_string());
     provider.insert_expected_dim = None;

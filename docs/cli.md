@@ -68,60 +68,25 @@ Use this command when an agent needs a machine-readable description of the CLI b
 cargo run -- capabilities
 ```
 
-Example output:
+**Source of truth:** the live output of `kinic-cli capabilities` (or `cargo run -- capabilities` from this repo). The JSON is regression-tested against [`tests/fixtures/capabilities_golden.json`](../tests/fixtures/capabilities_golden.json); update that fixture when you intentionally change the contract. Semantic rules shared with runtime validation live in [`rust/cli_policy.rs`](../rust/cli_policy.rs).
+
+Top-level shape:
+
+- `schema_version`, `cli`, `version` (matches the package / built binary)
+- `auth_summary` (short narrative; same string as in code)
+- `global_options`: introspected global flags; `relations.conflicts` reflects clap `conflicts_with` (there is no separate `requires` field in the JSON)
+- `commands`: nested tree with `summary`, `auth`, `output`, `global_flags_supported`, `arguments`, optional `arg_groups`, `subcommands`
+
+Minimal illustrative excerpt (not a full copy of the output):
 
 ```json
 {
   "schema_version": 1,
   "cli": "kinic-cli",
-  "version": "0.1.2",
-  "auth_summary": "Network commands use global --identity or --ii unless noted otherwise. The TUI requires --identity. tools serve is environment-auth only.",
-  "global_options": [
-    {
-      "scope": "global",
-      "name": "identity",
-      "required": false,
-      "input_shape": "single_value",
-      "value_kind": "string",
-      "relations": {
-        "conflicts": ["ii"]
-      }
-    }
-  ],
-  "commands": [
-    {
-      "name": "prefs",
-      "summary": "Manage local Kinic preferences shared with the TUI.",
-      "auth": {
-        "required": false,
-        "sources": []
-      },
-      "output": {
-        "default": "json",
-        "supported": ["json"],
-        "interactive": false
-      },
-      "global_flags_supported": ["verbose"],
-      "arguments": [],
-      "subcommands": [
-        {
-          "name": "show",
-          "summary": "Show local preferences shared with the TUI.",
-          "auth": {
-            "required": false,
-            "sources": []
-          },
-          "output": {
-            "default": "json",
-            "supported": ["json"],
-            "interactive": false
-          },
-          "global_flags_supported": ["verbose"],
-          "arguments": []
-        }
-      ]
-    }
-  ]
+  "version": "<matches package version>",
+  "auth_summary": "Network commands use global --identity or --ii unless noted otherwise. The TUI requires --identity. tools serve is environment-auth only. Some commands expose conditional auth requirements based on flags such as --validate.",
+  "global_options": [],
+  "commands": []
 }
 ```
 
