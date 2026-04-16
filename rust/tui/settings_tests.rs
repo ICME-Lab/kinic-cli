@@ -1,4 +1,5 @@
 use super::*;
+use crate::preferences::UserPreferences;
 use candid::Nat;
 use tui_kit_runtime::{SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview};
 
@@ -52,32 +53,6 @@ fn section_entry_value<'a>(snapshot: &'a SettingsSnapshot, section: &str, id: &s
         .and_then(|current| current.entries.iter().find(|entry| entry.id == id))
         .map(|entry| entry.value.as_str())
         .expect("section entry should exist")
-}
-
-#[test]
-fn user_preferences_accepts_unknown_fields() {
-    let with_unknown: UserPreferences = serde_yaml::from_str(
-        r#"
-default_memory_id: aaaaa-aa
-saved_tags:
-  - docs
-manual_memory_ids:
-  - bbbbb-bb
-future_setting: true
-"#,
-    )
-    .expect("unknown fields should be ignored");
-
-    assert_eq!(with_unknown.default_memory_id.as_deref(), Some("aaaaa-aa"));
-    assert_eq!(with_unknown.saved_tags, vec!["docs".to_string()]);
-    assert_eq!(with_unknown.manual_memory_ids, vec!["bbbbb-bb".to_string()]);
-}
-
-#[test]
-fn user_preferences_rejects_missing_saved_tags() {
-    let result = serde_yaml::from_str::<UserPreferences>("default_memory_id: aaaaa-aa\n");
-
-    assert!(result.is_err());
 }
 
 #[test]
@@ -234,26 +209,6 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             "{name}"
         );
     }
-}
-
-#[test]
-fn user_preferences_normalizes_missing_chat_retrieval_fields() {
-    let preferences: UserPreferences = serde_yaml::from_str(
-        r#"
-default_memory_id: aaaaa-aa
-saved_tags:
-  - docs
-manual_memory_ids:
-  - bbbbb-bb
-"#,
-    )
-    .expect("chat retrieval fields should default");
-
-    let normalized = normalize_user_preferences(preferences);
-
-    assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
-    assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
-    assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
 }
 
 #[test]

@@ -84,6 +84,7 @@ The TUI has five tabs.
 - `Settings`: view and change current connection info and saved settings
 
 The `Memories` tab opens first when the TUI starts.
+The local preferences shown in `Settings`, including the default memory, saved tags, and manually tracked memories, can also be managed from the CLI with `kinic-cli prefs ...`.
 
 ## Basic Controls
 
@@ -316,6 +317,12 @@ The main saved values are:
 
 - You are asked to approve Keychain access after startup  
   On macOS, access to Keychain is required to read the identity PEM. On first launch, or when access has not been granted yet, you may see a permission dialog. Approve it and try again.
+
+- Startup reports that Keychain access was not granted
+  The TUI now surfaces a dedicated message prefixed with `KEYCHAIN_ACCESS_DENIED` when macOS blocks Keychain access. Approve the prompt if it appears, or unlock the login keychain and retry. If the dialog was previously denied, re-allow access for the app from Keychain Access.
+
+- Startup reports that Keychain lookup could not be confirmed
+  The TUI may show `KEYCHAIN_LOOKUP_FAILED` when macOS does not clearly confirm whether the expected entry was readable. This can mean the entry is missing, approval was delayed, or the lookup did not complete cleanly. Check the expected entry name `internet_computer_identity_<IDENTITY_NAME>` and retry after responding to any Keychain prompt.
 
 - The memory list cannot be loaded  
   In a local environment, check that `dfx start` is running and the supporting canisters are deployed. Also confirm that you are connected to the expected target, and use `Ctrl+R` to refresh if needed.

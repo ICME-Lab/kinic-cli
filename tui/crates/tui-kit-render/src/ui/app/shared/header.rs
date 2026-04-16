@@ -114,9 +114,14 @@ impl<'a> TuiKitUi<'a> {
                         .map(|summary| summary.name.as_str())
                 }),
             TabKind::InsertForm => {
-                let insert_memory_id = self.insert_memory_id.trim();
-                if !insert_memory_id.is_empty() {
-                    Some(insert_memory_id)
+                if let Some(selected_memory) = self.selected_memory {
+                    let selected_memory_label = selected_memory.label.trim();
+                    if !selected_memory_label.is_empty() {
+                        Some(selected_memory_label)
+                    } else {
+                        let selected_memory_id = selected_memory.id.trim();
+                        (!selected_memory_id.is_empty()).then_some(selected_memory_id)
+                    }
                 } else {
                     self.insert_memory_placeholder
                         .map(str::trim)
@@ -124,7 +129,8 @@ impl<'a> TuiKitUi<'a> {
                 }
             }
             _ => self
-                .selected_memory_label
+                .selected_memory
+                .map(|selection| selection.label.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty()),
         }
@@ -199,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn current_memory_line_uses_insert_target_placeholder() {
+    fn current_memory_line_uses_insert_placeholder() {
         let theme = Theme::default();
 
         let line = TuiKitUi::new(&theme)
@@ -211,12 +217,32 @@ mod tests {
     }
 
     #[test]
+    fn current_memory_line_uses_selected_memory_label_on_insert_tab() {
+        let theme = Theme::default();
+        let selected_memory = tui_kit_runtime::MemorySelection {
+            id: "bbbbb-bb".to_string(),
+            label: "Beta Memory".to_string(),
+        };
+
+        let line = TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new(KINIC_INSERT_TAB_ID))
+            .selected_memory(Some(&selected_memory))
+            .current_memory_line(80);
+
+        assert_eq!(line, "📚 memory: Beta Memory");
+    }
+
+    #[test]
     fn current_memory_line_keeps_selected_memory_on_other_tabs() {
         let theme = Theme::default();
+        let selected_memory = tui_kit_runtime::MemorySelection {
+            id: "aaaaa-aa".to_string(),
+            label: "Alpha Memory".to_string(),
+        };
 
         let line = TuiKitUi::new(&theme)
             .current_tab_id(TabId::new("kinic-settings"))
-            .selected_memory_label(Some("Alpha Memory"))
+            .selected_memory(Some(&selected_memory))
             .current_memory_line(80);
 
         assert_eq!(line, "📚 memory: Alpha Memory");

@@ -107,6 +107,14 @@ fn install_pending_search(
     tx
 }
 
+fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
+    provider.set_active_memory_by_id(memory_id.to_string());
+}
+
+fn active_memory_id(provider: &KinicProvider) -> Option<&str> {
+    provider.active_memory_id()
+}
+
 fn refreshed_session_overview() -> SessionAccountOverview {
     let mut overview = SessionAccountOverview::new(session_snapshot("aaaaa-aa"));
     overview.balance_base_units = Some(1_234_000_000u128);

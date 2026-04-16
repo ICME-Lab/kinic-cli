@@ -10,17 +10,30 @@ use std::{
 use super::adapter;
 use super::bridge::{self, MemorySummary, SearchResultItem};
 use super::chat_prompt::ActiveMemoryContext;
-use super::settings::{self, PreferencesHealth, UserPreferences};
+use super::settings::{self, PreferencesHealth};
 use crate::{
+    agent::{KeychainErrorCode, extract_keychain_error_code},
     create_domain::derive_create_cost,
     embedding::fetch_embedding,
     insert_service::{
         InsertRequest, parse_embedding_json, validate_insert_request_fields,
         validate_insert_request_for_submit,
     },
+    preferences::{self, UserPreferences},
+    shared::{
+        cross_memory_search::{collect_searchable_memory_ids, fold_search_batches},
+        memory_metadata::parse_memory_metadata,
+    },
     tui::TuiAuth,
 };
-use ic_agent::export::Principal;
+use kinic_core::{
+    amount::{
+        KinicAmountParseError, format_e8s_to_kinic_string_u128, parse_required_kinic_amount_to_e8s,
+    },
+    prefs_policy,
+    principal::parse_required_principal,
+    tag,
+};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
@@ -28,10 +41,9 @@ use tokio_util::sync::CancellationToken;
 use tui_kit_runtime::{
     AccessControlAction, AccessControlMode, AccessControlRole, ChatScope, CoreAction, CoreEffect,
     CoreResult, CoreState, CreateCostState, DataProvider, FILE_MODE_ALLOWED_EXTENSIONS, InsertMode,
-    LoadedCreateCost, PaneFocus, PickerConfirmKind, PickerContext, PickerItem, PickerItemKind,
-    PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SearchScope,
+    LoadedCreateCost, MemorySelection, PaneFocus, PickerConfirmKind, PickerContext, PickerItem,
+    PickerItemKind, PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SearchScope,
     SessionAccountOverview, SessionSettingsSnapshot, TransferModalMode,
-    format_e8s_to_kinic_string_u128,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
         KINIC_SETTINGS_TAB_ID,
@@ -132,7 +144,7 @@ pub struct KinicProvider {
     session_overview: SessionAccountOverview,
     user_preferences: UserPreferences,
     preferences_health: PreferencesHealth,
-    cursor_memory_id: Option<String>,
+    active_memory: Option<MemorySelection>,
     memory_summaries: Vec<MemorySummary>,
     memory_records: Vec<KinicRecord>,
     result_records: Vec<KinicRecord>,
@@ -204,7 +216,6 @@ struct PendingSearch {
 type MemorySearchTaskResult = (String, anyhow::Result<Vec<SearchResultItem>>);
 type MemorySearchJoinResult = Result<MemorySearchTaskResult, tokio::task::JoinError>;
 type NextMemorySearchTask = Option<MemorySearchJoinResult>;
-const SEARCH_JOIN_ERROR_MEMORY_ID: &str = "join-error";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LastSearchState {
@@ -216,6 +227,7 @@ struct LastSearchState {
 struct SearchBatchResult {
     items: Vec<SearchResultItem>,
     failed_memory_ids: Vec<String>,
+    join_error_count: usize,
 }
 
 fn fold_live_search_results(
@@ -223,37 +235,19 @@ fn fold_live_search_results(
     results: Vec<MemorySearchTaskResult>,
     join_errors: Vec<tokio::task::JoinError>,
 ) -> Result<SearchBatchResult, String> {
-    let mut items = Vec::new();
-    let mut failed_memory_ids = Vec::new();
-    let mut first_error = None;
-
-    for (memory_id, result) in results {
-        match result {
-            Ok(mut next_items) => items.append(&mut next_items),
-            Err(error) => {
-                failed_memory_ids.push(memory_id);
-                if first_error.is_none() {
-                    first_error = Some(error.to_string());
-                }
-            }
-        }
-    }
-
-    for error in join_errors {
-        failed_memory_ids.push(SEARCH_JOIN_ERROR_MEMORY_ID.to_string());
-        if first_error.is_none() {
-            first_error = Some(error.to_string());
-        }
-    }
-
-    if target_count > 0 && failed_memory_ids.len() == target_count {
-        return Err(first_error
-            .unwrap_or_else(|| "Search failed before any memory returned results.".to_string()));
-    }
-
+    let folded = fold_search_batches(
+        target_count,
+        results,
+        join_errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect(),
+        "Search failed before any memory returned results.",
+    )?;
     Ok(SearchBatchResult {
-        items,
-        failed_memory_ids,
+        items: folded.items,
+        failed_memory_ids: folded.failed_memory_ids,
+        join_error_count: folded.join_error_count,
     })
 }
 
@@ -365,7 +359,7 @@ impl<'a> DefaultMemorySelection<'a> {
 }
 
 fn saved_tag_selection(preferences: &UserPreferences) -> Vec<String> {
-    settings::normalize_saved_tags(preferences.saved_tags.clone())
+    tag::normalize_saved_tags(preferences.saved_tags.clone())
 }
 
 fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> {
@@ -383,14 +377,12 @@ fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> 
 fn picker_selected_id_for_context(
     context: PickerContext,
     state: &CoreState,
+    active_memory: Option<&MemorySelection>,
     user_preferences: &UserPreferences,
 ) -> Option<String> {
     match context {
         PickerContext::DefaultMemory => state.saved_default_memory_id.clone(),
-        PickerContext::InsertTarget => {
-            let insert_memory_id = state.insert_memory_id.trim();
-            (!insert_memory_id.is_empty()).then(|| insert_memory_id.to_string())
-        }
+        PickerContext::InsertTarget => active_memory.map(|selection| selection.id.clone()),
         PickerContext::InsertTag => {
             let insert_tag = state.insert_tag.trim();
             (!insert_tag.is_empty()).then(|| insert_tag.to_string())
@@ -450,32 +442,32 @@ fn picker_items_for_context(
                 .unwrap_or_default(),
             _ => Vec::new(),
         },
-        PickerContext::ChatResultLimit => settings::chat_result_limit_options()
+        PickerContext::ChatResultLimit => prefs_policy::chat_result_limit_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
                     value.to_string(),
-                    settings::chat_result_limit_display(*value),
+                    preferences::chat_result_limit_display(*value),
                     user_preferences.chat_overall_top_k == *value,
                 )
             })
             .collect(),
-        PickerContext::ChatPerMemoryLimit => settings::chat_per_memory_limit_options()
+        PickerContext::ChatPerMemoryLimit => prefs_policy::chat_per_memory_limit_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
                     value.to_string(),
-                    settings::chat_per_memory_limit_display(*value),
+                    preferences::chat_per_memory_limit_display(*value),
                     user_preferences.chat_per_memory_cap == *value,
                 )
             })
             .collect(),
-        PickerContext::ChatDiversity => settings::chat_diversity_options()
+        PickerContext::ChatDiversity => prefs_policy::chat_diversity_options()
             .iter()
             .map(|value| {
                 PickerItem::option(
                     value.to_string(),
-                    settings::chat_diversity_display(*value),
+                    preferences::chat_diversity_display(*value),
                     user_preferences.chat_mmr_lambda == *value,
                 )
             })
@@ -589,7 +581,7 @@ fn reload_preferences_for_apply(
 
     #[cfg(not(test))]
     {
-        settings::load_user_preferences()
+        preferences::load_user_preferences()
     }
 }
 
@@ -601,7 +593,7 @@ fn save_user_preferences_for_apply(
         return Err(tui_kit_host::settings::SettingsError::NoConfigDir);
     }
 
-    settings::save_user_preferences(preferences)
+    preferences::save_user_preferences(preferences)
 }
 
 #[cfg(test)]
@@ -751,12 +743,13 @@ struct AccessSubmitTaskOutput {
 
 struct AddMemoryValidationTaskOutput {
     memory_id: String,
-    result: Result<(), String>,
+    result: Result<String, String>,
 }
 
 struct RenameSubmitTaskOutput {
     memory_id: String,
     next_name: String,
+    stored_name: Option<String>,
     result: Result<(), bridge::RenameMemoryError>,
 }
 
@@ -945,7 +938,7 @@ impl KinicProvider {
         let _settings_io_lock = settings_io_lock()
             .lock()
             .expect("settings io lock should be available");
-        let (user_preferences, preferences_health) = match settings::load_user_preferences() {
+        let (user_preferences, preferences_health) = match preferences::load_user_preferences() {
             Ok(preferences) => (preferences, PreferencesHealth::default()),
             Err(error) => (
                 UserPreferences::default(),
@@ -970,7 +963,7 @@ impl KinicProvider {
             session_overview,
             user_preferences,
             preferences_health,
-            cursor_memory_id: None,
+            active_memory: None,
             memory_summaries: Vec::new(),
             memory_records: Vec::new(),
             result_records: Vec::new(),
@@ -1045,7 +1038,7 @@ impl KinicProvider {
         reset_request_task(&mut self.pending_memory_detail);
         self.pending_memory_detail_memory_id = None;
         self.memory_detail_prefetch.reset();
-        self.cursor_memory_id = None;
+        self.clear_active_memory();
         self.active_chat_thread = None;
         self.initial_memories_in_flight = true;
         let auth = self.config.auth.clone();
@@ -1111,7 +1104,7 @@ impl KinicProvider {
         if self.memories_mode != MemoriesMode::Browser {
             return false;
         }
-        let previous_cursor_memory_id = self.cursor_memory_id.clone();
+        let previous_active_memory = self.active_memory.clone();
 
         let visible_ids = self
             .visible_memory_records()
@@ -1120,26 +1113,26 @@ impl KinicProvider {
             .collect::<Vec<_>>();
 
         if visible_ids.is_empty() {
-            self.cursor_memory_id = None;
-            return self.cursor_memory_id != previous_cursor_memory_id;
+            self.clear_active_memory();
+            return self.active_memory != previous_active_memory;
         }
 
         if !self
-            .cursor_memory_id
-            .as_ref()
+            .active_memory_id()
             .is_some_and(|memory_id| visible_ids.iter().any(|id| id == memory_id))
+            && let Some(memory_id) = visible_ids.first()
         {
-            self.cursor_memory_id = visible_ids.first().cloned();
+            self.set_active_memory_by_id(memory_id.clone());
         }
 
-        self.cursor_memory_id != previous_cursor_memory_id
+        self.active_memory != previous_active_memory
     }
 
-    /// Aligns provider cursor with [`CoreState::selected_index`] for browser list interactions.
+    /// Aligns provider active memory with [`CoreState::selected_index`] for browser list interactions.
     /// `all memories` chat still keeps the browser selection so detail/search/default-memory
     /// actions keep pointing at the visible list selection. In [`MemoriesMode::Results`], list
     /// selection follows a different path; chat scope sync is intentionally browser-first here.
-    fn sync_cursor_to_chat_scope_for_browser(&mut self, state: &CoreState) {
+    fn sync_active_memory_to_chat_scope_for_browser(&mut self, state: &CoreState) {
         if state.current_tab_id.as_str() != KINIC_MEMORIES_TAB_ID {
             return;
         }
@@ -1157,18 +1150,18 @@ impl KinicProvider {
             })
             .map(|item| item.id.clone())
         {
-            self.cursor_memory_id = Some(id);
+            self.set_active_memory_by_id(id);
         }
     }
 
-    fn cursor_visible_memory_index(&self) -> Option<usize> {
-        let active_id = self.cursor_memory_id.as_deref()?;
+    fn active_memory_visible_index(&self) -> Option<usize> {
+        let active_id = self.active_memory_id()?;
         self.visible_memory_records()
             .into_iter()
             .position(|record| record.id == active_id)
     }
 
-    fn navigate_memory_cursor(&mut self, state: &CoreState, action: &CoreAction) {
+    fn navigate_active_memory(&mut self, state: &CoreState, action: &CoreAction) {
         if !self.should_handle_memory_navigation(state) || self.is_add_memory_action_selected(state)
         {
             return;
@@ -1185,7 +1178,7 @@ impl KinicProvider {
             index
         } else {
             let visible_count = visible_records.len();
-            let current = self.cursor_visible_memory_index().unwrap_or(0);
+            let current = self.active_memory_visible_index().unwrap_or(0);
             let last = visible_count.saturating_sub(1);
             match action {
                 CoreAction::MoveNext => {
@@ -1215,7 +1208,7 @@ impl KinicProvider {
         let Some(record) = visible_records.get(target_index) else {
             return;
         };
-        self.cursor_memory_id = Some(record.id.clone());
+        self.set_active_memory_by_id(record.id.clone());
     }
 
     fn network_label(&self) -> &str {
@@ -1380,22 +1373,18 @@ impl KinicProvider {
     fn active_chat_scope_memory_id(&self, state: &CoreState) -> Option<String> {
         match state.chat_scope {
             ChatScope::All => None,
-            ChatScope::Selected => state
-                .selected_index
-                .and_then(|idx| state.list_items.get(idx))
-                .filter(|item| {
-                    matches!(
-                        &item.kind,
-                        tui_kit_model::UiItemKind::Custom(kind) if kind == "memory"
-                    )
-                })
-                .map(|item| item.id.clone())
-                .or_else(|| self.cursor_memory_id.clone()),
+            ChatScope::Selected => self.active_memory_id().map(str::to_string),
         }
     }
 
     fn chat_scope_label(&self, state: &CoreState) -> Option<String> {
         let memory_id = self.active_chat_scope_memory_id(state)?;
+        if self.active_memory_id() == Some(memory_id.as_str())
+            && let Some(label) = self.active_memory_label().map(str::trim)
+            && !label.is_empty()
+        {
+            return Some(label.to_string());
+        }
         self.memory_records
             .iter()
             .find(|record| record.id == memory_id)
@@ -1601,18 +1590,75 @@ impl KinicProvider {
         self.snapshot_output(state, vec![effect])
     }
 
-    fn selected_memory_summary(&self) -> Option<&MemorySummary> {
-        let active_id = self.cursor_memory_id.as_deref()?;
+    fn active_memory_summary(&self) -> Option<&MemorySummary> {
+        let active_id = self.active_memory_id()?;
         self.memory_summaries
             .iter()
             .find(|summary| summary.id == active_id)
     }
 
-    fn selected_memory_record(&self) -> Option<&KinicRecord> {
-        let selected_id = self.cursor_memory_id.as_deref()?;
+    fn active_memory_record(&self) -> Option<&KinicRecord> {
+        let selected_id = self.active_memory_id()?;
         self.memory_records
             .iter()
             .find(|record| record.id == selected_id)
+    }
+
+    fn active_memory_id(&self) -> Option<&str> {
+        self.active_memory
+            .as_ref()
+            .map(|selection| selection.id.as_str())
+    }
+
+    fn active_memory_label(&self) -> Option<&str> {
+        self.active_memory
+            .as_ref()
+            .map(|selection| selection.label.as_str())
+    }
+
+    fn memory_selection_for_id(&self, id: &str) -> MemorySelection {
+        let label = self
+            .memory_records
+            .iter()
+            .find(|record| record.id == id)
+            .map(|record| record.title.trim())
+            .filter(|title| !title.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.default_memory_selection().title_for_id(id))
+            .unwrap_or_else(|| id.to_string());
+
+        MemorySelection {
+            id: id.to_string(),
+            label,
+        }
+    }
+
+    fn set_active_memory_by_id(&mut self, id: impl Into<String>) -> bool {
+        let id = id.into();
+        self.set_active_memory(self.memory_selection_for_id(id.as_str()))
+    }
+
+    fn set_active_memory(&mut self, selection: MemorySelection) -> bool {
+        if self.active_memory.as_ref() == Some(&selection) {
+            return false;
+        }
+        self.active_memory = Some(selection);
+        true
+    }
+
+    fn clear_active_memory(&mut self) -> bool {
+        if self.active_memory.is_none() {
+            return false;
+        }
+        self.active_memory = None;
+        true
+    }
+
+    fn refresh_active_memory_label(&mut self, memory_id: &str) -> bool {
+        if self.active_memory_id() != Some(memory_id) {
+            return false;
+        }
+        self.set_active_memory_by_id(memory_id.to_string())
     }
 
     fn memory_summary_display_text(&self, memory_id: &str) -> Option<String> {
@@ -1662,7 +1708,7 @@ impl KinicProvider {
         if self.is_add_memory_action_selected(state) {
             return None;
         }
-        let summary = self.selected_memory_summary()?;
+        let summary = self.active_memory_summary()?;
         summary.searchable_memory_id.as_ref().map(|_| {
             (
                 summary,
@@ -1672,7 +1718,7 @@ impl KinicProvider {
     }
 
     fn active_memory_is_manual(&self) -> bool {
-        let Some(active_id) = self.cursor_memory_id.as_deref() else {
+        let Some(active_id) = self.active_memory_id() else {
             return false;
         };
         self.user_preferences
@@ -1685,7 +1731,7 @@ impl KinicProvider {
         &'a self,
         state: &CoreState,
     ) -> Vec<MemoryContentSelection<'a>> {
-        let Some(summary) = self.selected_memory_summary() else {
+        let Some(summary) = self.active_memory_summary() else {
             return vec![MemoryContentSelection::AddUser];
         };
         let mut selections = Vec::new();
@@ -1749,7 +1795,7 @@ impl KinicProvider {
             return;
         };
         let users = self
-            .selected_memory_summary()
+            .active_memory_summary()
             .and_then(|summary| summary.users.as_ref());
         section.body_lines = render_access_lines(users, current_selection.as_ref());
 
@@ -1771,17 +1817,8 @@ impl KinicProvider {
         }
     }
 
-    fn selected_insert_memory_id(&self, state: &CoreState) -> Option<String> {
-        let insert_memory_id = state.insert_memory_id.trim();
-        if !insert_memory_id.is_empty() {
-            return Some(insert_memory_id.to_string());
-        }
-
-        let default_memory_id = self.user_preferences.default_memory_id.as_deref()?;
-        self.memory_records
-            .iter()
-            .find(|record| record.id == default_memory_id)
-            .map(|record| record.id.clone())
+    fn effective_insert_memory_id(&self) -> Option<String> {
+        self.active_memory_id().map(str::to_string)
     }
 
     fn reset_insert_dim(&mut self) {
@@ -1792,8 +1829,8 @@ impl KinicProvider {
         self.pending_insert_dim = None;
     }
 
-    fn start_insert_dim_load(&mut self, state: &CoreState) {
-        let Some(memory_id) = self.selected_insert_memory_id(state) else {
+    fn start_insert_dim_load(&mut self) {
+        let Some(memory_id) = self.effective_insert_memory_id() else {
             return;
         };
         if self.insert_expected_dim_memory_id.as_deref() == Some(memory_id.as_str())
@@ -1941,15 +1978,18 @@ impl KinicProvider {
                     .iter_mut()
                     .find(|summary| summary.id == memory_id)
                 {
-                    summary.name = details.name;
+                    summary.name = parse_memory_metadata(details.metadata_name.as_str())
+                        .map(|_| details.metadata_name)
+                        .unwrap_or(details.display_name);
                     summary.version = details.version;
                     summary.dim = details.dim;
                     summary.owners = Some(details.owners);
                     summary.stable_memory_size = details.stable_memory_size;
                     summary.cycle_amount = details.cycle_amount;
                     summary.users = Some(details.users);
-                    self.loaded_memory_details.insert(memory_id);
+                    self.loaded_memory_details.insert(memory_id.clone());
                     self.refresh_memory_records_from_summaries();
+                    self.refresh_active_memory_label(memory_id.as_str());
                 }
                 if notify && let Some(message) = details.users_load_error.as_ref() {
                     effects.push(CoreEffect::Notify(format!(
@@ -1968,11 +2008,11 @@ impl KinicProvider {
         effects
     }
 
-    fn start_cursor_memory_detail_load(&mut self) {
+    fn start_active_memory_detail_load(&mut self) {
         if self.memories_mode != MemoriesMode::Browser {
             return;
         }
-        let Some(memory_id) = self.cursor_memory_id.clone() else {
+        let Some(memory_id) = self.active_memory_id().map(str::to_string) else {
             return;
         };
         if self.loaded_memory_details.contains(memory_id.as_str()) {
@@ -2018,7 +2058,7 @@ impl KinicProvider {
         if self.memories_mode != MemoriesMode::Browser {
             return;
         }
-        let Some(record) = self.selected_memory_record() else {
+        let Some(record) = self.active_memory_record() else {
             return;
         };
         #[cfg(test)]
@@ -2135,7 +2175,7 @@ impl KinicProvider {
         let default_memory = self.default_memory_selection();
         let default_memory_items = default_memory.available_memory_ids();
         let default_memory_labels = default_memory.selector_labels();
-        let insert_memory_placeholder = self.insert_memory_placeholder_label(state);
+        let insert_memory_placeholder = self.insert_memory_placeholder_label();
         let picker = match &state.picker {
             PickerState::Closed => PickerState::Closed,
             PickerState::Input {
@@ -2161,7 +2201,12 @@ impl KinicProvider {
                     &self.user_preferences,
                 );
                 let preferred_selected_id = selected_id.clone().or_else(|| {
-                    picker_selected_id_for_context(*context, state, &self.user_preferences)
+                    picker_selected_id_for_context(
+                        *context,
+                        state,
+                        self.active_memory.as_ref(),
+                        &self.user_preferences,
+                    )
                 });
                 let resolved_index = picker_selected_index(
                     &items,
@@ -2209,13 +2254,13 @@ impl KinicProvider {
         let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
         } else if self.memories_mode == MemoriesMode::Browser {
-            if self.cursor_memory_id.is_none() && self.memory_records.is_empty() {
+            if self.active_memory.is_none() && self.memory_records.is_empty() {
                 filtered
                     .first()
                     .copied()
                     .map(|record| self.selected_content_for_record(record, state))
             } else {
-                self.selected_memory_record()
+                self.active_memory_record()
                     .map(|record| self.selected_content_for_record(record, state))
             }
         } else {
@@ -2229,7 +2274,7 @@ impl KinicProvider {
         } else if self.is_add_memory_action_selected(state) {
             Some(filtered.len())
         } else if self.memories_mode == MemoriesMode::Browser {
-            self.cursor_visible_memory_index()
+            self.active_memory_visible_index()
                 .or_else(|| (!filtered.is_empty()).then_some(0))
         } else {
             let current = state.selected_index.unwrap_or(0);
@@ -2245,7 +2290,7 @@ impl KinicProvider {
             selected_context: None,
             total_count: filtered.len(),
             status_message: Some(self.status_message(state, filtered.len())),
-            selected_memory_label: self.selected_memory_label(),
+            selected_memory: self.active_memory.clone(),
             chat_scope_label: self.chat_scope_label(state),
             create_cost_state: self.create_cost_state.clone(),
             create_submit_state: state.create_submit_state.clone(),
@@ -2260,17 +2305,15 @@ impl KinicProvider {
             saved_default_memory_id: self.user_preferences.default_memory_id.clone(),
             insert_memory_placeholder,
             insert_expected_dim: self
-                .selected_insert_memory_id(state)
+                .effective_insert_memory_id()
                 .filter(|memory_id| {
                     self.insert_expected_dim_memory_id.as_deref() == Some(memory_id.as_str())
                 })
                 .and(self.insert_expected_dim),
             insert_expected_dim_loading: self.insert_expected_dim_loading
-                && self
-                    .selected_insert_memory_id(state)
-                    .is_some_and(|memory_id| {
-                        self.insert_expected_dim_memory_id.as_deref() == Some(memory_id.as_str())
-                    }),
+                && self.effective_insert_memory_id().is_some_and(|memory_id| {
+                    self.insert_expected_dim_memory_id.as_deref() == Some(memory_id.as_str())
+                }),
             insert_current_dim,
             insert_validation_message,
         }
@@ -2291,24 +2334,6 @@ impl KinicProvider {
         )
     }
 
-    fn selected_memory_label(&self) -> Option<String> {
-        self.selected_memory_record()
-            .map(|record| {
-                let title = record.title.trim();
-                if title.is_empty() {
-                    record.id.clone()
-                } else {
-                    title.to_string()
-                }
-            })
-            .or_else(|| {
-                self.cursor_memory_id
-                    .as_deref()
-                    .and_then(|memory_id| self.default_memory_selection().title_for_id(memory_id))
-            })
-            .or_else(|| self.cursor_memory_id.clone())
-    }
-
     fn insert_validation_message(&self, state: &CoreState) -> Option<String> {
         if !matches!(state.insert_mode, InsertMode::ManualEmbedding)
             || state.insert_embedding.trim().is_empty()
@@ -2316,7 +2341,7 @@ impl KinicProvider {
             return None;
         }
 
-        let selected_memory_id = self.selected_insert_memory_id(state)?;
+        let selected_memory_id = self.effective_insert_memory_id()?;
         if self.insert_expected_dim_memory_id.as_deref() != Some(selected_memory_id.as_str()) {
             return None;
         }
@@ -2353,8 +2378,8 @@ impl KinicProvider {
         snapshot
     }
 
-    fn insert_memory_placeholder_label(&self, state: &CoreState) -> Option<String> {
-        if !state.insert_memory_id.trim().is_empty() {
+    fn insert_memory_placeholder_label(&self) -> Option<String> {
+        if self.active_memory.is_some() {
             return None;
         }
         let default_memory_id = self.user_preferences.default_memory_id.as_deref()?;
@@ -2390,8 +2415,7 @@ impl KinicProvider {
 
         let mut updated_preferences = self.user_preferences.clone();
         updated_preferences.saved_tags.push(normalized_tag.clone());
-        updated_preferences.saved_tags =
-            settings::normalize_saved_tags(updated_preferences.saved_tags);
+        updated_preferences.saved_tags = tag::normalize_saved_tags(updated_preferences.saved_tags);
 
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -2431,8 +2455,7 @@ impl KinicProvider {
         updated_preferences
             .saved_tags
             .retain(|saved| saved != &normalized_tag);
-        updated_preferences.saved_tags =
-            settings::normalize_saved_tags(updated_preferences.saved_tags);
+        updated_preferences.saved_tags = tag::normalize_saved_tags(updated_preferences.saved_tags);
 
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -2475,14 +2498,25 @@ impl KinicProvider {
         item: &PickerItem,
     ) -> Vec<CoreEffect> {
         match context {
-            PickerContext::DefaultMemory => vec![
-                self.default_memory_controller()
-                    .set_default_memory_preference(item.id.clone()),
-            ],
-            PickerContext::InsertTarget => vec![
-                CoreEffect::SetInsertMemoryId(item.id.clone()),
-                CoreEffect::Notify(format!("Selected target memory {}", item.id)),
-            ],
+            PickerContext::DefaultMemory => {
+                let selection = self.memory_selection_for_id(item.id.as_str());
+                self.set_active_memory(selection);
+                vec![
+                    self.default_memory_controller()
+                        .set_default_memory_preference(item.id.clone()),
+                ]
+            }
+            PickerContext::InsertTarget => {
+                let selection = MemorySelection {
+                    id: item.id.clone(),
+                    label: item.label.clone(),
+                };
+                self.set_active_memory(selection);
+                vec![CoreEffect::Notify(format!(
+                    "Selected target memory {}",
+                    item.label
+                ))]
+            }
             PickerContext::InsertTag => Vec::new(),
             PickerContext::TagManagement => vec![
                 CoreEffect::SetInsertTag(item.id.clone()),
@@ -2631,11 +2665,6 @@ impl KinicProvider {
     }
 
     fn start_add_memory_validation(&mut self, memory_id: String) -> Result<CoreEffect, String> {
-        let principal_id = self
-            .config
-            .auth
-            .principal_text()
-            .map_err(|error| short_error(&error.to_string()))?;
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
         spawn_task(&mut self.add_memory_validation_task, move |tx| {
@@ -2646,14 +2675,13 @@ impl KinicProvider {
                     use_mainnet,
                     auth,
                     memory_id.clone(),
-                    principal_id,
                 ))
                 .map_err(|error| error.to_string());
             let _ = tx.send(AddMemoryValidationTaskOutput { memory_id, result });
         });
 
         Ok(CoreEffect::Notify(
-            "Checking memory access via get_users()...".to_string(),
+            "Checking memory access via get_name()...".to_string(),
         ))
     }
 
@@ -2668,9 +2696,14 @@ impl KinicProvider {
                 memory_id.clone(),
                 next_name.clone(),
             ));
+            let (stored_name, result) = match result {
+                Ok(output) => (Some(output.stored_name), Ok(())),
+                Err(error) => (None, Err(error)),
+            };
             let _ = tx.send(RenameSubmitTaskOutput {
                 memory_id,
                 next_name,
+                stored_name,
                 result,
             });
         });
@@ -2707,7 +2740,7 @@ impl KinicProvider {
         if self.user_preferences.chat_overall_top_k == value {
             return CoreEffect::Notify(format!(
                 "Chat result limit already set to {}",
-                settings::chat_result_limit_display(value)
+                preferences::chat_result_limit_display(value)
             ));
         }
         match self.update_user_preferences(|preferences| {
@@ -2715,7 +2748,7 @@ impl KinicProvider {
         }) {
             Ok(()) => CoreEffect::Notify(format!(
                 "Chat result limit set to {}",
-                settings::chat_result_limit_display(value)
+                preferences::chat_result_limit_display(value)
             )),
             Err(error) => CoreEffect::Notify(format!("Chat result limit save failed: {error}")),
         }
@@ -2725,7 +2758,7 @@ impl KinicProvider {
         if self.user_preferences.chat_per_memory_cap == value {
             return CoreEffect::Notify(format!(
                 "Per-memory limit already set to {}",
-                settings::chat_per_memory_limit_display(value)
+                preferences::chat_per_memory_limit_display(value)
             ));
         }
         match self.update_user_preferences(|preferences| {
@@ -2733,7 +2766,7 @@ impl KinicProvider {
         }) {
             Ok(()) => CoreEffect::Notify(format!(
                 "Per-memory limit set to {}",
-                settings::chat_per_memory_limit_display(value)
+                preferences::chat_per_memory_limit_display(value)
             )),
             Err(error) => CoreEffect::Notify(format!("Per-memory limit save failed: {error}")),
         }
@@ -2743,7 +2776,7 @@ impl KinicProvider {
         if self.user_preferences.chat_mmr_lambda == value {
             return CoreEffect::Notify(format!(
                 "Chat diversity already set to {}",
-                settings::chat_diversity_display(value)
+                preferences::chat_diversity_display(value)
             ));
         }
         match self.update_user_preferences(|preferences| {
@@ -2751,7 +2784,7 @@ impl KinicProvider {
         }) {
             Ok(()) => CoreEffect::Notify(format!(
                 "Chat diversity set to {}",
-                settings::chat_diversity_display(value)
+                preferences::chat_diversity_display(value)
             )),
             Err(error) => CoreEffect::Notify(format!("Chat diversity save failed: {error}")),
         }
@@ -2865,7 +2898,7 @@ impl KinicProvider {
     }
 
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
-        let memory_id = self.selected_insert_memory_id(state).unwrap_or_default();
+        let memory_id = self.effective_insert_memory_id().unwrap_or_default();
         let tag = state.insert_tag.trim().to_string();
         let file_path = resolved_insert_file_path(state);
 
@@ -2992,15 +3025,11 @@ impl KinicProvider {
         validate_insert_request_for_submit(&request).map_err(|error| error.to_string())
     }
 
-    fn validate_insert_expected_dim(
-        &self,
-        request: &InsertRequest,
-        state: &CoreState,
-    ) -> Result<(), String> {
+    fn validate_insert_expected_dim(&self, request: &InsertRequest) -> Result<(), String> {
         let InsertRequest::Raw { embedding_json, .. } = request else {
             return Ok(());
         };
-        let Some(selected_memory_id) = self.selected_insert_memory_id(state) else {
+        let Some(selected_memory_id) = self.effective_insert_memory_id() else {
             return Ok(());
         };
         if self.insert_expected_dim_memory_id.as_deref() != Some(selected_memory_id.as_str()) {
@@ -3103,8 +3132,8 @@ impl KinicProvider {
                 effects.push(CoreEffect::CloseAccessControl);
                 effects.push(CoreEffect::Notify("Access updated.".to_string()));
                 self.loaded_memory_details.remove(&output.memory_id);
-                if self.cursor_memory_id.as_deref() == Some(output.memory_id.as_str()) {
-                    self.start_cursor_memory_detail_load();
+                if self.active_memory_id() == Some(output.memory_id.as_str()) {
+                    self.start_active_memory_detail_load();
                 }
             }
             Err(error) => {
@@ -3141,24 +3170,27 @@ impl KinicProvider {
 
         let mut effects = Vec::new();
         match output.result {
-            Ok(()) => match self.save_manual_memory_to_preferences(output.memory_id.as_str()) {
-                Ok(()) => {
-                    self.preferred_memory_after_refresh = Some(output.memory_id.clone());
-                    effects.push(CoreEffect::CloseAddMemory);
-                    effects.push(CoreEffect::Notify(format!(
-                        "Added memory {}.",
-                        output.memory_id
-                    )));
-                    if let Some(effect) = self.start_live_memories_load(None, true) {
-                        effects.push(effect);
+            Ok(memory_name) => {
+                match self.save_manual_memory_to_preferences(output.memory_id.as_str()) {
+                    Ok(()) => {
+                        self.preferred_memory_after_refresh = Some(output.memory_id.clone());
+                        effects.push(CoreEffect::CloseAddMemory);
+                        effects.push(CoreEffect::Notify(if memory_name.trim().is_empty() {
+                            format!("Added memory {}.", output.memory_id)
+                        } else {
+                            format!("Added memory {} ({memory_name}).", output.memory_id)
+                        }));
+                        if let Some(effect) = self.start_live_memories_load(None, true) {
+                            effects.push(effect);
+                        }
+                    }
+                    Err(error) => {
+                        effects.push(CoreEffect::AddMemoryFormError(Some(format!(
+                            "Manual memory save failed: {error}"
+                        ))));
                     }
                 }
-                Err(error) => {
-                    effects.push(CoreEffect::AddMemoryFormError(Some(format!(
-                        "Manual memory save failed: {error}"
-                    ))));
-                }
-            },
+            }
             Err(error) => {
                 effects.push(CoreEffect::AddMemoryFormError(Some(short_error(&error))));
             }
@@ -3191,12 +3223,16 @@ impl KinicProvider {
                     .iter_mut()
                     .find(|summary| summary.id == output.memory_id)
                 {
-                    summary.name = output.next_name.clone();
+                    summary.name = output
+                        .stored_name
+                        .clone()
+                        .unwrap_or_else(|| output.next_name.clone());
                 }
                 self.refresh_memory_records_from_summaries();
+                self.refresh_active_memory_label(output.memory_id.as_str());
                 self.loaded_memory_details.remove(&output.memory_id);
-                if self.cursor_memory_id.as_deref() == Some(output.memory_id.as_str()) {
-                    self.start_cursor_memory_detail_load();
+                if self.active_memory_id() == Some(output.memory_id.as_str()) {
+                    self.start_active_memory_detail_load();
                 }
                 effects.push(CoreEffect::CloseRenameMemory);
                 effects.push(CoreEffect::Notify(format!(
@@ -3329,23 +3365,31 @@ impl KinicProvider {
             return Err("Principal ID is required.".to_string());
         }
 
-        if principal_id == crate::clients::LAUNCHER_CANISTER {
-            return Err("Launcher canister access cannot be modified.".to_string());
-        }
-
-        if principal_id != "anonymous" {
-            Principal::from_text(principal_id)
-                .map_err(|_| format!("Invalid principal text: {principal_id}"))?;
-        }
-
         let action = state.access_control.action;
         let role = state.access_control.role;
-        if action != AccessControlAction::Remove
-            && role == AccessControlRole::Admin
-            && principal_id == "anonymous"
-        {
-            return Err("cannot grant admin role to anonymous".to_string());
-        }
+        let requested_role = match action {
+            AccessControlAction::Remove => None,
+            AccessControlAction::Add | AccessControlAction::Change => Some(match role {
+                AccessControlRole::Admin => crate::shared::access::MemoryRole::Admin,
+                AccessControlRole::Writer => crate::shared::access::MemoryRole::Writer,
+                AccessControlRole::Reader => crate::shared::access::MemoryRole::Reader,
+            }),
+        };
+        crate::shared::access::validate_access_control_target(
+            principal_id,
+            crate::clients::LAUNCHER_CANISTER,
+            requested_role,
+        )
+        .map_err(|error| {
+            let message = error.to_string();
+            if message == "launcher canister access cannot be modified" {
+                "Launcher canister access cannot be modified.".to_string()
+            } else if message.starts_with("invalid principal text:") {
+                format!("Invalid principal text: {principal_id}")
+            } else {
+                message
+            }
+        })?;
 
         Ok((
             memory_id.to_string(),
@@ -3360,7 +3404,7 @@ impl KinicProvider {
         if memory_id.is_empty() {
             return Err("Memory canister id is required.".to_string());
         }
-        Principal::from_text(memory_id)
+        parse_required_principal(memory_id)
             .map_err(|_| format!("Invalid principal text: {memory_id}"))?;
         if self
             .user_preferences
@@ -3382,7 +3426,7 @@ impl KinicProvider {
         if memory_id.is_empty() {
             return Err("Select a memory before renaming.".to_string());
         }
-        Principal::from_text(memory_id)
+        parse_required_principal(memory_id)
             .map_err(|_| format!("Invalid principal text: {memory_id}"))?;
 
         let next_name = state.rename_memory.form.value.trim();
@@ -3398,14 +3442,15 @@ impl KinicProvider {
         if principal_id.is_empty() {
             return Err("Recipient principal is required.".to_string());
         }
-        Principal::from_text(principal_id)
+        parse_required_principal(principal_id)
             .map_err(|_| format!("Invalid principal text: {principal_id}"))?;
 
         let amount_text = state.transfer_modal.amount.trim();
         if amount_text.is_empty() {
             return Err("Amount is required.".to_string());
         }
-        let amount_base_units = parse_kinic_amount_to_e8s(amount_text)?;
+        let amount_base_units = parse_required_kinic_amount_to_e8s(amount_text)
+            .map_err(format_transfer_amount_parse_error)?;
         if amount_base_units == 0 {
             return Err("Amount must be greater than zero.".to_string());
         }
@@ -3444,13 +3489,13 @@ impl KinicProvider {
         })
     }
 
-    fn selected_memory_id_for_default(&self, state: &CoreState) -> Option<String> {
+    fn active_memory_id_for_default_selection(&self, state: &CoreState) -> Option<String> {
         match self.memories_mode {
             MemoriesMode::Browser => {
                 if self.is_add_memory_action_selected(state) {
                     None
                 } else {
-                    self.cursor_memory_id.clone()
+                    self.active_memory_id().map(str::to_string)
                 }
             }
             MemoriesMode::Results => self
@@ -3462,20 +3507,14 @@ impl KinicProvider {
 
     fn search_target_memory_ids(&self, scope: SearchScope) -> Result<Vec<String>, String> {
         match scope {
-            SearchScope::All => {
-                let targets = self
-                    .memory_records
+            SearchScope::All => collect_searchable_memory_ids(
+                self.memory_records
                     .iter()
-                    .filter_map(|record| record.searchable_memory_id.clone())
-                    .collect::<Vec<_>>();
-                if targets.is_empty() {
-                    Err("No searchable memories are available yet.".to_string())
-                } else {
-                    Ok(targets)
-                }
-            }
+                    .map(|record| record.searchable_memory_id.clone()),
+                "No searchable memories are available yet.",
+            ),
             SearchScope::Selected => {
-                let active_memory_id = self.cursor_memory_id.as_deref().ok_or_else(|| {
+                let active_memory_id = self.active_memory_id().ok_or_else(|| {
                     "Select a memory in the list before running search.".to_string()
                 })?;
                 let record = self
@@ -3646,7 +3685,7 @@ impl KinicProvider {
 
         let effects = match output.result {
             Ok(results) => {
-                let failed_count = results.failed_memory_ids.len();
+                let failed_count = results.failed_memory_ids.len() + results.join_error_count;
                 let mut items = results.items;
                 items.sort_by(|left, right| {
                     right
@@ -3731,7 +3770,7 @@ impl KinicProvider {
         self.initial_memories_in_flight = false;
         match output.result {
             Ok(memories) => {
-                let previous_cursor_memory_id = self.cursor_memory_id.clone();
+                let previous_active_memory = self.active_memory.clone();
                 self.memory_summaries = memories;
                 self.refresh_memory_records_from_summaries();
                 let initial_memory_id = self
@@ -3747,23 +3786,29 @@ impl KinicProvider {
                             .preferred_initial_memory_id()
                     })
                     .or_else(|| self.memory_records.first().map(|record| record.id.clone()));
-                if self.cursor_memory_id.is_none()
-                    || self.cursor_memory_id.as_ref().is_some_and(|memory_id| {
+                if self.active_memory_id().is_none()
+                    || self.active_memory_id().is_some_and(|memory_id| {
                         !self
                             .memory_records
                             .iter()
-                            .any(|record| &record.id == memory_id)
+                            .any(|record| record.id == memory_id)
                     })
                 {
-                    self.cursor_memory_id = initial_memory_id.clone();
+                    if let Some(memory_id) = initial_memory_id {
+                        self.set_active_memory_by_id(memory_id);
+                    } else {
+                        self.clear_active_memory();
+                    }
+                } else if let Some(memory_id) = self.active_memory_id().map(str::to_string) {
+                    self.set_active_memory_by_id(memory_id);
                 }
                 self.last_search_state = None;
                 self.start_memory_detail_prefetch_for_records();
-                self.start_cursor_memory_detail_load();
+                self.start_active_memory_detail_load();
                 self.start_selected_memory_summary_load(false);
-                self.start_insert_dim_load(state);
+                self.start_insert_dim_load();
                 let mut effects = Vec::new();
-                if self.cursor_memory_id != previous_cursor_memory_id {
+                if self.active_memory != previous_active_memory {
                     self.invalidate_pending_search();
                     effects.extend(self.load_active_chat_history_effects(state));
                 }
@@ -3773,15 +3818,16 @@ impl KinicProvider {
                 })
             }
             Err(error) => {
-                let previous_cursor_memory_id = self.cursor_memory_id.clone();
+                let previous_active_memory = self.active_memory.clone();
                 self.memory_records.clear();
                 self.result_records.clear();
                 self.memories_mode = MemoriesMode::Browser;
+                let notify_message = format_live_load_failure_message(&error);
                 self.all = vec![load_error_record(error)];
-                self.cursor_memory_id = None;
+                self.clear_active_memory();
                 self.last_search_state = None;
-                let mut effects = vec![CoreEffect::Notify("Unable to load memories.".to_string())];
-                if self.cursor_memory_id != previous_cursor_memory_id {
+                let mut effects = vec![CoreEffect::Notify(notify_message)];
+                if self.active_memory != previous_active_memory {
                     self.invalidate_pending_search();
                     effects.extend(self.load_active_chat_history_effects(state));
                 }
@@ -3868,7 +3914,7 @@ impl KinicProvider {
         let mut effects = vec![CoreEffect::SetChatLoading(false)];
         match output.result {
             Ok(success) => {
-                let failed_count = success.failed_memory_ids.len();
+                let failed_count = success.failed_memory_ids.len() + success.join_error_count;
                 let response = success.response;
                 if let Err(error) = self.append_chat_history_message(
                     output.history_thread_key.as_str(),
@@ -3993,11 +4039,10 @@ impl KinicProvider {
             return Some(self.stale_request_output(state));
         }
 
-        let previous_cursor_memory_id = self.cursor_memory_id.clone();
+        let previous_active_memory = self.active_memory.clone();
         let mut effects = Vec::new();
         match output.result {
             Ok(success) => {
-                self.cursor_memory_id = Some(success.id.clone());
                 if let Some(memories) = success.memories {
                     self.memory_summaries = memories;
                     self.loaded_memory_details.clear();
@@ -4018,12 +4063,13 @@ impl KinicProvider {
                         }
                     }
                 }
+                self.set_active_memory_by_id(success.id.clone());
                 self.memories_mode = MemoriesMode::Browser;
                 self.result_records.clear();
                 self.invalidate_pending_search();
                 self.last_search_state = None;
                 self.start_memory_detail_prefetch_for_records();
-                self.start_cursor_memory_detail_load();
+                self.start_active_memory_detail_load();
                 self.start_selected_memory_summary_load(false);
                 let _ = self.start_create_cost_refresh();
                 effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
@@ -4045,7 +4091,7 @@ impl KinicProvider {
                 )));
             }
         }
-        if self.cursor_memory_id != previous_cursor_memory_id {
+        if self.active_memory != previous_active_memory {
             effects.push(CoreEffect::SetMemoryContentActionIndex(0));
             effects.extend(self.load_active_chat_history_effects(state));
         }
@@ -4180,7 +4226,7 @@ impl KinicProvider {
         let effects = match output.result {
             Ok(success) => {
                 self.invalidate_memory_summary(success.memory_id.as_str());
-                if self.cursor_memory_id.as_deref() == Some(success.memory_id.as_str()) {
+                if self.active_memory_id() == Some(success.memory_id.as_str()) {
                     self.start_selected_memory_summary_load(true);
                 }
                 vec![
@@ -4307,7 +4353,7 @@ impl DataProvider for KinicProvider {
         action: &CoreAction,
         state: &CoreState,
     ) -> CoreResult<ProviderOutput> {
-        let previous_cursor_memory_id = self.cursor_memory_id.clone();
+        let previous_active_memory = self.active_memory.clone();
         let mut effects = Vec::new();
         let mut close_picker_after_submit = false;
         match action {
@@ -4339,7 +4385,7 @@ impl DataProvider for KinicProvider {
                 self.invalidate_pending_search();
             }
             CoreAction::ChatScopePrev | CoreAction::ChatScopeNext | CoreAction::ChatScopeAll => {
-                self.sync_cursor_to_chat_scope_for_browser(state);
+                self.sync_active_memory_to_chat_scope_for_browser(state);
                 effects.extend(self.load_active_chat_history_effects(state));
             }
             CoreAction::ChatNewThread => {
@@ -4372,22 +4418,22 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::MoveNext if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MovePrev if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MoveHome if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MoveEnd if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MovePageDown if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::MovePageUp if self.should_handle_memory_navigation(state) => {
-                self.navigate_memory_cursor(state, action)
+                self.navigate_active_memory(state, action)
             }
             CoreAction::OpenSelected => {
                 if self.is_add_memory_action_selected(state) {
@@ -4398,7 +4444,7 @@ impl DataProvider for KinicProvider {
             CoreAction::SetTab(id) => {
                 effects.extend(self.set_tab(id.0.as_str()));
                 if id.0.as_str() == KINIC_INSERT_TAB_ID {
-                    self.start_insert_dim_load(state);
+                    self.start_insert_dim_load();
                 }
             }
             CoreAction::ChatSubmit => {
@@ -4481,7 +4527,7 @@ impl DataProvider for KinicProvider {
                 let request = self.build_insert_request(state);
                 if let Err(error) = self.validate_insert_state(state) {
                     effects.push(CoreEffect::InsertFormError(Some(error)));
-                } else if let Err(error) = self.validate_insert_expected_dim(&request, state) {
+                } else if let Err(error) = self.validate_insert_expected_dim(&request) {
                     effects.push(CoreEffect::InsertFormError(Some(error)));
                 } else if self.insert_submit_task.in_flight {
                     effects.push(CoreEffect::Notify(
@@ -4577,7 +4623,7 @@ impl DataProvider for KinicProvider {
                 });
             }
             CoreAction::MemoryContentOpenSelected => {
-                let Some(memory_id) = self.cursor_memory_id.clone() else {
+                let Some(memory_id) = self.active_memory_id().map(str::to_string) else {
                     effects.push(CoreEffect::Notify(
                         "Select a memory before running this action.".to_string(),
                     ));
@@ -4726,7 +4772,7 @@ impl DataProvider for KinicProvider {
                     });
                 }
 
-                let Some(memory_id) = self.cursor_memory_id.clone() else {
+                let Some(memory_id) = self.active_memory_id().map(str::to_string) else {
                     effects.push(CoreEffect::RemoveMemoryFormError(Some(
                         "Select a memory before removing it.".to_string(),
                     )));
@@ -4749,10 +4795,14 @@ impl DataProvider for KinicProvider {
                 match self.remove_manual_memory_from_preferences(memory_id.as_str()) {
                     Ok(()) => {
                         self.remove_manual_memory_locally(memory_id.as_str());
-                        self.cursor_memory_id = next_memory_id;
+                        if let Some(memory_id) = next_memory_id {
+                            self.set_active_memory_by_id(memory_id);
+                        } else {
+                            self.clear_active_memory();
+                        }
                         let _ = self.sync_memory_browser_selection();
                         self.invalidate_pending_search();
-                        self.start_cursor_memory_detail_load();
+                        self.start_active_memory_detail_load();
                         effects.push(CoreEffect::CloseRemoveMemory);
                         effects.push(CoreEffect::SetMemoryContentActionIndex(0));
                         effects.push(CoreEffect::Notify(format!(
@@ -4912,7 +4962,7 @@ impl DataProvider for KinicProvider {
                 }
             },
             CoreAction::SetDefaultMemoryFromSelection => {
-                let Some(memory_id) = self.selected_memory_id_for_default(state) else {
+                let Some(memory_id) = self.active_memory_id_for_default_selection(state) else {
                     effects.push(CoreEffect::Notify(
                         "Select a memory before setting the default.".to_string(),
                     ));
@@ -4964,17 +5014,17 @@ impl DataProvider for KinicProvider {
             }
             _ => self.build_snapshot(state),
         };
-        let chat_scope_follows_cursor = state.chat_scope == ChatScope::Selected
+        let chat_scope_follows_active_memory = state.chat_scope == ChatScope::Selected
             && !matches!(
                 action,
                 CoreAction::ChatScopePrev | CoreAction::ChatScopeNext | CoreAction::ChatScopeAll
             );
-        if self.cursor_memory_id != previous_cursor_memory_id {
+        if self.active_memory != previous_active_memory {
             self.invalidate_pending_search();
-            self.start_cursor_memory_detail_load();
+            self.start_active_memory_detail_load();
             self.start_selected_memory_summary_load(false);
             effects.push(CoreEffect::SetMemoryContentActionIndex(0));
-            if chat_scope_follows_cursor {
+            if chat_scope_follows_active_memory {
                 effects.extend(self.load_active_chat_history_effects(state));
             }
         }
@@ -5006,48 +5056,19 @@ impl DataProvider for KinicProvider {
     }
 }
 
-fn parse_kinic_amount_to_e8s(value: &str) -> Result<u128, String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err("Amount is required.".to_string());
+fn format_transfer_amount_parse_error(error: KinicAmountParseError) -> String {
+    match error {
+        KinicAmountParseError::Empty => "Amount is required.".to_string(),
+        KinicAmountParseError::Negative => "Amount must be a positive decimal number.".to_string(),
+        KinicAmountParseError::TooManyParts => {
+            "Amount must be a decimal number with up to 8 fraction digits.".to_string()
+        }
+        KinicAmountParseError::NonDigit => "Amount must contain digits only.".to_string(),
+        KinicAmountParseError::TooManyFractionDigits => {
+            "Amount supports up to 8 decimal places.".to_string()
+        }
+        KinicAmountParseError::Overflow => "Amount exceeds supported range.".to_string(),
     }
-    let parts: Vec<&str> = trimmed.split('.').collect();
-    if parts.len() > 2 {
-        return Err("Amount must be a decimal number with up to 8 fraction digits.".to_string());
-    }
-    let whole = parts[0];
-    let fraction = if parts.len() == 2 { parts[1] } else { "" };
-    if whole.is_empty() && fraction.is_empty() {
-        return Err("Amount is required.".to_string());
-    }
-    if !whole.chars().all(|char| char.is_ascii_digit())
-        || !fraction.chars().all(|char| char.is_ascii_digit())
-    {
-        return Err("Amount must contain digits only.".to_string());
-    }
-    if fraction.len() > 8 {
-        return Err("Amount supports up to 8 decimal places.".to_string());
-    }
-
-    let whole_value = if whole.is_empty() {
-        0u128
-    } else {
-        whole
-            .parse::<u128>()
-            .map_err(|_| "Amount exceeds supported range.".to_string())?
-    };
-    let fractional_text = format!("{fraction:0<8}");
-    let fractional_value = if fractional_text.is_empty() {
-        0u128
-    } else {
-        fractional_text
-            .parse::<u128>()
-            .map_err(|_| "Amount exceeds supported range.".to_string())?
-    };
-    whole_value
-        .checked_mul(100_000_000u128)
-        .and_then(|value| value.checked_add(fractional_value))
-        .ok_or_else(|| "Amount exceeds supported range.".to_string())
 }
 
 fn format_transfer_error(error: &bridge::TransferKinicError) -> String {
@@ -5164,28 +5185,53 @@ fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
 
+fn format_live_load_failure_message(error: &str) -> String {
+    format!("Unable to load memories. Cause: {}", short_error(error))
+}
+
 fn load_error_record(error: String) -> KinicRecord {
+    let subtitle = keychain_context_note(error.as_str())
+        .unwrap_or("Check your identity or network configuration.");
     KinicRecord::new(
         "kinic-live-error",
         "Unable to load memories",
         "memories",
-        "Check your identity or network configuration.",
+        subtitle,
         format!("## Live Load Error\n\n{error}"),
     )
 }
 
+fn keychain_context_note(error: &str) -> Option<&'static str> {
+    match extract_keychain_error_code(error) {
+        Some(KeychainErrorCode::LookupFailed) => {
+            Some("Check the macOS Keychain entry and whether approval was delayed or interrupted.")
+        }
+        Some(KeychainErrorCode::AccessDenied | KeychainErrorCode::InteractionNotAllowed) => {
+            Some("Check the macOS Keychain prompt and the selected identity entry.")
+        }
+        Some(KeychainErrorCode::KeychainError) => {
+            Some("Check the macOS Keychain entry and local security settings.")
+        }
+        None => None,
+    }
+}
+
 fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
     let detail = parse_memory_detail(memory.detail.as_str());
-    let metadata_name = parse_detail_object(memory.name.as_str()).unwrap_or((None, None));
+    let metadata_name = parse_memory_metadata(memory.name.as_str());
     let resolved_name = detail
         .name
         .as_deref()
-        .or(metadata_name.0.as_deref())
+        .or(metadata_name
+            .as_ref()
+            .and_then(|value| value.name.as_deref()))
         .map(str::to_string);
     let resolved_description = detail
         .description
         .as_deref()
-        .or(metadata_name.1.as_deref())
+        .or(metadata_name
+            .as_ref()
+            .and_then(|value| value.description.as_deref()))
         .map(str::to_string);
     let users_section = render_memory_users_markdown(&memory.users);
     let dim = memory
@@ -5239,7 +5285,7 @@ fn display_memory_name(name: &str, detail_name: Option<&str>) -> String {
 
 fn resolved_memory_name(name: &str, detail: &str) -> String {
     let detail_name = parse_memory_detail(detail).name;
-    let metadata_name = parse_detail_object(name).and_then(|(resolved_name, _)| resolved_name);
+    let metadata_name = parse_memory_metadata(name).and_then(|metadata| metadata.name);
     display_memory_name(name, detail_name.as_deref().or(metadata_name.as_deref()))
 }
 
@@ -5296,8 +5342,11 @@ fn parse_memory_detail(detail: &str) -> ParsedMemoryDetail {
         };
     }
 
-    if let Some((name, description)) = parse_detail_object(trimmed) {
-        return ParsedMemoryDetail { name, description };
+    if let Some(metadata) = parse_memory_metadata(trimmed) {
+        return ParsedMemoryDetail {
+            name: metadata.name,
+            description: metadata.description,
+        };
     }
 
     ParsedMemoryDetail {
@@ -5311,71 +5360,6 @@ fn is_memory_boilerplate_detail(detail: &str) -> bool {
         detail,
         "Memory is ready for search and writes." | "Launcher is setting up this memory."
     )
-}
-
-fn parse_detail_object(detail: &str) -> Option<(Option<String>, Option<String>)> {
-    parse_detail_json_object(detail)
-        .or_else(|| parse_detail_jsonish_object(detail))
-        .and_then(|value| {
-            let name = value
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            let description = value
-                .get("description")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            (name.is_some() || description.is_some()).then_some((name, description))
-        })
-}
-
-fn parse_detail_json_object(detail: &str) -> Option<serde_json::Value> {
-    let value = serde_json::from_str::<serde_json::Value>(detail).ok()?;
-    value.is_object().then_some(value)
-}
-
-fn parse_detail_jsonish_object(detail: &str) -> Option<serde_json::Value> {
-    let name = extract_jsonish_field(detail, "name");
-    let description = extract_jsonish_field(detail, "description");
-
-    if name.is_none() && description.is_none() {
-        return None;
-    }
-
-    let mut object = serde_json::Map::new();
-    if let Some(name) = name {
-        object.insert("name".to_string(), serde_json::Value::String(name));
-    }
-    if let Some(description) = description {
-        object.insert(
-            "description".to_string(),
-            serde_json::Value::String(description),
-        );
-    }
-    Some(serde_json::Value::Object(object))
-}
-
-fn extract_jsonish_field(detail: &str, key: &str) -> Option<String> {
-    let patterns = [format!("\"{key}\":\""), format!("{key}\":\"")];
-    for pattern in patterns {
-        let Some(found_at) = detail.find(&pattern) else {
-            continue;
-        };
-        let start = found_at + pattern.len();
-        let tail = &detail[start..];
-        let Some(end) = tail.find('"') else {
-            continue;
-        };
-        let value = tail[..end].trim();
-        if !value.is_empty() {
-            return Some(value.to_string());
-        }
-    }
-    None
 }
 
 fn render_memory_users_markdown(users: &Option<Vec<bridge::MemoryUser>>) -> String {

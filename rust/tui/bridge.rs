@@ -10,16 +10,22 @@ use crate::{
     embedding::embedding_base_url,
     insert_service::{InsertRequest, execute_insert_request},
     ledger::{fetch_balance, fetch_fee, transfer},
+    shared::{
+        access::{
+            MemoryRole, format_role, validate_access_control_target, validate_role_assignment,
+            visible_memory_users,
+        },
+        cross_memory_search::SearchHit,
+        memory_metadata::encode_renamed_memory_metadata,
+    },
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
 };
 
 use anyhow::{Context, Result};
 use ic_agent::{Agent, export::Principal};
-use tui_kit_runtime::{
-    AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview,
-    format_e8s_to_kinic_string_nat,
-};
+use kinic_core::amount::format_e8s_to_kinic_string_nat;
+use tui_kit_runtime::{AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySummary {
@@ -36,17 +42,13 @@ pub struct MemorySummary {
     pub users: Option<Vec<MemoryUser>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SearchResultItem {
-    pub memory_id: String,
-    pub score: f32,
-    pub payload: String,
-}
+pub type SearchResultItem = SearchHit;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AskMemoriesOutput {
     pub response: String,
     pub failed_memory_ids: Vec<String>,
+    pub join_error_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,7 +75,8 @@ pub struct MemoryUser {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryDetails {
-    pub name: String,
+    pub display_name: String,
+    pub metadata_name: String,
     pub version: String,
     pub dim: Option<u64>,
     pub owners: Vec<String>,
@@ -101,6 +104,11 @@ pub struct InsertMemorySuccess {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferKinicSuccess {
     pub block_index: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameMemorySuccess {
+    pub stored_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -399,12 +407,21 @@ pub async fn load_memory_details(
     let agent = factory.build().await?;
     let launcher_id = LauncherClient::new(agent.clone()).launcher_id().to_text();
     let client = MemoryClient::new(agent, memory);
-    let metadata = client.get_metadata().await?;
-    let (dim, users) = tokio::join!(client.get_dim(), client.get_users());
+    // TUI title uses the human-facing canister name contract from `get_name()`.
+    // `metadata.name` may contain the raw metadata envelope and should not drive labels.
+    let (display_name, metadata, dim, users) = tokio::join!(
+        client.get_name(),
+        client.get_metadata(),
+        client.get_dim(),
+        client.get_users()
+    );
+    let display_name = display_name?;
+    let metadata = metadata?;
     let (users, users_load_error) = memory_users_from_query(users, &launcher_id);
 
     Ok(MemoryDetails {
-        name: metadata.name,
+        display_name,
+        metadata_name: metadata.name,
         version: metadata.version,
         dim: dim.ok(),
         owners: metadata.owners,
@@ -459,7 +476,7 @@ pub async fn rename_memory(
     auth: TuiAuth,
     memory_id: String,
     name: String,
-) -> Result<(), RenameMemoryError> {
+) -> Result<RenameMemorySuccess, RenameMemoryError> {
     let factory = resolve_agent_factory(use_mainnet, &auth)
         .map_err(|error| RenameMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
     let agent = factory
@@ -469,36 +486,33 @@ pub async fn rename_memory(
     let memory = Principal::from_text(&memory_id)
         .map_err(|error| RenameMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let client = MemoryClient::new(agent, memory);
+    let metadata = client
+        .get_metadata()
+        .await
+        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
+    let payload = encode_renamed_memory_metadata(&metadata.name, &name)
+        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
 
     client
-        .change_name(&name)
+        .change_name(&payload)
         .await
-        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))
+        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
+
+    Ok(RenameMemorySuccess {
+        stored_name: payload,
+    })
 }
 
 pub async fn validate_manual_memory_access(
     use_mainnet: bool,
     auth: TuiAuth,
     memory_id: String,
-    principal_id: String,
-) -> Result<()> {
+) -> Result<String> {
     let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
-    let self_principal =
-        Principal::from_text(&principal_id).context("Failed to parse current principal")?;
     let factory = resolve_agent_factory(use_mainnet, &auth)?;
     let agent = factory.build().await?;
     let client = MemoryClient::new(agent, memory);
-    let users = client.get_users().await?;
-
-    if users.iter().any(|(user_principal_id, _)| {
-        Principal::from_text(user_principal_id)
-            .map(|principal| principal == self_principal)
-            .unwrap_or(false)
-    }) {
-        Ok(())
-    } else {
-        anyhow::bail!("Current principal does not have access to this memory")
-    }
+    client.get_name().await
 }
 
 pub async fn run_insert(
@@ -612,15 +626,6 @@ fn memory_summary_from_state(state: State) -> MemorySummary {
     }
 }
 
-fn role_name(role_code: u8) -> String {
-    match role_code {
-        1 => "admin".to_string(),
-        2 => "writer".to_string(),
-        3 => "reader".to_string(),
-        other => format!("unknown({other})"),
-    }
-}
-
 fn memory_users_from_query(
     users: Result<Vec<(String, u8)>, anyhow::Error>,
     launcher_id: &str,
@@ -632,12 +637,11 @@ fn memory_users_from_query(
 }
 
 fn decode_memory_users(users: Vec<(String, u8)>, launcher_id: &str) -> Vec<MemoryUser> {
-    users
+    visible_memory_users(users, launcher_id)
         .into_iter()
-        .filter(|(principal_id, _)| principal_id != launcher_id)
-        .map(|(principal_id, role_code)| MemoryUser {
-            principal_id,
-            role: role_name(role_code),
+        .map(|user| MemoryUser {
+            principal_id: user.principal_id,
+            role: format_role(user.role_code),
         })
         .collect()
 }
@@ -648,10 +652,15 @@ fn build_access_control_request(
     role: AccessControlRole,
     launcher_id: &str,
 ) -> Result<AccessControlRequest> {
-    let principal = parse_access_control_principal(principal_id)?;
-    if principal.to_text() == launcher_id {
-        anyhow::bail!("launcher canister access cannot be modified");
-    }
+    let requested_role = match action {
+        AccessControlAction::Remove => None,
+        AccessControlAction::Add | AccessControlAction::Change => Some(match role {
+            AccessControlRole::Admin => MemoryRole::Admin,
+            AccessControlRole::Writer => MemoryRole::Writer,
+            AccessControlRole::Reader => MemoryRole::Reader,
+        }),
+    };
+    let principal = validate_access_control_target(principal_id, launcher_id, requested_role)?;
     let role_code = match action {
         AccessControlAction::Remove => None,
         AccessControlAction::Add | AccessControlAction::Change => {
@@ -666,23 +675,14 @@ fn build_access_control_request(
     })
 }
 
-fn parse_access_control_principal(principal_id: &str) -> Result<Principal> {
-    if principal_id == "anonymous" {
-        return Ok(Principal::anonymous());
-    }
-    Principal::from_text(principal_id)
-        .with_context(|| format!("invalid principal text: {principal_id}"))
-}
-
 fn role_code(role: AccessControlRole, principal_id: &str) -> Result<u8> {
-    if role == AccessControlRole::Admin && principal_id == "anonymous" {
-        anyhow::bail!("cannot grant admin role to anonymous");
-    }
-    Ok(match role {
-        AccessControlRole::Admin => 1,
-        AccessControlRole::Writer => 2,
-        AccessControlRole::Reader => 3,
-    })
+    let memory_role = match role {
+        AccessControlRole::Admin => MemoryRole::Admin,
+        AccessControlRole::Writer => MemoryRole::Writer,
+        AccessControlRole::Reader => MemoryRole::Reader,
+    };
+    validate_role_assignment(principal_id, memory_role)?;
+    Ok(memory_role.code())
 }
 
 fn short_error(message: &str) -> String {
@@ -833,6 +833,36 @@ mod tests {
 
         assert!(users.is_empty());
         assert_eq!(load_err.as_deref(), Some("canister rejected get_users"));
+    }
+
+    #[test]
+    fn build_access_control_request_rejects_launcher_principal() {
+        let error = build_access_control_request(
+            AccessControlAction::Change,
+            "aaaaa-aa",
+            AccessControlRole::Reader,
+            "aaaaa-aa",
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "launcher canister access cannot be modified"
+        );
+    }
+
+    #[test]
+    fn build_access_control_request_allows_non_launcher_self_target() {
+        let request = build_access_control_request(
+            AccessControlAction::Remove,
+            "aaaaa-aa",
+            AccessControlRole::Reader,
+            "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        )
+        .expect("non-launcher principal should remain mutable");
+
+        assert_eq!(request.principal.to_text(), "aaaaa-aa");
+        assert_eq!(request.role_code, None);
     }
 
     #[test]

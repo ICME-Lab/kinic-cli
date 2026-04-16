@@ -3,7 +3,7 @@
 Run with:
     uv run python python/examples/insert_pdf_file.py \
         --identity alice \
-        --memory-id yta6k-5x777-77774-aaaaa-cai \
+        --memory-id MEMORY_CANISTER_ID \
         --file ./docs/report.pdf \
         --tag quarterly_report
 """

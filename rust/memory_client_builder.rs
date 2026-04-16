@@ -1,8 +1,9 @@
 // Where: shared by CLI commands and Python bindings.
 // What: centralizes MemoryClient construction from a memory canister id string.
 // Why: keeps initialization policy in one place without coupling MemoryClient itself to CLI/Python setup.
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ic_agent::{Agent, export::Principal};
+use kinic_core::principal::parse_required_principal;
 
 #[cfg(feature = "python-bindings")]
 use crate::build_keyring_agent_factory;
@@ -32,7 +33,8 @@ fn build_memory_client_with_agent(agent: Agent, memory_id: &str) -> Result<Memor
 }
 
 fn parse_memory_canister_id(memory_id: &str) -> Result<Principal> {
-    Principal::from_text(memory_id).context("Failed to parse memory canister id")
+    parse_required_principal(memory_id)
+        .map_err(|_| anyhow::anyhow!("Failed to parse memory canister id"))
 }
 
 #[cfg(test)]

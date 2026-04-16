@@ -80,6 +80,17 @@ impl MemoryClient {
         decode_get_dim_response(&response)
     }
 
+    pub async fn get_name(&self) -> Result<String> {
+        let response = self
+            .agent
+            .query(&self.canister_id, "get_name")
+            .call()
+            .await
+            .context("Failed to call get_name on memory canister")?;
+
+        decode_get_name_response(&response)
+    }
+
     pub async fn get_metadata(&self) -> Result<DbMetadata> {
         let response = self
             .agent
@@ -183,6 +194,10 @@ fn decode_get_dim_response(response: &[u8]) -> Result<u64> {
     Decode!(response, u64).context("Failed to decode get_dim response")
 }
 
+fn decode_get_name_response(response: &[u8]) -> Result<String> {
+    Decode!(response, String).context("Failed to decode get_name response")
+}
+
 fn decode_get_metadata_response(response: &[u8]) -> Result<DbMetadata> {
     Decode!(response, DbMetadata).context("Failed to decode get_metadata response")
 }
@@ -195,7 +210,8 @@ fn decode_get_users_response(response: &[u8]) -> Result<Vec<(String, u8)>> {
 mod tests {
     use super::{
         DbMetadata, decode_get_dim_response, decode_get_metadata_response,
-        decode_get_users_response, encode_change_name_args, encode_remove_user_args,
+        decode_get_name_response, decode_get_users_response, encode_change_name_args,
+        encode_remove_user_args,
     };
     use candid::Decode;
     use ic_agent::export::Principal;
@@ -231,6 +247,16 @@ mod tests {
         assert_eq!(metadata.version, "1.2.3");
         assert_eq!(metadata.owners.len(), 2);
         assert_eq!(metadata.cycle_amount, 99);
+    }
+
+    #[test]
+    fn decode_get_name_response_parses_text_payload() {
+        let payload =
+            candid::encode_one("Alpha Memory".to_string()).expect("name payload should encode");
+
+        let name = decode_get_name_response(&payload).expect("name payload should decode");
+
+        assert_eq!(name, "Alpha Memory");
     }
 
     #[test]

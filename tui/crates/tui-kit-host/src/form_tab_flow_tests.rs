@@ -226,7 +226,6 @@ fn reset_insert_form_state_clears_insert_fields() {
     let mut state = CoreState {
         saved_default_memory_id: Some("bbbbb-bb".to_string()),
         insert_mode: InsertMode::File,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_tag: "docs".to_string(),
         insert_file_path_input: "/tmp/doc.pdf".to_string(),
         insert_selected_file_path: Some(std::path::PathBuf::from("/tmp/doc.pdf")),
@@ -239,7 +238,6 @@ fn reset_insert_form_state_clears_insert_fields() {
     reset_form_state_for_tab(&mut state, KINIC_INSERT_TAB_ID);
 
     assert_eq!(state.insert_mode, InsertMode::File);
-    assert_eq!(state.insert_memory_id, "bbbbb-bb");
     assert_eq!(state.insert_tag, "");
     assert_eq!(state.insert_file_path_input, "");
     assert_eq!(state.insert_selected_file_path, None);

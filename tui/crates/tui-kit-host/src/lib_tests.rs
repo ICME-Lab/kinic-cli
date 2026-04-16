@@ -148,24 +148,6 @@ mod effect_application {
     }
 
     #[test]
-    fn set_insert_memory_id_effect_updates_insert_target() {
-        let mut state = CoreState {
-            insert_memory_id: "aaaaa-aa".to_string(),
-            insert_error: Some("boom".to_string()),
-            ..CoreState::default()
-        };
-
-        execute_effects_to_status(
-            &mut state,
-            vec![CoreEffect::SetInsertMemoryId("bbbbb-bb".to_string())],
-        );
-
-        assert_eq!(state.insert_memory_id, "bbbbb-bb");
-        assert_eq!(state.insert_memory_placeholder, None);
-        assert_eq!(state.insert_error, None);
-    }
-
-    #[test]
     fn set_insert_tag_effect_updates_insert_tag() {
         let mut state = CoreState {
             insert_tag: "docs".to_string(),

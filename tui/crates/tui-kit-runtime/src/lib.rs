@@ -5,6 +5,7 @@
 
 pub mod chat_commands;
 mod form_descriptor;
+mod input_rules;
 pub mod kinic_tabs;
 
 use candid::Nat;
@@ -13,6 +14,11 @@ pub use form_descriptor::{
     core_action_to_form_command, current_form_focus, current_form_focus_for_tab,
     form_char_input_command, form_command_to_action, form_descriptor, form_enter_command,
     form_horizontal_change_command, form_shows_horizontal_change_hint,
+};
+pub use kinic_core::amount::{
+    KinicAmountParseError, editing_kinic_amount_accepts_char, format_e8s_to_kinic_string_nat,
+    format_e8s_to_kinic_string_u128, parse_editing_kinic_display_to_e8s,
+    parse_required_kinic_amount_to_e8s,
 };
 use std::path::PathBuf;
 use tui_kit_model::{UiContextNode, UiItemContent, UiItemKind, UiItemSummary};
@@ -26,25 +32,6 @@ pub const SETTINGS_ENTRY_CHAT_DIVERSITY_ID: &str = "chat_diversity";
 pub const FILE_MODE_ALLOWED_EXTENSIONS: &[&str] = &[
     "md", "markdown", "mdx", "txt", "json", "yaml", "yml", "csv", "log", "pdf",
 ];
-
-/// Transfer amount accepts ASCII digits and a single decimal separator.
-/// Fractional precision is capped at 8 places to match ledger parsing.
-pub fn transfer_amount_accepts_char(current: &str, next: char) -> bool {
-    if next.is_ascii_digit() {
-        let fraction_len = current
-            .split_once('.')
-            .map_or(0, |(_, fraction)| fraction.chars().count());
-        return !current.contains('.') || fraction_len < 8;
-    }
-
-    next == '.' && !current.contains('.')
-}
-
-/// Principal-like identifiers in the TUI use lowercase text, digits, and hyphens.
-/// Final validity still belongs to `Principal::from_text(...)` at submit time.
-pub fn principal_text_accepts_char(next: char) -> bool {
-    next.is_ascii_lowercase() || next.is_ascii_digit() || next == '-'
-}
 
 /// Core result type used by provider and reducer contracts.
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -606,27 +593,6 @@ impl SessionAccountOverview {
     }
 }
 
-pub fn format_e8s_to_kinic_string_u128(value: u128) -> String {
-    format_e8s_to_kinic_string_str(value.to_string().as_str())
-}
-
-pub fn format_e8s_to_kinic_string_nat(value: &Nat) -> String {
-    format_e8s_to_kinic_string_str(value.to_string().as_str())
-}
-
-fn format_e8s_to_kinic_string_str(value: &str) -> String {
-    const SCALE: usize = 8;
-
-    let digits = value.replace('_', "");
-    if digits.len() <= SCALE {
-        return format!("0.{:0>width$}", digits, width = SCALE);
-    }
-
-    let split_at = digits.len() - SCALE;
-    let (whole, fraction) = digits.split_at(split_at);
-    format!("{whole}.{fraction}")
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SettingsEntry {
     pub id: String,
@@ -648,6 +614,12 @@ pub struct SettingsSnapshot {
     pub sections: Vec<SettingsSection>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemorySelection {
+    pub id: String,
+    pub label: String,
+}
+
 /// Domain-agnostic runtime state owned by the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoreState {
@@ -660,7 +632,6 @@ pub struct CoreState {
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
-    pub selected_memory_label: Option<String>,
     pub persistent_status_message: Option<String>,
     pub chat_open: bool,
     pub chat_messages: Vec<(String, String)>,
@@ -681,7 +652,6 @@ pub struct CoreState {
     pub saved_default_memory_id: Option<String>,
     pub search_scope: SearchScope,
     pub insert_mode: InsertMode,
-    pub insert_memory_id: String,
     pub insert_memory_placeholder: Option<String>,
     pub insert_expected_dim: Option<u64>,
     pub insert_expected_dim_loading: bool,
@@ -717,7 +687,6 @@ impl Default for CoreState {
             selected_context: None,
             total_count: 0,
             status_message: None,
-            selected_memory_label: None,
             persistent_status_message: None,
             chat_open: false,
             chat_messages: Vec::new(),
@@ -738,7 +707,6 @@ impl Default for CoreState {
             saved_default_memory_id: None,
             search_scope: SearchScope::default(),
             insert_mode: InsertMode::default(),
-            insert_memory_id: String::new(),
             insert_memory_placeholder: None,
             insert_expected_dim: None,
             insert_expected_dim_loading: false,
@@ -946,8 +914,6 @@ pub enum CoreEffect {
     },
     /// Clear insert content fields while keeping target selection for repeated inserts.
     ResetInsertFormForRepeat,
-    /// Apply a selector-picked insert target without routing it through text input.
-    SetInsertMemoryId(String),
     /// Apply a selector-picked insert tag without routing it through text input.
     SetInsertTag(String),
     SetAccessListIndex(usize),
@@ -1005,7 +971,7 @@ pub struct ProviderSnapshot {
     pub selected_context: Option<UiContextNode>,
     pub total_count: usize,
     pub status_message: Option<String>,
-    pub selected_memory_label: Option<String>,
+    pub selected_memory: Option<MemorySelection>,
     pub chat_scope_label: Option<String>,
     pub create_cost_state: CreateCostState,
     pub create_submit_state: CreateSubmitState,
@@ -1019,36 +985,17 @@ pub struct ProviderSnapshot {
     pub insert_validation_message: Option<String>,
 }
 
+/// Provider-owned values kept outside core reducer state for rendering.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProviderRenderState {
+    pub selected_memory: Option<MemorySelection>,
+}
+
 /// Provider response to one action.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProviderOutput {
     pub snapshot: Option<ProviderSnapshot>,
     pub effects: Vec<CoreEffect>,
-}
-
-#[cfg(test)]
-mod formatter_tests {
-    use super::{format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128};
-    use candid::Nat;
-
-    #[test]
-    fn format_e8s_to_kinic_string_u128_keeps_eight_fraction_digits() {
-        assert_eq!(
-            format_e8s_to_kinic_string_u128(123_456_789u128),
-            "1.23456789"
-        );
-        assert_eq!(format_e8s_to_kinic_string_u128(42u128), "0.00000042");
-    }
-
-    #[test]
-    fn format_e8s_to_kinic_string_nat_supports_values_larger_than_u128() {
-        let large = Nat::parse(b"340282366920938463463374607431768211456").expect("valid Nat");
-
-        assert_eq!(
-            format_e8s_to_kinic_string_nat(&large),
-            "3402823669209384634633746074317.68211456"
-        );
-    }
 }
 
 /// Input key abstraction for shared key->action mapping.
@@ -1135,7 +1082,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             {
                 return;
             }
-            if principal_text_accepts_char(*c) {
+            if input_rules::principal_text_accepts_char(*c) {
                 state.access_control.principal_id.push(*c);
             } else {
                 return;
@@ -1245,7 +1192,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             close_add_memory_modal(state);
         }
         CoreAction::AddMemoryInput(c) => {
-            if !principal_text_accepts_char(*c) {
+            if !input_rules::principal_text_accepts_char(*c) {
                 return;
             }
             apply_text_input_modal_command(
@@ -1353,14 +1300,14 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
             match state.transfer_modal.focus {
                 TransferModalFocus::Principal => {
-                    if principal_text_accepts_char(*c) {
+                    if input_rules::principal_text_accepts_char(*c) {
                         state.transfer_modal.principal_id.push(*c);
                     } else {
                         return;
                     }
                 }
                 TransferModalFocus::Amount => {
-                    if transfer_amount_accepts_char(&state.transfer_modal.amount, *c) {
+                    if editing_kinic_amount_accepts_char(&state.transfer_modal.amount, *c) {
                         state.transfer_modal.amount.push(*c);
                     } else {
                         return;
@@ -2424,12 +2371,25 @@ pub fn dispatch_action(
     state: &mut CoreState,
     action: &CoreAction,
 ) -> CoreResult<Vec<CoreEffect>> {
+    let (effects, _) = dispatch_action_with_render_state(provider, state, action)?;
+    Ok(effects)
+}
+
+/// Dispatch one action through local reducer + provider + snapshot merge.
+///
+/// Returns provider effects plus provider-owned render state from the applied snapshot.
+pub fn dispatch_action_with_render_state(
+    provider: &mut impl DataProvider,
+    state: &mut CoreState,
+    action: &CoreAction,
+) -> CoreResult<(Vec<CoreEffect>, ProviderRenderState)> {
     apply_core_action(state, action);
     let out = provider.handle_action(action, state)?;
+    let mut render_state = ProviderRenderState::default();
     if let Some(snapshot) = out.snapshot {
-        apply_snapshot(state, snapshot);
+        render_state = apply_snapshot(state, snapshot);
     }
-    Ok(out.effects)
+    Ok((out.effects, render_state))
 }
 
 /// Shared focus-aware keymap from abstract keys to core actions.
@@ -2547,7 +2507,10 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
 }
 
 /// Apply a new snapshot to core runtime state.
-pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
+pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) -> ProviderRenderState {
+    let render_state = ProviderRenderState {
+        selected_memory: snapshot.selected_memory.clone(),
+    };
     state.list_items = snapshot.items;
     let snapshot_selected_index = snapshot.selected_index;
     state.selected_content = snapshot.selected_content;
@@ -2556,23 +2519,21 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     if state.persistent_status_message.is_none() {
         state.status_message = snapshot.status_message;
     }
-    state.selected_memory_label = snapshot.selected_memory_label;
     state.chat_scope_label = snapshot.chat_scope_label;
     state.create_cost_state = snapshot.create_cost_state;
     state.create_submit_state = snapshot.create_submit_state;
     state.settings = snapshot.settings;
-    state.picker = reconcile_picker_state(state, snapshot.picker);
+    state.picker = reconcile_picker_state(
+        state,
+        snapshot.picker,
+        render_state.selected_memory.as_ref(),
+    );
     state.saved_default_memory_id = snapshot.saved_default_memory_id;
     state.insert_memory_placeholder = snapshot.insert_memory_placeholder;
     state.insert_expected_dim = snapshot.insert_expected_dim;
     state.insert_expected_dim_loading = snapshot.insert_expected_dim_loading;
     state.insert_current_dim = snapshot.insert_current_dim;
     state.insert_validation_message = snapshot.insert_validation_message;
-    if state.current_tab_id == kinic_tabs::KINIC_INSERT_TAB_ID && state.insert_memory_id.is_empty()
-    {
-        state.insert_memory_id = state.saved_default_memory_id.clone().unwrap_or_default();
-    }
-
     let selectable_len = selectable_len(state);
     if let Some(selected_index) = snapshot_selected_index {
         state.selected_index = if selectable_len == 0 {
@@ -2580,7 +2541,7 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
         } else {
             Some(selected_index.min(selectable_len.saturating_sub(1)))
         };
-        return;
+        return render_state;
     }
 
     if !is_settings_content(state.current_tab_id.as_str(), state.focus)
@@ -2603,6 +2564,7 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) {
     } else if selectable_len != 0 {
         state.selected_index = Some(0);
     }
+    render_state
 }
 
 fn selectable_len(state: &CoreState) -> usize {
@@ -2699,7 +2661,11 @@ fn settings_content_action_for_key(key: CoreKey) -> Option<CoreAction> {
     }
 }
 
-fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerState {
+fn reconcile_picker_state(
+    state: &CoreState,
+    snapshot: PickerState,
+    selected_memory: Option<&MemorySelection>,
+) -> PickerState {
     match snapshot {
         PickerState::Closed => PickerState::Closed,
         PickerState::Input {
@@ -2761,6 +2727,7 @@ fn reconcile_picker_state(state: &CoreState, snapshot: PickerState) -> PickerSta
                 resolved_selected_id.as_deref(),
                 previous_index,
                 state,
+                selected_memory,
             );
             let resolved_selected_id = items.get(resolved_index).and_then(|item| match item.kind {
                 PickerItemKind::Option => Some(item.id.clone()),
@@ -2793,6 +2760,7 @@ fn picker_selected_index(
     preferred_selected_id: Option<&str>,
     preferred_index: usize,
     state: &CoreState,
+    selected_memory: Option<&MemorySelection>,
 ) -> usize {
     if items.is_empty() {
         return 0;
@@ -2803,14 +2771,9 @@ fn picker_selected_index(
             .map(str::to_string)
             .or_else(|| match context {
                 PickerContext::DefaultMemory => state.saved_default_memory_id.clone(),
-                PickerContext::InsertTarget => {
-                    let insert_memory_id = state.insert_memory_id.trim();
-                    if insert_memory_id.is_empty() {
-                        state.saved_default_memory_id.clone()
-                    } else {
-                        Some(insert_memory_id.to_string())
-                    }
-                }
+                PickerContext::InsertTarget => selected_memory
+                    .map(|selection| selection.id.clone())
+                    .or_else(|| state.saved_default_memory_id.clone()),
                 PickerContext::InsertTag => {
                     let insert_tag = state.insert_tag.trim();
                     (!insert_tag.is_empty()).then(|| insert_tag.to_string())
@@ -4311,7 +4274,7 @@ mod tests {
     }
 
     #[test]
-    fn open_insert_target_picker_uses_selected_anchor() {
+    fn open_insert_target_picker_uses_active_memory_anchor() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
             focus: PaneFocus::Form,
@@ -4347,12 +4310,11 @@ mod tests {
     }
 
     #[test]
-    fn open_insert_target_picker_prefers_explicit_insert_target_selection() {
+    fn open_insert_target_picker_prefers_selected_memory() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
             focus: PaneFocus::Form,
             insert_focus: InsertFormFocus::MemoryId,
-            insert_memory_id: "aaaaa-aa".to_string(),
             ..CoreState::default()
         };
 
@@ -4363,6 +4325,10 @@ mod tests {
         apply_snapshot(
             &mut state,
             ProviderSnapshot {
+                selected_memory: Some(MemorySelection {
+                    id: "aaaaa-aa".to_string(),
+                    label: "Alpha Memory".to_string(),
+                }),
                 picker: PickerState::List {
                     context: PickerContext::InsertTarget,
                     items: vec![
@@ -4499,7 +4465,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_snapshot_sets_insert_memory_id_from_saved_default_on_insert_tab() {
+    fn apply_snapshot_returns_empty_selected_memory_when_only_default_exists() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_INSERT_TAB_ID.to_string(),
             ..CoreState::default()
@@ -4509,9 +4475,9 @@ mod tests {
             ..ProviderSnapshot::default()
         };
 
-        apply_snapshot(&mut state, snapshot);
+        let render_state = apply_snapshot(&mut state, snapshot);
 
-        assert_eq!(state.insert_memory_id, "aaaaa-aa");
+        assert_eq!(render_state.selected_memory, None);
     }
 
     #[test]
@@ -4659,22 +4625,6 @@ mod tests {
             ..CoreState::default()
         };
         assert!(!is_insert_form_locked(&error));
-    }
-
-    #[test]
-    fn insert_memory_id_ignores_direct_text_editing() {
-        let mut state = CoreState {
-            insert_focus: InsertFormFocus::MemoryId,
-            insert_memory_id: "aaaaa-aa".to_string(),
-            ..CoreState::default()
-        };
-
-        apply_core_action(&mut state, &CoreAction::InsertInput('x'));
-        assert_eq!(state.insert_memory_id, "aaaaa-aa");
-
-        apply_core_action(&mut state, &CoreAction::InsertBackspace);
-
-        assert_eq!(state.insert_memory_id, "aaaaa-aa");
     }
 
     #[test]
@@ -4873,11 +4823,8 @@ mod tests {
     }
 
     #[test]
-    fn open_picker_uses_insert_target_selection_after_snapshot() {
-        let mut state = CoreState {
-            insert_memory_id: "bbbbb-bb".to_string(),
-            ..CoreState::default()
-        };
+    fn open_picker_uses_selected_memory_after_snapshot() {
+        let mut state = CoreState::default();
 
         apply_core_action(
             &mut state,
@@ -4886,6 +4833,10 @@ mod tests {
         apply_snapshot(
             &mut state,
             ProviderSnapshot {
+                selected_memory: Some(MemorySelection {
+                    id: "bbbbb-bb".to_string(),
+                    label: "Beta Memory".to_string(),
+                }),
                 picker: PickerState::List {
                     context: PickerContext::InsertTarget,
                     items: vec![

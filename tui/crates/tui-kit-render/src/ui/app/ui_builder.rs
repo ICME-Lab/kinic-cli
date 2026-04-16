@@ -5,8 +5,8 @@ use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
     AccessControlModalState, CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus,
-    InsertMode, PickerState, RemoveMemoryModalState, RenameMemoryModalState, SearchScope,
-    SettingsSnapshot, TextInputModalState, TransferModalState,
+    InsertMode, MemorySelection, PickerState, RemoveMemoryModalState, RenameMemoryModalState,
+    SearchScope, SettingsSnapshot, TextInputModalState, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -236,12 +236,6 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn insert_memory_id(mut self, value: &'a str) -> Self {
-        self.insert_memory_id = value;
-        self
-    }
-
-    #[must_use]
     pub fn insert_memory_placeholder(mut self, value: Option<&'a str>) -> Self {
         self.insert_memory_placeholder = value;
         self
@@ -362,8 +356,8 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
-    pub fn selected_memory_label(mut self, value: Option<&'a str>) -> Self {
-        self.selected_memory_label = value;
+    pub fn selected_memory(mut self, value: Option<&'a MemorySelection>) -> Self {
+        self.selected_memory = value;
         self
     }
 

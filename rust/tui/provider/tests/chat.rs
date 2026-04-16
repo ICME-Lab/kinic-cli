@@ -27,10 +27,6 @@ fn expected_active_memory_context() -> ActiveMemoryContext {
     }
 }
 
-fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
-    provider.cursor_memory_id = Some(memory_id.to_string());
-}
-
 fn chat_state(query: &str) -> CoreState {
     CoreState {
         current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
@@ -134,6 +130,7 @@ fn chat_submit_starts_background_task_and_saves_user_message() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "saved".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = chat_state("What changed?");
@@ -191,6 +188,7 @@ fn chat_background_success_appends_assistant_and_persists_reply() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "Answer".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = chat_state("Question");
@@ -232,6 +230,7 @@ fn chat_background_partial_search_failure_notifies_status() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "Partial answer".to_string(),
         failed_memory_ids: vec!["bbbbb-bb".to_string()],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = chat_state("Question");
@@ -310,6 +309,7 @@ fn chat_background_success_does_not_overwrite_memory_content_summary() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "New chat answer".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     provider.memory_content_summaries.insert(
@@ -459,7 +459,7 @@ fn memory_switch_loads_chat_history_for_new_active_memory() {
         .expect("open selected should dispatch");
     execute_effects_to_status(&mut state, effects);
 
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -476,6 +476,7 @@ fn chat_submit_uses_latest_user_query_and_recent_visible_history() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = CoreState {
@@ -542,6 +543,7 @@ fn all_memories_chat_submit_uses_all_targets_and_separate_history_thread() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     let mut state = CoreState {
@@ -641,7 +643,7 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
     assert_eq!(state.chat_scope, ChatScope::Selected);
     assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -653,7 +655,7 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
 
     assert_eq!(state.chat_scope, ChatScope::All);
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "global".to_string())]
@@ -666,7 +668,7 @@ fn chat_scope_switch_loads_separate_all_memories_history() {
     assert_eq!(state.chat_scope, ChatScope::Selected);
     assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -705,7 +707,7 @@ fn chat_scope_cycles_across_visible_memories_before_returning_to_all() {
     assert_eq!(state.chat_scope, ChatScope::Selected);
     assert_eq!(state.chat_scope_label.as_deref(), Some("Beta"));
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
     assert_eq!(
         state.chat_messages,
         vec![("assistant".to_string(), "beta".to_string())]
@@ -717,7 +719,7 @@ fn chat_scope_cycles_across_visible_memories_before_returning_to_all() {
 
     assert_eq!(state.chat_scope, ChatScope::All);
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
 }
 
 #[test]
@@ -788,14 +790,16 @@ fn chat_scope_all_keeps_browser_selection_for_selected_memory_actions() {
 
     assert_eq!(state.chat_scope, ChatScope::All);
     assert_eq!(state.selected_index, Some(1));
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("bbbbb-bb"));
+    assert_eq!(active_memory_id(&provider), Some("bbbbb-bb"));
 
     let search_targets = provider
         .search_target_memory_ids(SearchScope::Selected)
         .expect("selected memory search should still resolve from the list selection");
     assert_eq!(search_targets, vec!["bbbbb-bb".to_string()]);
     assert_eq!(
-        provider.selected_memory_id_for_default(&state).as_deref(),
+        provider
+            .active_memory_id_for_default_selection(&state)
+            .as_deref(),
         Some("bbbbb-bb")
     );
 }
@@ -850,6 +854,7 @@ fn chat_new_thread_switches_to_empty_thread_and_submit_uses_it() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     state.chat_input = "fresh".to_string();
     let _ = dispatch_action(&mut provider, &mut state, &CoreAction::ChatSubmit)
@@ -873,6 +878,7 @@ fn selected_chat_submit_includes_cached_memory_summary_context() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     provider.memory_content_summaries.insert(
@@ -897,7 +903,7 @@ fn selected_chat_submit_includes_cached_memory_summary_context() {
 }
 
 #[test]
-fn selected_chat_submit_excludes_placeholder_memory_summary_context() {
+fn selected_chat_submit_excludes_unavailable_memory_summary_context() {
     let _guard = chat_test_guard();
     let _ = take_test_chat_submit_result();
     let _ = take_last_test_chat_request();
@@ -905,6 +911,7 @@ fn selected_chat_submit_excludes_placeholder_memory_summary_context() {
     set_next_test_chat_submit_result(Ok(AskMemoriesOutput {
         response: "ok".to_string(),
         failed_memory_ids: vec![],
+        join_error_count: 0,
     }));
     let mut provider = configure_provider_for_chat();
     provider

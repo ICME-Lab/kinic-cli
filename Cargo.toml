@@ -26,10 +26,12 @@ tokio = { version = "1.48", features = ["rt-multi-thread", "macros"] }
 tokio-util = "0.7"
 icrc-ledger-types = "0.1.12"
 serde = { version =  "1.0", features = ["derive"] }
+schemars = "1.2.1"
 thiserror = "2.0.17"
 reqwest = { version = "0.12.7", default-features = false, features = ["json", "rustls-tls"] }
 dotenvy = "0.15.7"
 serde_json = "1.0.145"
+rmcp = { version = "0.5.0", features = ["server", "transport-io"] }
 pyo3 = { version = "0.27", features = ["extension-module", "abi3-py38"], optional = true }
 pdf-extract = "0.8"
 gag = "1.0"
@@ -37,6 +39,7 @@ ring = "0.17.14"
 der = "0.7.10"
 pkcs8 = "0.10.2"
 ic-ed25519 = "0.2.0"
+kinic-core = { path = "crates/kinic-core" }
 tui-kit-host = { path = "tui/crates/tui-kit-host" }
 tui-kit-runtime = { path = "tui/crates/tui-kit-runtime" }
 tui-kit-model = { path = "tui/crates/tui-kit-model" }
@@ -44,6 +47,7 @@ tui-kit-render = { path = "tui/crates/tui-kit-render" }
 
 [dev-dependencies]
 serde_yaml = "0.9"
+tower = "0.5"
 
 [features]
 default = []
@@ -62,6 +66,7 @@ path = "rust/cli.rs"
 [workspace]
 members = [
     ".",
+    "crates/kinic-core",
     "tui/crates/tui-kit",
     "tui/crates/tui-kit-host",
     "tui/crates/tui-kit-runtime",

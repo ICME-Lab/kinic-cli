@@ -1,9 +1,5 @@
 use super::*;
 
-fn set_memory_selection(provider: &mut KinicProvider, memory_id: &str) {
-    provider.cursor_memory_id = Some(memory_id.to_string());
-}
-
 fn run_session_settings_refresh(
     request_id: u64,
     seed_overview: Option<SessionAccountOverview>,
@@ -162,6 +158,42 @@ fn poll_background_keeps_previous_principal_when_refresh_reports_principal_error
 }
 
 #[test]
+fn poll_background_uses_keychain_specific_principal_error_message() {
+    let mut overview = principal_error_session_overview();
+    overview.principal_error = Some(
+        "[KEYCHAIN_ACCESS_DENIED] Keychain access was not granted for identity \"alice\". Approve the macOS Keychain prompt, unlock the keychain if needed, and try again. Cause: User interaction is not allowed"
+            .to_string(),
+    );
+    let (provider, output) =
+        run_session_settings_refresh(11, Some(refreshed_session_overview()), overview);
+
+    assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message.contains("Session settings refresh failed: [KEYCHAIN_ACCESS_DENIED]")
+    )));
+}
+
+#[test]
+fn poll_background_uses_lookup_failed_principal_error_message() {
+    let mut overview = principal_error_session_overview();
+    overview.principal_error = Some(
+        "[KEYCHAIN_LOOKUP_FAILED] Keychain lookup for identity \"alice\" could not be confirmed. The entry may be missing, access may have been delayed, or macOS may not have completed the lookup. Expected entry: \"internet_computer_identity_alice\"."
+            .to_string(),
+    );
+    let (provider, output) =
+        run_session_settings_refresh(12, Some(refreshed_session_overview()), overview);
+
+    assert_eq!(provider.session_overview.session.principal_id, "aaaaa-aa");
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::Notify(message)
+            if message.contains("Session settings refresh failed: [KEYCHAIN_LOOKUP_FAILED]")
+    )));
+}
+
+#[test]
 fn poll_background_drops_stale_account_values_when_session_context_changes() {
     let (provider, _output) = run_session_settings_refresh(
         9,
@@ -255,7 +287,7 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
 
     assert!(!provider.create_submit_task.in_flight);
     assert_eq!(provider.tab_id, KINIC_MEMORIES_TAB_ID);
-    assert_eq!(provider.cursor_memory_id.as_deref(), Some("aaaaa-aa"));
+    assert_eq!(active_memory_id(&provider), Some("aaaaa-aa"));
     assert_eq!(
         provider.user_preferences.default_memory_id.as_deref(),
         Some("bbbbb-bb")
@@ -521,4 +553,61 @@ fn validate_transfer_submit_rejects_invalid_principal_and_overspend() {
             .expect_err("overspend")
             .contains("Max sendable")
     );
+}
+
+#[test]
+fn validate_transfer_submit_rejects_negative_amount_with_precise_message() {
+    let provider = KinicProvider::new(live_config());
+    let negative_amount_state = CoreState {
+        transfer_modal: TransferModalState {
+            principal_id: "aaaaa-aa".to_string(),
+            amount: "-1".to_string(),
+            fee_base_units: Some(100_000),
+            available_balance_base_units: Some(1_000_000_000),
+            ..TransferModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider
+            .validate_transfer_submit(&negative_amount_state)
+            .expect_err("negative amount"),
+        "Amount must be a positive decimal number."
+    );
+}
+
+#[test]
+fn validate_access_submit_rejects_launcher_and_allows_self_target() {
+    let provider = KinicProvider::new(live_config());
+    let launcher_state = CoreState {
+        access_control: tui_kit_runtime::AccessControlModalState {
+            memory_id: "bbbbb-bb".to_string(),
+            principal_id: crate::clients::LAUNCHER_CANISTER.to_string(),
+            action: AccessControlAction::Change,
+            role: AccessControlRole::Reader,
+            ..tui_kit_runtime::AccessControlModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    assert_eq!(
+        provider
+            .validate_access_submit(&launcher_state)
+            .expect_err("launcher principal should fail"),
+        "Launcher canister access cannot be modified."
+    );
+
+    let self_state = CoreState {
+        access_control: tui_kit_runtime::AccessControlModalState {
+            memory_id: "bbbbb-bb".to_string(),
+            principal_id: "aaaaa-aa".to_string(),
+            action: AccessControlAction::Remove,
+            role: AccessControlRole::Reader,
+            ..tui_kit_runtime::AccessControlModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    assert!(provider.validate_access_submit(&self_state).is_ok());
 }

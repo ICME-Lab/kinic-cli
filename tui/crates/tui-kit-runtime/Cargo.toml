@@ -12,4 +12,5 @@ path = "src/lib.rs"
 
 [dependencies]
 candid = "0.10.20"
+kinic-core = { path = "../../../crates/kinic-core" }
 tui-kit-model = { path = "../tui-kit-model" }

@@ -1,0 +1,14 @@
+[package]
+name = "kinic-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+license = "MIT"
+description = "Shared KINIC domain rules for CLI and TUI flows"
+
+[lib]
+name = "kinic_core"
+path = "src/lib.rs"
+
+[dependencies]
+candid = "0.10.20"

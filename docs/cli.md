@@ -48,13 +48,59 @@ Command-line companion for deploying and operating Kinic “memory” canisters.
 
 ## Running the CLI
 
-Use either `--identity` (dfx identity name stored in the system keychain) or `--ii` (Internet Identity login). Use `--ic` to talk to mainnet; omit it (or leave false) for the local replica. If you are not using `--ii`, `--identity <name>` is required for CLI commands.
+Use either `--identity` (dfx identity name stored in the system keychain) or `--ii` (Internet Identity login). Use `--ic` to talk to mainnet; omit it (or leave false) for the local replica. If you are not using `--ii`, `--identity <name>` is required for CLI commands. The examples below assume mainnet unless noted otherwise.
+
+Machine-consumption entrypoint:
+- Agent/public skill: [`skills/SKILL.md`](../skills/SKILL.md)
+
+Agent-friendly discovery tips:
+- Start with `kinic-cli --help` for auth mode guidance and top-level entrypoints
+- Start with `kinic-cli capabilities` to get a JSON execution contract for global flags, auth sources, output behavior, major arguments, and arg-group constraints
+- Use `kinic-cli prefs --help` to inspect the JSON contract for shared local preferences
+- `capabilities` and `prefs` commands return JSON; `list`, `show`, and `search` also support `--json` for agent/script consumption while keeping human-friendly text output by default
+- Keychain failures use stable text prefixes such as `KEYCHAIN_LOOKUP_FAILED`, `KEYCHAIN_ACCESS_DENIED`, `KEYCHAIN_INTERACTION_NOT_ALLOWED`, and `KEYCHAIN_ERROR`; agents should branch on the leading `[KEYCHAIN_*]` code instead of parsing the rest of the sentence
+
+### Capabilities JSON
+
+Use this command when an agent needs a machine-readable description of the CLI before choosing a command:
 
 ```bash
-cargo run -- --identity alice list
-cargo run -- --identity alice create \
+cargo run -- capabilities
+```
+
+**Source of truth:** the live output of `kinic-cli capabilities` (or `cargo run -- capabilities` from this repo). The JSON is regression-tested against [`tests/fixtures/capabilities_golden.json`](../tests/fixtures/capabilities_golden.json); update that fixture when you intentionally change the contract. Semantic rules shared with runtime validation live in [`rust/cli_policy.rs`](../rust/cli_policy.rs).
+
+Top-level shape:
+
+- `schema_version`, `cli`, `version` (matches the package / built binary)
+- `auth_summary` (short narrative; same string as in code)
+- `global_options`: introspected global flags; `relations.conflicts` reflects clap `conflicts_with` (there is no separate `requires` field in the JSON)
+- `commands`: nested tree with `summary`, `auth`, `output`, `global_flags_supported`, `arguments`, optional `arg_groups`, `subcommands`
+
+Minimal illustrative excerpt (not a full copy of the output):
+
+```json
+{
+  "schema_version": 1,
+  "cli": "kinic-cli",
+  "version": "<matches package version>",
+  "auth_summary": "Network commands use global --identity or --ii unless noted otherwise. The TUI requires --identity. tools serve is environment-auth only. Some commands expose conditional auth requirements based on flags such as --validate.",
+  "global_options": [],
+  "commands": []
+}
+```
+
+`global_options` describes top-level flags such as `--identity`, `--ii`, and `--ic`. Each command also reports `global_flags_supported` so agents can see which global flags are valid for that path and construct valid invocations without guessing hidden top-level options. `auth.sources` distinguishes between global CLI auth (for example `global_identity`) and environment-driven auth (`environment_identity` for `tools serve`).
+
+`prefs add-memory` stays local by default, but `prefs add-memory --validate` performs a network call and therefore requires either `--identity <name>` or `--ii`.
+
+For commands with compound input rules, `capabilities` also includes `arg_groups`. Arguments now separate `input_shape` (`flag`, `single_value`, `multi_value`) from `value_kind` (`boolean`, `integer`, `string`, `principal`, `path`, `json_array`) so agents can distinguish presence flags from value-taking arguments.
+
+```bash
+cargo run -- --ic --identity alice list
+cargo run -- --ic --identity alice create \
   --name "Demo memory" \
-  --description "Local test canister"
+  --description "Mainnet memory"
 ```
 
 ### Internet Identity flow (--ii)
@@ -62,16 +108,16 @@ cargo run -- --identity alice create \
 First, open the browser login flow and store a delegation (default TTL: 6 hours):
 
 ```bash
-cargo run -- --ii login
+cargo run -- login
 ```
 
 Then run commands with `--ii`:
 
 ```bash
-cargo run -- --ii list
-cargo run -- --ii create \
+cargo run -- --ic --ii list
+cargo run -- --ic --ii create \
   --name "Demo memory" \
-  --description "Local test canister"
+  --description "Mainnet memory"
 ```
 
 Notes:
@@ -89,17 +135,19 @@ cargo run -- convert-pdf --file-path ./docs/report.pdf
 ### Insert PDF (converted to markdown)
 
 ```bash
-cargo run -- --identity alice insert-pdf \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+cargo run -- --ic --identity alice insert-pdf \
+  --memory-id MEMORY_CANISTER_ID \
   --file-path ./docs/report.pdf \
   --tag quarterly_report
 ```
 
+Replace `MEMORY_CANISTER_ID` with the target memory canister ID from `list --json` or `show`.
+
 ### Insert example
 
 ```bash
-cargo run -- --identity alice insert \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+cargo run -- --ic --identity alice insert \
+  --memory-id MEMORY_CANISTER_ID \
   --text "# Notes\n\nHello Kinic!" \
   --tag diary_7th_Nov_2025
 ```
@@ -107,8 +155,8 @@ cargo run -- --identity alice insert \
 You can also read the input from disk:
 
 ```bash
-cargo run -- --identity alice insert \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+cargo run -- --ic --identity alice insert \
+  --memory-id MEMORY_CANISTER_ID \
   --file-path ./notes/weekly.md \
   --tag diary_weekly
 ```
@@ -118,34 +166,178 @@ Exactly one of `--text` or `--file-path` must be supplied. The command calls the
 ### Search example
 
 ```bash
-cargo run -- --identity alice search \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
+cargo run -- --ic --identity alice search \
+  --memory-id MEMORY_CANISTER_ID \
   --query "Hello"
 ```
 
 The CLI fetches an embedding for the query and prints the scored matches returned by the memory canister.
 
-### Manage config (add user)
-
-Grant a role for a user on a memory canister:
+For AI agents or scripts, use JSON output:
 
 ```bash
-cargo run -- --identity alice config \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
-  --add-user <principal|anonymous> <admin|writer|reader>
+cargo run -- --ic --identity alice search \
+  --memory-id MEMORY_CANISTER_ID \
+  --query "Hello" \
+  --json
+```
+
+Search across all searchable memories:
+
+```bash
+cargo run -- --ic --identity alice search \
+  --all \
+  --query "Hello"
+```
+
+When `--all` is used, results are merged and printed with the source memory id.
+With `--json`, both selected-search and all-search output include `searched_memory_ids`. All-search may also include optional `failed_memory_ids` and optional `join_error_count` when some background search tasks fail.
+`failed_memory_ids` always contains real memory canister ids only. `join_error_count` covers task panics/cancellation cases where no memory id could be reported.
+
+### Show memory details
+
+```bash
+cargo run -- --ic --identity alice show \
+  --memory-id MEMORY_CANISTER_ID
+
+cargo run -- --ic --identity alice show \
+  --memory-id MEMORY_CANISTER_ID \
+  --json
+```
+
+The command prints the memory name, optional description, version, dimension, owners, stable memory size, cycle amount, and users.
+
+### List memories for agents
+
+```bash
+cargo run -- --ic --identity alice list --json
+```
+
+`list --json` returns a structured `items[]` payload with `memory_id` and launcher `status`.
+
+### Agent workflow
+
+For agent-driven usage, prefer:
+
+1. `list --json` to discover candidate memories
+2. `show --json` to fetch metadata and access context
+3. `search --json` to fetch retrieval evidence
+4. summarize in the agent based on the retrieved evidence
+
+### Rename a memory
+
+```bash
+cargo run -- --ic --identity alice rename \
+  --memory-id MEMORY_CANISTER_ID \
+  --name "Renamed demo memory"
+```
+
+### Manage config (add user)
+
+Manage users for a memory canister:
+
+```bash
+cargo run -- --ic --identity alice config users list \
+  --memory-id MEMORY_CANISTER_ID
+
+cargo run -- --ic --identity alice config users add \
+  --memory-id MEMORY_CANISTER_ID \
+  --principal PRINCIPAL_OR_ANONYMOUS \
+  --role ROLE
+
+cargo run -- --ic --identity alice config users change \
+  --memory-id MEMORY_CANISTER_ID \
+  --principal PRINCIPAL_OR_ANONYMOUS \
+  --role ROLE
+
+cargo run -- --ic --identity alice config users remove \
+  --memory-id MEMORY_CANISTER_ID \
+  --principal PRINCIPAL_OR_ANONYMOUS
 ```
 
 Notes:
 - `anonymous` assigns the role to everyone; admin cannot be granted to `anonymous`.
 - Principals are validated; invalid text fails fast.
+- The launcher canister principal cannot be changed or removed from the CLI.
+- Risky `config users change` and `config users remove` operations prompt for interactive confirmation when they would leave the memory with zero admins, or remove/downgrade your own admin access.
+- Those risky operations fail in non-interactive environments because the CLI does not provide a confirmation bypass flag yet.
+
+### Manage local preferences shared with the TUI
+
+These commands read and write the same local settings file used by the TUI at `~/.config/kinic/tui.yaml`.
+They do not require `--identity` when they only update local preferences.
+`prefs add-memory --validate` is the exception and requires `--identity` or `--ii` because it checks whether `get_name()` can reach the target memory canister before saving.
+That validation confirms reachability and visible metadata only; it does not guarantee membership or later search/chat access.
+`prefs show` returns JSON so it can be consumed reliably by AI agents, shell scripts, and other tools.
+All `prefs` commands now return JSON so agents can consume both reads and mutations with one stable contract.
+
+Show the current shared preferences:
+
+```bash
+cargo run -- prefs show
+```
+
+Example output:
+
+```json
+{
+  "default_memory_id": null,
+  "saved_tags": [],
+  "manual_memory_ids": [],
+  "chat_overall_top_k": 8,
+  "chat_per_memory_cap": 3,
+  "chat_mmr_lambda": 70
+}
+```
+
+Set or clear the default memory:
+
+```bash
+cargo run -- prefs set-default-memory --memory-id MEMORY_CANISTER_ID
+cargo run -- prefs clear-default-memory
+```
+
+Example mutation output:
+
+```json
+{
+  "resource": "default_memory_id",
+  "action": "set",
+  "status": "updated",
+  "value": "MEMORY_CANISTER_ID"
+}
+```
+
+Manage saved tags:
+
+```bash
+cargo run -- prefs add-tag --tag quarterly_report
+cargo run -- prefs remove-tag --tag quarterly_report
+```
+
+Manage manually tracked memories:
+
+```bash
+cargo run -- prefs add-memory --memory-id MEMORY_CANISTER_ID
+cargo run -- --ic --identity alice prefs add-memory --memory-id MEMORY_CANISTER_ID --validate
+cargo run -- prefs remove-memory --memory-id MEMORY_CANISTER_ID
+```
+
+Manage chat retrieval tuning used by `all memories` chat:
+
+```bash
+cargo run -- prefs set-chat-overall-top-k --value 10
+cargo run -- prefs set-chat-per-memory-cap --value 4
+cargo run -- prefs set-chat-mmr-lambda --value 80
+```
 
 ### Update a memory canister instance
 
 Trigger the launcher’s `update_instance` for a given memory id:
 
 ```bash
-cargo run -- --identity alice update \
-  --memory-id yta6k-5x777-77774-aaaaa-cai
+cargo run -- --ic --identity alice update \
+  --memory-id MEMORY_CANISTER_ID
 ```
 
 ### Check token balance
@@ -153,27 +345,30 @@ cargo run -- --identity alice update \
 Query the ledger for the current identity’s balance (base units):
 
 ```bash
-cargo run -- --identity alice balance
+cargo run -- --ic --identity alice balance
 ```
 
-### Ask AI (LLM placeholder)
+### Transfer KINIC
 
-Runs a search and prepares context for an AI answer (LLM not implemented yet):
+Transfer KINIC to another principal:
 
 ```bash
-cargo run -- --identity alice ask-ai \
-  --memory-id yta6k-5x777-77774-aaaaa-cai \
-  --query "What did we say about quarterly goals?" \
-  --top-k 3
+cargo run -- --ic --identity alice transfer \
+  --to RECIPIENT_PRINCIPAL \
+  --amount 1.25 \
+  --yes
 ```
 
-- Uses `EMBEDDING_API_ENDPOINT` (default: `https://api.kinic.io`) and calls `/chat`.
-- Prints the generated prompt and only the `<answer>` portion of the LLM response.
+Notes:
+- `--yes` is required to execute the transfer.
+- `--amount` accepts KINIC decimal text and is converted to e8s internally.
+- The CLI fetches the current ledger fee for every transfer.
 
 ## Troubleshooting
 
 - **Replica already running**: stop lingering replicas with `dfx stop` before restarting.
 - **Keychain access errors**: ensure the CLI has permission to read the keychain entry, and prefer the arm64 build of `dfx`.
+- **Keychain failure codes**: CLI and TUI surface the same leading codes. `KEYCHAIN_LOOKUP_FAILED` means the lookup could not be confirmed and may reflect a missing entry, delayed approval, or incomplete macOS lookup. `KEYCHAIN_ACCESS_DENIED` means access was not granted or the keychain is locked. `KEYCHAIN_INTERACTION_NOT_ALLOWED` indicates the `-67671` arm64/x86 mismatch path, and `KEYCHAIN_ERROR` is the generic fallback.
 - **Embedding API failures**: set `EMBEDDING_API_ENDPOINT` and verify the endpoint responds to `/late-chunking` and `/embedding`.
 
 ## Python wrapper
@@ -191,9 +386,6 @@ memory_id = km.create("Demo", "Created from Python")
 # Insert / search
 km.insert_markdown(memory_id, "notes", "# Hello Kinic!")
 results = km.search(memory_id, "Hello")
-
-# Ask AI (returns prompt and the <answer> text only)
-prompt, answer = km.ask_ai(memory_id, "What did we say?", top_k=3, language="en")
 
 # Balance (base units, KINIC)
 base, kinic = km.balance()

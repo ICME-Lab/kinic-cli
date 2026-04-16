@@ -197,7 +197,16 @@ fn build_ui_renders_rename_overlay_contents() {
     let textareas = FormTextareas::default();
     let animation = AnimationState::new();
     let ui = build_ui(
-        &theme, &cfg, &state, &textareas, 0, 0, false, false, &animation,
+        &theme,
+        &cfg,
+        &state,
+        &ProviderRenderState::default(),
+        &textareas,
+        0,
+        0,
+        false,
+        false,
+        &animation,
     );
     let area = Rect::new(0, 0, 100, 30);
     let mut buf = Buffer::empty(area);
@@ -1045,7 +1054,16 @@ fn build_ui_places_chat_cursor_after_trailing_space() {
     sync_form_textareas_from_state(&mut textareas, &state);
 
     let ui = build_ui(
-        &theme, &cfg, &state, &textareas, 0, 0, false, false, &animation,
+        &theme,
+        &cfg,
+        &state,
+        &ProviderRenderState::default(),
+        &textareas,
+        0,
+        0,
+        false,
+        false,
+        &animation,
     );
     let cursor = ui.cursor_position_for_area(Rect::new(0, 0, 120, 40));
 
@@ -1380,25 +1398,25 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
         current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
         focus: PaneFocus::Content,
         insert_mode: tui_kit_runtime::InsertMode::File,
-        insert_memory_id: "aaaaa-aa".into(),
         insert_tag: "docs".into(),
         insert_file_path_input: "/tmp/doc.pdf".into(),
         insert_focus: tui_kit_runtime::InsertFormFocus::Submit,
         status_message: Some("ready".into()),
         ..CoreState::default()
     };
+    let mut provider_render_state = ProviderRenderState::default();
 
     open_form_tab(
         &mut provider,
         &mut state,
         &mut hooks,
+        &mut provider_render_state,
         KINIC_INSERT_TAB_ID,
         true,
     );
 
     assert_eq!(state.focus, PaneFocus::Content);
     assert_eq!(state.insert_mode, tui_kit_runtime::InsertMode::File);
-    assert_eq!(state.insert_memory_id, "aaaaa-aa");
     assert_eq!(state.insert_tag, "docs");
     assert_eq!(state.insert_file_path_input, "/tmp/doc.pdf");
     assert_eq!(state.insert_focus, tui_kit_runtime::InsertFormFocus::Submit);
@@ -1467,7 +1485,6 @@ fn build_ui_forwards_insert_validation_fields_to_render_tree() {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
         insert_mode: InsertMode::ManualEmbedding,
-        insert_memory_id: "aaaaa-aa".to_string(),
         insert_embedding: "[0.1, 0.2]".to_string(),
         insert_current_dim: Some("2".to_string()),
         insert_validation_message: Some(
@@ -1475,12 +1492,19 @@ fn build_ui_forwards_insert_validation_fields_to_render_tree() {
         ),
         ..CoreState::default()
     };
+    let provider_render_state = ProviderRenderState {
+        selected_memory: Some(tui_kit_runtime::MemorySelection {
+            id: "aaaaa-aa".to_string(),
+            label: "Alpha Memory".to_string(),
+        }),
+    };
     let textareas = FormTextareas::default();
 
     let ui = build_ui(
         &theme,
         &test_runtime_config(),
         &state,
+        &provider_render_state,
         &textareas,
         0,
         0,
@@ -1511,11 +1535,13 @@ fn dispatch_with_effects_returns_error_message_on_failure() {
     let mut provider = TestProvider::err("settings failed");
     let mut hooks = NoopRuntimeHooks;
     let mut state = CoreState::default();
+    let mut provider_render_state = ProviderRenderState::default();
 
     let result = dispatch_with_effects(
         &mut provider,
         &mut state,
         &mut hooks,
+        &mut provider_render_state,
         &CoreAction::ToggleSettings,
     );
 
@@ -1530,11 +1556,13 @@ fn dispatch_with_effects_keeps_non_tab_reducer_state_on_failure() {
         current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
         ..CoreState::default()
     };
+    let mut provider_render_state = ProviderRenderState::default();
 
     let result = dispatch_with_effects(
         &mut provider,
         &mut state,
         &mut hooks,
+        &mut provider_render_state,
         &CoreAction::ToggleChat,
     );
 
@@ -1572,7 +1600,7 @@ fn dispatch_action_with_persistent_clear_clears_for_edit_actions() {
         ..CoreState::default()
     };
 
-    let effects = dispatch_action_with_persistent_clear(
+    let (effects, _) = dispatch_action_with_persistent_clear(
         &mut provider,
         &mut state,
         &CoreAction::InsertInput('x'),
@@ -1595,7 +1623,7 @@ fn dispatch_action_with_persistent_clear_keeps_for_navigation_actions() {
         ..CoreState::default()
     };
 
-    let effects =
+    let (effects, _) =
         dispatch_action_with_persistent_clear(&mut provider, &mut state, &CoreAction::MoveNext)
             .expect("dispatch should succeed");
 

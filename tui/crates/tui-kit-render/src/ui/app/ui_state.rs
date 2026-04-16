@@ -6,8 +6,8 @@ use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
 use tui_kit_runtime::{
     AccessControlModalState, ChatScope, CreateCostState, CreateModalFocus, CreateSubmitState,
-    InsertFormFocus, InsertMode, PickerState, RemoveMemoryModalState, RenameMemoryModalState,
-    SearchScope, SettingsSnapshot, TextInputModalState, TransferModalState,
+    InsertFormFocus, InsertMode, MemorySelection, PickerState, RemoveMemoryModalState,
+    RenameMemoryModalState, SearchScope, SettingsSnapshot, TextInputModalState, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
@@ -51,7 +51,6 @@ pub struct TuiKitUi<'a> {
     pub(super) picker: &'a PickerState,
     pub(super) saved_default_memory_id: Option<&'a str>,
     pub(super) insert_mode: InsertMode,
-    pub(super) insert_memory_id: &'a str,
     pub(super) insert_memory_placeholder: Option<&'a str>,
     pub(super) insert_expected_dim: Option<u64>,
     pub(super) insert_expected_dim_loading: bool,
@@ -72,7 +71,7 @@ pub struct TuiKitUi<'a> {
     pub(super) rename_memory: RenameMemoryModalState,
     pub(super) transfer_modal: TransferModalState,
     pub(super) status_message: &'a str,
-    pub(super) selected_memory_label: Option<&'a str>,
+    pub(super) selected_memory: Option<&'a MemorySelection>,
     pub(super) chat_scope_label: Option<&'a str>,
     pub(super) inspector_scroll: usize,
     pub(super) animation: Option<&'a AnimationState>,
@@ -127,7 +126,6 @@ impl<'a> TuiKitUi<'a> {
             picker: &PickerState::Closed,
             saved_default_memory_id: None,
             insert_mode: InsertMode::default(),
-            insert_memory_id: "",
             insert_memory_placeholder: None,
             insert_expected_dim: None,
             insert_expected_dim_loading: false,
@@ -148,7 +146,7 @@ impl<'a> TuiKitUi<'a> {
             rename_memory: RenameMemoryModalState::default(),
             transfer_modal: TransferModalState::default(),
             status_message: "",
-            selected_memory_label: None,
+            selected_memory: None,
             chat_scope_label: None,
             inspector_scroll: 0,
             animation: None,
@@ -169,7 +167,10 @@ impl<'a> TuiKitUi<'a> {
             self.list_selected
                 .and_then(|index| self.ui_summaries.get(index))
                 .map(|item| item.name.as_str())
-                .or(self.selected_memory_label)
+                .or_else(|| {
+                    self.selected_memory
+                        .map(|selection| selection.label.as_str())
+                })
         })
     }
 
