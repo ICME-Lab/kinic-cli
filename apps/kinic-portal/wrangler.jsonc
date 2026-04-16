@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "kinic-portal",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-04-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "kinic-portal"
+    }
+  ],
+  "vars": {
+    "DFX_NETWORK": "mainnet",
+    "IC_HOST": "https://ic0.app"
+  }
+}

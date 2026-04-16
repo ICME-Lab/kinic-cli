@@ -1,0 +1,11 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "kinic-remote-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "DFX_NETWORK": "mainnet",
+    "IC_HOST": "https://ic0.app"
+  }
+}

@@ -7,6 +7,8 @@ target/
 
 # environment variables
 .env
+.dev.vars
+.dev.vars.*
 
 # python packaging
 .venv/
@@ -32,5 +34,10 @@ pylate-index/
 .vscode/
 
 #web
-.next/
 node_modules/
+.pnpm-store/
+coverage/
+apps/kinic-portal/.next/
+apps/kinic-portal/.open-next/
+apps/kinic-portal/.wrangler/
+apps/kinic-portal/.playwright-cli/
