@@ -13,9 +13,10 @@ use icrc_ledger_types::{
 use serde_json::json;
 use thiserror::Error;
 
-use crate::clients::{LAUNCHER_CANISTER, LEDGER_CANISTER};
-
-const DEFAULT_VECTOR_DIM: u64 = 1024;
+use crate::{
+    clients::{LAUNCHER_CANISTER, LEDGER_CANISTER},
+    embedding::configured_embedding_dimension_u64,
+};
 const APPROVAL_TTL_NS: u64 = 10 * 60 * 1_000_000_000;
 
 pub struct LauncherClient {
@@ -131,7 +132,10 @@ fn encode_deploy_args(name: &str, description: &str) -> Result<Vec<u8>> {
         "name": name,
         "description": description})
     .to_string();
-    Ok(candid::encode_args((payload, DEFAULT_VECTOR_DIM))?)
+    Ok(candid::encode_args((
+        payload,
+        configured_embedding_dimension_u64()?,
+    ))?)
 }
 
 fn encode_update_instance_args(instance_pid_str: &str) -> Result<Vec<u8>> {

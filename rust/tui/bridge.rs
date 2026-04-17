@@ -7,7 +7,7 @@ use crate::{
         memory::MemoryClient,
     },
     create_domain::{BalanceDelta, balance_delta, required_balance},
-    embedding::embedding_base_url,
+    embedding::{embedding_base_url, ensure_memory_dim_matches},
     insert_service::{InsertRequest, execute_insert_request},
     ledger::{fetch_balance, fetch_fee, transfer},
     shared::{
@@ -355,6 +355,7 @@ pub async fn search_memory_with_agent(
 ) -> Result<Vec<SearchResultItem>> {
     let memory = Principal::from_text(&memory_id).context("Failed to parse memory canister id")?;
     let client = MemoryClient::new(agent, memory);
+    ensure_memory_dim_matches(&client, &memory_id, embedding.len()).await?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
 

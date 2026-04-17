@@ -13,7 +13,9 @@ use ic_agent::export::Principal;
 use serde_json::json;
 
 use crate::{
-    clients::memory::MemoryClient, commands::convert_pdf::pdf_to_markdown, embedding::late_chunking,
+    clients::memory::MemoryClient,
+    commands::convert_pdf::pdf_to_markdown,
+    embedding::{ensure_vector_dim_matches, late_chunking},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +89,7 @@ pub async fn execute_insert_request(
     validate_insert_request_fields(request)?;
     let validated = validate_and_transform_insert_request(request)?;
     let prepared = prepare_insert_request(&validated).await?;
+    ensure_prepared_items_match_memory(client, request.memory_id(), &prepared).await?;
     let inserted_count = prepared.len();
     let source_name = validated.source_name();
 
@@ -147,6 +150,21 @@ pub fn validate_insert_request_fields(request: &InsertRequest) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn ensure_prepared_items_match_memory(
+    client: &MemoryClient,
+    memory_id: &str,
+    items: &[PreparedInsertItem],
+) -> Result<()> {
+    let Some(first) = items.first() else {
+        bail!("Insert content did not produce any chunks.");
+    };
+    let expected_dim = client
+        .get_dim()
+        .await
+        .context("Failed to load memory embedding dimension")?;
+    ensure_vector_dim_matches(memory_id, first.embedding.len(), expected_dim)
 }
 
 pub fn validate_insert_request_for_submit(request: &InsertRequest) -> Result<()> {
@@ -456,6 +474,11 @@ mod tests {
         let payload = payload_for("docs", "hello");
 
         assert_eq!(payload, "{\"sentence\":\"hello\",\"tag\":\"docs\"}");
+    }
+
+    #[test]
+    fn prepared_items_match_expected_dimension() {
+        ensure_vector_dim_matches("aaaaa-aa", 2, 2).unwrap();
     }
 
     #[test]

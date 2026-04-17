@@ -58,6 +58,7 @@ fn prefs_show_runs_without_identity() {
             "chat_overall_top_k": 8,
             "chat_per_memory_cap": 3,
             "chat_mmr_lambda": 70,
+            "embedding_model_id": "api",
         })
     );
 }
@@ -166,6 +167,7 @@ fn prefs_mutations_update_shared_yaml_and_preserve_chat_fields() {
             "chat_overall_top_k": 10,
             "chat_per_memory_cap": 4,
             "chat_mmr_lambda": 80,
+            "embedding_model_id": "api",
         })
     );
 }
