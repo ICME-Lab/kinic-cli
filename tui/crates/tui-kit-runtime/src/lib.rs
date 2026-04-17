@@ -26,6 +26,7 @@ use tui_kit_model::{UiContextNode, UiItemContent, UiItemKind, UiItemSummary};
 pub const SETTINGS_ENTRY_DEFAULT_MEMORY_ID: &str = "default_memory";
 pub const SETTINGS_ENTRY_KINIC_BALANCE_ID: &str = "kinic_balance";
 pub const SETTINGS_ENTRY_SAVED_TAGS_ID: &str = "saved_tags";
+pub const SETTINGS_ENTRY_EMBEDDING_MODEL_ID: &str = "embedding_model";
 pub const SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID: &str = "chat_result_limit";
 pub const SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID: &str = "chat_per_memory_limit";
 pub const SETTINGS_ENTRY_CHAT_DIVERSITY_ID: &str = "chat_diversity";
@@ -179,6 +180,7 @@ pub enum PickerContext {
     InsertTag,
     TagManagement,
     AddTag,
+    EmbeddingModel,
     ChatResultLimit,
     ChatPerMemoryLimit,
     ChatDiversity,
@@ -2629,6 +2631,10 @@ pub fn settings_row_behavior_for_index(
             Some(CoreAction::OpenPicker(PickerContext::TagManagement)),
             " manage saved tags ",
         ),
+        SETTINGS_ENTRY_EMBEDDING_MODEL_ID => SettingsRowBehavior::new(
+            Some(CoreAction::OpenPicker(PickerContext::EmbeddingModel)),
+            " choose embedding backend ",
+        ),
         SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID => SettingsRowBehavior::new(
             Some(CoreAction::OpenPicker(PickerContext::ChatResultLimit)),
             " adjust chat limit ",
@@ -2780,6 +2786,7 @@ fn picker_selected_index(
                 }
                 PickerContext::TagManagement
                 | PickerContext::AddTag
+                | PickerContext::EmbeddingModel
                 | PickerContext::ChatResultLimit
                 | PickerContext::ChatPerMemoryLimit
                 | PickerContext::ChatDiversity => None,
@@ -4013,6 +4020,38 @@ mod tests {
             Some(SettingsRowBehavior {
                 enter_action: Some(CoreAction::OpenPicker(PickerContext::TagManagement)),
                 status_hint: " manage saved tags ",
+            })
+        );
+    }
+
+    #[test]
+    fn selected_settings_row_behavior_matches_embedding_model_row() {
+        let settings = SettingsSnapshot {
+            quick_entries: vec![],
+            sections: vec![SettingsSection {
+                title: "Saved preferences".to_string(),
+                entries: vec![SettingsEntry {
+                    id: SETTINGS_ENTRY_EMBEDDING_MODEL_ID.to_string(),
+                    label: "Embedding backend".to_string(),
+                    value: "API (remote default) (1024)".to_string(),
+                    note: None,
+                }],
+                footer: None,
+            }],
+        };
+        let state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            selected_index: Some(0),
+            settings,
+            ..CoreState::default()
+        };
+
+        assert_eq!(
+            selected_settings_row_behavior(&state),
+            Some(SettingsRowBehavior {
+                enter_action: Some(CoreAction::OpenPicker(PickerContext::EmbeddingModel)),
+                status_hint: " choose embedding backend ",
             })
         );
     }

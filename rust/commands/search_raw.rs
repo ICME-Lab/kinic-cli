@@ -1,13 +1,18 @@
 use anyhow::{Context, Result, bail};
 use tracing::info;
 
-use crate::{cli::SearchRawArgs, memory_client_builder::build_memory_client};
+use crate::{
+    cli::SearchRawArgs, embedding::ensure_vector_dim_matches,
+    memory_client_builder::build_memory_client,
+};
 
 use super::CommandContext;
 
 pub async fn handle(args: SearchRawArgs, ctx: &CommandContext) -> Result<()> {
     let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
     let embedding = parse_embedding(&args.embedding)?;
+    let expected_dim = client.get_dim().await?;
+    ensure_vector_dim_matches(&args.memory_id, embedding.len(), expected_dim)?;
     let mut results = client.search(embedding).await?;
 
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));

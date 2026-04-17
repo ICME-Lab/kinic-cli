@@ -15,6 +15,7 @@ use crate::{
     agent::{KeychainErrorCode, extract_keychain_error_code},
     create_domain::derive_create_cost,
     embedding::fetch_embedding,
+    embedding_config::{normalize_supported_embedding_backend_id, supported_embedding_backends},
     insert_service::{
         InsertRequest, parse_embedding_json, validate_insert_request_fields,
         validate_insert_request_for_submit,
@@ -368,6 +369,7 @@ fn add_action_label_for_context(context: PickerContext) -> Option<&'static str> 
         PickerContext::DefaultMemory
         | PickerContext::InsertTarget
         | PickerContext::AddTag
+        | PickerContext::EmbeddingModel
         | PickerContext::ChatResultLimit
         | PickerContext::ChatPerMemoryLimit
         | PickerContext::ChatDiversity => None,
@@ -388,6 +390,7 @@ fn picker_selected_id_for_context(
             (!insert_tag.is_empty()).then(|| insert_tag.to_string())
         }
         PickerContext::TagManagement | PickerContext::AddTag => None,
+        PickerContext::EmbeddingModel => Some(user_preferences.embedding_model_id.clone()),
         PickerContext::ChatResultLimit => Some(user_preferences.chat_overall_top_k.to_string()),
         PickerContext::ChatPerMemoryLimit => Some(user_preferences.chat_per_memory_cap.to_string()),
         PickerContext::ChatDiversity => Some(user_preferences.chat_mmr_lambda.to_string()),
@@ -442,6 +445,16 @@ fn picker_items_for_context(
                 .unwrap_or_default(),
             _ => Vec::new(),
         },
+        PickerContext::EmbeddingModel => supported_embedding_backends()
+            .iter()
+            .map(|backend| {
+                PickerItem::option(
+                    backend.id.to_string(),
+                    format!("{} ({})", backend.label, backend.dimension),
+                    user_preferences.embedding_model_id == backend.id,
+                )
+            })
+            .collect(),
         PickerContext::ChatResultLimit => prefs_policy::chat_result_limit_options()
             .iter()
             .map(|value| {
@@ -513,6 +526,7 @@ impl<'a> DefaultMemoryController<'a> {
             chat_overall_top_k: self.user_preferences.chat_overall_top_k,
             chat_per_memory_cap: self.user_preferences.chat_per_memory_cap,
             chat_mmr_lambda: self.user_preferences.chat_mmr_lambda,
+            embedding_model_id: self.user_preferences.embedding_model_id.clone(),
         };
         #[cfg(test)]
         let _settings_io_lock = settings_io_lock()
@@ -2523,6 +2537,9 @@ impl KinicProvider {
                 CoreEffect::Notify(format!("Selected tag {} for insert", item.id)),
             ],
             PickerContext::AddTag => Vec::new(),
+            PickerContext::EmbeddingModel => {
+                vec![self.set_embedding_model_preference(item.id.as_str())]
+            }
             PickerContext::ChatResultLimit => item
                 .id
                 .parse::<usize>()
@@ -2787,6 +2804,21 @@ impl KinicProvider {
                 preferences::chat_diversity_display(value)
             )),
             Err(error) => CoreEffect::Notify(format!("Chat diversity save failed: {error}")),
+        }
+    }
+
+    fn set_embedding_model_preference(&mut self, model_id: &str) -> CoreEffect {
+        let normalized = normalize_supported_embedding_backend_id(model_id);
+        if self.user_preferences.embedding_model_id == normalized {
+            return CoreEffect::Notify(format!("Embedding backend already set to {normalized}"));
+        }
+        match self.update_user_preferences(|preferences| {
+            preferences.embedding_model_id = normalized.to_string();
+        }) {
+            Ok(()) => CoreEffect::Notify(format!(
+                "Embedding backend set to {normalized}. API preserves old memories. Local backends may need reindex."
+            )),
+            Err(error) => CoreEffect::Notify(format!("Embedding backend save failed: {error}")),
         }
     }
 
@@ -4998,6 +5030,7 @@ impl DataProvider for KinicProvider {
                             | PickerContext::InsertTarget
                             | PickerContext::InsertTag
                             | PickerContext::TagManagement
+                            | PickerContext::EmbeddingModel
                             | PickerContext::ChatResultLimit
                             | PickerContext::ChatPerMemoryLimit
                             | PickerContext::ChatDiversity

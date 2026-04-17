@@ -2,14 +2,13 @@ use std::cmp::Ordering;
 
 use anyhow::{Context, Result};
 use ic_agent::export::Principal;
-use reqwest::Client;
 use tracing::info;
 
 use crate::{
     agent::AgentFactory,
     cli::AskAiArgs,
     clients::memory::MemoryClient,
-    embedding::{embedding_base_url, fetch_embedding},
+    embedding::{call_chat_http, ensure_memory_dim_matches, fetch_embedding},
     prompt_utils::{escape_xml, prompt_language_instruction},
 };
 
@@ -20,8 +19,6 @@ const MAX_RESULTS: usize = 5;
 const MAX_HITS_PER_DOC: usize = 6;
 const MAX_HIT_LEN: usize = 600;
 const MAX_FULL_LEN: usize = 4096;
-const CHAT_PATH: &str = "/chat";
-
 pub struct AskAiResult {
     pub prompt: String,
     pub response: String,
@@ -67,6 +64,7 @@ pub async fn ask_ai_flow(
     let client = MemoryClient::new(agent, *memory_id);
 
     let embedding = fetch_embedding(query).await?;
+    ensure_memory_dim_matches(&client, &memory_id.to_text(), embedding.len()).await?;
     let mut results = client.search(embedding).await?;
 
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
@@ -84,24 +82,7 @@ pub async fn ask_ai_flow(
 }
 
 pub(crate) async fn call_chat_endpoint(prompt: &str) -> Result<String> {
-    let url = format!("{}{}", embedding_base_url(), CHAT_PATH);
-    let response = Client::new()
-        .post(url)
-        .json(&ChatRequest { message: prompt })
-        .send()
-        .await
-        .context("Failed to call chat endpoint")?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("chat endpoint returned {status}: {body}");
-    }
-
-    let body = response
-        .text()
-        .await
-        .context("Failed to read chat response")?;
+    let body = call_chat_http(prompt).await?;
 
     let mut acc = String::new();
     for line in body.lines() {
@@ -139,11 +120,6 @@ struct SearchResult {
     title: String,
     score: f32,
     hits: Vec<SearchHit>,
-}
-
-#[derive(serde::Serialize)]
-struct ChatRequest<'a> {
-    message: &'a str,
 }
 
 #[derive(serde::Deserialize)]

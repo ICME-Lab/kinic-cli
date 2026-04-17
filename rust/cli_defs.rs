@@ -116,7 +116,7 @@ pub enum Command {
     Capabilities(CapabilitiesArgs),
     #[command(
         about = "Manage local Kinic preferences shared with the TUI. All prefs commands return JSON.",
-        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id MEMORY_CANISTER_ID\n  kinic-cli prefs set-chat-overall-top-k --value 10\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|integer|null}"
+        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id MEMORY_CANISTER_ID\n  kinic-cli prefs set-chat-overall-top-k --value 10\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer, \"embedding_model_id\": string}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|integer|null}"
     )]
     Prefs(PrefsArgs),
     #[command(
@@ -411,7 +411,7 @@ pub struct PrefsArgs {
 pub enum PrefsCommand {
     #[command(
         about = "Show local preferences shared with the TUI. Returns JSON.",
-        after_help = "Returns:\n  {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer}\n\nExample:\n  kinic-cli prefs show"
+        after_help = "Returns:\n  {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer, \"embedding_model_id\": string}\n\nExample:\n  kinic-cli prefs show"
     )]
     Show,
     #[command(

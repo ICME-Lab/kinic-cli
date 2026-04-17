@@ -384,7 +384,7 @@ See `python/examples/insert_pdf_file.py` for a runnable script.
 
 ## Ask AI
 
-Runs a search and prepares context for an AI answer. The CLI calls `/chat` at `EMBEDDING_API_ENDPOINT` (default `https://api.kinic.io`) and prints only the `<answer>` text.
+Runs a search with the configured embedding backend, prepares context for an AI answer, then calls `/chat` at `EMBEDDING_API_ENDPOINT` (default `https://api.kinic.io`) and prints only the `<answer>` text.
 
 ```python
 prompt, answer = km.ask_ai(memory_id, "What did we say about quarterly goals?", top_k=3, language="en")
@@ -394,6 +394,26 @@ print("Answer:\n", answer)
 
 - `km.ask_ai` returns `(prompt, answer)` where `answer` is the `<answer>` section from the chat response.
 - CLI usage: `cargo run -- --identity <name> ask-ai --memory-id <id> --query "<q>" --top-k 3`
+
+Embedding backend initialization:
+
+- initial saved backend: `api`
+- API dimension: `1024`
+- local option example: `Snowflake/snowflake-arctic-embed-s`
+- local cache dir: `$HOME/.cache/kinic-cli/embeddings`
+
+Shared settings behavior:
+
+- if the shared config directory is available and `tui.yaml` is missing, Kinic initializes with the saved default `api`
+- if the shared config directory is unavailable, embedding-backed commands fail explicitly instead of falling back
+
+Local runtime overrides:
+
+- `KINIC_LOCAL_EMBEDDING_CACHE_DIR`
+- `KINIC_LOCAL_EMBEDDING_MAX_LENGTH`
+- `KINIC_LOCAL_EMBEDDING_CHUNK_SOFT_LIMIT`
+- `KINIC_LOCAL_EMBEDDING_CHUNK_HARD_LIMIT`
+- `KINIC_LOCAL_EMBEDDING_CHUNK_OVERLAP`
 
 ---
 

@@ -291,6 +291,7 @@ struct ShowPreferences {
     chat_overall_top_k: usize,
     chat_per_memory_cap: usize,
     chat_mmr_lambda: u8,
+    embedding_model_id: String,
 }
 
 impl From<UserPreferences> for ShowPreferences {
@@ -302,6 +303,7 @@ impl From<UserPreferences> for ShowPreferences {
             chat_overall_top_k: value.chat_overall_top_k,
             chat_per_memory_cap: value.chat_per_memory_cap,
             chat_mmr_lambda: value.chat_mmr_lambda,
+            embedding_model_id: value.embedding_model_id,
         }
     }
 }
@@ -407,6 +409,7 @@ mod tests {
             chat_overall_top_k: DEFAULT_CHAT_OVERALL_TOP_K,
             chat_per_memory_cap: DEFAULT_CHAT_PER_MEMORY_CAP,
             chat_mmr_lambda: DEFAULT_CHAT_MMR_LAMBDA,
+            embedding_model_id: "invalid".to_string(),
         };
 
         let normalized = preferences::normalize_user_preferences(preferences);
@@ -423,6 +426,10 @@ mod tests {
         assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
         assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
         assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
+        assert_eq!(
+            normalized.embedding_model_id,
+            preferences::default_embedding_model_id()
+        );
     }
 
     #[test]
@@ -439,6 +446,10 @@ mod tests {
             DEFAULT_CHAT_PER_MEMORY_CAP
         );
         assert_eq!(serialized["chat_mmr_lambda"], DEFAULT_CHAT_MMR_LAMBDA);
+        assert_eq!(
+            serialized["embedding_model_id"],
+            preferences::default_embedding_model_id()
+        );
     }
 
     #[test]

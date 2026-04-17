@@ -12,10 +12,12 @@ use tui_kit_host::settings::SettingsError;
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 use tui_kit_runtime::{
     SETTINGS_ENTRY_CHAT_DIVERSITY_ID, SETTINGS_ENTRY_CHAT_PER_MEMORY_LIMIT_ID,
-    SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID, SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview,
-    SessionSettingsSnapshot, SettingsEntry, SettingsSection, SettingsSnapshot,
+    SETTINGS_ENTRY_CHAT_RESULT_LIMIT_ID, SETTINGS_ENTRY_DEFAULT_MEMORY_ID,
+    SETTINGS_ENTRY_EMBEDDING_MODEL_ID, SessionAccountOverview, SessionSettingsSnapshot,
+    SettingsEntry, SettingsSection, SettingsSnapshot,
 };
 
+use crate::embedding_config::supported_embedding_backends;
 use crate::preferences::{
     UserPreferences, chat_diversity_display, chat_per_memory_limit_display,
     chat_result_limit_display,
@@ -28,6 +30,7 @@ const APP_NAMESPACE: &str = "kinic";
 const CHAT_HISTORY_FILE_NAME: &str = "chat-threads.yaml";
 const UNAVAILABLE: &str = "unavailable";
 const NOT_SET: &str = "not set";
+const EMBEDDING_MODEL_NOTE: &str = "Affects create/search/insert. API keeps existing memories usable. Local backends may require reindex. Same-dimension model mismatches are not detectable.";
 const CHAT_HISTORY_MAX_MESSAGES: usize = 40;
 const CHAT_MESSAGE_MAX_CONTENT_LEN: usize = 4096;
 
@@ -457,6 +460,7 @@ pub fn build_settings_snapshot(
     let default_memory_display =
         default_memory_display(preferences, selector_items, selector_labels);
     let saved_tags_display = saved_tags_display(preferences);
+    let embedding_model_display = embedding_model_display(preferences);
     let chat_result_limit_display = chat_result_limit_display(preferences.chat_overall_top_k);
     let chat_per_memory_limit_display =
         chat_per_memory_limit_display(preferences.chat_per_memory_cap);
@@ -490,7 +494,7 @@ pub fn build_settings_snapshot(
             },
             SettingsEntry {
                 id: "embedding_api_endpoint".to_string(),
-                label: "Embedding".to_string(),
+                label: "Chat API".to_string(),
                 value: session.embedding_api_endpoint.clone(),
                 note: None,
             },
@@ -510,6 +514,12 @@ pub fn build_settings_snapshot(
                         label: "Saved tags".to_string(),
                         value: saved_tags_display,
                         note: None,
+                    },
+                    SettingsEntry {
+                        id: SETTINGS_ENTRY_EMBEDDING_MODEL_ID.to_string(),
+                        label: "Embedding backend".to_string(),
+                        value: embedding_model_display,
+                        note: Some(EMBEDDING_MODEL_NOTE.to_string()),
                     },
                     SettingsEntry {
                         id: "preferences_status".to_string(),
@@ -567,7 +577,7 @@ pub fn build_settings_snapshot(
                     },
                     SettingsEntry {
                         id: "embedding_api_endpoint".to_string(),
-                        label: "Embedding".to_string(),
+                        label: "Chat API".to_string(),
                         value: session.embedding_api_endpoint.clone(),
                         note: None,
                     },
@@ -717,6 +727,14 @@ fn saved_tags_display(preferences: &UserPreferences) -> String {
     }
 
     preferences.saved_tags.join(", ")
+}
+
+fn embedding_model_display(preferences: &UserPreferences) -> String {
+    supported_embedding_backends()
+        .into_iter()
+        .find(|model| model.id == preferences.embedding_model_id)
+        .map(|model| format!("{} ({})", model.label, model.dimension))
+        .unwrap_or_else(|| preferences.embedding_model_id.clone())
 }
 
 #[cfg(test)]

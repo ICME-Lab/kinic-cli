@@ -5,6 +5,8 @@
 
 use kinic_core::{prefs_policy, principal::normalize_memory_id_text, tag};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::cell::Cell;
 use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
@@ -16,6 +18,9 @@ const SETTINGS_FILE_NAME: &str = "tui.yaml";
 pub use kinic_core::prefs_policy::{
     DEFAULT_CHAT_MMR_LAMBDA, DEFAULT_CHAT_OVERALL_TOP_K, DEFAULT_CHAT_PER_MEMORY_CAP,
 };
+
+const DEFAULT_EMBEDDING_MODEL_ID: &str = "api";
+const SUPPORTED_EMBEDDING_MODEL_IDS: &[&str] = &["api", "Snowflake/snowflake-arctic-embed-s"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 // Missing legacy fields are backfilled with defaults and unknown fields are ignored.
@@ -32,6 +37,8 @@ pub struct UserPreferences {
     pub chat_per_memory_cap: usize,
     #[serde(default = "default_chat_mmr_lambda")]
     pub chat_mmr_lambda: u8,
+    #[serde(default = "default_embedding_model_id")]
+    pub embedding_model_id: String,
 }
 
 impl Default for UserPreferences {
@@ -43,6 +50,7 @@ impl Default for UserPreferences {
             chat_overall_top_k: DEFAULT_CHAT_OVERALL_TOP_K,
             chat_per_memory_cap: DEFAULT_CHAT_PER_MEMORY_CAP,
             chat_mmr_lambda: DEFAULT_CHAT_MMR_LAMBDA,
+            embedding_model_id: default_embedding_model_id(),
         }
     }
 }
@@ -59,8 +67,15 @@ pub fn default_chat_mmr_lambda() -> u8 {
     DEFAULT_CHAT_MMR_LAMBDA
 }
 
+pub fn default_embedding_model_id() -> String {
+    DEFAULT_EMBEDDING_MODEL_ID.to_string()
+}
+
 #[cfg(test)]
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
+    if let Some(error) = test_load_error() {
+        return Err(error);
+    }
     Ok(normalize_user_preferences(UserPreferences::default()))
 }
 
@@ -73,6 +88,25 @@ pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
 #[cfg(test)]
 pub fn save_user_preferences(_preferences: &UserPreferences) -> Result<(), SettingsError> {
     Ok(())
+}
+
+#[cfg(test)]
+pub fn set_load_user_preferences_error_for_tests(enabled: bool) {
+    TEST_LOAD_ERROR.with(|slot| slot.set(enabled));
+}
+
+#[cfg(test)]
+fn test_load_error() -> Option<SettingsError> {
+    if TEST_LOAD_ERROR.with(Cell::get) {
+        Some(SettingsError::NoConfigDir)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_LOAD_ERROR: Cell<bool> = const { Cell::new(false) };
 }
 
 #[cfg(not(test))]
@@ -97,6 +131,7 @@ pub fn normalize_user_preferences(mut preferences: UserPreferences) -> UserPrefe
     preferences.chat_per_memory_cap =
         normalize_chat_per_memory_cap(preferences.chat_per_memory_cap);
     preferences.chat_mmr_lambda = normalize_chat_mmr_lambda(preferences.chat_mmr_lambda);
+    preferences.embedding_model_id = normalize_embedding_model_id(preferences.embedding_model_id);
     preferences
 }
 
@@ -122,6 +157,14 @@ pub fn chat_per_memory_limit_display(value: usize) -> String {
 
 pub fn chat_diversity_display(value: u8) -> String {
     format!("{:.2}", f32::from(value) / 100.0)
+}
+
+pub fn normalize_embedding_model_id(value: String) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || !SUPPORTED_EMBEDDING_MODEL_IDS.contains(&trimmed) {
+        return default_embedding_model_id();
+    }
+    trimmed.to_string()
 }
 
 fn normalize_default_memory_id(memory_id: Option<String>) -> Option<String> {
@@ -176,6 +219,7 @@ future_setting: true
         assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
         assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
         assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
+        assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);
     }
 
     #[test]
@@ -227,6 +271,20 @@ manual_memory_ids:
         assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
         assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
         assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
+        assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);
+    }
+
+    #[test]
+    fn user_preferences_normalizes_blank_embedding_model_id() {
+        let preferences: UserPreferences = serde_yaml::from_str(
+            r#"
+embedding_model_id: "   "
+"#,
+        )
+        .expect("blank embedding model should deserialize");
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);
     }
 
     #[test]

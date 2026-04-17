@@ -1,7 +1,9 @@
 use super::*;
 use crate::preferences::UserPreferences;
 use candid::Nat;
-use tui_kit_runtime::{SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SessionAccountOverview};
+use tui_kit_runtime::{
+    SETTINGS_ENTRY_DEFAULT_MEMORY_ID, SETTINGS_ENTRY_EMBEDDING_MODEL_ID, SessionAccountOverview,
+};
 
 fn deferred_session() -> SessionSettingsSnapshot {
     session_settings_snapshot(
@@ -199,6 +201,24 @@ fn settings_snapshot_projects_default_memory_and_preferences_status() {
             "{name}"
         );
         assert_eq!(
+            section_entry_value(
+                &snapshot,
+                "Saved preferences",
+                SETTINGS_ENTRY_EMBEDDING_MODEL_ID
+            ),
+            "API (remote default) (1024)",
+            "{name}"
+        );
+        assert!(
+            section_entry_note(
+                &snapshot,
+                "Saved preferences",
+                SETTINGS_ENTRY_EMBEDDING_MODEL_ID
+            )
+            .is_some(),
+            "{name}"
+        );
+        assert_eq!(
             section_titles,
             vec![
                 "Saved preferences",
@@ -271,6 +291,7 @@ fn settings_snapshot_projects_chat_retrieval_section() {
             chat_overall_top_k: 10,
             chat_per_memory_cap: 4,
             chat_mmr_lambda: 80,
+            embedding_model_id: "Snowflake/snowflake-arctic-embed-s".to_string(),
             ..UserPreferences::default()
         },
         &Vec::new(),
@@ -289,6 +310,14 @@ fn settings_snapshot_projects_chat_retrieval_section() {
     assert_eq!(
         section_entry_value(&snapshot, "Chat retrieval", "chat_diversity"),
         "0.80"
+    );
+    assert_eq!(
+        section_entry_value(
+            &snapshot,
+            "Saved preferences",
+            SETTINGS_ENTRY_EMBEDDING_MODEL_ID
+        ),
+        "Snowflake Arctic Embed S (384)"
     );
 }
 

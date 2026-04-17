@@ -16,7 +16,7 @@ use crate::{
         search::{search_across_memories, searchable_memory_ids},
         show::{ShowOutput, load_show_output},
     },
-    embedding::fetch_embedding,
+    embedding::{ensure_memory_dim_matches, fetch_embedding},
     insert_service::{InsertRequest, execute_insert_request},
     memory_client_builder::build_memory_client,
 };
@@ -198,9 +198,10 @@ impl ToolService {
 
 async fn search_memory(
     client: &MemoryClient,
-    _memory_id: &str,
+    memory_id: &str,
     embedding: Vec<f32>,
 ) -> anyhow::Result<Vec<MemorySearchItem>> {
+    ensure_memory_dim_matches(client, memory_id, embedding.len()).await?;
     let rows = client
         .search(embedding)
         .await
