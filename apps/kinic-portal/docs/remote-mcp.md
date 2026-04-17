@@ -15,13 +15,19 @@ The Kinic Portal remote MCP is an anonymous read-only surface running on a Cloud
 
 ## Exposed Tools
 
+- `public_memory_help`
+  - input: `{}`
+  - Explains how to use the read-only memory tools
+  - Clarifies that search reads memory payloads, not MCP server implementation
 - `public_memory_show`
   - input: `{ "memory_id": "aaaaa-aa" }`
-  - Returns a summary for an anonymously readable memory
+  - Returns a metadata summary for an anonymously readable memory, not MCP server metadata
   - response: `{ "memory_id": "...", "name": "...", "description": "...", "version": "..." }`
 - `public_memory_search`
-  - input: `{ "memory_id": "aaaaa-aa", "query": "..." }`
-  - Generates embeddings on the server, then runs memory search
+  - input: `{ "memory_id": "aaaaa-aa", "query": "...", "top_k": 10 }`
+  - `top_k` is optional, defaults to `10`, and accepts `1` through `50`
+  - Generates embeddings on the server, then searches stored contents in the selected memory
+  - Does not inspect the MCP server implementation
 
 ## External Clients
 
@@ -62,11 +68,15 @@ To share the configuration across a project, add `.mcp.json` at the repository r
 Example prompts:
 
 ```text
+Use public_memory_help first, then search memory_id aaaaa-aa for "vector search".
+```
+
+```text
 Use public_memory_show to inspect memory_id aaaaa-aa
 ```
 
 ```text
-Use public_memory_search to search memory_id aaaaa-aa for "vector search"
+Use public_memory_search to search memory_id aaaaa-aa for "vector search" with top_k 10
 ```
 
 ### Local Validation
@@ -80,6 +90,8 @@ claude mcp add --transport http kinic-local http://127.0.0.1:8787/mcp
 
 - The caller must provide `memory_id` on every request
 - Canister access stays anonymous only
+- Search results are memory payloads from the selected canister
+- The remote MCP does not expose implementation inspection
 - Permission failures from `get_metadata` or `search` surface as MCP tool errors
 - `memory_create`, `memory_insert_markdown`, `memory_list`, and `memory_search_all` are not exposed
 - Search remains read-only, but still depends on `EMBEDDING_API_ENDPOINT` for embedding generation

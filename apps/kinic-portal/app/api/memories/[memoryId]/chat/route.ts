@@ -3,12 +3,14 @@
 // Why: the public UI needs concise Q&A without exposing mutation paths or ACL-specific detail queries.
 
 import {
+  TRANSIENT_QUERY_ERROR,
   buildAskAiPrompt,
   callChatApi,
   createAnonymousAgent,
   extractAnswer,
   fetchEmbedding,
   isAnonymousAccessError,
+  isTransientQueryError,
   searchMemory,
 } from "@kinic/kinic-share";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
@@ -28,6 +30,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
   if (state.kind === "invalid") {
     return Response.json({ error: state.error }, { status: 400 });
   }
+  if (state.kind === "transient_error") {
+    return Response.json({ error: state.error }, { status: 503 });
+  }
   if (state.kind === "denied") {
     return Response.json({ error: state.error }, { status: 403 });
   }
@@ -40,6 +45,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
   } catch (error) {
     if (isAnonymousAccessError(error)) {
       return Response.json({ error: "anonymous access denied" }, { status: 403 });
+    }
+    if (isTransientQueryError(error)) {
+      return Response.json({ error: TRANSIENT_QUERY_ERROR }, { status: 503 });
     }
     throw error;
   }

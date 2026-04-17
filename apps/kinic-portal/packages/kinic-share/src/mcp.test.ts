@@ -30,7 +30,7 @@ describe("remote mcp helpers", () => {
       "Use public_memory_show to inspect memory_id aaaaa-aa",
     );
     expect(buildPublicMemorySearchPrompt("aaaaa-aa")).toBe(
-      'Use public_memory_search to search memory_id aaaaa-aa for "vector search"',
+      'Use public_memory_search to search memory_id aaaaa-aa for "vector search" with top_k 10',
     );
   });
 });

@@ -7,6 +7,7 @@ const MAX_RESULTS = 5;
 const MAX_HITS_PER_DOC = 6;
 const MAX_HIT_LEN = 600;
 const MAX_FULL_LEN = 4096;
+const SUMMARY_QUERY = "overview summary main topics purpose contents";
 
 export type PromptSearchHit = {
   score: number;
@@ -76,6 +77,68 @@ ${docsBlock}
 <full_document>
 ${fullDocument}
 </full_document>`;
+}
+
+export function buildMemorySummarySearchQuery(name: string, description: string | null): string {
+  return [name.trim(), description?.trim(), SUMMARY_QUERY].filter(Boolean).join("\n");
+}
+
+export function buildMemorySummaryPrompt(
+  name: string,
+  description: string | null,
+  rawResults: PromptSearchHit[],
+  language: string,
+): string {
+  const docs = rawResults.slice(0, MAX_RESULTS).map((result, index) => ({
+    url: `memory://${index + 1}`,
+    title: clip(result.payload, 80),
+    score: result.score,
+    hits: [{ index: 0, score: result.score, content: result.payload }],
+  }));
+  const docsBlock = docs.length
+    ? docs
+        .map((doc, index) => {
+          const hits = doc.hits
+            .slice(0, MAX_HITS_PER_DOC)
+            .map(
+              (hit) =>
+                `<hit index="${hit.index}" score="${hit.score}">\n${escapeXml(
+                  clip(hit.content, MAX_HIT_LEN),
+                )}\n</hit>`,
+            )
+            .join("\n");
+          return `<doc index="${index + 1}">\n<url>${escapeXml(doc.url)}</url>\n<title>${escapeXml(
+            doc.title,
+          )}</title>\n<score>${doc.score}</score>\n<hits>\n${hits || '<hit index="0">(no hits)</hit>'}\n</hits>\n</doc>`;
+        })
+        .join("\n\n")
+    : '<doc index="1"><url></url><title></title><hits><hit index="0">(no hits)</hit></hits></doc>';
+
+  return `You are an excellent AI assistant that writes a short public-facing summary for one memory.
+Summarize only what is supported by the memory metadata and retrieved content.
+
+# Instructions
+- Before responding, describe your thinking within the <thinking>...</thinking> tag in under 80 words.
+- After thinking, write the final summary within the <answer>...</answer> tag.
+- The final summary must be one short paragraph of 2-3 sentences.
+- Do not use bullet points.
+- Do not exaggerate, speculate, or add facts that are not present in the memory.
+- Mention the memory's purpose, main topics, and what kind of content it contains when supported by the evidence.
+- Answer in ${promptLanguageInstruction(language)} in the <answer> tag.
+
+# Input
+
+<memory_name>
+${escapeXml(clip(name, 120))}
+</memory_name>
+
+<memory_description>
+${escapeXml(clip(description?.trim() || "(none)", 240))}
+</memory_description>
+
+<docs>
+${docsBlock}
+</docs>`;
 }
 
 export function extractAnswer(text: string): string {

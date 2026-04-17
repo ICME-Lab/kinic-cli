@@ -4,7 +4,7 @@
 // What: renders detail cards and drives the public read-only chat request against the Next.js BFF.
 // Why: keep the interactive state on the client while server routes remain thin and deterministic.
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   buildClaudeCodeMcpCommand,
   buildPublicMemorySearchPrompt,
@@ -12,20 +12,23 @@ import {
   type MemoryShowResponse,
 } from "@kinic/kinic-share";
 import { Check, Copy } from "lucide-react";
+import { FaLinkedinIn, FaXTwitter } from "react-icons/fa6";
 import { MemoryStat } from "@/components/memory-stat";
+import { MemorySummary } from "@/components/memory-summary";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 type ChatResponse = {
   answer: string;
   context_count: number;
 };
 
-type CopyStatusKey = "endpoint" | "claude" | "show" | "search";
+type CopyStatusKey = "endpoint" | "claude" | "show" | "search" | "share";
 
 export function MemoryView({
   initialMemory,
@@ -35,15 +38,21 @@ export function MemoryView({
   mcpEndpoint: string | null;
 }) {
   const [query, setQuery] = useState("");
-  const [chatAnswer, setChatAnswer] = useState("");
-  const [chatContextCount, setChatContextCount] = useState(0);
   const [error, setError] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [contextCount, setContextCount] = useState(0);
   const [copyStatus, setCopyStatus] = useState<CopyStatusKey | null>(null);
   const [copyError, setCopyError] = useState("");
+  const [currentUrl, setCurrentUrl] = useState("");
   const [isPending, startTransition] = useTransition();
   const showPrompt = buildPublicMemoryShowPrompt(initialMemory.memory_id);
   const searchPrompt = buildPublicMemorySearchPrompt(initialMemory.memory_id);
   const claudeCommand = mcpEndpoint ? buildClaudeCodeMcpCommand(mcpEndpoint) : null;
+  const shareLinks = buildShareLinks(currentUrl, initialMemory.name, initialMemory.description);
+
+  useEffect(() => {
+    setCurrentUrl(window.location.href);
+  }, []);
 
   function submit() {
     startTransition(async () => {
@@ -58,8 +67,8 @@ export function MemoryView({
         if (!response.ok) {
           throw new Error(payload.error || "request failed");
         }
-        setChatAnswer(payload.answer);
-        setChatContextCount(payload.context_count);
+        setAnswer(payload.answer);
+        setContextCount(payload.context_count);
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : "request failed");
       }
@@ -84,17 +93,14 @@ export function MemoryView({
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 pb-20 pt-6 md:px-6 md:pb-24">
       <section className="hero-wash rounded-[32px] border border-border px-6 py-8 md:px-10 md:py-12">
-        <div className="max-w-4xl space-y-6">
+        <div className="space-y-6">
           <div className="flex flex-wrap items-center gap-3">
             <Badge variant="outline">Public Memory</Badge>
             <Badge variant="secondary">Read-only</Badge>
-            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-              /m/{initialMemory.memory_id}
-            </span>
           </div>
           <div className="space-y-4">
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-              Shared Memory Surface
+              Memory Name
             </p>
             <h1 className="text-[clamp(2.6rem,6vw,4.2rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-foreground">
               {initialMemory.name}
@@ -102,12 +108,14 @@ export function MemoryView({
             <p className="max-w-3xl text-base leading-7 text-muted-foreground md:text-lg md:leading-8">
               {initialMemory.description || "No description"}
             </p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <MemoryStat label="Memory ID" value={initialMemory.memory_id} />
-            <MemoryStat label="Version" value={initialMemory.version} />
-            <MemoryStat label="Dim" value={String(initialMemory.dim)} />
-            <MemoryStat label="Owners" value={String(initialMemory.owners.length)} />
+            <div className="grid w-full gap-4">
+              <MemorySummary memoryId={initialMemory.memory_id} />
+              <div className="grid gap-3 md:grid-cols-3">
+                <MemoryStat label="Memory ID" value={initialMemory.memory_id} />
+                <MemoryStat label="Version" value={initialMemory.version} />
+                <MemoryStat label="Dim" value={String(initialMemory.dim)} />
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -137,24 +145,43 @@ export function MemoryView({
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
-            <Separator />
-            <div className="rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-4 text-sm leading-7 text-muted-foreground">
-              The public UI does not show a raw result list. Internally it uses search to gather
-              context and returns only a summarized answer.
-            </div>
+            {answer ? (
+              <>
+                <Separator />
+                <div className="space-y-3 rounded-2xl border border-border bg-muted/20 px-4 py-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">Answer</Badge>
+                    <span className="text-sm text-muted-foreground">
+                      Grounded in {contextCount} search result{contextCount === 1 ? "" : "s"}.
+                    </span>
+                  </div>
+                  <p className="text-sm leading-7 text-foreground">{answer}</p>
+                </div>
+              </>
+            ) : null}
           </CardContent>
         </Card>
 
         <div className="grid gap-5">
-          <Card>
+          <Card className="shadow-none">
             <CardHeader className="gap-3">
-              <Badge variant="secondary" className="w-fit">Summary</Badge>
-              <CardTitle>Read-only Chat</CardTitle>
-              <CardDescription>Summarizes {chatContextCount} search results and never writes to the memory.</CardDescription>
+              <Badge variant="secondary" className="w-fit">Share</Badge>
+              <CardTitle>Share this memory.</CardTitle>
+              <CardDescription>Post this page to social networks or copy the URL.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="min-h-[280px] whitespace-pre-wrap rounded-2xl border border-border bg-muted/30 p-5 text-sm leading-8 text-foreground">
-                {chatAnswer || "No answer yet"}
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-3">
+                <ShareLink href={shareLinks.x} label="Share on X" className="hover:!text-zinc-500 active:!text-zinc-500 focus-visible:!text-zinc-500">
+                  <FaXTwitter className="size-4" />
+                </ShareLink>
+                <ShareLink href={shareLinks.linkedin} label="Share on LinkedIn" className="hover:!text-sky-700 active:!text-sky-700 focus-visible:!text-sky-700">
+                  <FaLinkedinIn className="size-4" />
+                </ShareLink>
+                <ShareIconButton
+                  copied={copyStatus === "share"}
+                  label="Copy share URL"
+                  onClick={() => copyText("share", currentUrl || `/m/${initialMemory.memory_id}`)}
+                />
               </div>
             </CardContent>
           </Card>
@@ -255,6 +282,54 @@ function PromptRow({
   );
 }
 
+function ShareLink({
+  className,
+  children,
+  href,
+  label,
+}: {
+  className?: string;
+  children: React.ReactNode;
+  href: string;
+  label: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={label}
+      className={cn(
+        "inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted",
+        className,
+      )}
+    >
+      {children}
+    </a>
+  );
+}
+
+function ShareIconButton({
+  copied,
+  label,
+  onClick,
+}: {
+  copied: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted"
+    >
+      {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+    </button>
+  );
+}
+
 function CopyButton({
   children,
   copied,
@@ -286,4 +361,21 @@ function parsePayload(value: unknown): ChatResponse & { error?: string } {
 
 function toRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value)) : null;
+}
+
+function buildShareLinks(url: string, title: string, description: string | null) {
+  const encodedUrl = encodeURIComponent(url);
+  const shareText = buildXShareText(title, description);
+  const encodedTitle = encodeURIComponent(shareText);
+  return {
+    x: `https://twitter.com/intent/tweet?url=${encodedUrl}&text=${encodedTitle}`,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
+  };
+}
+
+function buildXShareText(title: string, description: string | null): string {
+  const normalizedTitle = title.trim();
+  const normalizedDescription = description?.trim();
+  const headline = "Explore this public memory on Kinic.";
+  return [headline, normalizedTitle, normalizedDescription].filter(Boolean).join("\n\n");
 }

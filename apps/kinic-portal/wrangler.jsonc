@@ -14,8 +14,16 @@
       "service": "kinic-portal"
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "SUMMARY_CACHE",
+      "id": "5ae0671d6e7c47fd9867184b609ae990",
+      "preview_id": "3f14e59069344a389ab13828817f5b4f"
+    }
+  ],
   "vars": {
     "DFX_NETWORK": "mainnet",
-    "IC_HOST": "https://ic0.app"
+    "IC_HOST": "https://ic0.app",
+    "SUMMARY_CACHE_TTL_SECONDS": "86400"
   }
 }

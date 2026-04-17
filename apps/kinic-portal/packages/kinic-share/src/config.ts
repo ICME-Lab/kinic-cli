@@ -5,6 +5,9 @@
 export const DEFAULT_MAINNET_HOST = "https://ic0.app";
 export const DEFAULT_LOCAL_HOST = "http://127.0.0.1:4943";
 export const DEFAULT_VECTOR_DIM = 1024n;
+export const DEFAULT_SUMMARY_CACHE_TTL_SECONDS = 60 * 60 * 24;
+export const DEFAULT_REMOTE_MCP_SEARCH_TOP_K = 10;
+export const MAX_REMOTE_MCP_SEARCH_TOP_K = 50;
 export const ANONYMOUS_PRINCIPAL = "2vxsx-fae";
 
 export type SharedRuntimeEnv = {
@@ -13,6 +16,7 @@ export type SharedRuntimeEnv = {
   CANISTER_ID_LAUNCHER?: string;
   EMBEDDING_API_ENDPOINT?: string;
   KINIC_MCP_IDENTITY_PEM?: string;
+  SUMMARY_CACHE_TTL_SECONDS?: string;
 };
 
 export function resolveIcHost(env: SharedRuntimeEnv): string {
@@ -44,4 +48,14 @@ export function requireIdentityPem(env: SharedRuntimeEnv): string {
     throw new Error("KINIC_MCP_IDENTITY_PEM is required for remote MCP mutations.");
   }
   return value;
+}
+
+export function resolveSummaryCacheTtlSeconds(env: SharedRuntimeEnv): number {
+  const value = env.SUMMARY_CACHE_TTL_SECONDS?.trim();
+  if (!value) {
+    return DEFAULT_SUMMARY_CACHE_TTL_SECONDS;
+  }
+
+  const ttl = Number.parseInt(value, 10);
+  return Number.isInteger(ttl) && ttl > 0 ? ttl : DEFAULT_SUMMARY_CACHE_TTL_SECONDS;
 }

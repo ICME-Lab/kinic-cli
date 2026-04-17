@@ -15,9 +15,11 @@ export function MemoryStat({
   className?: string;
 }) {
   return (
-    <Card className={cn("grid gap-2 rounded-2xl px-4 py-4 shadow-none", className)}>
+    <Card className={cn("grid min-w-0 gap-2 rounded-2xl px-4 py-4 shadow-none", className)}>
       <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{label}</span>
-      <strong className="break-all font-mono text-sm font-medium text-foreground">{value}</strong>
+      <strong className="overflow-x-auto whitespace-nowrap font-mono text-sm font-medium text-foreground [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {value}
+      </strong>
     </Card>
   );
 }

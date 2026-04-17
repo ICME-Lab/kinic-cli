@@ -2,6 +2,8 @@
 // What: normalizes the public remote MCP endpoint and builds copyable client snippets.
 // Why: keep copy text deterministic across UI, docs, and tests without duplicating string rules.
 
+import { DEFAULT_REMOTE_MCP_SEARCH_TOP_K } from "./config";
+
 const DEFAULT_SEARCH_QUERY = "vector search";
 
 export function resolveRemoteMcpEndpoint(origin: string | undefined): string | null {
@@ -32,5 +34,5 @@ export function buildPublicMemorySearchPrompt(
   memoryId: string,
   query: string = DEFAULT_SEARCH_QUERY,
 ): string {
-  return `Use public_memory_search to search memory_id ${memoryId} for "${query}"`;
+  return `Use public_memory_search to search memory_id ${memoryId} for "${query}" with top_k ${DEFAULT_REMOTE_MCP_SEARCH_TOP_K}`;
 }

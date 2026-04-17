@@ -66,7 +66,9 @@ export type MemorySummaryResponse = {
 
 export type AnonymousAccessResult =
   | { accessible: true }
-  | { accessible: false; error: "anonymous access denied" };
+  | { accessible: false; error: "anonymous access denied" | "temporary network error" };
+
+export const TRANSIENT_QUERY_ERROR = "temporary network error";
 
 export function isValidPrincipalText(value: string): boolean {
   try {
@@ -82,12 +84,20 @@ export function isAnonymousAccessError(error: unknown): boolean {
   return message.includes("permission denied") || message.includes("invalid user");
 }
 
+export function isTransientQueryError(error: unknown): boolean {
+  const message = extractErrorMessage(error).toLowerCase();
+  return message.includes("invalid certificate") || message.includes("invalid signature");
+}
+
 export async function getMemoryDetails(
   agent: HttpAgent,
   memoryId: string,
 ): Promise<MemoryShowResponse> {
   const actor = createMemoryActor(agent, memoryId);
-  const [metadata, dim] = await Promise.all([actor.get_metadata(), actor.get_dim()]);
+  const [metadata, dim] = await Promise.all([
+    retryTransientQuery(() => actor.get_metadata()),
+    retryTransientQuery(() => actor.get_dim()),
+  ]);
   const { name, description } = parseMemoryNameFields(metadata.name);
   return {
     memory_id: memoryId,
@@ -105,7 +115,7 @@ export async function getMemorySummary(
   agent: HttpAgent,
   memoryId: string,
 ): Promise<MemorySummaryResponse> {
-  const metadata = await createMemoryActor(agent, memoryId).get_metadata();
+  const metadata = await retryTransientQuery(() => createMemoryActor(agent, memoryId).get_metadata());
   return summarizeMemory(memoryId, metadata);
 }
 
@@ -128,7 +138,7 @@ export async function searchMemory(
   memoryId: string,
   embedding: number[],
 ): Promise<Array<{ score: number; payload: string }>> {
-  const rows = await createMemoryActor(agent, memoryId).search(embedding);
+  const rows = await retryTransientQuery(() => createMemoryActor(agent, memoryId).search(embedding));
   return rows
     .map(([score, payload]) => ({ score, payload }))
     .sort((left, right) => right.score - left.score);
@@ -247,14 +257,28 @@ function parseRecord(value: unknown): Record<string, unknown> | null {
 
 export async function probeAnonymousAccess(getName: () => Promise<string>): Promise<AnonymousAccessResult> {
   try {
-    await getName();
+    await retryTransientQuery(getName);
     return { accessible: true };
   } catch (error) {
     if (isAnonymousAccessError(error)) {
       return { accessible: false, error: "anonymous access denied" };
     }
+    if (isTransientQueryError(error)) {
+      return { accessible: false, error: TRANSIENT_QUERY_ERROR };
+    }
     throw error;
   }
+}
+
+export async function retryTransientQuery<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (!isTransientQueryError(error)) {
+      throw error;
+    }
+  }
+  return call();
 }
 
 function extractErrorMessage(error: unknown): string {
