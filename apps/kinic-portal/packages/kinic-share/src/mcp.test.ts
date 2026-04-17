@@ -4,6 +4,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  buildChatGptMemoryPrompt,
+  buildChatGptPromptUrl,
   buildClaudeCodeMcpCommand,
   buildPublicMemorySearchPrompt,
   buildPublicMemoryShowPrompt,
@@ -32,5 +34,14 @@ describe("remote mcp helpers", () => {
     expect(buildPublicMemorySearchPrompt("aaaaa-aa")).toBe(
       'Use public_memory_search to search memory_id aaaaa-aa for "vector search" with top_k 10',
     );
+  });
+
+  it("builds a ChatGPT prompt and prefill url", () => {
+    const prompt = buildChatGptMemoryPrompt("aaaaa-aa");
+    expect(prompt).toContain("@Kinic-Memory");
+    expect(prompt).toContain("public_memory_show");
+    expect(prompt).toContain("public_memory_search");
+    expect(prompt).toContain("memory_id aaaaa-aa");
+    expect(buildChatGptPromptUrl(prompt)).toMatch(/^https:\/\/chatgpt\.com\/\?q=/);
   });
 });

@@ -27,7 +27,7 @@ describe("shared runtime config", () => {
   });
 
   it("uses the default summary cache ttl when missing", () => {
-    expect(resolveSummaryCacheTtlSeconds({})).toBe(86400);
+    expect(resolveSummaryCacheTtlSeconds({})).toBe(604800);
   });
 
   it("uses the configured summary cache ttl when valid", () => {
@@ -35,7 +35,7 @@ describe("shared runtime config", () => {
   });
 
   it("falls back to the default summary cache ttl when invalid", () => {
-    expect(resolveSummaryCacheTtlSeconds({ SUMMARY_CACHE_TTL_SECONDS: "abc" })).toBe(86400);
-    expect(resolveSummaryCacheTtlSeconds({ SUMMARY_CACHE_TTL_SECONDS: "-1" })).toBe(86400);
+    expect(resolveSummaryCacheTtlSeconds({ SUMMARY_CACHE_TTL_SECONDS: "abc" })).toBe(604800);
+    expect(resolveSummaryCacheTtlSeconds({ SUMMARY_CACHE_TTL_SECONDS: "-1" })).toBe(604800);
   });
 });

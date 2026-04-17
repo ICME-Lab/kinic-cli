@@ -3,6 +3,7 @@
 // Why: the public UI needs concise Q&A without exposing mutation paths or ACL-specific detail queries.
 
 import {
+  PUBLIC_MEMORY_CHAT_TOP_K,
   TRANSIENT_QUERY_ERROR,
   buildAskAiPrompt,
   callChatApi,
@@ -42,6 +43,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
   let hits;
   try {
     hits = await searchMemory(agent, memoryId, embedding);
+    hits = hits.slice(0, PUBLIC_MEMORY_CHAT_TOP_K);
   } catch (error) {
     if (isAnonymousAccessError(error)) {
       return Response.json({ error: "anonymous access denied" }, { status: 403 });

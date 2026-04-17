@@ -4,15 +4,10 @@
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ImageResponse } from "next/og";
-import {
-  buildMemoryOgpSearchCards,
-  buildMemorySearchQuery,
-  createAnonymousAgent,
-  fetchEmbedding,
-  searchMemory,
-} from "@kinic/kinic-share";
 import { renderOgpImage } from "@/lib/ogp-image";
+import { DEFAULT_SUMMARY_LANGUAGE } from "@/lib/public-summary";
 import { resolvePublicMemory, toSharedRuntimeEnv } from "@/lib/public-memory";
+import { buildSummaryCacheKey, getSummaryCache, readSummaryCache } from "@/lib/summary-cache";
 
 export const alt = "Kinic Public Memory";
 export const size = {
@@ -35,33 +30,30 @@ export default async function Image({
     return new ImageResponse(renderOgpImage({}), size);
   }
 
-  const searchCards = await loadSearchCards(env, memoryId, state.memory.name, state.memory.description);
+  const summary = await loadCachedSummary(context.env, memoryId, state.memory.version);
 
   return new ImageResponse(
     renderOgpImage({
       memory: {
         memoryId: state.memory.memory_id,
         name: state.memory.name,
-        description: state.memory.description,
+        description: summary || state.memory.description,
       },
-      searchCards,
     }),
     size,
   );
 }
 
-async function loadSearchCards(
-  env: ReturnType<typeof toSharedRuntimeEnv>,
+async function loadCachedSummary(
+  env: unknown,
   memoryId: string,
-  name: string,
-  description: string | null,
-) {
+  version: string | null | undefined,
+): Promise<string | null> {
   try {
-    const agent = createAnonymousAgent(env);
-    const embedding = await fetchEmbedding(buildMemorySearchQuery({ name, description }), env);
-    const hits = await searchMemory(agent, memoryId, embedding);
-    return buildMemoryOgpSearchCards(hits);
+    const cache = getSummaryCache(env);
+    const key = buildSummaryCacheKey(memoryId, version, DEFAULT_SUMMARY_LANGUAGE);
+    return (await readSummaryCache(cache, key))?.summary ?? null;
   } catch {
-    return [];
+    return null;
   }
 }

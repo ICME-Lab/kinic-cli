@@ -36,6 +36,7 @@ vi.mock("@/lib/summary-cache", () => ({
 }));
 
 vi.mock("@kinic/kinic-share", () => ({
+  PUBLIC_MEMORY_SUMMARY_TOP_K: 5,
   TRANSIENT_QUERY_ERROR: "temporary network error",
   buildMemorySummaryPrompt: mocks.buildMemorySummaryPrompt,
   buildMemorySummarySearchQuery: mocks.buildMemorySummarySearchQuery,
@@ -98,7 +99,9 @@ describe("public summary route", () => {
     mocks.buildMemorySummarySearchQuery.mockReturnValue("summary query");
     mocks.fetchEmbedding.mockResolvedValue([0.1, 0.2]);
     mocks.createAnonymousAgent.mockReturnValue("agent");
-    mocks.searchMemory.mockResolvedValue([{ score: 1, payload: "result" }]);
+    mocks.searchMemory.mockResolvedValue(
+      Array.from({ length: 7 }, (_, index) => ({ score: 20 - index, payload: `result-${index}` })),
+    );
     mocks.buildMemorySummaryPrompt.mockReturnValue("prompt");
     mocks.callChatApi.mockResolvedValue("<answer>要約</answer>");
     mocks.extractAnswer.mockReturnValue("要約");
@@ -111,7 +114,19 @@ describe("public summary route", () => {
     expect(response.status).toBe(200);
     expect(payload.summary).toBe("要約");
     expect(payload.cached).toBe(false);
-    expect(mocks.buildMemorySummaryPrompt).toHaveBeenCalledWith("Skill Store", "desc", [{ score: 1, payload: "result" }], "ja-jp");
+    expect(mocks.searchMemory).toHaveBeenCalledWith("agent", "m1", [0.1, 0.2]);
+    expect(mocks.buildMemorySummaryPrompt).toHaveBeenCalledWith(
+      "Skill Store",
+      "desc",
+      [
+        { score: 20, payload: "result-0" },
+        { score: 19, payload: "result-1" },
+        { score: 18, payload: "result-2" },
+        { score: 17, payload: "result-3" },
+        { score: 16, payload: "result-4" },
+      ],
+      "ja-jp",
+    );
     expect(mocks.writeSummaryCache).toHaveBeenCalledTimes(1);
   });
 

@@ -9,7 +9,7 @@ import { resolveRemoteMcpEndpoint } from "@kinic/kinic-share";
 import { MemoryView } from "../../../components/memory-view";
 import { buildMemoryMetadataDescription, buildMemoryPageTitle } from "@kinic/kinic-share";
 import { MemoryTemporaryError } from "@/components/memory-temporary-error";
-import { resolvePublicMemory, toSharedRuntimeEnv } from "@/lib/public-memory";
+import { resolvePublicMemoryCached, toSharedRuntimeEnv } from "@/lib/public-memory";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,7 @@ export default async function MemoryPage({
   const { memoryId } = await params;
   const context = await getCloudflareContext({ async: true });
   const env = toSharedRuntimeEnv(context.env);
-  const state = await resolvePublicMemory(env, memoryId);
+  const state = await resolvePublicMemoryCached(env, memoryId);
 
   if (state.kind === "invalid") {
     notFound();
@@ -49,7 +49,7 @@ export async function generateMetadata({
   const { memoryId } = await params;
   const context = await getCloudflareContext({ async: true });
   const env = toSharedRuntimeEnv(context.env);
-  const state = await resolvePublicMemory(env, memoryId);
+  const state = await resolvePublicMemoryCached(env, memoryId);
 
   if (state.kind !== "accessible") {
     return {};

@@ -33,6 +33,7 @@ describe("prompt helpers", () => {
     expect(prompt).toContain("&lt;query&gt;");
     expect(prompt).toContain("&lt;doc&gt;unsafe&lt;/doc&gt;");
     expect(prompt).not.toContain("<doc>unsafe</doc>");
+    expect(prompt).not.toContain("<full_document>");
     expect(prompt).toContain("Japanese");
   });
 

@@ -6,7 +6,6 @@ const MAX_QUERY_LEN = 150;
 const MAX_RESULTS = 5;
 const MAX_HITS_PER_DOC = 6;
 const MAX_HIT_LEN = 600;
-const MAX_FULL_LEN = 4096;
 const SUMMARY_QUERY = "overview summary main topics purpose contents";
 
 export type PromptSearchHit = {
@@ -43,16 +42,6 @@ export function buildAskAiPrompt(
         })
         .join("\n\n")
     : '<doc index="1"><url></url><title></title><hits><hit index="0">(no hits)</hit></hits></doc>';
-  const fullDocument = escapeXml(
-    clip(
-      docs
-        .flatMap((doc) => doc.hits.slice(0, MAX_HITS_PER_DOC))
-        .map((hit) => hit.content)
-        .join("\n"),
-      MAX_FULL_LEN,
-    ),
-  );
-
   return `You are an excellent AI assistant that summarizes the content of documents found as search results.
 Summarize the main points concisely, taking into account their relevance to the user's search query.
 
@@ -72,11 +61,7 @@ ${escapeXml(clip(query, MAX_QUERY_LEN))}
 
 <docs>
 ${docsBlock}
-</docs>
-
-<full_document>
-${fullDocument}
-</full_document>`;
+</docs>`;
 }
 
 export function buildMemorySummarySearchQuery(name: string, description: string | null): string {

@@ -2,6 +2,7 @@
 // What: centralizes anonymous access probing and public-memory resolution.
 // Why: keep 403/404 semantics identical without exposing a separate detail API surface.
 
+import { cache } from "react";
 import {
   checkAnonymousAccess,
   createAnonymousAgent,
@@ -43,6 +44,22 @@ export async function resolvePublicMemory(env: SharedRuntimeEnv, memoryId: strin
     }
     throw error;
   }
+}
+
+const resolvePublicMemoryCachedInternal = cache(
+  async (memoryId: string, dfxNetwork: string | undefined, icHost: string | undefined): Promise<PublicMemoryState> =>
+    resolvePublicMemory(
+      {
+        DFX_NETWORK: dfxNetwork,
+        IC_HOST: icHost,
+      },
+      memoryId,
+    ),
+);
+
+export function resolvePublicMemoryCached(env: SharedRuntimeEnv, memoryId: string): Promise<PublicMemoryState> {
+  // Why: `generateMetadata()` と Page 本体が同一 request で同じ IC query を再実行しないようにする。
+  return resolvePublicMemoryCachedInternal(memoryId, env.DFX_NETWORK, env.IC_HOST);
 }
 
 export function toSharedRuntimeEnv(env: unknown): SharedRuntimeEnv {

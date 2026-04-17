@@ -6,13 +6,13 @@
 
 import { useEffect, useState, useTransition } from "react";
 import {
-  buildClaudeCodeMcpCommand,
-  buildPublicMemorySearchPrompt,
-  buildPublicMemoryShowPrompt,
+  buildChatGptMemoryPrompt,
+  buildChatGptPromptUrl,
   type MemoryShowResponse,
 } from "@kinic/kinic-share";
 import { Check, Copy } from "lucide-react";
-import { FaLinkedinIn, FaXTwitter } from "react-icons/fa6";
+import { FaDiscord, FaLinkedinIn, FaTelegram, FaXTwitter } from "react-icons/fa6";
+import { SiOpenai } from "react-icons/si";
 import { MemoryStat } from "@/components/memory-stat";
 import { MemorySummary } from "@/components/memory-summary";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -28,7 +28,7 @@ type ChatResponse = {
   context_count: number;
 };
 
-type CopyStatusKey = "endpoint" | "claude" | "show" | "search" | "share";
+type CopyStatusKey = "share" | "discord" | "chatgpt";
 
 export function MemoryView({
   initialMemory,
@@ -45,9 +45,8 @@ export function MemoryView({
   const [copyError, setCopyError] = useState("");
   const [currentUrl, setCurrentUrl] = useState("");
   const [isPending, startTransition] = useTransition();
-  const showPrompt = buildPublicMemoryShowPrompt(initialMemory.memory_id);
-  const searchPrompt = buildPublicMemorySearchPrompt(initialMemory.memory_id);
-  const claudeCommand = mcpEndpoint ? buildClaudeCodeMcpCommand(mcpEndpoint) : null;
+  const chatGptPrompt = buildChatGptMemoryPrompt(initialMemory.memory_id);
+  const chatGptUrl = buildChatGptPromptUrl(chatGptPrompt);
   const shareLinks = buildShareLinks(currentUrl, initialMemory.name, initialMemory.description);
 
   useEffect(() => {
@@ -90,14 +89,15 @@ export function MemoryView({
     }
   }
 
+  function openInChatGpt() {
+    void copyText("chatgpt", chatGptPrompt);
+    window.open(chatGptUrl, "_blank", "noopener,noreferrer");
+  }
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 pb-20 pt-6 md:px-6 md:pb-24">
-      <section className="hero-wash rounded-[32px] border border-border px-6 py-8 md:px-10 md:py-12">
+    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 pb-16 pt-4 md:px-6 md:pb-20">
+      <section className="hero-wash rounded-[32px] border border-border px-6 py-7 md:px-10 md:py-10">
         <div className="space-y-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variant="outline">Public Memory</Badge>
-            <Badge variant="secondary">Read-only</Badge>
-          </div>
           <div className="space-y-4">
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
               Memory Name
@@ -124,8 +124,7 @@ export function MemoryView({
         <Card>
           <CardHeader className="gap-3">
             <Badge variant="secondary" className="w-fit">Ask</Badge>
-            <CardTitle>Send a read-only question to the public memory.</CardTitle>
-            <CardDescription>Collect relevant context and return only a summarized answer.</CardDescription>
+            <CardTitle>Send a question to the memory.</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <Textarea
@@ -166,17 +165,27 @@ export function MemoryView({
           <Card className="shadow-none">
             <CardHeader className="gap-3">
               <Badge variant="secondary" className="w-fit">Share</Badge>
-              <CardTitle>Share this memory.</CardTitle>
-              <CardDescription>Post this page to social networks or copy the URL.</CardDescription>
+              <CardTitle className="font-normal">Share this memory anywhere.</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-3">
-                <ShareLink href={shareLinks.x} label="Share on X" className="hover:!text-zinc-500 active:!text-zinc-500 focus-visible:!text-zinc-500">
+                <ShareLink href={shareLinks.x} label="Share on X" className="!text-zinc-900 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
                   <FaXTwitter className="size-4" />
                 </ShareLink>
-                <ShareLink href={shareLinks.linkedin} label="Share on LinkedIn" className="hover:!text-sky-700 active:!text-sky-700 focus-visible:!text-sky-700">
+                <ShareLink href={shareLinks.linkedin} label="Share on LinkedIn" className="!text-sky-700 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
                   <FaLinkedinIn className="size-4" />
                 </ShareLink>
+                <ShareLink href={shareLinks.telegram} label="Share on Telegram" className="!text-sky-500 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
+                  <FaTelegram className="size-4" />
+                </ShareLink>
+                <button
+                  type="button"
+                  aria-label="Copy share URL for Discord"
+                  onClick={() => copyText("discord", currentUrl || `/m/${initialMemory.memory_id}`)}
+                  className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-indigo-500 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted hover:!text-foreground active:!text-foreground focus-visible:!text-foreground"
+                >
+                  {copyStatus === "discord" ? <Check className="size-4" /> : <FaDiscord className="size-4" />}
+                </button>
                 <ShareIconButton
                   copied={copyStatus === "share"}
                   label="Copy share URL"
@@ -189,68 +198,24 @@ export function MemoryView({
           {mcpEndpoint ? (
             <Card className="shadow-none">
               <CardHeader className="gap-3">
-                <Badge variant="secondary" className="w-fit">MCP</Badge>
-                <CardTitle>Reuse this public memory from an MCP client.</CardTitle>
-                <CardDescription>Read-only endpoint, Claude Code command, and copyable prompts for this memory.</CardDescription>
+                <Badge variant="secondary" className="w-fit">ChatGPT</Badge>
+                <CardTitle className="font-normal">Use this memory in ChatGPT.</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4 text-sm leading-7 text-muted-foreground">
-                <div className="rounded-2xl border border-border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Endpoint</p>
-                      <p className="mt-1 text-sm text-foreground">Use this URL in any generic MCP client.</p>
-                    </div>
-                    <CopyButton onClick={() => copyText("endpoint", mcpEndpoint)} copied={copyStatus === "endpoint"}>
-                      {copyLabel("endpoint")}
-                    </CopyButton>
-                  </div>
-                  <code className="mt-3 block break-all rounded-2xl border border-border bg-background px-4 py-3 font-mono text-[12px] text-foreground">
-                    {mcpEndpoint}
-                  </code>
+              <CardContent className="text-sm leading-7 text-muted-foreground">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    aria-label="Open in ChatGPT"
+                    onClick={openInChatGpt}
+                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted"
+                  >
+                    <SiOpenai className="size-5" />
+                  </button>
+                  <p className="text-sm leading-6 text-foreground">
+                    Requires the Kinic app in ChatGPT.
+                  </p>
                 </div>
 
-                {claudeCommand ? (
-                  <div className="rounded-2xl border border-border bg-muted/20 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Claude Code</p>
-                        <p className="mt-1 text-sm text-foreground">Add the remote MCP server with one command.</p>
-                      </div>
-                      <CopyButton onClick={() => copyText("claude", claudeCommand)} copied={copyStatus === "claude"}>
-                        {copyLabel("claude")}
-                      </CopyButton>
-                    </div>
-                    <code className="mt-3 block break-all rounded-2xl border border-border bg-background px-4 py-3 font-mono text-[12px] text-foreground">
-                      {claudeCommand}
-                    </code>
-                  </div>
-                ) : null}
-
-                <div className="rounded-2xl border border-border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Example Prompts</p>
-                      <p className="mt-1 text-sm text-foreground">Prompt an agent to inspect or search this memory by id.</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 space-y-3">
-                    <PromptRow
-                      prompt={showPrompt}
-                      copied={copyStatus === "show"}
-                      onCopy={() => copyText("show", showPrompt)}
-                    />
-                    <PromptRow
-                      prompt={searchPrompt}
-                      copied={copyStatus === "search"}
-                      onCopy={() => copyText("search", searchPrompt)}
-                    />
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-dashed border-border bg-background px-4 py-4">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Contract</p>
-                  <p className="mt-2 text-sm text-foreground">The shared surface and MCP endpoint stay anonymous and read-only. Owner authentication and write permissions do not belong here.</p>
-                </div>
                 {copyError ? <p className="text-sm text-muted-foreground">{copyError}</p> : null}
               </CardContent>
             </Card>
@@ -258,27 +223,6 @@ export function MemoryView({
         </div>
       </section>
     </main>
-  );
-}
-
-function PromptRow({
-  prompt,
-  copied,
-  onCopy,
-}: {
-  prompt: string;
-  copied: boolean;
-  onCopy: () => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-background p-3">
-      <div className="flex items-start justify-between gap-3">
-        <code className="block break-all font-mono text-[12px] leading-6 text-foreground">{prompt}</code>
-        <CopyButton onClick={onCopy} copied={copied}>
-          {copied ? "Copied" : "Copy"}
-        </CopyButton>
-      </div>
-    </div>
   );
 }
 
@@ -370,6 +314,7 @@ function buildShareLinks(url: string, title: string, description: string | null)
   return {
     x: `https://twitter.com/intent/tweet?url=${encodedUrl}&text=${encodedTitle}`,
     linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
+    telegram: `https://t.me/share/url?url=${encodedUrl}&text=${encodedTitle}`,
   };
 }
 

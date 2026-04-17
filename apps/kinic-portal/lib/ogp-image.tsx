@@ -5,20 +5,17 @@
 import type { CSSProperties, ReactElement } from "react";
 import {
   buildMemoryOgpCardModel,
-  type MemoryOgpSearchCard,
   DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION,
   type MemoryOgpInput,
 } from "@kinic/kinic-share";
 
 type OgpImageProps = {
   memory?: MemoryOgpInput;
-  searchCards?: MemoryOgpSearchCard[];
 };
 
-export function renderOgpImage({ memory, searchCards = [] }: OgpImageProps): ReactElement {
+export function renderOgpImage({ memory }: OgpImageProps): ReactElement {
   const card = buildMemoryOgpCardModel(memory ?? {});
   const badges = memory ? ["Public Memory", "Read-only"] : ["Kinic", "Portal"];
-  const hasSearchCards = searchCards.length > 0;
 
   return (
     <div style={frameStyle}>
@@ -41,27 +38,6 @@ export function renderOgpImage({ memory, searchCards = [] }: OgpImageProps): Rea
             <div style={titleStyle}>{card.title}</div>
             <div style={descriptionStyle}>{card.description || DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION}</div>
           </div>
-          {hasSearchCards ? (
-            <div style={searchPanelStyle}>
-              <div style={searchEyebrowStyle}>Actual Search Hits</div>
-              <div style={searchStackStyle}>
-                {searchCards.map((item, index) => (
-                  <div
-                    key={`${item.tag}-${index}`}
-                    style={{
-                      ...searchCardStyle,
-                      top: index * 28,
-                      left: index * 18,
-                      opacity: 1 - index * 0.14,
-                    }}
-                  >
-                    <div style={searchTagStyle}>{item.tag}</div>
-                    <div style={searchExcerptStyle}>{item.excerpt}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
 
         <div style={statsGridStyle}>
@@ -196,57 +172,6 @@ const descriptionStyle: CSSProperties = {
 const statsGridStyle: CSSProperties = {
   display: "flex",
   gap: 16,
-};
-
-const searchPanelStyle: CSSProperties = {
-  width: 360,
-  display: "flex",
-  flexDirection: "column",
-  gap: 14,
-};
-
-const searchEyebrowStyle: CSSProperties = {
-  fontSize: 16,
-  letterSpacing: "0.16em",
-  textTransform: "uppercase",
-  color: "rgba(13, 13, 13, 0.42)",
-  textAlign: "right",
-};
-
-const searchStackStyle: CSSProperties = {
-  position: "relative",
-  height: 236,
-};
-
-const searchCardStyle: CSSProperties = {
-  position: "absolute",
-  width: 320,
-  minHeight: 132,
-  display: "flex",
-  flexDirection: "column",
-  gap: 12,
-  padding: "18px 20px",
-  borderRadius: 24,
-  border: "1px solid rgba(13, 13, 13, 0.06)",
-  background: "rgba(255, 255, 255, 0.94)",
-  boxShadow: "0 12px 32px rgba(13, 13, 13, 0.04)",
-};
-
-const searchTagStyle: CSSProperties = {
-  fontSize: 14,
-  letterSpacing: "0.14em",
-  textTransform: "uppercase",
-  color: "rgba(13, 13, 13, 0.46)",
-};
-
-const searchExcerptStyle: CSSProperties = {
-  display: "-webkit-box",
-  overflow: "hidden",
-  fontSize: 22,
-  lineHeight: 1.4,
-  color: "rgba(13, 13, 13, 0.72)",
-  WebkitBoxOrient: "vertical",
-  WebkitLineClamp: 3,
 };
 
 const statCardStyle: CSSProperties = {

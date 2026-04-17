@@ -26,7 +26,7 @@ The Kinic Portal remote MCP is an anonymous read-only surface running on a Cloud
 - `public_memory_search`
   - input: `{ "memory_id": "aaaaa-aa", "query": "...", "top_k": 10 }`
   - `top_k` is optional, defaults to `10`, and accepts `1` through `50`
-  - Generates embeddings on the server, then searches stored contents in the selected memory
+  - Generates embeddings on the server, then requests bounded search results from the selected memory canister
   - Does not inspect the MCP server implementation
 
 ## External Clients

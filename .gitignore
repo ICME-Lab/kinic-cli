@@ -7,6 +7,7 @@ target/
 
 # environment variables
 .env
+.env.local
 .dev.vars
 .dev.vars.*
 

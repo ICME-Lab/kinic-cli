@@ -20,6 +20,7 @@ Kinic Portal is the public read-only sharing surface built on OpenNext and Cloud
 - Public details use SSR at `/m/[memoryId]` as the only entrypoint
 - Public summarized answers stay limited to the `chat` read-only server API
 - Public AI summaries below the description are generated on demand and cached in Cloudflare KV
+- Public chat, summary, and OGP routes request bounded canister search results instead of reading full result sets
 - Anonymous denial on the page renders the same UI with HTTP `403`, while chat returns `403 {"error":"anonymous access denied"}`
 - Future owner or authenticated actions are expected to call the canister directly from the client principal
 - Remote MCP also stays anonymous and read-only, with the caller providing `memory_id` on every request and permission failures surfacing as MCP tool errors
@@ -90,6 +91,7 @@ Remote MCP:
 - Local development should supply it through `.dev.vars`
 - Exposed tools: `public_memory_help`, `public_memory_show`, `public_memory_search`
 - `public_memory_search` defaults to 10 results and accepts `top_k` from 1 through 50
+- Portal routes use fixed canister search caps: chat `5`, summary `5`, OGP `3`
 - Detailed spec: `apps/kinic-portal/docs/remote-mcp.md`
 
 ## Notes

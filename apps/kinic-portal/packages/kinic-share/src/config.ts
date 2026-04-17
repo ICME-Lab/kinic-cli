@@ -5,7 +5,10 @@
 export const DEFAULT_MAINNET_HOST = "https://ic0.app";
 export const DEFAULT_LOCAL_HOST = "http://127.0.0.1:4943";
 export const DEFAULT_VECTOR_DIM = 1024n;
-export const DEFAULT_SUMMARY_CACHE_TTL_SECONDS = 60 * 60 * 24;
+export const DEFAULT_SUMMARY_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7;
+export const PUBLIC_MEMORY_CHAT_TOP_K = 5;
+export const PUBLIC_MEMORY_SUMMARY_TOP_K = 5;
+export const PUBLIC_MEMORY_OGP_TOP_K = 3;
 export const DEFAULT_REMOTE_MCP_SEARCH_TOP_K = 10;
 export const MAX_REMOTE_MCP_SEARCH_TOP_K = 50;
 export const ANONYMOUS_PRINCIPAL = "2vxsx-fae";

@@ -1,15 +1,40 @@
 // Where: remote MCP Worker contract tests.
-// What: fixes the help payload and tool descriptions exposed to MCP clients.
-// Why: LLM clients must not confuse memory content search with MCP server inspection.
+// What: verifies fixed tool guidance and bounded search shaping.
+// Why: remote MCP must keep public search bounded without changing canister search semantics.
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  createAnonymousAgent: vi.fn(),
+  fetchEmbedding: vi.fn(),
+  searchMemory: vi.fn(),
+}));
+
+vi.mock("@kinic/kinic-share", async () => {
+  const actual = await vi.importActual<typeof import("@kinic/kinic-share")>("@kinic/kinic-share");
+  return {
+    ...actual,
+    createAnonymousAgent: mocks.createAnonymousAgent,
+    fetchEmbedding: mocks.fetchEmbedding,
+    searchMemory: mocks.searchMemory,
+  };
+});
+
 import {
   PUBLIC_MEMORY_HELP_OUTPUT,
   PUBLIC_MEMORY_SEARCH_DESCRIPTION,
   REMOTE_MCP_TOOL_NAMES,
+  searchOneMemory,
 } from "./src/index";
 
 describe("remote MCP tool guidance", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.createAnonymousAgent.mockReturnValue("agent");
+    mocks.fetchEmbedding.mockResolvedValue([0.1, 0.2]);
+    mocks.searchMemory.mockResolvedValue([{ score: 0.9, payload: "alpha" }]);
+  });
+
   it("returns fixed help output that explains memory search boundaries", () => {
     expect(PUBLIC_MEMORY_HELP_OUTPUT).toEqual({
       server: "kinic-remote-mcp",
@@ -46,5 +71,25 @@ describe("remote MCP tool guidance", () => {
   it("warns that search reads stored contents, not server implementation", () => {
     expect(PUBLIC_MEMORY_SEARCH_DESCRIPTION).toContain("stored contents");
     expect(PUBLIC_MEMORY_SEARCH_DESCRIPTION).toContain("does not inspect the MCP server implementation");
+  });
+
+  it("truncates shared search results to the requested top_k", async () => {
+    mocks.searchMemory.mockResolvedValue([
+      { score: 0.9, payload: "alpha" },
+      { score: 0.8, payload: "beta" },
+      { score: 0.7, payload: "gamma" },
+    ]);
+
+    await expect(
+      searchOneMemory({ IC_HOST: "https://ic0.app" }, "aaaaa-aa", "vector search", 2),
+    ).resolves.toEqual({
+      memory_id: "aaaaa-aa",
+      top_k: 2,
+      items: [
+        { score: 0.9, payload: "alpha" },
+        { score: 0.8, payload: "beta" },
+      ],
+    });
+    expect(mocks.searchMemory).toHaveBeenCalledWith("agent", "aaaaa-aa", [0.1, 0.2]);
   });
 });

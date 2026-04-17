@@ -5,6 +5,7 @@
 import { DEFAULT_REMOTE_MCP_SEARCH_TOP_K } from "./config";
 
 const DEFAULT_SEARCH_QUERY = "vector search";
+const CHATGPT_ORIGIN = "https://chatgpt.com/";
 
 export function resolveRemoteMcpEndpoint(origin: string | undefined): string | null {
   const normalized = origin?.trim();
@@ -35,4 +36,21 @@ export function buildPublicMemorySearchPrompt(
   query: string = DEFAULT_SEARCH_QUERY,
 ): string {
   return `Use public_memory_search to search memory_id ${memoryId} for "${query}" with top_k ${DEFAULT_REMOTE_MCP_SEARCH_TOP_K}`;
+}
+
+export function buildChatGptMemoryPrompt(memoryId: string): string {
+  return [
+    "@Kinic-Memory",
+    "",
+    "Use the Kinic MCP app/tools if available.",
+    `First call public_memory_show with memory_id ${memoryId}.`,
+    `Then use public_memory_search with memory_id ${memoryId} when answering follow-up questions.`,
+    "Answer only from this public memory.",
+  ].join("\n");
+}
+
+export function buildChatGptPromptUrl(prompt: string): string {
+  const url = new URL(CHATGPT_ORIGIN);
+  url.searchParams.set("q", prompt);
+  return url.toString();
 }

@@ -3,6 +3,7 @@
 // Why: public memory pages need a concise overview without paying the AI cost on every visit.
 
 import {
+  PUBLIC_MEMORY_SUMMARY_TOP_K,
   TRANSIENT_QUERY_ERROR,
   buildMemorySummaryPrompt,
   buildMemorySummarySearchQuery,
@@ -53,7 +54,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ memo
     const summaryQuery = buildMemorySummarySearchQuery(state.memory.name, state.memory.description);
     const embedding = await fetchEmbedding(summaryQuery, env);
     const agent = createAnonymousAgent(env);
-    const hits = await searchMemory(agent, memoryId, embedding);
+    const hits = (await searchMemory(agent, memoryId, embedding))
+      .slice(0, PUBLIC_MEMORY_SUMMARY_TOP_K);
     const prompt = buildMemorySummaryPrompt(state.memory.name, state.memory.description, hits, language);
     const summary = extractAnswer(await callChatApi(prompt, env)).trim();
     if (!summary) {

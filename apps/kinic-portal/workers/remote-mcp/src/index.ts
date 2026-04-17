@@ -155,7 +155,7 @@ function textContent(text: string): { type: "text"; text: string } {
   return { type: "text", text };
 }
 
-async function searchOneMemory(
+export async function searchOneMemory(
   env: SharedRuntimeEnv,
   memoryId: string,
   query: string,
@@ -163,11 +163,11 @@ async function searchOneMemory(
 ) {
   const agent = createAnonymousAgent(env);
   const embedding = await fetchEmbedding(query, env);
-  const items = await searchMemory(agent, memoryId, embedding);
+  const items = (await searchMemory(agent, memoryId, embedding)).slice(0, topK);
   return {
     memory_id: memoryId,
     top_k: topK,
-    items: items.slice(0, topK),
+    items,
   };
 }
 
