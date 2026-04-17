@@ -6,6 +6,7 @@ import {
   checkAnonymousAccess,
   createAnonymousAgent,
   getPublicMemory,
+  isValidPrincipalText,
   isAnonymousAccessError,
   type MemoryShowResponse,
   type SharedRuntimeEnv,
@@ -13,9 +14,13 @@ import {
 
 export type PublicMemoryState =
   | { kind: "accessible"; memory: MemoryShowResponse }
+  | { kind: "invalid"; error: "invalid memory id" }
   | { kind: "denied"; error: "anonymous access denied" };
 
 export async function resolvePublicMemory(env: SharedRuntimeEnv, memoryId: string): Promise<PublicMemoryState> {
+  if (!isValidPrincipalText(memoryId)) {
+    return { kind: "invalid", error: "invalid memory id" };
+  }
   const agent = createAnonymousAgent(env);
   const access = await checkAnonymousAccess(agent, memoryId);
   if (!access.accessible) {

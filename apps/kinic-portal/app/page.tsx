@@ -9,6 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
+const EXAMPLE_MEMORY_ID = "ywega-gaaaa-aaaak-apg6q-cai";
+
 export default function HomePage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 pb-20 pt-6 md:px-6 md:pb-24">
@@ -29,7 +31,7 @@ export default function HomePage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Link href="/m/aaaaa-aa" className={buttonVariants({ className: "min-w-36" })}>
+            <Link href={`/m/${EXAMPLE_MEMORY_ID}`} className={buttonVariants({ className: "min-w-36" })}>
               Example Memory
             </Link>
             <Link
@@ -43,7 +45,7 @@ export default function HomePage() {
             <CardContent className="flex flex-wrap items-center justify-center gap-3 px-5 py-3">
               <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Example URL</span>
               <Separator orientation="vertical" className="hidden h-4 sm:block" />
-              <code className="font-mono text-sm text-foreground">/m/aaaaa-aa</code>
+              <code className="font-mono text-sm text-foreground">/m/{EXAMPLE_MEMORY_ID}</code>
             </CardContent>
           </Card>
         </div>

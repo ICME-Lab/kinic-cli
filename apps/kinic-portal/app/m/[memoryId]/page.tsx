@@ -4,7 +4,7 @@
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { Metadata } from "next";
-import { forbidden } from "next/navigation";
+import { forbidden, notFound } from "next/navigation";
 import { resolveRemoteMcpEndpoint } from "@kinic/kinic-share";
 import { MemoryView } from "../../../components/memory-view";
 import { buildMemoryMetadataDescription, buildMemoryPageTitle } from "@kinic/kinic-share";
@@ -22,6 +22,9 @@ export default async function MemoryPage({
   const env = toSharedRuntimeEnv(context.env);
   const state = await resolvePublicMemory(env, memoryId);
 
+  if (state.kind === "invalid") {
+    notFound();
+  }
   if (state.kind === "denied") {
     forbidden();
   }

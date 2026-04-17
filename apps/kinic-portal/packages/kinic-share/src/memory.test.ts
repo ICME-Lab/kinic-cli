@@ -3,7 +3,7 @@
 // Why: Kinic portal now distinguishes 403 from 404 based on `get_name()` reachability and exposes a minimal remote MCP surface.
 
 import { describe, expect, it } from "vitest";
-import { isAnonymousAccessError, probeAnonymousAccess, summarizeMemory } from "./memory";
+import { isAnonymousAccessError, isValidPrincipalText, probeAnonymousAccess, summarizeMemory } from "./memory";
 
 describe("memory access helpers", () => {
   it("marks anonymous access as allowed when get_name succeeds", async () => {
@@ -33,6 +33,11 @@ describe("memory access helpers", () => {
     expect(isAnonymousAccessError(new Error('Call failed: "Message": "Permission denied"'))).toBe(true);
     expect(isAnonymousAccessError(new Error('Call failed: "Message": "Invalid user"'))).toBe(true);
     expect(isAnonymousAccessError(new Error("connection reset"))).toBe(false);
+  });
+
+  it("validates principal text before actor construction", () => {
+    expect(isValidPrincipalText("ywega-gaaaa-aaaak-apg6q-cai")).toBe(true);
+    expect(isValidPrincipalText("not-a-principal")).toBe(false);
   });
 
   it("reduces memory metadata to the public remote summary shape", () => {

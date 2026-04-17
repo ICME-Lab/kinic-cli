@@ -68,6 +68,15 @@ export type AnonymousAccessResult =
   | { accessible: true }
   | { accessible: false; error: "anonymous access denied" };
 
+export function isValidPrincipalText(value: string): boolean {
+  try {
+    Principal.fromText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function isAnonymousAccessError(error: unknown): boolean {
   const message = extractErrorMessage(error).toLowerCase();
   return message.includes("permission denied") || message.includes("invalid user");

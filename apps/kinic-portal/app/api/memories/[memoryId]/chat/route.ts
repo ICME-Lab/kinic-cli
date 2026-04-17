@@ -25,6 +25,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
   const context = await getCloudflareContext({ async: true });
   const env = toSharedRuntimeEnv(context.env);
   const state = await resolvePublicMemory(env, memoryId);
+  if (state.kind === "invalid") {
+    return Response.json({ error: state.error }, { status: 400 });
+  }
   if (state.kind === "denied") {
     return Response.json({ error: state.error }, { status: 403 });
   }
