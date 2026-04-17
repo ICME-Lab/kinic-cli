@@ -91,4 +91,12 @@ describe("memory opengraph image route", () => {
       },
     });
   });
+
+  it("normalizes the default OGP cache language before reading summary cache", async () => {
+    mocks.readSummaryCache.mockResolvedValue(null);
+
+    await Image({ params: Promise.resolve({ memoryId: "m1" }) });
+
+    expect(mocks.buildSummaryCacheKey).toHaveBeenCalledWith("m1", "0.2.5", "en");
+  });
 });

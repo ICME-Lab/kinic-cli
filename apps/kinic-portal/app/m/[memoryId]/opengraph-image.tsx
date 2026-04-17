@@ -5,7 +5,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ImageResponse } from "next/og";
 import { renderOgpImage } from "@/lib/ogp-image";
-import { DEFAULT_SUMMARY_LANGUAGE } from "@/lib/public-summary";
+import { DEFAULT_SUMMARY_LANGUAGE, normalizeSummaryLanguage } from "@/lib/public-summary";
 import { resolvePublicMemory, toSharedRuntimeEnv } from "@/lib/public-memory";
 import { buildSummaryCacheKey, getSummaryCache, readSummaryCache } from "@/lib/summary-cache";
 
@@ -51,7 +51,7 @@ async function loadCachedSummary(
 ): Promise<string | null> {
   try {
     const cache = getSummaryCache(env);
-    const key = buildSummaryCacheKey(memoryId, version, DEFAULT_SUMMARY_LANGUAGE);
+    const key = buildSummaryCacheKey(memoryId, version, normalizeSummaryLanguage(DEFAULT_SUMMARY_LANGUAGE));
     return (await readSummaryCache(cache, key))?.summary ?? null;
   } catch {
     return null;

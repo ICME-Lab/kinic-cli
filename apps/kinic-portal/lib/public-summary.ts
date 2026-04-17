@@ -28,5 +28,5 @@ export function normalizeSummaryLanguage(value: string | null | undefined): stri
     ?.replaceAll("_", "-")
     ?.replace(/[^a-z0-9-]/g, "");
 
-  return candidate || DEFAULT_SUMMARY_LANGUAGE;
+  return candidate?.split("-", 1)[0] || DEFAULT_SUMMARY_LANGUAGE;
 }

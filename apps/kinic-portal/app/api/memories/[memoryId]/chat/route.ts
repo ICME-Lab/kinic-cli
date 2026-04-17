@@ -39,11 +39,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
   }
 
   const agent = createAnonymousAgent(env);
-  const embedding = await fetchEmbedding(query, env);
-  let hits;
   try {
-    hits = await searchMemory(agent, memoryId, embedding);
-    hits = hits.slice(0, PUBLIC_MEMORY_CHAT_TOP_K);
+    const embedding = await fetchEmbedding(query, env);
+    const hits = (await searchMemory(agent, memoryId, embedding)).slice(0, PUBLIC_MEMORY_CHAT_TOP_K);
+    const prompt = buildAskAiPrompt(query, hits, body.language?.trim() || "en");
+    const rawResponse = await callChatApi(prompt, env);
+
+    return Response.json({
+      memory_id: memoryId,
+      query,
+      context_count: hits.length,
+      answer: extractAnswer(rawResponse),
+    });
   } catch (error) {
     if (isAnonymousAccessError(error)) {
       return Response.json({ error: "anonymous access denied" }, { status: 403 });
@@ -51,17 +58,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
     if (isTransientQueryError(error)) {
       return Response.json({ error: TRANSIENT_QUERY_ERROR }, { status: 503 });
     }
-    throw error;
+    return Response.json({ error: "chat unavailable right now" }, { status: 502 });
   }
-  const prompt = buildAskAiPrompt(query, hits, body.language?.trim() || "en");
-  const rawResponse = await callChatApi(prompt, env);
-
-  return Response.json({
-    memory_id: memoryId,
-    query,
-    context_count: hits.length,
-    answer: extractAnswer(rawResponse),
-  });
 }
 
 function parseObject(value: unknown): { query?: string; language?: string } {

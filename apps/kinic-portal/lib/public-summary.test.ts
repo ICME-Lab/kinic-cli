@@ -6,18 +6,24 @@ describe("public summary language helpers", () => {
     const request = new Request("https://portal.kinic.io/api/memories/x/summary?language=ja-JP", {
       headers: { "accept-language": "en-US,en;q=0.9" },
     });
-    expect(resolveSummaryLanguage(request)).toBe("ja-jp");
+    expect(resolveSummaryLanguage(request)).toBe("ja");
   });
 
   it("falls back to the first accept-language entry", () => {
     const request = new Request("https://portal.kinic.io/api/memories/x/summary", {
       headers: { "accept-language": "ko-KR,ko;q=0.9,en;q=0.8" },
     });
-    expect(resolveSummaryLanguage(request)).toBe("ko-kr");
+    expect(resolveSummaryLanguage(request)).toBe("ko");
   });
 
   it("uses english when the input is empty", () => {
     expect(normalizeSummaryLanguage("")).toBe(DEFAULT_SUMMARY_LANGUAGE);
     expect(normalizeSummaryLanguage(undefined)).toBe(DEFAULT_SUMMARY_LANGUAGE);
+  });
+
+  it("collapses regional english variants to one cache language", () => {
+    expect(normalizeSummaryLanguage("en-US")).toBe("en");
+    expect(normalizeSummaryLanguage("en-GB")).toBe("en");
+    expect(normalizeSummaryLanguage("en")).toBe("en");
   });
 });

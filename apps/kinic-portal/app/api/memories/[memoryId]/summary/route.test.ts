@@ -87,7 +87,7 @@ describe("public summary route", () => {
       updatedAt: "2026-04-17T00:00:00.000Z",
     });
     expect(mocks.fetchEmbedding).not.toHaveBeenCalled();
-    expect(mocks.buildSummaryCacheKey).toHaveBeenCalledWith("m1", "0.2.5", "ja-jp");
+    expect(mocks.buildSummaryCacheKey).toHaveBeenCalledWith("m1", "0.2.5", "ja");
   });
 
   it("generates and stores uncached summaries in the requested language", async () => {
@@ -125,7 +125,7 @@ describe("public summary route", () => {
         { score: 17, payload: "result-3" },
         { score: 16, payload: "result-4" },
       ],
-      "ja-jp",
+      "ja",
     );
     expect(mocks.writeSummaryCache).toHaveBeenCalledTimes(1);
   });

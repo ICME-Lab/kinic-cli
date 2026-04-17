@@ -106,4 +106,68 @@ describe("public chat route", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "query is required" });
   });
+
+  it("returns 502 when embedding generation fails", async () => {
+    mocks.fetchEmbedding.mockRejectedValueOnce(new Error("embedding request failed with status 503"));
+
+    const response = await POST(
+      new Request("https://portal.kinic.io/api/memories/m1/chat", {
+        method: "POST",
+        body: JSON.stringify({ query: "what changed?" }),
+      }),
+      { params: Promise.resolve({ memoryId: "m1" }) },
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "chat unavailable right now" });
+  });
+
+  it("returns 502 when chat completion fails", async () => {
+    mocks.callChatApi.mockRejectedValueOnce(new Error("chat request failed with status 502"));
+
+    const response = await POST(
+      new Request("https://portal.kinic.io/api/memories/m1/chat", {
+        method: "POST",
+        body: JSON.stringify({ query: "what changed?" }),
+      }),
+      { params: Promise.resolve({ memoryId: "m1" }) },
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "chat unavailable right now" });
+  });
+
+  it("returns 503 on transient upstream verification failures", async () => {
+    const transientError = new Error("Invalid certificate: Invalid signature from replica");
+    mocks.fetchEmbedding.mockRejectedValueOnce(transientError);
+    mocks.isTransientQueryError.mockImplementation((error: unknown) => error === transientError);
+
+    const response = await POST(
+      new Request("https://portal.kinic.io/api/memories/m1/chat", {
+        method: "POST",
+        body: JSON.stringify({ query: "what changed?" }),
+      }),
+      { params: Promise.resolve({ memoryId: "m1" }) },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: "temporary network error" });
+  });
+
+  it("returns 403 when upstream rejects anonymous access", async () => {
+    const permissionError = new Error('Call failed: "Message": "Permission denied"');
+    mocks.searchMemory.mockRejectedValueOnce(permissionError);
+    mocks.isAnonymousAccessError.mockImplementation((error: unknown) => error === permissionError);
+
+    const response = await POST(
+      new Request("https://portal.kinic.io/api/memories/m1/chat", {
+        method: "POST",
+        body: JSON.stringify({ query: "what changed?" }),
+      }),
+      { params: Promise.resolve({ memoryId: "m1" }) },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "anonymous access denied" });
+  });
 });
