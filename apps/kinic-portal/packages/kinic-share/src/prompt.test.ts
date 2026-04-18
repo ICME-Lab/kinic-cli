@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  PromptContractError,
   buildAskAiPrompt,
   buildMemorySummaryPrompt,
   buildMemorySummarySearchQuery,
@@ -28,12 +29,32 @@ describe("prompt helpers", () => {
     ).toBe("done");
   });
 
-  it("throws when the response has no answer tag", () => {
-    expect(() => extractAnswer("<thinking>hidden</thinking>visible")).toThrowError("missing <answer> tag");
+  it("returns plain text when the response has no answer tag", () => {
+    expect(extractAnswer("visible")).toBe("visible");
   });
 
-  it("throws when the answer tag is not closed", () => {
-    expect(() => extractAnswer("<answer>visible")).toThrowError("unclosed <answer> tag");
+  it("returns the normalized text when the answer tag is not closed", () => {
+    expect(extractAnswer("<answer>visible")).toBe("<answer>visible");
+  });
+
+  it("returns plain text from streamed chat chunks without answer tags", () => {
+    expect(
+      extractAnswer([
+        'data: {"content":"plain"}',
+        'data: {"content":" "}',
+        'data: {"content":"text"}',
+        'data: {"finish_reason":"stop"}',
+      ].join("\n")),
+    ).toBe("plain text");
+  });
+
+  it("throws when the model response is empty", () => {
+    expect(() => extractAnswer(" \n\t ")).toThrowError(PromptContractError);
+    expect(() => extractAnswer(" \n\t ")).toThrowError("empty model output");
+  });
+
+  it("throws when the tagged answer is empty", () => {
+    expect(() => extractAnswer("<answer>   </answer>")).toThrowError("empty model output");
   });
 
   it("escapes payloads inside the generated prompt", () => {
@@ -44,6 +65,7 @@ describe("prompt helpers", () => {
     expect(prompt).not.toContain("<full_document>");
     expect(prompt).not.toContain("<thinking>");
     expect(prompt).toContain("Japanese");
+    expect(prompt).toContain("Return only the final summary text");
   });
 
   it("builds a stable summary search query from memory metadata", () => {
@@ -65,6 +87,7 @@ describe("prompt helpers", () => {
     expect(prompt).toContain("2-3 sentences");
     expect(prompt).toContain("Do not exaggerate");
     expect(prompt).toContain("Answer in English");
+    expect(prompt).toContain("Return only the final summary text");
     expect(prompt).not.toContain("<thinking>");
   });
 });

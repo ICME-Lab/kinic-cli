@@ -4,6 +4,7 @@
 
 import {
   PUBLIC_MEMORY_SUMMARY_TOP_K,
+  PromptContractError,
   TRANSIENT_QUERY_ERROR,
   buildMemorySummaryPrompt,
   buildMemorySummarySearchQuery,
@@ -79,6 +80,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ memo
     }
     if (isTransientQueryError(error)) {
       return Response.json({ error: TRANSIENT_QUERY_ERROR }, { status: 503 });
+    }
+    if (error instanceof PromptContractError) {
+      console.warn("summary model output unusable", error.message);
     }
     return Response.json({ error: "summary unavailable right now" }, { status: 502 });
   }

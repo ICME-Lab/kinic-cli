@@ -53,11 +53,11 @@ export function buildAskAiPrompt(
 Summarize the main points concisely, taking into account their relevance to the user's search query.
 
 # Instructions
-- Write your final summary within the <answer>...</answer> tag.
 - The summary should be objective and grounded in the documents.
 - Focus on information related to <user_query>, especially considering the content in <docs>.
 - Limit the final summary to 140 words or less.
-- Answer in ${promptLanguageInstruction(language)} in <answer> tag. << IMPORTANT!!
+- Return only the final summary text with no XML tags, labels, or prefatory text.
+- Answer in ${promptLanguageInstruction(language)}. << IMPORTANT!!
 
 # Input
 
@@ -109,12 +109,12 @@ export function buildMemorySummaryPrompt(
 Summarize only what is supported by the memory metadata and retrieved content.
 
 # Instructions
-- Write the final summary within the <answer>...</answer> tag.
 - The final summary must be one short paragraph of 2-3 sentences.
 - Do not use bullet points.
 - Do not exaggerate, speculate, or add facts that are not present in the memory.
 - Mention the memory's purpose, main topics, and what kind of content it contains when supported by the evidence.
-- Answer in ${promptLanguageInstruction(language)} in the <answer> tag.
+- Return only the final summary text with no XML tags, labels, or prefatory text.
+- Answer in ${promptLanguageInstruction(language)}.
 
 # Input
 
@@ -135,15 +135,12 @@ export function extractAnswer(text: string): string {
   const normalized = normalizeChatResponse(text);
   const lower = normalized.toLowerCase();
   const start = lower.indexOf("<answer>");
-  if (start === -1) {
-    throw new PromptContractError("missing <answer> tag in model response");
+  const extracted = start === -1 ? normalized : extractTaggedAnswer(normalized, lower, start);
+  const answer = extracted.trim();
+  if (!answer) {
+    throw new PromptContractError("empty model output");
   }
-  const contentStart = start + "<answer>".length;
-  const end = lower.indexOf("</answer>", contentStart);
-  if (end === -1) {
-    throw new PromptContractError("unclosed <answer> tag in model response");
-  }
-  return normalized.slice(contentStart, end).trim();
+  return answer;
 }
 
 export function escapeXml(input: string): string {
@@ -207,6 +204,12 @@ function normalizeChatResponse(text: string): string {
     });
 
   return chunks.length > 0 ? chunks.join("") : text;
+}
+
+function extractTaggedAnswer(normalized: string, lower: string, start: number): string {
+  const contentStart = start + "<answer>".length;
+  const end = lower.indexOf("</answer>", contentStart);
+  return end === -1 ? normalized : normalized.slice(contentStart, end);
 }
 
 function parseRecord(value: unknown): Record<string, unknown> | null {

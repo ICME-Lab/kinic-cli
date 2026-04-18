@@ -3,8 +3,10 @@
 // Why: portal chat truncates search results server-side before prompt construction.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PromptContractError } from "@kinic/kinic-share";
 
 const mocks = vi.hoisted(() => ({
+  PromptContractError: class PromptContractError extends Error {},
   getCloudflareContext: vi.fn(),
   resolvePublicMemory: vi.fn(),
   toSharedRuntimeEnv: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock("@/lib/public-memory", () => ({
 
 vi.mock("@kinic/kinic-share", () => ({
   PUBLIC_MEMORY_CHAT_TOP_K: 5,
+  PromptContractError: mocks.PromptContractError,
   TRANSIENT_QUERY_ERROR: "temporary network error",
   buildAskAiPrompt: mocks.buildAskAiPrompt,
   callChatApi: mocks.callChatApi,
@@ -165,9 +168,31 @@ describe("public chat route", () => {
     await expect(response.json()).resolves.toEqual({ error: "chat unavailable right now" });
   });
 
-  it("returns 502 when the model response misses answer tags", async () => {
+  it("returns 200 when the model response is plain text", async () => {
+    mocks.callChatApi.mockResolvedValueOnce("plain answer");
+    mocks.extractAnswer.mockReturnValueOnce("plain answer");
+
+    const response = await POST(
+      new Request("https://portal.kinic.io/api/memories/m1/chat", {
+        method: "POST",
+        body: JSON.stringify({ query: "what changed?" }),
+      }),
+      { params: Promise.resolve({ memoryId: "m1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      memory_id: "m1",
+      query: "what changed?",
+      context_count: 1,
+      answer: "plain answer",
+    });
+  });
+
+  it("returns 502 when the model response is empty", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.extractAnswer.mockImplementationOnce(() => {
-      throw new Error("missing <answer> tag in model response");
+      throw new PromptContractError("empty model output");
     });
 
     const response = await POST(
@@ -180,6 +205,7 @@ describe("public chat route", () => {
 
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({ error: "chat unavailable right now" });
+    expect(warn).toHaveBeenCalledWith("chat model output unusable", "empty model output");
   });
 
   it("returns 503 on transient upstream verification failures", async () => {

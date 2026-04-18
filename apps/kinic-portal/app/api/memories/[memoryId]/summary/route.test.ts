@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PromptContractError } from "@kinic/kinic-share";
 
 const mocks = vi.hoisted(() => ({
+  PromptContractError: class PromptContractError extends Error {},
   getCloudflareContext: vi.fn(),
   resolvePublicMemory: vi.fn(),
   toSharedRuntimeEnv: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock("@/lib/summary-cache", () => ({
 
 vi.mock("@kinic/kinic-share", () => ({
   PUBLIC_MEMORY_SUMMARY_TOP_K: 5,
+  PromptContractError: mocks.PromptContractError,
   TRANSIENT_QUERY_ERROR: "temporary network error",
   buildMemorySummaryPrompt: mocks.buildMemorySummaryPrompt,
   buildMemorySummarySearchQuery: mocks.buildMemorySummarySearchQuery,
@@ -181,7 +184,7 @@ describe("public summary route", () => {
     expect(response.status).toBe(200);
   });
 
-  it("returns 502 and skips cache writes when the model response is malformed", async () => {
+  it("returns 200 and caches plain-text model responses", async () => {
     mocks.resolvePublicMemory.mockResolvedValue({
       kind: "accessible",
       memory: { memory_id: "m1", name: "Skill Store", description: "desc", version: "0.2.5" },
@@ -192,9 +195,33 @@ describe("public summary route", () => {
     mocks.createAnonymousAgent.mockReturnValue("agent");
     mocks.searchMemory.mockResolvedValue([{ score: 1, payload: "result" }]);
     mocks.buildMemorySummaryPrompt.mockReturnValue("prompt");
-    mocks.callChatApi.mockResolvedValue("<thinking>hidden</thinking>");
+    mocks.callChatApi.mockResolvedValue("summary");
+    mocks.extractAnswer.mockReturnValue("summary");
+
+    const response = await GET(new Request("https://portal.kinic.io/api/memories/m1/summary"), {
+      params: Promise.resolve({ memoryId: "m1" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ summary: "summary", cached: false });
+    expect(mocks.writeSummaryCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 502 and skips cache writes when the model response is empty", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.resolvePublicMemory.mockResolvedValue({
+      kind: "accessible",
+      memory: { memory_id: "m1", name: "Skill Store", description: "desc", version: "0.2.5" },
+    });
+    mocks.readSummaryCache.mockResolvedValue(null);
+    mocks.buildMemorySummarySearchQuery.mockReturnValue("summary query");
+    mocks.fetchEmbedding.mockResolvedValue([0.1, 0.2]);
+    mocks.createAnonymousAgent.mockReturnValue("agent");
+    mocks.searchMemory.mockResolvedValue([{ score: 1, payload: "result" }]);
+    mocks.buildMemorySummaryPrompt.mockReturnValue("prompt");
+    mocks.callChatApi.mockResolvedValue("   ");
     mocks.extractAnswer.mockImplementation(() => {
-      throw new Error("missing <answer> tag in model response");
+      throw new PromptContractError("empty model output");
     });
 
     const response = await GET(new Request("https://portal.kinic.io/api/memories/m1/summary"), {
@@ -204,6 +231,7 @@ describe("public summary route", () => {
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({ error: "summary unavailable right now" });
     expect(mocks.writeSummaryCache).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith("summary model output unusable", "empty model output");
   });
 
   it("preserves invalid, not_found, denied, and transient statuses", async () => {

@@ -4,6 +4,7 @@
 
 import {
   PUBLIC_MEMORY_CHAT_TOP_K,
+  PromptContractError,
   TRANSIENT_QUERY_ERROR,
   buildAskAiPrompt,
   callChatApi,
@@ -63,6 +64,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
     }
     if (isTransientQueryError(error)) {
       return Response.json({ error: TRANSIENT_QUERY_ERROR }, { status: 503 });
+    }
+    if (error instanceof PromptContractError) {
+      console.warn("chat model output unusable", error.message);
     }
     return Response.json({ error: "chat unavailable right now" }, { status: 502 });
   }
