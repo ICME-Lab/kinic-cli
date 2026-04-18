@@ -1,0 +1,43 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "jsx": "preserve",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "types": [
+      "./worker-configuration.d.ts",
+      "node"
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@kinic/kinic-share": [
+        "./packages/kinic-share/src/index.ts"
+      ],
+      "@kinic/kinic-share/*": [
+        "./packages/kinic-share/src/*"
+      ]
+    },
+    "incremental": true
+  },
+  "include": [
+    "next-env.d.ts",
+    ".next/types/**/*.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "worker-configuration.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
