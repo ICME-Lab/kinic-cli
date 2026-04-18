@@ -29,7 +29,10 @@ vi.mock("@dfinity/principal", () => ({
 
 import {
   isAnonymousAccessError,
+  isPublicMemoryNotFoundError,
   isTransientQueryError,
+  resolvePublicMemoryDetails,
+  resolvePublicMemorySummary,
   retryTransientQuery,
   TRANSIENT_QUERY_ERROR,
   isValidPrincipalText,
@@ -76,6 +79,17 @@ describe("memory access helpers", () => {
     ).resolves.toEqual({
       accessible: false,
       error: TRANSIENT_QUERY_ERROR,
+    });
+  });
+
+  it("maps missing or unsupported public memories to not_found during anonymous probe", async () => {
+    await expect(
+      probeAnonymousAccess(async () => {
+        throw new Error("has no query method 'get_name'");
+      }),
+    ).resolves.toEqual({
+      accessible: false,
+      error: "memory not found",
     });
   });
 
@@ -137,6 +151,26 @@ describe("memory access helpers", () => {
     ).rejects.toThrowError("connection reset");
   });
 
+  it("resolves invalid principal text before actor construction", async () => {
+    await expect(resolvePublicMemoryDetails(undefined!, "not-a-principal")).resolves.toEqual({
+      kind: "invalid",
+      error: "invalid memory id",
+    });
+  });
+
+  it("resolves unsupported canisters to not_found before metadata fetch", async () => {
+    mocks.createActor.mockReturnValue({
+      get_name: vi.fn(async () => {
+        throw new Error("query method does not exist");
+      }),
+    });
+
+    await expect(resolvePublicMemorySummary(undefined!, "aaaaa-aa")).resolves.toEqual({
+      kind: "not_found",
+      error: "memory not found",
+    });
+  });
+
   it("detects anonymous access permission errors", () => {
     expect(isAnonymousAccessError(new Error('Call failed: "Message": "Permission denied"'))).toBe(true);
     expect(isAnonymousAccessError(new Error('Call failed: "Message": "Invalid user"'))).toBe(true);
@@ -146,6 +180,13 @@ describe("memory access helpers", () => {
   it("detects transient query verification errors", () => {
     expect(isTransientQueryError(new Error("Invalid certificate: Invalid signature from replica"))).toBe(true);
     expect(isTransientQueryError(new Error("connection reset"))).toBe(false);
+  });
+
+  it("detects missing or unsupported memory canisters", () => {
+    expect(isPublicMemoryNotFoundError(new Error("Canister not found"))).toBe(true);
+    expect(isPublicMemoryNotFoundError(new Error("has no query method 'get_metadata'"))).toBe(true);
+    expect(isPublicMemoryNotFoundError(new Error("failed to decode canister response"))).toBe(true);
+    expect(isPublicMemoryNotFoundError(new Error("connection reset"))).toBe(false);
   });
 
   it("validates principal text before actor construction", () => {

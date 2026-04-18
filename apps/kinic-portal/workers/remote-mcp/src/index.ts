@@ -6,9 +6,13 @@ import {
   createAnonymousAgent,
   DEFAULT_REMOTE_MCP_SEARCH_TOP_K,
   fetchEmbedding,
-  getMemorySummary,
+  isAnonymousAccessError,
+  isPublicMemoryNotFoundError,
+  isTransientQueryError,
   MAX_REMOTE_MCP_SEARCH_TOP_K,
+  resolvePublicMemorySummary,
   searchMemory,
+  TRANSIENT_QUERY_ERROR,
   type SharedRuntimeEnv,
 } from "@kinic/kinic-share";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -22,6 +26,7 @@ export const PUBLIC_MEMORY_HELP_OUTPUT = {
   rules: [
     "Pass memory_id on every public_memory_show and public_memory_search call.",
     "public_memory_search.query searches the stored contents of the selected memory.",
+    "public_memory_search.top_k truncates results in the Worker after the canister query returns.",
     "public_memory_search does not inspect the MCP server implementation.",
     "The remote MCP Worker uses @modelcontextprotocol/sdk, not ic-rmcp.",
   ],
@@ -29,7 +34,7 @@ export const PUBLIC_MEMORY_HELP_OUTPUT = {
     {
       tool: "public_memory_search",
       input: {
-        memory_id: "aaaaa-aa",
+        memory_id: "<memory-canister-id>",
         query: "vector search",
         top_k: DEFAULT_REMOTE_MCP_SEARCH_TOP_K,
       },
@@ -48,7 +53,7 @@ export const PUBLIC_MEMORY_SHOW_DESCRIPTION =
   "Show a metadata summary for one anonymous-readable public memory canister. This is not MCP server metadata.";
 
 export const PUBLIC_MEMORY_SEARCH_DESCRIPTION =
-  "Search the stored contents of one anonymous-readable public memory canister. This uses the embedding API and IC query calls, and does not inspect the MCP server implementation.";
+  "Search the stored contents of one anonymous-readable public memory canister. This uses the embedding API and IC query calls, then truncates results in the Worker, and does not inspect the MCP server implementation.";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -63,20 +68,31 @@ export default {
       return withCors(Response.json({ error: "not found" }, { status: 404 }));
     }
 
+    let parsedBody: unknown;
+    try {
+      parsedBody = await parseJsonBody(request);
+    } catch (error) {
+      return withCors(
+        Response.json(
+          { error: error instanceof BadRequestError ? error.message : "bad request" },
+          { status: 400 },
+        ),
+      );
+    }
     const server = createServer(env);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
     await server.connect(transport);
     const response = await transport.handleRequest(request, {
-      parsedBody: await parseJsonBody(request),
+      parsedBody,
     });
     return withCors(response);
   },
 };
 
 function createServer(env: SharedRuntimeEnv): McpServer {
-  const server = new McpServer({ name: "kinic-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: "kinic-remote-mcp", version: "0.1.0" });
 
   server.registerTool(
     "public_memory_help",
@@ -104,7 +120,7 @@ function createServer(env: SharedRuntimeEnv): McpServer {
         idempotentHint: true,
       },
     },
-    async ({ memory_id }) => structured(await showMemory(env, memory_id)),
+    async ({ memory_id }) => toToolResult(await showMemory(env, memory_id)),
   );
 
   server.registerTool(
@@ -121,7 +137,7 @@ function createServer(env: SharedRuntimeEnv): McpServer {
         idempotentHint: true,
       },
     },
-    async ({ memory_id, query, top_k }) => structured(await searchOneMemory(env, memory_id, query, top_k)),
+    async ({ memory_id, query, top_k }) => toToolResult(await searchOneMemory(env, memory_id, query, top_k)),
   );
 
   return server;
@@ -139,15 +155,31 @@ function withCors(response: Response): Response {
 async function parseJsonBody(request: Request): Promise<unknown> {
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
-    throw new Error("MCP requests must use application/json.");
+    throw new BadRequestError("bad request");
   }
-  return request.json();
+  try {
+    return await request.json();
+  } catch {
+    throw new BadRequestError("bad request");
+  }
 }
 
 function structured<T extends Record<string, unknown>>(payload: T) {
   return {
     content: [textContent(JSON.stringify(payload))],
     structuredContent: payload,
+  };
+}
+
+export function toToolResult<T extends Record<string, unknown>>(payload: T | ToolErrorResult) {
+  return isToolErrorResult(payload) ? payload : structured(payload);
+}
+
+function toolError(message: string, payload: Record<string, unknown>) {
+  return {
+    content: [textContent(message)],
+    structuredContent: payload,
+    isError: true,
   };
 }
 
@@ -162,15 +194,76 @@ export async function searchOneMemory(
   topK: number = DEFAULT_REMOTE_MCP_SEARCH_TOP_K,
 ) {
   const agent = createAnonymousAgent(env);
-  const embedding = await fetchEmbedding(query, env);
-  const items = (await searchMemory(agent, memoryId, embedding)).slice(0, topK);
-  return {
-    memory_id: memoryId,
-    top_k: topK,
-    items,
-  };
+  const state = await resolvePublicMemorySummary(agent, memoryId);
+  const payload = { memory_id: memoryId, query, top_k: topK };
+  if (state.kind !== "accessible") {
+    return toToolError(state, payload);
+  }
+  try {
+    const embedding = await fetchEmbedding(query, env);
+    const items = (await searchMemory(agent, memoryId, embedding)).slice(0, topK);
+    return {
+      memory_id: memoryId,
+      top_k: topK,
+      items,
+    };
+  } catch (error) {
+    return toSearchToolError(error, payload);
+  }
 }
 
-async function showMemory(env: SharedRuntimeEnv, memoryId: string) {
-  return getMemorySummary(createAnonymousAgent(env), memoryId);
+export async function showMemory(env: SharedRuntimeEnv, memoryId: string) {
+  const state = await resolvePublicMemorySummary(createAnonymousAgent(env), memoryId);
+  if (state.kind !== "accessible") {
+    return toToolError(state, { memory_id: memoryId });
+  }
+  return state.memory;
 }
+
+function toToolError(
+  state: Exclude<Awaited<ReturnType<typeof resolvePublicMemorySummary>>, { kind: "accessible"; memory: unknown }>,
+  payload: Record<string, unknown>,
+) {
+  return toolError(state.error, {
+    error: state.error,
+    ...payload,
+  });
+}
+
+function toSearchToolError(error: unknown, payload: Record<string, unknown>) {
+  if (isPublicMemoryNotFoundError(error)) {
+    return toolError("memory not found", {
+      error: "memory not found",
+      ...payload,
+    });
+  }
+  if (isAnonymousAccessError(error)) {
+    return toolError("anonymous access denied", {
+      error: "anonymous access denied",
+      ...payload,
+    });
+  }
+  if (isTransientQueryError(error)) {
+    return toolError(TRANSIENT_QUERY_ERROR, {
+      error: TRANSIENT_QUERY_ERROR,
+      ...payload,
+    });
+  }
+  return toolError("search unavailable right now", {
+    error: "search unavailable right now",
+    ...payload,
+  });
+}
+
+type ToolErrorResult = ReturnType<typeof toolError>;
+
+function isToolErrorResult(value: Record<string, unknown> | ToolErrorResult): value is ToolErrorResult {
+  return (
+    value.isError === true &&
+    Array.isArray(value.content) &&
+    typeof value.structuredContent === "object" &&
+    value.structuredContent !== null
+  );
+}
+
+class BadRequestError extends Error {}

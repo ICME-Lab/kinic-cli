@@ -181,12 +181,41 @@ describe("public summary route", () => {
     expect(response.status).toBe(200);
   });
 
-  it("preserves invalid, denied, and transient statuses", async () => {
+  it("returns 502 and skips cache writes when the model response is malformed", async () => {
+    mocks.resolvePublicMemory.mockResolvedValue({
+      kind: "accessible",
+      memory: { memory_id: "m1", name: "Skill Store", description: "desc", version: "0.2.5" },
+    });
+    mocks.readSummaryCache.mockResolvedValue(null);
+    mocks.buildMemorySummarySearchQuery.mockReturnValue("summary query");
+    mocks.fetchEmbedding.mockResolvedValue([0.1, 0.2]);
+    mocks.createAnonymousAgent.mockReturnValue("agent");
+    mocks.searchMemory.mockResolvedValue([{ score: 1, payload: "result" }]);
+    mocks.buildMemorySummaryPrompt.mockReturnValue("prompt");
+    mocks.callChatApi.mockResolvedValue("<thinking>hidden</thinking>");
+    mocks.extractAnswer.mockImplementation(() => {
+      throw new Error("missing <answer> tag in model response");
+    });
+
+    const response = await GET(new Request("https://portal.kinic.io/api/memories/m1/summary"), {
+      params: Promise.resolve({ memoryId: "m1" }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "summary unavailable right now" });
+    expect(mocks.writeSummaryCache).not.toHaveBeenCalled();
+  });
+
+  it("preserves invalid, not_found, denied, and transient statuses", async () => {
     mocks.resolvePublicMemory.mockResolvedValueOnce({ kind: "invalid", error: "invalid memory id" });
+    mocks.resolvePublicMemory.mockResolvedValueOnce({ kind: "not_found", error: "memory not found" });
     mocks.resolvePublicMemory.mockResolvedValueOnce({ kind: "denied", error: "anonymous access denied" });
     mocks.resolvePublicMemory.mockResolvedValueOnce({ kind: "transient_error", error: "temporary network error" });
 
     const invalid = await GET(new Request("https://portal.kinic.io/api/memories/m1/summary"), {
+      params: Promise.resolve({ memoryId: "m1" }),
+    });
+    const notFound = await GET(new Request("https://portal.kinic.io/api/memories/m1/summary"), {
       params: Promise.resolve({ memoryId: "m1" }),
     });
     const denied = await GET(new Request("https://portal.kinic.io/api/memories/m1/summary"), {
@@ -197,6 +226,7 @@ describe("public summary route", () => {
     });
 
     expect(invalid.status).toBe(400);
+    expect(notFound.status).toBe(404);
     expect(denied.status).toBe(403);
     expect(transient.status).toBe(503);
   });

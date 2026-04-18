@@ -4,46 +4,16 @@
 
 import { cache } from "react";
 import {
-  checkAnonymousAccess,
   createAnonymousAgent,
-  getPublicMemory,
-  isTransientQueryError,
-  isValidPrincipalText,
-  isAnonymousAccessError,
-  TRANSIENT_QUERY_ERROR,
-  type MemoryShowResponse,
+  resolvePublicMemoryDetails,
+  type PublicMemoryDetailsState,
   type SharedRuntimeEnv,
 } from "@kinic/kinic-share";
 
-export type PublicMemoryState =
-  | { kind: "accessible"; memory: MemoryShowResponse }
-  | { kind: "invalid"; error: "invalid memory id" }
-  | { kind: "transient_error"; error: typeof TRANSIENT_QUERY_ERROR }
-  | { kind: "denied"; error: "anonymous access denied" };
+export type PublicMemoryState = PublicMemoryDetailsState;
 
 export async function resolvePublicMemory(env: SharedRuntimeEnv, memoryId: string): Promise<PublicMemoryState> {
-  if (!isValidPrincipalText(memoryId)) {
-    return { kind: "invalid", error: "invalid memory id" };
-  }
-  const agent = createAnonymousAgent(env);
-  const access = await checkAnonymousAccess(agent, memoryId);
-  if (!access.accessible) {
-    if (access.error === TRANSIENT_QUERY_ERROR) {
-      return { kind: "transient_error", error: access.error };
-    }
-    return { kind: "denied", error: access.error };
-  }
-  try {
-    return { kind: "accessible", memory: await getPublicMemory(agent, memoryId) };
-  } catch (error) {
-    if (isAnonymousAccessError(error)) {
-      return { kind: "denied", error: "anonymous access denied" };
-    }
-    if (isTransientQueryError(error)) {
-      return { kind: "transient_error", error: TRANSIENT_QUERY_ERROR };
-    }
-    throw error;
-  }
+  return resolvePublicMemoryDetails(createAnonymousAgent(env), memoryId);
 }
 
 const resolvePublicMemoryCachedInternal = cache(

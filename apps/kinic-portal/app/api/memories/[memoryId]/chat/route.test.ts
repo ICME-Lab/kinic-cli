@@ -1,6 +1,6 @@
 // Where: unit tests for the public chat route.
 // What: verifies bounded search requests and response shaping.
-// Why: portal chat must not fetch unbounded search results from the memory canister.
+// Why: portal chat truncates search results server-side before prompt construction.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -107,6 +107,34 @@ describe("public chat route", () => {
     await expect(response.json()).resolves.toEqual({ error: "query is required" });
   });
 
+  it("rejects malformed json bodies", async () => {
+    const response = await POST(
+      new Request("https://portal.kinic.io/api/memories/m1/chat", {
+        method: "POST",
+        body: "{",
+      }),
+      { params: Promise.resolve({ memoryId: "m1" }) },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid request body" });
+  });
+
+  it("returns 404 when the memory is not found", async () => {
+    mocks.resolvePublicMemory.mockResolvedValueOnce({ kind: "not_found", error: "memory not found" });
+
+    const response = await POST(
+      new Request("https://portal.kinic.io/api/memories/m1/chat", {
+        method: "POST",
+        body: JSON.stringify({ query: "what changed?" }),
+      }),
+      { params: Promise.resolve({ memoryId: "m1" }) },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "memory not found" });
+  });
+
   it("returns 502 when embedding generation fails", async () => {
     mocks.fetchEmbedding.mockRejectedValueOnce(new Error("embedding request failed with status 503"));
 
@@ -124,6 +152,23 @@ describe("public chat route", () => {
 
   it("returns 502 when chat completion fails", async () => {
     mocks.callChatApi.mockRejectedValueOnce(new Error("chat request failed with status 502"));
+
+    const response = await POST(
+      new Request("https://portal.kinic.io/api/memories/m1/chat", {
+        method: "POST",
+        body: JSON.stringify({ query: "what changed?" }),
+      }),
+      { params: Promise.resolve({ memoryId: "m1" }) },
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "chat unavailable right now" });
+  });
+
+  it("returns 502 when the model response misses answer tags", async () => {
+    mocks.extractAnswer.mockImplementationOnce(() => {
+      throw new Error("missing <answer> tag in model response");
+    });
 
     const response = await POST(
       new Request("https://portal.kinic.io/api/memories/m1/chat", {

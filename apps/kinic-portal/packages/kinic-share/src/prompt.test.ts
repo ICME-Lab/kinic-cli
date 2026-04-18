@@ -28,12 +28,21 @@ describe("prompt helpers", () => {
     ).toBe("done");
   });
 
+  it("throws when the response has no answer tag", () => {
+    expect(() => extractAnswer("<thinking>hidden</thinking>visible")).toThrowError("missing <answer> tag");
+  });
+
+  it("throws when the answer tag is not closed", () => {
+    expect(() => extractAnswer("<answer>visible")).toThrowError("unclosed <answer> tag");
+  });
+
   it("escapes payloads inside the generated prompt", () => {
     const prompt = buildAskAiPrompt("<query>", [{ score: 0.9, payload: "<doc>unsafe</doc>" }], "ja-JP");
     expect(prompt).toContain("&lt;query&gt;");
     expect(prompt).toContain("&lt;doc&gt;unsafe&lt;/doc&gt;");
     expect(prompt).not.toContain("<doc>unsafe</doc>");
     expect(prompt).not.toContain("<full_document>");
+    expect(prompt).not.toContain("<thinking>");
     expect(prompt).toContain("Japanese");
   });
 
@@ -56,5 +65,6 @@ describe("prompt helpers", () => {
     expect(prompt).toContain("2-3 sentences");
     expect(prompt).toContain("Do not exaggerate");
     expect(prompt).toContain("Answer in English");
+    expect(prompt).not.toContain("<thinking>");
   });
 });

@@ -20,13 +20,13 @@ The Kinic Portal remote MCP is an anonymous read-only surface running on a Cloud
   - Explains how to use the read-only memory tools
   - Clarifies that search reads memory payloads, not MCP server implementation
 - `public_memory_show`
-  - input: `{ "memory_id": "aaaaa-aa" }`
+  - input: `{ "memory_id": "<memory-canister-id>" }`
   - Returns a metadata summary for an anonymously readable memory, not MCP server metadata
   - response: `{ "memory_id": "...", "name": "...", "description": "...", "version": "..." }`
 - `public_memory_search`
-  - input: `{ "memory_id": "aaaaa-aa", "query": "...", "top_k": 10 }`
+  - input: `{ "memory_id": "<memory-canister-id>", "query": "...", "top_k": 10 }`
   - `top_k` is optional, defaults to `10`, and accepts `1` through `50`
-  - Generates embeddings on the server, then requests bounded search results from the selected memory canister
+  - Generates embeddings on the server, requests canister search results, then truncates them in the Worker
   - Does not inspect the MCP server implementation
 
 ## External Clients
@@ -68,15 +68,15 @@ To share the configuration across a project, add `.mcp.json` at the repository r
 Example prompts:
 
 ```text
-Use public_memory_help first, then search memory_id aaaaa-aa for "vector search".
+Use public_memory_help first, then search memory_id <memory-canister-id> for "vector search".
 ```
 
 ```text
-Use public_memory_show to inspect memory_id aaaaa-aa
+Use public_memory_show to inspect memory_id <memory-canister-id>
 ```
 
 ```text
-Use public_memory_search to search memory_id aaaaa-aa for "vector search" with top_k 10
+Use public_memory_search to search memory_id <memory-canister-id> for "vector search" with top_k 10
 ```
 
 ### Local Validation

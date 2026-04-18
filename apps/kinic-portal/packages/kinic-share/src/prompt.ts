@@ -13,6 +13,13 @@ export type PromptSearchHit = {
   payload: string;
 };
 
+export class PromptContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PromptContractError";
+  }
+}
+
 export function buildAskAiPrompt(
   query: string,
   rawResults: PromptSearchHit[],
@@ -46,8 +53,7 @@ export function buildAskAiPrompt(
 Summarize the main points concisely, taking into account their relevance to the user's search query.
 
 # Instructions
-- Before responding, please describe your thinking process within the <thinking>...</thinking> tag (keep under 100 words).
-- After thinking, write your final summary within the <answer>...</answer> tag.
+- Write your final summary within the <answer>...</answer> tag.
 - The summary should be objective and grounded in the documents.
 - Focus on information related to <user_query>, especially considering the content in <docs>.
 - Limit the final summary to 140 words or less.
@@ -103,8 +109,7 @@ export function buildMemorySummaryPrompt(
 Summarize only what is supported by the memory metadata and retrieved content.
 
 # Instructions
-- Before responding, describe your thinking within the <thinking>...</thinking> tag in under 80 words.
-- After thinking, write the final summary within the <answer>...</answer> tag.
+- Write the final summary within the <answer>...</answer> tag.
 - The final summary must be one short paragraph of 2-3 sentences.
 - Do not use bullet points.
 - Do not exaggerate, speculate, or add facts that are not present in the memory.
@@ -131,12 +136,12 @@ export function extractAnswer(text: string): string {
   const lower = normalized.toLowerCase();
   const start = lower.indexOf("<answer>");
   if (start === -1) {
-    return normalized.trim();
+    throw new PromptContractError("missing <answer> tag in model response");
   }
   const contentStart = start + "<answer>".length;
   const end = lower.indexOf("</answer>", contentStart);
   if (end === -1) {
-    return normalized.trim();
+    throw new PromptContractError("unclosed <answer> tag in model response");
   }
   return normalized.slice(contentStart, end).trim();
 }

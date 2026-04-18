@@ -64,9 +64,23 @@ export type MemorySummaryResponse = {
   version: string;
 };
 
+export type PublicMemoryDetailsState =
+  | { kind: "accessible"; memory: MemoryShowResponse }
+  | { kind: "invalid"; error: "invalid memory id" }
+  | { kind: "not_found"; error: "memory not found" }
+  | { kind: "transient_error"; error: typeof TRANSIENT_QUERY_ERROR }
+  | { kind: "denied"; error: "anonymous access denied" };
+
+export type PublicMemorySummaryState =
+  | { kind: "accessible"; memory: MemorySummaryResponse }
+  | { kind: "invalid"; error: "invalid memory id" }
+  | { kind: "not_found"; error: "memory not found" }
+  | { kind: "transient_error"; error: typeof TRANSIENT_QUERY_ERROR }
+  | { kind: "denied"; error: "anonymous access denied" };
+
 export type AnonymousAccessResult =
   | { accessible: true }
-  | { accessible: false; error: "anonymous access denied" | "temporary network error" };
+  | { accessible: false; error: "anonymous access denied" | "memory not found" | "temporary network error" };
 
 export const TRANSIENT_QUERY_ERROR = "temporary network error";
 
@@ -87,6 +101,21 @@ export function isAnonymousAccessError(error: unknown): boolean {
 export function isTransientQueryError(error: unknown): boolean {
   const message = extractErrorMessage(error).toLowerCase();
   return message.includes("invalid certificate") || message.includes("invalid signature");
+}
+
+export function isPublicMemoryNotFoundError(error: unknown): boolean {
+  const message = extractErrorMessage(error).toLowerCase();
+  return [
+    "canister not found",
+    "could not find canister",
+    "destination invalid",
+    "query method does not exist",
+    "has no query method",
+    "method not found",
+    "failed to decode",
+    "cannot decode",
+    "decode error",
+  ].some((pattern) => message.includes(pattern));
 }
 
 export async function getMemoryDetails(
@@ -131,6 +160,20 @@ export async function getPublicMemory(
   memoryId: string,
 ): Promise<MemoryShowResponse> {
   return getMemoryDetails(agent, memoryId);
+}
+
+export async function resolvePublicMemoryDetails(
+  agent: HttpAgent,
+  memoryId: string,
+): Promise<PublicMemoryDetailsState> {
+  return resolvePublicMemoryState(memoryId, () => checkAnonymousAccess(agent, memoryId), () => getPublicMemory(agent, memoryId));
+}
+
+export async function resolvePublicMemorySummary(
+  agent: HttpAgent,
+  memoryId: string,
+): Promise<PublicMemorySummaryState> {
+  return resolvePublicMemoryState(memoryId, () => checkAnonymousAccess(agent, memoryId), () => getMemorySummary(agent, memoryId));
 }
 
 export async function searchMemory(
@@ -260,6 +303,9 @@ export async function probeAnonymousAccess(getName: () => Promise<string>): Prom
     await retryTransientQuery(getName);
     return { accessible: true };
   } catch (error) {
+    if (isPublicMemoryNotFoundError(error)) {
+      return { accessible: false, error: "memory not found" };
+    }
     if (isAnonymousAccessError(error)) {
       return { accessible: false, error: "anonymous access denied" };
     }
@@ -303,6 +349,48 @@ export function summarizeMemory(memoryId: string, metadata: DbMetadata): MemoryS
     description,
     version: metadata.version,
   };
+}
+
+async function resolvePublicMemoryState<T>(
+  memoryId: string,
+  checkAccess: () => Promise<AnonymousAccessResult>,
+  loadMemory: () => Promise<T>,
+): Promise<
+  | { kind: "accessible"; memory: T }
+  | { kind: "invalid"; error: "invalid memory id" }
+  | { kind: "not_found"; error: "memory not found" }
+  | { kind: "transient_error"; error: typeof TRANSIENT_QUERY_ERROR }
+  | { kind: "denied"; error: "anonymous access denied" }
+> {
+  if (!isValidPrincipalText(memoryId)) {
+    return { kind: "invalid", error: "invalid memory id" };
+  }
+
+  const access = await checkAccess();
+  if (!access.accessible) {
+    if (access.error === "memory not found") {
+      return { kind: "not_found", error: access.error };
+    }
+    if (access.error === TRANSIENT_QUERY_ERROR) {
+      return { kind: "transient_error", error: access.error };
+    }
+    return { kind: "denied", error: access.error };
+  }
+
+  try {
+    return { kind: "accessible", memory: await loadMemory() };
+  } catch (error) {
+    if (isPublicMemoryNotFoundError(error)) {
+      return { kind: "not_found", error: "memory not found" };
+    }
+    if (isAnonymousAccessError(error)) {
+      return { kind: "denied", error: "anonymous access denied" };
+    }
+    if (isTransientQueryError(error)) {
+      return { kind: "transient_error", error: TRANSIENT_QUERY_ERROR };
+    }
+    throw error;
+  }
 }
 
 const memoryIdlFactory: IDL.InterfaceFactory = ({ IDL: Types }) =>

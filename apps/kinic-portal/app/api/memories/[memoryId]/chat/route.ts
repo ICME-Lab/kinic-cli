@@ -19,7 +19,10 @@ import { resolvePublicMemory, toSharedRuntimeEnv } from "@/lib/public-memory";
 
 export async function POST(request: Request, { params }: { params: Promise<{ memoryId: string }> }) {
   const { memoryId } = await params;
-  const body = parseObject(await request.json());
+  const body = await parseRequestBody(request);
+  if ("error" in body) {
+    return Response.json({ error: body.error }, { status: 400 });
+  }
   const query = body.query?.trim();
   if (!query) {
     return Response.json({ error: "query is required" }, { status: 400 });
@@ -30,6 +33,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
   const state = await resolvePublicMemory(env, memoryId);
   if (state.kind === "invalid") {
     return Response.json({ error: state.error }, { status: 400 });
+  }
+  if (state.kind === "not_found") {
+    return Response.json({ error: state.error }, { status: 404 });
   }
   if (state.kind === "transient_error") {
     return Response.json({ error: state.error }, { status: 503 });
@@ -75,4 +81,12 @@ function parseObject(value: unknown): { query?: string; language?: string } {
 
 function toRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value)) : null;
+}
+
+async function parseRequestBody(request: Request): Promise<{ query?: string; language?: string } | { error: "invalid request body" }> {
+  try {
+    return parseObject(await request.json());
+  } catch {
+    return { error: "invalid request body" };
+  }
 }

@@ -43,3 +43,4 @@ apps/kinic-portal/.next/
 apps/kinic-portal/.open-next/
 apps/kinic-portal/.wrangler/
 apps/kinic-portal/.playwright-cli/
+*.tsbuildinfo

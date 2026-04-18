@@ -26,6 +26,9 @@ export default async function MemoryPage({
   if (state.kind === "invalid") {
     notFound();
   }
+  if (state.kind === "not_found") {
+    notFound();
+  }
   if (state.kind === "denied") {
     forbidden();
   }

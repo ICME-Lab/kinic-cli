@@ -32,6 +32,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ memo
   if (state.kind === "invalid") {
     return Response.json({ error: state.error }, { status: 400 });
   }
+  if (state.kind === "not_found") {
+    return Response.json({ error: state.error }, { status: 404 });
+  }
   if (state.kind === "transient_error") {
     return Response.json({ error: state.error }, { status: 503 });
   }

@@ -44,6 +44,7 @@ export function MemoryView({
   const [copyStatus, setCopyStatus] = useState<CopyStatusKey | null>(null);
   const [copyError, setCopyError] = useState("");
   const [currentUrl, setCurrentUrl] = useState("");
+  const [language, setLanguage] = useState("en");
   const [isPending, startTransition] = useTransition();
   const chatGptPrompt = buildChatGptMemoryPrompt(initialMemory.memory_id);
   const chatGptUrl = buildChatGptPromptUrl(chatGptPrompt);
@@ -51,16 +52,19 @@ export function MemoryView({
 
   useEffect(() => {
     setCurrentUrl(window.location.href);
+    setLanguage(window.navigator.language || "en");
   }, []);
 
   function submit() {
     startTransition(async () => {
       setError("");
+      setAnswer("");
+      setContextCount(0);
       try {
         const response = await fetch(`/api/memories/${initialMemory.memory_id}/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ query, language: "en" }),
+          body: JSON.stringify({ query, language }),
         });
         const payload = parsePayload(await response.json());
         if (!response.ok) {
