@@ -20,12 +20,14 @@ export type MemoryOgpInput = {
   memoryId?: string | null;
   name?: string | null;
   description?: string | null;
+  owner?: string | null;
 };
 
 export type MemoryOgpCardModel = {
   title: string;
   description: string;
   shortMemoryId: string;
+  owner: string | null;
 };
 
 export type MemoryOgpImageCopy = {
@@ -53,6 +55,7 @@ export function buildMemoryOgpCardModel(input: MemoryOgpInput): MemoryOgpCardMod
     title: copy.title,
     description: copy.description,
     shortMemoryId: normalizeMemoryId(input.memoryId),
+    owner: normalizeOptionalCopy(input.owner) || null,
   };
 }
 

@@ -41,7 +41,6 @@ export function toSharedRuntimeEnv(env: unknown): SharedRuntimeEnv {
       typeof record?.EMBEDDING_API_ENDPOINT === "string" ? record.EMBEDDING_API_ENDPOINT : undefined,
     SUMMARY_CACHE_TTL_SECONDS:
       typeof record?.SUMMARY_CACHE_TTL_SECONDS === "string" ? record.SUMMARY_CACHE_TTL_SECONDS : undefined,
-    CANISTER_ID_LAUNCHER: process.env.CANISTER_ID_LAUNCHER,
   };
 }
 

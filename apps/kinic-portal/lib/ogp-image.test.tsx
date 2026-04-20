@@ -10,7 +10,13 @@ describe("renderOgpImage", () => {
     expect(markup).toContain("Kinic Portal");
     expect(markup).toContain("KinicMemory");
     expect(markup).toContain("Share public Kinic memory canisters over the web");
-    expect(markup).not.toContain("Shared Memory</div>");
+    expect(markup).toContain("NETWORK");
+    expect(markup).toContain("IC Mainnet");
+    expect(markup).toContain("VISIBILITY");
+    expect(markup).toContain("Public");
+    expect(markup).not.toContain("STATUS");
+    expect(markup).not.toContain("ASPECT RATIO");
+    expect(markup).not.toContain(">Shared notes and context from Kinic<");
     expect(markup).toContain(OGP_FRAME_SRC);
     expect(markup).toContain(OGP_LOGO_SRC);
   });
@@ -22,6 +28,7 @@ describe("renderOgpImage", () => {
           memoryId: "ywega-gaaaa-aaaak-apg6q-cai",
           name: "Skill Store",
           description: "Shared notes",
+          owner: "rdmx6-jaaaa-aaaaa-aaadq-cai",
         },
       }),
     );
@@ -30,5 +37,9 @@ describe("renderOgpImage", () => {
     expect(markup).toContain("Shared notes");
     expect(markup).toContain("MEMORY ID");
     expect(markup).toContain("ywega-gaaaa-aaaak-apg6q-cai");
+    expect(markup).toContain("OWNER");
+    expect(markup).toContain("rdmx6...cai");
+    expect(markup).toContain("IC Mainnet");
+    expect(markup).toContain("Public");
   });
 });

@@ -32,7 +32,7 @@ describe("memory og api route", () => {
 
   it("renders using query-provided memory copy", async () => {
     const response = await GET(
-      new Request("https://portal.kinic.io/api/og/memories/m1?name=Skill%20Store&description=cached%20summary"),
+      new Request("https://portal.kinic.io/api/og/memories/m1?name=Skill%20Store&description=cached%20summary&owner=rdmx6-jaaaa-aaaaa-aaadq-cai"),
       {
         params: Promise.resolve({ memoryId: "m1" }),
       },
@@ -43,6 +43,7 @@ describe("memory og api route", () => {
         memoryId: "m1",
         name: "Skill Store",
         description: "cached summary",
+        owner: "rdmx6-jaaaa-aaaaa-aaadq-cai",
       },
     });
     expect(mocks.imageResponse).toHaveBeenCalledWith("markup", { width: 1200, height: 630 });
@@ -63,6 +64,7 @@ describe("memory og api route", () => {
         memoryId: "m1",
         name: null,
         description: null,
+        owner: null,
       },
     });
   });

@@ -24,30 +24,40 @@ export function renderOgpImage({ memory }: OgpImageProps): ReactElement {
         title: DEFAULT_SITE_TITLE,
         description: DEFAULT_SITE_DESCRIPTION,
         shortMemoryId: "-",
+        owner: null,
       };
   return (
     <div style={frameStyle}>
-      <img
-        alt=""
-        src={OGP_FRAME_SRC}
-        width={1200}
-        height={630}
-        style={backgroundImageStyle}
-      />
-      <div style={panelStyle}>
-        <div style={headerStyle}>
-          <div style={brandStyle}>
-            <KinicMark src={OGP_LOGO_SRC} />
-            <div style={brandTextStyle}>KinicMemory</div>
-          </div>
-        </div>
+      <div style={outerCardStyle}>
+        <div style={innerPanelStyle}>
+          <img
+            alt=""
+            src={OGP_FRAME_SRC}
+            width={1096}
+            height={538}
+            style={backgroundImageStyle}
+          />
+          <div style={panelStyle}>
+            <div style={headerStyle}>
+              <div style={brandStyle}>
+                <KinicMark src={OGP_LOGO_SRC} />
+                <div style={brandTextStyle}>KinicMemory</div>
+              </div>
+              <div style={metaGridStyle}>
+                <MetaStat label="NETWORK" value="IC Mainnet" />
+                <MetaStat label="VISIBILITY" value="Public" />
+                {card.owner ? <MetaStat label="OWNER" value={shortenOwner(card.owner)} /> : null}
+              </div>
+            </div>
 
-        <div style={heroStyle}>
-          <div style={bodyStyle}>
-            <div style={titleStyle}>{card.title}</div>
-            <div style={descriptionStyle}>{card.description}</div>
-            <div style={statsGridStyle}>
-              <Stat label="MEMORY ID" value={card.shortMemoryId} />
+            <div style={heroStyle}>
+              <div style={bodyStyle}>
+                <div style={titleStyle}>{card.title}</div>
+                <div style={descriptionStyle}>{card.description}</div>
+                <div style={statsGridStyle}>
+                  <Stat label="MEMORY ID" value={card.shortMemoryId} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -65,15 +75,57 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function MetaStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={metaStatStyle}>
+      <div style={metaLabelStyle}>{label}</div>
+      <div style={metaValueStyle}>{value}</div>
+    </div>
+  );
+}
+
+function shortenOwner(value: string): string {
+  if (value.length <= 9) {
+    return value;
+  }
+  return `${value.slice(0, 5)}...${value.slice(-3)}`;
+}
+
 const frameStyle: CSSProperties = {
   width: "100%",
   height: "100%",
   display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   position: "relative",
   background: "#060c1b",
   color: "#f7fbff",
   fontFamily: "system-ui, sans-serif",
   overflow: "hidden",
+};
+
+const outerCardStyle: CSSProperties = {
+  width: 1132,
+  height: 574,
+  display: "flex",
+  position: "relative",
+  overflow: "hidden",
+  borderRadius: 20,
+  border: "1px solid rgba(214, 226, 246, 0.16)",
+  background: "rgba(10, 16, 31, 0.86)",
+  boxShadow: "0 30px 70px rgba(0, 0, 0, 0.42)",
+};
+
+const innerPanelStyle: CSSProperties = {
+  margin: 18,
+  width: 1096,
+  height: 538,
+  display: "flex",
+  position: "relative",
+  overflow: "hidden",
+  borderRadius: 16,
+  border: "1px solid rgba(188, 205, 232, 0.08)",
+  background: "rgba(9, 15, 29, 0.84)",
 };
 
 const backgroundImageStyle: CSSProperties = {
@@ -85,18 +137,19 @@ const backgroundImageStyle: CSSProperties = {
 
 const panelStyle: CSSProperties = {
   margin: 0,
-  padding: "48px 60px 52px",
+  padding: "36px 42px 40px",
   width: "100%",
   height: "100%",
   display: "flex",
   flexDirection: "column",
-  gap: 36,
+  gap: 28,
   position: "relative",
 };
 
 const headerStyle: CSSProperties = {
   display: "flex",
-  alignItems: "center",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
 };
 
 const brandStyle: CSSProperties = {
@@ -112,18 +165,51 @@ const brandTextStyle: CSSProperties = {
   letterSpacing: "-0.03em",
 };
 
+const metaGridStyle: CSSProperties = {
+  display: "flex",
+  gap: 18,
+  alignItems: "flex-start",
+};
+
+const metaStatStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  minWidth: 112,
+  maxWidth: 168,
+};
+
+const metaLabelStyle: CSSProperties = {
+  fontSize: 12,
+  lineHeight: 1,
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+  color: "#8da2c5",
+};
+
+const metaValueStyle: CSSProperties = {
+  display: "-webkit-box",
+  overflow: "hidden",
+  fontSize: 24,
+  lineHeight: 1.1,
+  fontWeight: 600,
+  color: "#eef4ff",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+};
+
 const bodyStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 22,
-  width: 940,
+  gap: 20,
+  width: 860,
 };
 
 const heroStyle: CSSProperties = {
   display: "flex",
   gap: 18,
   alignItems: "flex-start",
-  marginTop: 10,
+  marginTop: 2,
 };
 
 const titleStyle: CSSProperties = {
@@ -141,9 +227,9 @@ const titleStyle: CSSProperties = {
 const descriptionStyle: CSSProperties = {
   display: "-webkit-box",
   overflow: "hidden",
-  width: 940,
-  fontSize: 29,
-  lineHeight: 1.34,
+  width: 860,
+  fontSize: 27,
+  lineHeight: 1.32,
   color: "rgba(235, 241, 252, 0.92)",
   WebkitBoxOrient: "vertical",
   WebkitLineClamp: 3,
@@ -152,7 +238,7 @@ const descriptionStyle: CSSProperties = {
 const statsGridStyle: CSSProperties = {
   display: "flex",
   gap: 16,
-  width: 520,
+  width: 860,
   marginTop: 10,
 };
 

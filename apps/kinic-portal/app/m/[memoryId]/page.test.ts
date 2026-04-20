@@ -20,6 +20,7 @@ vi.mock("@/lib/public-memory", () => ({
 }));
 
 vi.mock("@kinic/kinic-share", () => ({
+  ANONYMOUS_PRINCIPAL: "2vxsx-fae",
   buildMemoryOgpImageCopy: mocks.buildMemoryOgpImageCopy,
   buildMemoryMetadataDescription: mocks.buildMemoryMetadataDescription,
   buildMemoryPageTitle: mocks.buildMemoryPageTitle,
@@ -54,6 +55,7 @@ describe("memory page metadata", () => {
         name: "Skill Store",
         description: "desc",
         version: "0.2.5",
+        owners: ["2vxsx-fae", "rdmx6-jaaaa-aaaaa-aaadq-cai", "izipf-egrvr-4xhgq-xskhg-otja5-3wgmq-n5qr4-vee4s-u6jvb-atylz-pae"],
       },
     });
   });
@@ -76,10 +78,10 @@ describe("memory page metadata", () => {
     });
 
     expect(metadata.openGraph?.images).toEqual([
-      "/api/og/memories/m1?name=Skill+Store&description=cached+summary&v=0.2.5",
+      "/api/og/memories/m1?name=Skill+Store&description=cached+summary&owner=izipf-egrvr-4xhgq-xskhg-otja5-3wgmq-n5qr4-vee4s-u6jvb-atylz-pae&v=0.2.5",
     ]);
     expect(metadata.twitter?.images).toEqual([
-      "/api/og/memories/m1?name=Skill+Store&description=cached+summary&v=0.2.5",
+      "/api/og/memories/m1?name=Skill+Store&description=cached+summary&owner=izipf-egrvr-4xhgq-xskhg-otja5-3wgmq-n5qr4-vee4s-u6jvb-atylz-pae&v=0.2.5",
     ]);
     expect(metadata.description).toBe("cached summary");
   });
@@ -90,7 +92,7 @@ describe("memory page metadata", () => {
     });
 
     expect(metadata.openGraph?.images).toEqual([
-      "/api/og/memories/m1?name=Skill+Store&description=desc&v=0.2.5",
+      "/api/og/memories/m1?name=Skill+Store&description=desc&owner=izipf-egrvr-4xhgq-xskhg-otja5-3wgmq-n5qr4-vee4s-u6jvb-atylz-pae&v=0.2.5",
     ]);
     expect(metadata.description).toBe("desc");
   });
@@ -103,6 +105,7 @@ describe("memory page metadata", () => {
         name: "a".repeat(180),
         description: "desc",
         version: "0.2.5",
+        owners: ["2vxsx-fae", "rdmx6-jaaaa-aaaaa-aaadq-cai", "izipf-egrvr-4xhgq-xskhg-otja5-3wgmq-n5qr4-vee4s-u6jvb-atylz-pae"],
       },
     });
     mocks.buildMemoryOgpImageCopy.mockReturnValueOnce({
@@ -115,7 +118,28 @@ describe("memory page metadata", () => {
     });
 
     expect(metadata.openGraph?.images).toEqual([
-      "/api/og/memories/m1?name=bounded+name&description=bounded+desc&v=0.2.5",
+      "/api/og/memories/m1?name=bounded+name&description=bounded+desc&owner=izipf-egrvr-4xhgq-xskhg-otja5-3wgmq-n5qr4-vee4s-u6jvb-atylz-pae&v=0.2.5",
+    ]);
+  });
+
+  it("omits owner when every owner is anonymous or canister-like", async () => {
+    mocks.resolvePublicMemoryCached.mockResolvedValueOnce({
+      kind: "accessible",
+      memory: {
+        memory_id: "m1",
+        name: "Skill Store",
+        description: "desc",
+        version: "0.2.5",
+        owners: ["2vxsx-fae", "rdmx6-jaaaa-aaaaa-aaadq-cai"],
+      },
+    });
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ memoryId: "m1" }),
+    });
+
+    expect(metadata.openGraph?.images).toEqual([
+      "/api/og/memories/m1?name=Skill+Store&description=desc&v=0.2.5",
     ]);
   });
 });

@@ -20,6 +20,7 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const name = normalizeQueryValue(searchParams.get("name"));
   const description = normalizeQueryValue(searchParams.get("description"));
+  const owner = normalizeQueryValue(searchParams.get("owner"));
 
   const response = new ImageResponse(
     renderOgpImage({
@@ -27,6 +28,7 @@ export async function GET(
         memoryId,
         name,
         description,
+        owner,
       },
     }),
     IMAGE_SIZE,

@@ -5,7 +5,11 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { Metadata } from "next";
 import { forbidden, notFound } from "next/navigation";
-import { buildMemoryOgpImageCopy, resolveRemoteMcpEndpoint } from "@kinic/kinic-share";
+import {
+  ANONYMOUS_PRINCIPAL,
+  buildMemoryOgpImageCopy,
+  resolveRemoteMcpEndpoint,
+} from "@kinic/kinic-share";
 import { MemoryView } from "../../../components/memory-view";
 import { buildMemoryMetadataDescription, buildMemoryPageTitle } from "@kinic/kinic-share";
 import { MemoryTemporaryError } from "@/components/memory-temporary-error";
@@ -61,7 +65,13 @@ export async function generateMetadata({
   }
 
   const description = await resolveMemoryOgpDescription(context.env, state.memory);
-  const imageUrl = buildMemoryOgpImageUrl(memoryId, state.memory.name, description, state.memory.version);
+  const imageUrl = buildMemoryOgpImageUrl(
+    memoryId,
+    state.memory.name,
+    description,
+    state.memory.version,
+    selectOgpOwner(state.memory.owners),
+  );
 
   return {
     title: buildMemoryPageTitle(state.memory.name),
@@ -86,6 +96,7 @@ function buildMemoryOgpImageUrl(
   name: string,
   description: string,
   version: string | null | undefined,
+  owner: string | null,
 ): string {
   const copy = buildMemoryOgpImageCopy({
     name,
@@ -95,10 +106,33 @@ function buildMemoryOgpImageUrl(
     name: copy.title,
     description: copy.description,
   });
+  if (owner) {
+    search.set("owner", owner);
+  }
   if (version) {
     search.set("v", version);
   }
   return `/api/og/memories/${memoryId}?${search.toString()}`;
+}
+
+function selectOgpOwner(owners: string[] | null | undefined): string | null {
+  if (!Array.isArray(owners) || owners.length === 0) {
+    return null;
+  }
+  for (const owner of owners) {
+    const normalized = owner.trim();
+    if (!normalized) {
+      continue;
+    }
+    if (normalized === ANONYMOUS_PRINCIPAL) {
+      continue;
+    }
+    if (normalized.endsWith("-cai")) {
+      continue;
+    }
+    return normalized;
+  }
+  return null;
 }
 
 async function resolveMemoryOgpDescription(

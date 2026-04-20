@@ -36,6 +36,7 @@ describe("ogp helpers", () => {
       title: "Alpha",
       description: DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION,
       shortMemoryId: "-",
+      owner: null,
     });
   });
 
@@ -50,6 +51,7 @@ describe("ogp helpers", () => {
       title: "Alpha",
       description: "Beta",
       shortMemoryId: "ywega-gaaaa-aaaak-apg6q-cai",
+      owner: null,
     });
   });
 
@@ -58,6 +60,7 @@ describe("ogp helpers", () => {
       title: DEFAULT_MEMORY_OGP_IMAGE_TITLE,
       description: DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION,
       shortMemoryId: "-",
+      owner: null,
     });
   });
 
@@ -66,6 +69,23 @@ describe("ogp helpers", () => {
       title: "Память",
       description: "Резюме",
       shortMemoryId: "-",
+      owner: null,
+    });
+  });
+
+  it("keeps the selected owner in the card model", () => {
+    expect(
+      buildMemoryOgpCardModel({
+        name: "Alpha",
+        description: "Beta",
+        memoryId: "m1",
+        owner: "rdmx6-jaaaa-aaaaa-aaadq-cai",
+      }),
+    ).toEqual({
+      title: "Alpha",
+      description: "Beta",
+      shortMemoryId: "m1",
+      owner: "rdmx6-jaaaa-aaaaa-aaadq-cai",
     });
   });
 
