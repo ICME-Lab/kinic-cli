@@ -5,7 +5,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMemoryOgpImageCopy,
-  buildMemoryOgpSearchCards,
   DEFAULT_MEMORY_METADATA_DESCRIPTION,
   DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION,
   DEFAULT_MEMORY_OGP_IMAGE_TITLE,
@@ -109,29 +108,5 @@ describe("ogp helpers", () => {
     expect(buildMemorySearchQuery({ name: "Alpha", description: "Quarterly goals" })).toBe(
       "Alpha Quarterly goals",
     );
-  });
-
-  it("extracts actual search cards from stored payload rows", () => {
-    expect(
-      buildMemoryOgpSearchCards([
-        { payload: "{\"tag\":\"notes\",\"payload\":\"Revenue increased 18 percent quarter over quarter.\"}" },
-      ]),
-    ).toEqual([
-      {
-        tag: "notes",
-        excerpt: "Revenue increased 18 percent quarter over quarter.",
-      },
-    ]);
-  });
-
-  it("falls back when search payload is non-ascii only", () => {
-    expect(
-      buildMemoryOgpSearchCards([{ payload: "{\"tag\":\"Тег\",\"payload\":\"Резюме\"}" }]),
-    ).toEqual([
-      {
-        tag: "Search Hit",
-        excerpt: "Search result preview unavailable",
-      },
-    ]);
   });
 });

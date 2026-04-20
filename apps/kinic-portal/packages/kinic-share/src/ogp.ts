@@ -5,16 +5,12 @@
 export const DEFAULT_MEMORY_METADATA_DESCRIPTION = "Public Kinic memory";
 export const DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION = "Shared notes and context from Kinic";
 export const DEFAULT_MEMORY_OGP_IMAGE_TITLE = "Shared Memory";
-export const DEFAULT_MEMORY_OGP_SEARCH_EXCERPT = "Search result preview unavailable";
 
 const TITLE_LIMIT = 72;
 const DESCRIPTION_LIMIT = 160;
 const MEMORY_ID_HEAD = 6;
 const MEMORY_ID_TAIL = 4;
 const SEARCH_QUERY_LIMIT = 120;
-const SEARCH_CARD_LIMIT = 3;
-const SEARCH_CARD_TAG_LIMIT = 20;
-const SEARCH_CARD_EXCERPT_LIMIT = 110;
 
 export type MemoryOgpInput = {
   memoryId?: string | null;
@@ -33,11 +29,6 @@ export type MemoryOgpCardModel = {
 export type MemoryOgpImageCopy = {
   title: string;
   description: string;
-};
-
-export type MemoryOgpSearchCard = {
-  tag: string;
-  excerpt: string;
 };
 
 export function buildMemoryPageTitle(name?: string | null): string {
@@ -83,15 +74,6 @@ export function buildMemorySearchQuery(input: MemoryOgpInput): string {
   return clamp(parts.join(" ").trim() || "public memory", SEARCH_QUERY_LIMIT);
 }
 
-export function buildMemoryOgpSearchCards(
-  hits: Array<{ payload: string }>,
-): MemoryOgpSearchCard[] {
-  return hits
-    .map((hit) => parseSearchCard(hit.payload))
-    .filter((card): card is MemoryOgpSearchCard => card !== null)
-    .slice(0, SEARCH_CARD_LIMIT);
-}
-
 function normalizeCopy(value: string | null | undefined, fallback: string): string {
   const normalized = normalizeOptionalCopy(value);
   return normalized || fallback;
@@ -110,37 +92,4 @@ function clamp(value: string, limit: number): string {
     return value;
   }
   return `${value.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
-}
-
-function parseSearchCard(payload: string): MemoryOgpSearchCard | null {
-  const parsed = parseRecord(payload);
-  const excerpt = clamp(
-    normalizeCopy(typeof parsed?.payload === "string" ? parsed.payload : payload, ""),
-    SEARCH_CARD_EXCERPT_LIMIT,
-  );
-  if (!excerpt) {
-    return null;
-  }
-  return {
-    tag: clamp(normalizeAsciiCopy(typeof parsed?.tag === "string" ? parsed.tag : "Search Hit", "Search Hit"), SEARCH_CARD_TAG_LIMIT),
-    excerpt: clamp(normalizeAsciiCopy(excerpt, DEFAULT_MEMORY_OGP_SEARCH_EXCERPT), SEARCH_CARD_EXCERPT_LIMIT),
-  };
-}
-
-function normalizeAsciiCopy(value: string | null | undefined, fallback: string): string {
-  const normalized = normalizeOptionalCopy(value)
-    .normalize("NFKC")
-    .replace(/[^\x20-\x7E]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return normalized || fallback;
-}
-
-function parseRecord(value: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === "object" && parsed !== null ? Object.fromEntries(Object.entries(parsed)) : null;
-  } catch {
-    return null;
-  }
 }

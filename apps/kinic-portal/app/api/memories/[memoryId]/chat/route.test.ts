@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   PromptContractError: class PromptContractError extends Error {},
   getCloudflareContext: vi.fn(),
   resolvePublicMemory: vi.fn(),
+  classifyPublicMemoryRuntimeError: vi.fn(),
   toSharedRuntimeEnv: vi.fn(),
   createAnonymousAgent: vi.fn(),
   fetchEmbedding: vi.fn(),
@@ -16,8 +17,6 @@ const mocks = vi.hoisted(() => ({
   buildAskAiPrompt: vi.fn(),
   callChatApi: vi.fn(),
   extractAnswer: vi.fn(),
-  isAnonymousAccessError: vi.fn(),
-  isTransientQueryError: vi.fn(),
 }));
 
 vi.mock("@opennextjs/cloudflare", () => ({
@@ -29,17 +28,19 @@ vi.mock("@/lib/public-memory", () => ({
   toSharedRuntimeEnv: mocks.toSharedRuntimeEnv,
 }));
 
+vi.mock("@/lib/public-memory-runtime", () => ({
+  classifyPublicMemoryRuntimeError: mocks.classifyPublicMemoryRuntimeError,
+  TRANSIENT_PUBLIC_MEMORY_ERROR: "temporary network error",
+}));
+
 vi.mock("@kinic/kinic-share", () => ({
   PUBLIC_MEMORY_CHAT_TOP_K: 5,
   PromptContractError: mocks.PromptContractError,
-  TRANSIENT_QUERY_ERROR: "temporary network error",
   buildAskAiPrompt: mocks.buildAskAiPrompt,
   callChatApi: mocks.callChatApi,
   createAnonymousAgent: mocks.createAnonymousAgent,
   extractAnswer: mocks.extractAnswer,
   fetchEmbedding: mocks.fetchEmbedding,
-  isAnonymousAccessError: mocks.isAnonymousAccessError,
-  isTransientQueryError: mocks.isTransientQueryError,
   searchMemory: mocks.searchMemory,
 }));
 
@@ -60,8 +61,7 @@ describe("public chat route", () => {
     mocks.buildAskAiPrompt.mockReturnValue("prompt");
     mocks.callChatApi.mockResolvedValue("<answer>yes</answer>");
     mocks.extractAnswer.mockReturnValue("yes");
-    mocks.isAnonymousAccessError.mockReturnValue(false);
-    mocks.isTransientQueryError.mockReturnValue(false);
+    mocks.classifyPublicMemoryRuntimeError.mockReturnValue("unknown");
   });
 
   it("uses bounded search and returns bounded context_count", async () => {
@@ -211,7 +211,9 @@ describe("public chat route", () => {
   it("returns 503 on transient upstream verification failures", async () => {
     const transientError = new Error("Invalid certificate: Invalid signature from replica");
     mocks.fetchEmbedding.mockRejectedValueOnce(transientError);
-    mocks.isTransientQueryError.mockImplementation((error: unknown) => error === transientError);
+    mocks.classifyPublicMemoryRuntimeError.mockImplementation((error: unknown) =>
+      error === transientError ? "transient" : "unknown",
+    );
 
     const response = await POST(
       new Request("https://portal.kinic.io/api/memories/m1/chat", {
@@ -228,7 +230,9 @@ describe("public chat route", () => {
   it("returns 403 when upstream rejects anonymous access", async () => {
     const permissionError = new Error('Call failed: "Message": "Permission denied"');
     mocks.searchMemory.mockRejectedValueOnce(permissionError);
-    mocks.isAnonymousAccessError.mockImplementation((error: unknown) => error === permissionError);
+    mocks.classifyPublicMemoryRuntimeError.mockImplementation((error: unknown) =>
+      error === permissionError ? "denied" : "unknown",
+    );
 
     const response = await POST(
       new Request("https://portal.kinic.io/api/memories/m1/chat", {

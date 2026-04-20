@@ -14,11 +14,14 @@ describe("renderOgpImage", () => {
     expect(markup).toContain("IC Mainnet");
     expect(markup).toContain("VISIBILITY");
     expect(markup).toContain("Public");
+    expect(markup).toContain(
+      "Kinic is your cryptographically secure, searchable memory for AI",
+    );
     expect(markup).not.toContain("STATUS");
     expect(markup).not.toContain("ASPECT RATIO");
     expect(markup).not.toContain(">Shared notes and context from Kinic<");
-    expect(markup).toContain(OGP_FRAME_SRC);
-    expect(markup).toContain(OGP_LOGO_SRC);
+    expect(markup).toContain(escapeMarkup(OGP_FRAME_SRC));
+    expect(markup).toContain(escapeMarkup(OGP_LOGO_SRC));
   });
 
   it("uses memory card copy when a memory payload is present", () => {
@@ -41,5 +44,10 @@ describe("renderOgpImage", () => {
     expect(markup).toContain("rdmx6...cai");
     expect(markup).toContain("IC Mainnet");
     expect(markup).toContain("Public");
+    expect(markup).toContain("Kinic is your cryptographically secure");
   });
 });
+
+function escapeMarkup(value: string): string {
+  return value.replaceAll("'", "&#x27;");
+}

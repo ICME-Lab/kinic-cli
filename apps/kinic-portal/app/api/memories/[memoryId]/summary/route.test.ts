@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   PromptContractError: class PromptContractError extends Error {},
   getCloudflareContext: vi.fn(),
   resolvePublicMemory: vi.fn(),
+  classifyPublicMemoryRuntimeError: vi.fn(),
   toSharedRuntimeEnv: vi.fn(),
   getSummaryCache: vi.fn(),
   readSummaryCache: vi.fn(),
@@ -17,8 +18,6 @@ const mocks = vi.hoisted(() => ({
   buildMemorySummaryPrompt: vi.fn(),
   callChatApi: vi.fn(),
   extractAnswer: vi.fn(),
-  isAnonymousAccessError: vi.fn(),
-  isTransientQueryError: vi.fn(),
 }));
 
 vi.mock("@opennextjs/cloudflare", () => ({
@@ -28,6 +27,11 @@ vi.mock("@opennextjs/cloudflare", () => ({
 vi.mock("@/lib/public-memory", () => ({
   resolvePublicMemory: mocks.resolvePublicMemory,
   toSharedRuntimeEnv: mocks.toSharedRuntimeEnv,
+}));
+
+vi.mock("@/lib/public-memory-runtime", () => ({
+  classifyPublicMemoryRuntimeError: mocks.classifyPublicMemoryRuntimeError,
+  TRANSIENT_PUBLIC_MEMORY_ERROR: "temporary network error",
 }));
 
 vi.mock("@/lib/summary-cache", () => ({
@@ -40,15 +44,12 @@ vi.mock("@/lib/summary-cache", () => ({
 vi.mock("@kinic/kinic-share", () => ({
   PUBLIC_MEMORY_SUMMARY_TOP_K: 5,
   PromptContractError: mocks.PromptContractError,
-  TRANSIENT_QUERY_ERROR: "temporary network error",
   buildMemorySummaryPrompt: mocks.buildMemorySummaryPrompt,
   buildMemorySummarySearchQuery: mocks.buildMemorySummarySearchQuery,
   callChatApi: mocks.callChatApi,
   createAnonymousAgent: mocks.createAnonymousAgent,
   extractAnswer: mocks.extractAnswer,
   fetchEmbedding: mocks.fetchEmbedding,
-  isAnonymousAccessError: mocks.isAnonymousAccessError,
-  isTransientQueryError: mocks.isTransientQueryError,
   searchMemory: mocks.searchMemory,
 }));
 
@@ -62,8 +63,7 @@ describe("public summary route", () => {
     mocks.toSharedRuntimeEnv.mockReturnValue({ EMBEDDING_API_ENDPOINT: "https://api.kinic.io" });
     mocks.getSummaryCache.mockReturnValue({ get: vi.fn(), put: vi.fn() });
     mocks.buildSummaryCacheKey.mockReturnValue("memory-summary:key");
-    mocks.isAnonymousAccessError.mockReturnValue(false);
-    mocks.isTransientQueryError.mockReturnValue(false);
+    mocks.classifyPublicMemoryRuntimeError.mockReturnValue("unknown");
   });
 
   afterEach(() => {

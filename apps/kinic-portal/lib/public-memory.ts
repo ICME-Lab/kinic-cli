@@ -6,11 +6,10 @@ import { cache } from "react";
 import {
   createAnonymousAgent,
   resolvePublicMemoryDetails,
-  type PublicMemoryDetailsState,
   type SharedRuntimeEnv,
 } from "@kinic/kinic-share";
 
-export type PublicMemoryState = PublicMemoryDetailsState;
+export type PublicMemoryState = Awaited<ReturnType<typeof resolvePublicMemoryDetails>>;
 
 export async function resolvePublicMemory(env: SharedRuntimeEnv, memoryId: string): Promise<PublicMemoryState> {
   return resolvePublicMemoryDetails(createAnonymousAgent(env), memoryId);

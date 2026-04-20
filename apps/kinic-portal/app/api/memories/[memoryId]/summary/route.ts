@@ -5,21 +5,19 @@
 import {
   PUBLIC_MEMORY_SUMMARY_TOP_K,
   PromptContractError,
-  TRANSIENT_QUERY_ERROR,
   buildMemorySummaryPrompt,
   buildMemorySummarySearchQuery,
   callChatApi,
   createAnonymousAgent,
   extractAnswer,
   fetchEmbedding,
-  isAnonymousAccessError,
-  isTransientQueryError,
   searchMemory,
 } from "@kinic/kinic-share";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { resolveSummaryLanguage } from "@/lib/public-summary";
 import { buildSummaryCacheKey, getSummaryCache, readSummaryCache, writeSummaryCache } from "@/lib/summary-cache";
 import { resolvePublicMemory, toSharedRuntimeEnv } from "@/lib/public-memory";
+import { classifyPublicMemoryRuntimeError, TRANSIENT_PUBLIC_MEMORY_ERROR } from "@/lib/public-memory-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -75,11 +73,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ memo
       updatedAt,
     });
   } catch (error) {
-    if (isAnonymousAccessError(error)) {
+    if (classifyPublicMemoryRuntimeError(error) === "denied") {
       return Response.json({ error: "anonymous access denied" }, { status: 403 });
     }
-    if (isTransientQueryError(error)) {
-      return Response.json({ error: TRANSIENT_QUERY_ERROR }, { status: 503 });
+    if (classifyPublicMemoryRuntimeError(error) === "transient") {
+      return Response.json({ error: TRANSIENT_PUBLIC_MEMORY_ERROR }, { status: 503 });
     }
     if (error instanceof PromptContractError) {
       console.warn("summary model output unusable", error.message);

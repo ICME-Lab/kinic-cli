@@ -5,18 +5,16 @@
 import {
   PUBLIC_MEMORY_CHAT_TOP_K,
   PromptContractError,
-  TRANSIENT_QUERY_ERROR,
   buildAskAiPrompt,
   callChatApi,
   createAnonymousAgent,
   extractAnswer,
   fetchEmbedding,
-  isAnonymousAccessError,
-  isTransientQueryError,
   searchMemory,
 } from "@kinic/kinic-share";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { resolvePublicMemory, toSharedRuntimeEnv } from "@/lib/public-memory";
+import { classifyPublicMemoryRuntimeError, TRANSIENT_PUBLIC_MEMORY_ERROR } from "@/lib/public-memory-runtime";
 
 export async function POST(request: Request, { params }: { params: Promise<{ memoryId: string }> }) {
   const { memoryId } = await params;
@@ -59,11 +57,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
       answer: extractAnswer(rawResponse),
     });
   } catch (error) {
-    if (isAnonymousAccessError(error)) {
+    if (classifyPublicMemoryRuntimeError(error) === "denied") {
       return Response.json({ error: "anonymous access denied" }, { status: 403 });
     }
-    if (isTransientQueryError(error)) {
-      return Response.json({ error: TRANSIENT_QUERY_ERROR }, { status: 503 });
+    if (classifyPublicMemoryRuntimeError(error) === "transient") {
+      return Response.json({ error: TRANSIENT_PUBLIC_MEMORY_ERROR }, { status: 503 });
     }
     if (error instanceof PromptContractError) {
       console.warn("chat model output unusable", error.message);

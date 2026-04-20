@@ -1,5 +1,5 @@
 // Where: shared by the default and memory-specific OGP image routes.
-// What: renders the dark-framed Kinic social card with static image assets and bounded copy.
+// What: renders the dark-framed Kinic social card with static SVG assets and bounded copy.
 // Why: bot OGP fetches must stay cheap while matching the supplied frame and logo art.
 
 import type { CSSProperties, ReactElement } from "react";
@@ -17,15 +17,16 @@ type OgpImageProps = {
   memory?: MemoryOgpInput;
 };
 
+const CANVAS_WIDTH = 1200;
+const CANVAS_HEIGHT = 630;
+const INNER_INSET = 18;
+const PANEL_WIDTH = CANVAS_WIDTH - INNER_INSET * 2;
+const PANEL_HEIGHT = CANVAS_HEIGHT - INNER_INSET * 2;
+const FOOTER_TAGLINE =
+  "Kinic is your cryptographically secure, searchable memory for AI — every bookmark, email, note, and document in one place.";
+
 export function renderOgpImage({ memory }: OgpImageProps): ReactElement {
-  const card = memory
-    ? buildMemoryOgpCardModel(memory)
-    : {
-        title: DEFAULT_SITE_TITLE,
-        description: DEFAULT_SITE_DESCRIPTION,
-        shortMemoryId: "-",
-        owner: null,
-      };
+  const card = memory ? buildMemoryOgpCardModel(memory) : { title: DEFAULT_SITE_TITLE, description: DEFAULT_SITE_DESCRIPTION, shortMemoryId: "-", owner: null };
   return (
     <div style={frameStyle}>
       <div style={outerCardStyle}>
@@ -33,8 +34,8 @@ export function renderOgpImage({ memory }: OgpImageProps): ReactElement {
           <img
             alt=""
             src={OGP_FRAME_SRC}
-            width={1096}
-            height={538}
+            width={PANEL_WIDTH}
+            height={PANEL_HEIGHT}
             style={backgroundImageStyle}
           />
           <div style={panelStyle}>
@@ -58,6 +59,10 @@ export function renderOgpImage({ memory }: OgpImageProps): ReactElement {
                   <Stat label="MEMORY ID" value={card.shortMemoryId} />
                 </div>
               </div>
+            </div>
+            <div style={footerStyle}>
+              <div style={footerLineStyle} />
+              <div style={footerTextStyle}>{FOOTER_TAGLINE}</div>
             </div>
           </div>
         </div>
@@ -105,21 +110,20 @@ const frameStyle: CSSProperties = {
 };
 
 const outerCardStyle: CSSProperties = {
-  width: 1132,
-  height: 574,
+  width: CANVAS_WIDTH,
+  height: CANVAS_HEIGHT,
   display: "flex",
   position: "relative",
   overflow: "hidden",
-  borderRadius: 20,
+  borderRadius: 24,
   border: "1px solid rgba(214, 226, 246, 0.16)",
   background: "rgba(10, 16, 31, 0.86)",
-  boxShadow: "0 30px 70px rgba(0, 0, 0, 0.42)",
 };
 
 const innerPanelStyle: CSSProperties = {
-  margin: 18,
-  width: 1096,
-  height: 538,
+  margin: INNER_INSET,
+  width: PANEL_WIDTH,
+  height: PANEL_HEIGHT,
   display: "flex",
   position: "relative",
   overflow: "hidden",
@@ -143,6 +147,7 @@ const panelStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 28,
+  justifyContent: "space-between",
   position: "relative",
 };
 
@@ -202,7 +207,7 @@ const bodyStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 20,
-  width: 860,
+  width: 900,
 };
 
 const heroStyle: CSSProperties = {
@@ -210,6 +215,7 @@ const heroStyle: CSSProperties = {
   gap: 18,
   alignItems: "flex-start",
   marginTop: 2,
+  flex: 1,
 };
 
 const titleStyle: CSSProperties = {
@@ -227,7 +233,7 @@ const titleStyle: CSSProperties = {
 const descriptionStyle: CSSProperties = {
   display: "-webkit-box",
   overflow: "hidden",
-  width: 860,
+  width: 900,
   fontSize: 27,
   lineHeight: 1.32,
   color: "rgba(235, 241, 252, 0.92)",
@@ -238,8 +244,29 @@ const descriptionStyle: CSSProperties = {
 const statsGridStyle: CSSProperties = {
   display: "flex",
   gap: 16,
-  width: 860,
+  width: 900,
   marginTop: 10,
+};
+
+const footerStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 18,
+  width: "100%",
+  paddingBottom: 6,
+};
+
+const footerLineStyle: CSSProperties = {
+  width: "100%",
+  height: 0,
+  borderTop: "1px solid rgba(245, 247, 250, 0.92)",
+};
+
+const footerTextStyle: CSSProperties = {
+  fontSize: 17,
+  lineHeight: 1.35,
+  color: "rgba(245, 247, 250, 0.94)",
+  textAlign: "center",
 };
 
 const statCardStyle: CSSProperties = {

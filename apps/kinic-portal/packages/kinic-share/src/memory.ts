@@ -1,50 +1,23 @@
 // Where: shared by the public API routes and the remote MCP Worker.
-// What: implements the Kinic memory and launcher canister calls needed by Kinic portal v1.
-// Why: keep canister semantics, anonymous visibility checks, and response shaping identical across surfaces.
+// What: implements the read-only Kinic memory calls needed by Kinic portal v1.
+// Why: keep anonymous access checks and response shaping identical across public surfaces.
 
 import { Actor, type ActorMethod, type HttpAgent } from "@dfinity/agent";
 import { IDL } from "@dfinity/candid";
 import { Principal } from "@dfinity/principal";
-import {
-  DEFAULT_VECTOR_DIM,
-  requireLauncherCanisterId,
-  resolveEmbeddingApiEndpoint,
-  type SharedRuntimeEnv,
-} from "./config";
+import { resolveEmbeddingApiEndpoint, type SharedRuntimeEnv } from "./config";
 import { parseMemoryNameFields } from "./metadata";
+import {
+  classifyPublicMemoryRuntimeError,
+  probeAnonymousAccess,
+  retryTransientQuery,
+  summarizeMemory,
+  TRANSIENT_QUERY_ERROR,
+  type AnonymousAccessResult,
+  type DbMetadata,
+} from "./memory-internal";
 
-type DbMetadata = {
-  owners: string[];
-  name: string;
-  stable_memory_size: number;
-  version: string;
-  cycle_amount: bigint;
-};
-
-type MemoryActor = {
-  add_new_user: ActorMethod<[Principal, number], void>;
-  get_dim: ActorMethod<[], bigint>;
-  get_name: ActorMethod<[], string>;
-  get_metadata: ActorMethod<[], DbMetadata>;
-  get_users: ActorMethod<[], Array<[string, number]>>;
-  insert: ActorMethod<[number[], string], number>;
-  search: ActorMethod<[number[]], Array<[number, string]>>;
-};
-
-type LauncherState =
-  | { Empty: string }
-  | { Pending: string }
-  | { Creation: string }
-  | { Installation: [Principal, string] }
-  | { SettingUp: Principal }
-  | { Running: Principal };
-
-type DeployInstanceResult = { Ok: string } | { Err: unknown };
-
-type LauncherActor = {
-  deploy_instance: ActorMethod<[string, bigint], DeployInstanceResult>;
-  list_instance: ActorMethod<[], LauncherState[]>;
-};
+type MemoryActor = { get_dim: ActorMethod<[], bigint>; get_name: ActorMethod<[], string>; get_metadata: ActorMethod<[], DbMetadata>; search: ActorMethod<[number[]], Array<[number, string]>> };
 
 export type MemoryShowResponse = {
   memory_id: string;
@@ -57,32 +30,11 @@ export type MemoryShowResponse = {
   cycle_amount: number;
 };
 
-export type MemorySummaryResponse = {
-  memory_id: string;
-  name: string;
-  description: string | null;
-  version: string;
-};
-
-export type PublicMemoryDetailsState =
-  | { kind: "accessible"; memory: MemoryShowResponse }
-  | { kind: "invalid"; error: "invalid memory id" }
-  | { kind: "not_found"; error: "memory not found" }
-  | { kind: "transient_error"; error: typeof TRANSIENT_QUERY_ERROR }
-  | { kind: "denied"; error: "anonymous access denied" };
-
-export type PublicMemorySummaryState =
-  | { kind: "accessible"; memory: MemorySummaryResponse }
-  | { kind: "invalid"; error: "invalid memory id" }
-  | { kind: "not_found"; error: "memory not found" }
-  | { kind: "transient_error"; error: typeof TRANSIENT_QUERY_ERROR }
-  | { kind: "denied"; error: "anonymous access denied" };
-
-export type AnonymousAccessResult =
-  | { accessible: true }
-  | { accessible: false; error: "anonymous access denied" | "memory not found" | "temporary network error" };
-
-export const TRANSIENT_QUERY_ERROR = "temporary network error";
+type MemorySummaryResponse = { memory_id: string; name: string; description: string | null; version: string };
+type PublicMemoryError = "invalid memory id" | "memory not found" | "anonymous access denied" | typeof TRANSIENT_QUERY_ERROR;
+type PublicMemoryState<T> = { kind: "accessible"; memory: T } | { kind: "invalid"; error: "invalid memory id" } | { kind: "not_found"; error: "memory not found" } | { kind: "transient_error"; error: typeof TRANSIENT_QUERY_ERROR } | { kind: "denied"; error: "anonymous access denied" };
+type PublicMemoryDetailsState = PublicMemoryState<MemoryShowResponse>;
+type PublicMemorySummaryState = PublicMemoryState<MemorySummaryResponse>;
 
 export function isValidPrincipalText(value: string): boolean {
   try {
@@ -93,35 +45,11 @@ export function isValidPrincipalText(value: string): boolean {
   }
 }
 
-export function isAnonymousAccessError(error: unknown): boolean {
-  const message = extractErrorMessage(error).toLowerCase();
-  return message.includes("permission denied") || message.includes("invalid user");
+function isRuntimeErrorKind(error: unknown, kind: Exclude<ReturnType<typeof classifyPublicMemoryRuntimeError>, "unknown">): boolean {
+  return classifyPublicMemoryRuntimeError(error) === kind;
 }
 
-export function isTransientQueryError(error: unknown): boolean {
-  const message = extractErrorMessage(error).toLowerCase();
-  return message.includes("invalid certificate") || message.includes("invalid signature");
-}
-
-export function isPublicMemoryNotFoundError(error: unknown): boolean {
-  const message = extractErrorMessage(error).toLowerCase();
-  return [
-    "canister not found",
-    "could not find canister",
-    "destination invalid",
-    "query method does not exist",
-    "has no query method",
-    "method not found",
-    "failed to decode",
-    "cannot decode",
-    "decode error",
-  ].some((pattern) => message.includes(pattern));
-}
-
-export async function getMemoryDetails(
-  agent: HttpAgent,
-  memoryId: string,
-): Promise<MemoryShowResponse> {
+async function getMemoryDetails(agent: HttpAgent, memoryId: string): Promise<MemoryShowResponse> {
   const actor = createMemoryActor(agent, memoryId);
   const [metadata, dim] = await Promise.all([
     retryTransientQuery(() => actor.get_metadata()),
@@ -140,92 +68,32 @@ export async function getMemoryDetails(
   };
 }
 
-export async function getMemorySummary(
-  agent: HttpAgent,
-  memoryId: string,
-): Promise<MemorySummaryResponse> {
+async function getMemorySummary(agent: HttpAgent, memoryId: string): Promise<MemorySummaryResponse> {
   const metadata = await retryTransientQuery(() => createMemoryActor(agent, memoryId).get_metadata());
   return summarizeMemory(memoryId, metadata);
 }
 
-export async function checkAnonymousAccess(
-  agent: HttpAgent,
-  memoryId: string,
-): Promise<AnonymousAccessResult> {
+async function checkAnonymousAccess(agent: HttpAgent, memoryId: string): Promise<AnonymousAccessResult> {
   return probeAnonymousAccess(() => createMemoryActor(agent, memoryId).get_name());
 }
 
-export async function getPublicMemory(
-  agent: HttpAgent,
-  memoryId: string,
-): Promise<MemoryShowResponse> {
+async function getPublicMemory(agent: HttpAgent, memoryId: string): Promise<MemoryShowResponse> {
   return getMemoryDetails(agent, memoryId);
 }
 
-export async function resolvePublicMemoryDetails(
-  agent: HttpAgent,
-  memoryId: string,
-): Promise<PublicMemoryDetailsState> {
+export async function resolvePublicMemoryDetails(agent: HttpAgent, memoryId: string): Promise<PublicMemoryDetailsState> {
   return resolvePublicMemoryState(memoryId, () => checkAnonymousAccess(agent, memoryId), () => getPublicMemory(agent, memoryId));
 }
 
-export async function resolvePublicMemorySummary(
-  agent: HttpAgent,
-  memoryId: string,
-): Promise<PublicMemorySummaryState> {
+export async function resolvePublicMemorySummary(agent: HttpAgent, memoryId: string): Promise<PublicMemorySummaryState> {
   return resolvePublicMemoryState(memoryId, () => checkAnonymousAccess(agent, memoryId), () => getMemorySummary(agent, memoryId));
 }
 
-export async function searchMemory(
-  agent: HttpAgent,
-  memoryId: string,
-  embedding: number[],
-): Promise<Array<{ score: number; payload: string }>> {
+export async function searchMemory(agent: HttpAgent, memoryId: string, embedding: number[]): Promise<Array<{ score: number; payload: string }>> {
   const rows = await retryTransientQuery(() => createMemoryActor(agent, memoryId).search(embedding));
   return rows
     .map(([score, payload]) => ({ score, payload }))
     .sort((left, right) => right.score - left.score);
-}
-
-export async function listMemories(agent: HttpAgent, env: SharedRuntimeEnv): Promise<string[]> {
-  const actor = createLauncherActor(agent, requireLauncherCanisterId(env));
-  const items = await actor.list_instance();
-  return items.flatMap((item) => ("Running" in item ? [item.Running.toText()] : []));
-}
-
-export async function createMemory(
-  agent: HttpAgent,
-  env: SharedRuntimeEnv,
-  name: string,
-  description: string,
-): Promise<string> {
-  const actor = createLauncherActor(agent, requireLauncherCanisterId(env));
-  const payload = JSON.stringify({ name, description });
-  const response = await actor.deploy_instance(payload, DEFAULT_VECTOR_DIM);
-  if ("Err" in response) {
-    throw new Error(`deploy_instance failed: ${JSON.stringify(response.Err)}`);
-  }
-  return response.Ok;
-}
-
-export async function insertMarkdown(
-  agent: HttpAgent,
-  env: SharedRuntimeEnv,
-  memoryId: string,
-  tag: string,
-  text: string,
-): Promise<{ memory_id: string; tag: string; chunks_inserted: number }> {
-  const actor = createMemoryActor(agent, memoryId);
-  const chunks = await lateChunk(text, env);
-  for (const chunk of chunks) {
-    const payload = JSON.stringify({ tag, payload: chunk.sentence });
-    await actor.insert(chunk.embedding, payload);
-  }
-  return { memory_id: memoryId, tag, chunks_inserted: chunks.length };
-}
-
-export async function makeMemoryPublic(agent: HttpAgent, memoryId: string): Promise<void> {
-  await createMemoryActor(agent, memoryId).add_new_user(Principal.anonymous(), 3);
 }
 
 export async function fetchEmbedding(text: string, env: SharedRuntimeEnv): Promise<number[]> {
@@ -245,39 +113,11 @@ export async function fetchEmbedding(text: string, env: SharedRuntimeEnv): Promi
 }
 
 export async function callChatApi(prompt: string, env: SharedRuntimeEnv): Promise<string> {
-  const response = await fetch(`${resolveEmbeddingApiEndpoint(env)}/chat`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message: prompt }),
-  });
+  const response = await fetch(`${resolveEmbeddingApiEndpoint(env)}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: prompt }) });
   if (!response.ok) {
     throw new Error(`chat request failed with status ${response.status}`);
   }
   return response.text();
-}
-
-async function lateChunk(
-  text: string,
-  env: SharedRuntimeEnv,
-): Promise<Array<{ embedding: number[]; sentence: string }>> {
-  const response = await fetch(`${resolveEmbeddingApiEndpoint(env)}/late-chunking`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ markdown: text }),
-  });
-  if (!response.ok) {
-    throw new Error(`late chunking request failed with status ${response.status}`);
-  }
-  const payload = parseRecord(await response.json());
-  if (!payload || !Array.isArray(payload.chunks)) {
-    throw new Error("Invalid late chunking response.");
-  }
-  return payload.chunks.flatMap((chunk) => {
-    const row = parseRecord(chunk);
-    return row && Array.isArray(row.embedding) && typeof row.sentence === "string"
-      ? [{ embedding: row.embedding.filter((value): value is number => typeof value === "number"), sentence: row.sentence }]
-      : [];
-  });
 }
 
 function createMemoryActor(agent: HttpAgent, memoryId: string): MemoryActor {
@@ -287,81 +127,11 @@ function createMemoryActor(agent: HttpAgent, memoryId: string): MemoryActor {
   });
 }
 
-function createLauncherActor(agent: HttpAgent, canisterId: string): LauncherActor {
-  return Actor.createActor<LauncherActor>(launcherIdlFactory, {
-    agent,
-    canisterId: Principal.fromText(canisterId),
-  });
-}
-
 function parseRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value)) : null;
 }
 
-export async function probeAnonymousAccess(getName: () => Promise<string>): Promise<AnonymousAccessResult> {
-  try {
-    await retryTransientQuery(getName);
-    return { accessible: true };
-  } catch (error) {
-    if (isPublicMemoryNotFoundError(error)) {
-      return { accessible: false, error: "memory not found" };
-    }
-    if (isAnonymousAccessError(error)) {
-      return { accessible: false, error: "anonymous access denied" };
-    }
-    if (isTransientQueryError(error)) {
-      return { accessible: false, error: TRANSIENT_QUERY_ERROR };
-    }
-    throw error;
-  }
-}
-
-export async function retryTransientQuery<T>(call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (error) {
-    if (!isTransientQueryError(error)) {
-      throw error;
-    }
-  }
-  return call();
-}
-
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return "";
-  }
-}
-
-export function summarizeMemory(memoryId: string, metadata: DbMetadata): MemorySummaryResponse {
-  const { name, description } = parseMemoryNameFields(metadata.name);
-  return {
-    memory_id: memoryId,
-    name,
-    description,
-    version: metadata.version,
-  };
-}
-
-async function resolvePublicMemoryState<T>(
-  memoryId: string,
-  checkAccess: () => Promise<AnonymousAccessResult>,
-  loadMemory: () => Promise<T>,
-): Promise<
-  | { kind: "accessible"; memory: T }
-  | { kind: "invalid"; error: "invalid memory id" }
-  | { kind: "not_found"; error: "memory not found" }
-  | { kind: "transient_error"; error: typeof TRANSIENT_QUERY_ERROR }
-  | { kind: "denied"; error: "anonymous access denied" }
-> {
+async function resolvePublicMemoryState<T>(memoryId: string, checkAccess: () => Promise<AnonymousAccessResult>, loadMemory: () => Promise<T>): Promise<PublicMemoryState<T>> {
   if (!isValidPrincipalText(memoryId)) {
     return { kind: "invalid", error: "invalid memory id" };
   }
@@ -380,13 +150,13 @@ async function resolvePublicMemoryState<T>(
   try {
     return { kind: "accessible", memory: await loadMemory() };
   } catch (error) {
-    if (isPublicMemoryNotFoundError(error)) {
+    if (isRuntimeErrorKind(error, "not_found")) {
       return { kind: "not_found", error: "memory not found" };
     }
-    if (isAnonymousAccessError(error)) {
+    if (isRuntimeErrorKind(error, "denied")) {
       return { kind: "denied", error: "anonymous access denied" };
     }
-    if (isTransientQueryError(error)) {
+    if (isRuntimeErrorKind(error, "transient")) {
       return { kind: "transient_error", error: TRANSIENT_QUERY_ERROR };
     }
     throw error;
@@ -395,7 +165,6 @@ async function resolvePublicMemoryState<T>(
 
 const memoryIdlFactory: IDL.InterfaceFactory = ({ IDL: Types }) =>
   Types.Service({
-    add_new_user: Types.Func([Types.Principal, Types.Nat8], [], []),
     get_dim: Types.Func([], [Types.Nat64], ["query"]),
     get_name: Types.Func([], [Types.Text], ["query"]),
     get_metadata: Types.Func(
@@ -415,46 +184,5 @@ const memoryIdlFactory: IDL.InterfaceFactory = ({ IDL: Types }) =>
       ],
       ["query"],
     ),
-    get_users: Types.Func([], [Types.Vec(Types.Tuple(Types.Text, Types.Nat8))], ["query"]),
-    insert: Types.Func([Types.Vec(Types.Float32), Types.Text], [Types.Nat32], []),
     search: Types.Func([Types.Vec(Types.Float32)], [Types.Vec(Types.Tuple(Types.Float32, Types.Text))], ["query"]),
-  });
-
-const launcherIdlFactory: IDL.InterfaceFactory = ({ IDL: Types }) =>
-  Types.Service({
-    deploy_instance: Types.Func(
-      [Types.Text, Types.Nat64],
-      [
-        Types.Variant({
-          Ok: Types.Text,
-          Err: Types.Variant({
-            IndexOutOfLange: Types.Null,
-            SettingUpCanister: Types.Text,
-            Refund: Types.Null,
-            NoInstances: Types.Null,
-            CreateCanister: Types.Null,
-            InstallCanister: Types.Null,
-            CheckBalance: Types.Text,
-            AlreadyRunning: Types.Null,
-          }),
-        }),
-      ],
-      [],
-    ),
-    list_instance: Types.Func(
-      [],
-      [
-        Types.Vec(
-          Types.Variant({
-            Empty: Types.Text,
-            Pending: Types.Text,
-            Creation: Types.Text,
-            Installation: Types.Tuple(Types.Principal, Types.Text),
-            SettingUp: Types.Principal,
-            Running: Types.Principal,
-          }),
-        ),
-      ],
-      ["query"],
-    ),
   });

@@ -6,18 +6,15 @@ import {
   createAnonymousAgent,
   DEFAULT_REMOTE_MCP_SEARCH_TOP_K,
   fetchEmbedding,
-  isAnonymousAccessError,
-  isPublicMemoryNotFoundError,
-  isTransientQueryError,
   MAX_REMOTE_MCP_SEARCH_TOP_K,
   resolvePublicMemorySummary,
   searchMemory,
-  TRANSIENT_QUERY_ERROR,
   type SharedRuntimeEnv,
 } from "@kinic/kinic-share";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
+import { classifyPublicMemoryRuntimeError, TRANSIENT_PUBLIC_MEMORY_ERROR } from "../../../lib/public-memory-runtime";
 
 export const PUBLIC_MEMORY_HELP_OUTPUT = {
   server: "kinic-remote-mcp",
@@ -43,7 +40,7 @@ export const PUBLIC_MEMORY_HELP_OUTPUT = {
   ],
 } as const;
 
-export const REMOTE_MCP_TOOL_NAMES = [
+const REMOTE_MCP_TOOL_NAMES = [
   "public_memory_help",
   "public_memory_show",
   "public_memory_search",
@@ -231,21 +228,22 @@ function toToolError(
 }
 
 function toSearchToolError(error: unknown, payload: Record<string, unknown>) {
-  if (isPublicMemoryNotFoundError(error)) {
+  const kind = classifyPublicMemoryRuntimeError(error);
+  if (kind === "not_found") {
     return toolError("memory not found", {
       error: "memory not found",
       ...payload,
     });
   }
-  if (isAnonymousAccessError(error)) {
+  if (kind === "denied") {
     return toolError("anonymous access denied", {
       error: "anonymous access denied",
       ...payload,
     });
   }
-  if (isTransientQueryError(error)) {
-    return toolError(TRANSIENT_QUERY_ERROR, {
-      error: TRANSIENT_QUERY_ERROR,
+  if (kind === "transient") {
+    return toolError(TRANSIENT_PUBLIC_MEMORY_ERROR, {
+      error: TRANSIENT_PUBLIC_MEMORY_ERROR,
       ...payload,
     });
   }

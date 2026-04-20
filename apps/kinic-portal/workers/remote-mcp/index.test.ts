@@ -5,11 +5,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  classifyPublicMemoryRuntimeError: vi.fn(),
   createAnonymousAgent: vi.fn(),
   fetchEmbedding: vi.fn(),
-  isAnonymousAccessError: vi.fn(),
-  isPublicMemoryNotFoundError: vi.fn(),
-  isTransientQueryError: vi.fn(),
   resolvePublicMemorySummary: vi.fn(),
   searchMemory: vi.fn(),
 }));
@@ -20,19 +18,20 @@ vi.mock("@kinic/kinic-share", async () => {
     ...actual,
     createAnonymousAgent: mocks.createAnonymousAgent,
     fetchEmbedding: mocks.fetchEmbedding,
-    isAnonymousAccessError: mocks.isAnonymousAccessError,
-    isPublicMemoryNotFoundError: mocks.isPublicMemoryNotFoundError,
-    isTransientQueryError: mocks.isTransientQueryError,
     resolvePublicMemorySummary: mocks.resolvePublicMemorySummary,
     searchMemory: mocks.searchMemory,
   };
 });
 
+vi.mock("../../../lib/public-memory-runtime", () => ({
+  classifyPublicMemoryRuntimeError: mocks.classifyPublicMemoryRuntimeError,
+  TRANSIENT_PUBLIC_MEMORY_ERROR: "temporary network error",
+}));
+
 import {
   default as worker,
   PUBLIC_MEMORY_HELP_OUTPUT,
   PUBLIC_MEMORY_SEARCH_DESCRIPTION,
-  REMOTE_MCP_TOOL_NAMES,
   searchOneMemory,
   showMemory,
   toToolResult,
@@ -42,10 +41,8 @@ describe("remote MCP tool guidance", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.createAnonymousAgent.mockReturnValue("agent");
+    mocks.classifyPublicMemoryRuntimeError.mockReturnValue("unknown");
     mocks.fetchEmbedding.mockResolvedValue([0.1, 0.2]);
-    mocks.isAnonymousAccessError.mockReturnValue(false);
-    mocks.isPublicMemoryNotFoundError.mockReturnValue(false);
-    mocks.isTransientQueryError.mockReturnValue(false);
     mocks.resolvePublicMemorySummary.mockResolvedValue({
       kind: "accessible",
       memory: { memory_id: "aaaaa-aa", name: "Alpha", description: null, version: "v1" },
@@ -77,14 +74,6 @@ describe("remote MCP tool guidance", () => {
         },
       ],
     });
-  });
-
-  it("documents all remote MCP tools", () => {
-    expect(REMOTE_MCP_TOOL_NAMES).toEqual([
-      "public_memory_help",
-      "public_memory_show",
-      "public_memory_search",
-    ]);
   });
 
   it("warns that search reads stored contents, not server implementation", () => {
@@ -204,7 +193,9 @@ describe("remote MCP tool guidance", () => {
   it("returns a structured tool error when search loses anonymous access after preflight", async () => {
     const deniedError = new Error("permission denied");
     mocks.searchMemory.mockRejectedValueOnce(deniedError);
-    mocks.isAnonymousAccessError.mockImplementation((error: unknown) => error === deniedError);
+    mocks.classifyPublicMemoryRuntimeError.mockImplementation((error: unknown) =>
+      error === deniedError ? "denied" : "unknown",
+    );
 
     await expect(
       searchOneMemory({ IC_HOST: "https://ic0.app" }, "aaaaa-aa", "vector search", 2),
@@ -223,7 +214,9 @@ describe("remote MCP tool guidance", () => {
   it("preserves top-level isError when the search handler result is finalized", async () => {
     const deniedError = new Error("permission denied");
     mocks.searchMemory.mockRejectedValueOnce(deniedError);
-    mocks.isAnonymousAccessError.mockImplementation((error: unknown) => error === deniedError);
+    mocks.classifyPublicMemoryRuntimeError.mockImplementation((error: unknown) =>
+      error === deniedError ? "denied" : "unknown",
+    );
 
     const result = await searchOneMemory({ IC_HOST: "https://ic0.app" }, "aaaaa-aa", "vector search", 2);
     expect(toToolResult(result)).toEqual({
@@ -262,7 +255,9 @@ describe("remote MCP tool guidance", () => {
   it("returns a structured tool error when search hits not_found after preflight", async () => {
     const missingError = new Error("canister not found");
     mocks.searchMemory.mockRejectedValueOnce(missingError);
-    mocks.isPublicMemoryNotFoundError.mockImplementation((error: unknown) => error === missingError);
+    mocks.classifyPublicMemoryRuntimeError.mockImplementation((error: unknown) =>
+      error === missingError ? "not_found" : "unknown",
+    );
 
     await expect(
       searchOneMemory({ IC_HOST: "https://ic0.app" }, "aaaaa-aa", "vector search", 2),
@@ -281,7 +276,9 @@ describe("remote MCP tool guidance", () => {
   it("returns a structured tool error on transient replica failures after preflight", async () => {
     const transientError = new Error("invalid signature");
     mocks.searchMemory.mockRejectedValueOnce(transientError);
-    mocks.isTransientQueryError.mockImplementation((error: unknown) => error === transientError);
+    mocks.classifyPublicMemoryRuntimeError.mockImplementation((error: unknown) =>
+      error === transientError ? "transient" : "unknown",
+    );
 
     await expect(
       searchOneMemory({ IC_HOST: "https://ic0.app" }, "aaaaa-aa", "vector search", 2),

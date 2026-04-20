@@ -28,17 +28,10 @@ vi.mock("@dfinity/principal", () => ({
 }));
 
 import {
-  isAnonymousAccessError,
-  isPublicMemoryNotFoundError,
-  isTransientQueryError,
   resolvePublicMemoryDetails,
   resolvePublicMemorySummary,
-  retryTransientQuery,
-  TRANSIENT_QUERY_ERROR,
   isValidPrincipalText,
-  probeAnonymousAccess,
   searchMemory,
-  summarizeMemory,
 } from "./memory";
 
 describe("memory access helpers", () => {
@@ -56,82 +49,6 @@ describe("memory access helpers", () => {
     });
   });
 
-  it("marks anonymous access as allowed when get_name succeeds", async () => {
-    await expect(probeAnonymousAccess(async () => "visible")).resolves.toEqual({ accessible: true });
-  });
-
-  it("marks anonymous access as denied on permission errors", async () => {
-    await expect(
-      probeAnonymousAccess(async () => {
-        throw new Error('Call failed: "Message": "Permission denied"');
-      }),
-    ).resolves.toEqual({
-      accessible: false,
-      error: "anonymous access denied",
-    });
-  });
-
-  it("marks transient certificate failures as temporary network errors", async () => {
-    await expect(
-      probeAnonymousAccess(async () => {
-        throw new Error("Invalid certificate: Invalid signature from replica");
-      }),
-    ).resolves.toEqual({
-      accessible: false,
-      error: TRANSIENT_QUERY_ERROR,
-    });
-  });
-
-  it("maps missing or unsupported public memories to not_found during anonymous probe", async () => {
-    await expect(
-      probeAnonymousAccess(async () => {
-        throw new Error("has no query method 'get_name'");
-      }),
-    ).resolves.toEqual({
-      accessible: false,
-      error: "memory not found",
-    });
-  });
-
-  it("retries one transient query failure before succeeding", async () => {
-    let attempts = 0;
-    await expect(
-      probeAnonymousAccess(async () => {
-        attempts += 1;
-        if (attempts === 1) {
-          throw new Error("Invalid certificate: Invalid signature from replica");
-        }
-        return "visible";
-      }),
-    ).resolves.toEqual({ accessible: true });
-    expect(attempts).toBe(2);
-  });
-
-  it("surfaces transient query errors after one retry", async () => {
-    let attempts = 0;
-    await expect(
-      retryTransientQuery(async () => {
-        attempts += 1;
-        throw new Error("Invalid certificate: Invalid signature from replica");
-      }),
-    ).rejects.toThrowError("Invalid certificate: Invalid signature from replica");
-    expect(attempts).toBe(2);
-  });
-
-  it("retries search-like query calls before succeeding", async () => {
-    let attempts = 0;
-    await expect(
-      retryTransientQuery(async () => {
-        attempts += 1;
-        if (attempts === 1) {
-          throw new Error("Invalid certificate: Invalid signature from replica");
-        }
-        return [{ score: 1, payload: "ok" }];
-      }),
-    ).resolves.toEqual([{ score: 1, payload: "ok" }]);
-    expect(attempts).toBe(2);
-  });
-
   it("sorts search hits by descending score after reading the canister result", async () => {
     mocks.actorSearch.mockResolvedValue([[0.7, "beta"], [0.9, "alpha"]]);
 
@@ -141,14 +58,6 @@ describe("memory access helpers", () => {
     ]);
     expect(mocks.principalFromText).toHaveBeenCalledWith("aaaaa-aa");
     expect(mocks.actorSearch).toHaveBeenCalledWith([0.1, 0.2]);
-  });
-
-  it("rethrows non-permission failures from get_name", async () => {
-    await expect(
-      probeAnonymousAccess(async () => {
-        throw new Error("connection reset");
-      }),
-    ).rejects.toThrowError("connection reset");
   });
 
   it("resolves invalid principal text before actor construction", async () => {
@@ -171,22 +80,60 @@ describe("memory access helpers", () => {
     });
   });
 
-  it("detects anonymous access permission errors", () => {
-    expect(isAnonymousAccessError(new Error('Call failed: "Message": "Permission denied"'))).toBe(true);
-    expect(isAnonymousAccessError(new Error('Call failed: "Message": "Invalid user"'))).toBe(true);
-    expect(isAnonymousAccessError(new Error("connection reset"))).toBe(false);
+  it("resolves denied memories from permission errors", async () => {
+    mocks.createActor.mockReturnValue({
+      get_name: vi.fn(async () => {
+        throw new Error('Call failed: "Message": "Permission denied"');
+      }),
+    });
+
+    await expect(resolvePublicMemoryDetails(undefined!, "aaaaa-aa")).resolves.toEqual({
+      kind: "denied",
+      error: "anonymous access denied",
+    });
   });
 
-  it("detects transient query verification errors", () => {
-    expect(isTransientQueryError(new Error("Invalid certificate: Invalid signature from replica"))).toBe(true);
-    expect(isTransientQueryError(new Error("connection reset"))).toBe(false);
+  it("resolves transient verification failures after one retry", async () => {
+    const getName = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error("Invalid certificate: Invalid signature from replica"))
+      .mockResolvedValueOnce("visible");
+    const getMetadata = vi.fn(async () => ({
+      owners: ["owner"],
+      name: JSON.stringify({ name: "Kinic", description: "Public summary" }),
+      stable_memory_size: 42,
+      version: "1.2.3",
+      cycle_amount: 1000n,
+    }));
+
+    mocks.createActor.mockReturnValue({
+      get_name: getName,
+      get_metadata: getMetadata,
+    });
+
+    await expect(resolvePublicMemorySummary(undefined!, "aaaaa-aa")).resolves.toEqual({
+      kind: "accessible",
+      memory: {
+        memory_id: "aaaaa-aa",
+        name: "Kinic",
+        description: "Public summary",
+        version: "1.2.3",
+      },
+    });
+    expect(getName).toHaveBeenCalledTimes(2);
   });
 
-  it("detects missing or unsupported memory canisters", () => {
-    expect(isPublicMemoryNotFoundError(new Error("Canister not found"))).toBe(true);
-    expect(isPublicMemoryNotFoundError(new Error("has no query method 'get_metadata'"))).toBe(true);
-    expect(isPublicMemoryNotFoundError(new Error("failed to decode canister response"))).toBe(true);
-    expect(isPublicMemoryNotFoundError(new Error("connection reset"))).toBe(false);
+  it("surfaces transient query failures after one retry during search", async () => {
+    let attempts = 0;
+    mocks.actorSearch.mockImplementation(async () => {
+      attempts += 1;
+      throw new Error("Invalid certificate: Invalid signature from replica");
+    });
+
+    await expect(searchMemory(undefined!, "aaaaa-aa", [0.1, 0.2])).rejects.toThrowError(
+      "Invalid certificate: Invalid signature from replica",
+    );
+    expect(attempts).toBe(2);
   });
 
   it("validates principal text before actor construction", () => {
@@ -194,20 +141,26 @@ describe("memory access helpers", () => {
     expect(isValidPrincipalText("not-a-principal")).toBe(false);
   });
 
-  it("reduces memory metadata to the public remote summary shape", () => {
-    expect(
-      summarizeMemory("aaaaa-aa", {
+  it("reduces memory metadata to the public remote summary shape", async () => {
+    mocks.createActor.mockReturnValue({
+      get_name: vi.fn(async () => "visible"),
+      get_metadata: vi.fn(async () => ({
         owners: ["owner"],
         name: JSON.stringify({ name: "Kinic", description: "Public summary" }),
         stable_memory_size: 42,
         version: "1.2.3",
         cycle_amount: 1000n,
-      }),
-    ).toEqual({
-      memory_id: "aaaaa-aa",
-      name: "Kinic",
-      description: "Public summary",
-      version: "1.2.3",
+      })),
+    });
+
+    await expect(resolvePublicMemorySummary(undefined!, "aaaaa-aa")).resolves.toEqual({
+      kind: "accessible",
+      memory: {
+        memory_id: "aaaaa-aa",
+        name: "Kinic",
+        description: "Public summary",
+        version: "1.2.3",
+      },
     });
   });
 });

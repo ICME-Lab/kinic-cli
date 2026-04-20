@@ -2,7 +2,7 @@
 // What: parses the Kinic memory metadata envelope embedded in the canister name field.
 // Why: preserve the existing Rust contract so web responses match CLI/TUI behavior.
 
-export type ParsedMemoryMetadata = {
+type ParsedMemoryMetadata = {
   name?: string;
   description?: string;
 };
