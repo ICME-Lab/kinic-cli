@@ -7,7 +7,9 @@
     "build": "next build",
     "build:cf": "opennextjs-cloudflare build",
     "dev": "next dev",
+    "generate:static-assets": "node ./scripts/generate-static-assets.mjs",
     "preview": "opennextjs-cloudflare preview",
+    "verify:cf": "pnpm run generate:static-assets && pnpm run test --run 'lib/site-metadata.test.ts' 'lib/ogp-assets.test.ts' 'lib/ogp-image.test.tsx' 'app/api/og/memories/[memoryId]/route.test.ts' 'app/m/[memoryId]/page.test.ts' && pnpm run typecheck && pnpm run build:cf",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "next typegen && tsc --project tsconfig.json --noEmit"
   },

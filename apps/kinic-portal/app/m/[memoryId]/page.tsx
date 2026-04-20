@@ -5,11 +5,13 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { Metadata } from "next";
 import { forbidden, notFound } from "next/navigation";
-import { resolveRemoteMcpEndpoint } from "@kinic/kinic-share";
+import { buildMemoryOgpImageCopy, resolveRemoteMcpEndpoint } from "@kinic/kinic-share";
 import { MemoryView } from "../../../components/memory-view";
 import { buildMemoryMetadataDescription, buildMemoryPageTitle } from "@kinic/kinic-share";
 import { MemoryTemporaryError } from "@/components/memory-temporary-error";
 import { resolvePublicMemoryCached, toSharedRuntimeEnv } from "@/lib/public-memory";
+import { DEFAULT_SUMMARY_LANGUAGE } from "@/lib/public-summary";
+import { buildSummaryCacheKey, getSummaryCache, readSummaryCache } from "@/lib/summary-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +60,8 @@ export async function generateMetadata({
     return {};
   }
 
-  const description = buildMemoryMetadataDescription(state.memory.description);
+  const description = await resolveMemoryOgpDescription(context.env, state.memory);
+  const imageUrl = buildMemoryOgpImageUrl(memoryId, state.memory.name, description, state.memory.version);
 
   return {
     title: buildMemoryPageTitle(state.memory.name),
@@ -67,13 +70,68 @@ export async function generateMetadata({
       title: buildMemoryPageTitle(state.memory.name),
       description,
       type: "article",
-      images: [`/m/${memoryId}/opengraph-image`],
+      images: [imageUrl],
     },
     twitter: {
       card: "summary_large_image",
       title: buildMemoryPageTitle(state.memory.name),
       description,
-      images: [`/m/${memoryId}/opengraph-image`],
+      images: [imageUrl],
     },
   };
+}
+
+function buildMemoryOgpImageUrl(
+  memoryId: string,
+  name: string,
+  description: string,
+  version: string | null | undefined,
+): string {
+  const copy = buildMemoryOgpImageCopy({
+    name,
+    description,
+  });
+  const search = new URLSearchParams({
+    name: copy.title,
+    description: copy.description,
+  });
+  if (version) {
+    search.set("v", version);
+  }
+  return `/api/og/memories/${memoryId}?${search.toString()}`;
+}
+
+async function resolveMemoryOgpDescription(
+  contextEnv: unknown,
+  memory: {
+    memory_id: string;
+    description: string | null;
+    version: string | null | undefined;
+  },
+): Promise<string> {
+  const fallback = buildMemoryMetadataDescription(memory.description);
+  const cache = getSummaryCache(contextEnv);
+  if (!cache) {
+    return fallback;
+  }
+
+  try {
+    const cached = await readSummaryCache(
+      cache,
+      buildSummaryCacheKey(memory.memory_id, memory.version, DEFAULT_SUMMARY_LANGUAGE),
+    );
+    const summary = normalizeSummary(cached?.summary);
+    return buildMemoryMetadataDescription(summary ?? memory.description);
+  } catch (error) {
+    console.warn("ogp summary cache read failed", error);
+    return fallback;
+  }
+}
+
+function normalizeSummary(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized || null;
 }

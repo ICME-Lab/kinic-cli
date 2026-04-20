@@ -1,52 +1,55 @@
 // Where: shared by the default and memory-specific OGP image routes.
-// What: renders the Mintlify-like social card shell and compact memory stats.
-// Why: keep route image variants visually aligned without duplicating inline layout trees.
+// What: renders the dark-framed Kinic social card with static image assets and bounded copy.
+// Why: bot OGP fetches must stay cheap while matching the supplied frame and logo art.
 
 import type { CSSProperties, ReactElement } from "react";
 import {
   buildMemoryOgpCardModel,
-  DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION,
   type MemoryOgpInput,
 } from "@kinic/kinic-share";
+import { OGP_FRAME_SRC, OGP_LOGO_SRC } from "./ogp-assets";
+import {
+  DEFAULT_SITE_DESCRIPTION,
+  DEFAULT_SITE_TITLE,
+} from "./site-metadata";
 
 type OgpImageProps = {
   memory?: MemoryOgpInput;
 };
 
 export function renderOgpImage({ memory }: OgpImageProps): ReactElement {
-  const card = buildMemoryOgpCardModel(memory ?? {});
-  const badges = memory ? ["Public Memory", "Read-only"] : ["Kinic", "Portal"];
-
+  const card = memory
+    ? buildMemoryOgpCardModel(memory)
+    : {
+        title: DEFAULT_SITE_TITLE,
+        description: DEFAULT_SITE_DESCRIPTION,
+        shortMemoryId: "-",
+      };
   return (
     <div style={frameStyle}>
-      <div style={washStyle} />
+      <img
+        alt=""
+        src={OGP_FRAME_SRC}
+        width={1200}
+        height={630}
+        style={backgroundImageStyle}
+      />
       <div style={panelStyle}>
         <div style={headerStyle}>
-          <div style={brandPillStyle}>Kinic</div>
-          <div style={badgeRowStyle}>
-            {badges.map((badge) => (
-              <div key={badge} style={badgeStyle}>
-                {badge}
-              </div>
-            ))}
+          <div style={brandStyle}>
+            <KinicMark src={OGP_LOGO_SRC} />
+            <div style={brandTextStyle}>KinicMemory</div>
           </div>
         </div>
 
         <div style={heroStyle}>
           <div style={bodyStyle}>
-            <div style={eyebrowStyle}>{memory ? "Shared Memory Surface" : "Read-only knowledge surface"}</div>
             <div style={titleStyle}>{card.title}</div>
-            <div style={descriptionStyle}>{card.description || DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION}</div>
+            <div style={descriptionStyle}>{card.description}</div>
+            <div style={statsGridStyle}>
+              <Stat label="MEMORY ID" value={card.shortMemoryId} />
+            </div>
           </div>
-        </div>
-
-        <div style={statsGridStyle}>
-          <Stat label="Memory ID" value={card.shortMemoryId} />
-        </div>
-
-        <div style={footerStyle}>
-          <div style={accentLineStyle} />
-          <div style={footerTextStyle}>{memory ? "Read-only knowledge surface" : "Public memory sharing"}</div>
         </div>
       </div>
     </div>
@@ -67,104 +70,81 @@ const frameStyle: CSSProperties = {
   height: "100%",
   display: "flex",
   position: "relative",
-  background: "#ffffff",
-  color: "#0d0d0d",
-  fontFamily: "Inter, system-ui, sans-serif",
+  background: "#060c1b",
+  color: "#f7fbff",
+  fontFamily: "system-ui, sans-serif",
   overflow: "hidden",
 };
 
-const washStyle: CSSProperties = {
+const backgroundImageStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
-  background:
-    "radial-gradient(circle at top center, rgba(24, 226, 153, 0.18), transparent 32%), linear-gradient(180deg, rgba(212, 250, 232, 0.3) 0%, rgba(255, 255, 255, 0.96) 46%, #ffffff 100%)",
+  width: "100%",
+  height: "100%",
 };
 
 const panelStyle: CSSProperties = {
-  margin: 34,
-  padding: 34,
-  width: 1132,
-  height: 562,
+  margin: 0,
+  padding: "48px 60px 52px",
+  width: "100%",
+  height: "100%",
   display: "flex",
   flexDirection: "column",
-  justifyContent: "space-between",
-  borderRadius: 32,
-  border: "1px solid rgba(13, 13, 13, 0.08)",
-  background: "rgba(255, 255, 255, 0.88)",
-  boxShadow: "0 10px 40px rgba(13, 13, 13, 0.05)",
+  gap: 36,
+  position: "relative",
 };
 
 const headerStyle: CSSProperties = {
   display: "flex",
-  justifyContent: "space-between",
   alignItems: "center",
 };
 
-const brandPillStyle: CSSProperties = {
+const brandStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  padding: "10px 14px",
-  borderRadius: 999,
-  border: "1px solid rgba(13, 13, 13, 0.08)",
-  fontSize: 22,
+  gap: 18,
+};
+
+const brandTextStyle: CSSProperties = {
+  fontSize: 40,
   fontWeight: 600,
-};
-
-const badgeRowStyle: CSSProperties = {
-  display: "flex",
-  gap: 10,
-};
-
-const badgeStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  padding: "10px 14px",
-  borderRadius: 999,
-  background: "rgba(13, 13, 13, 0.04)",
-  color: "rgba(13, 13, 13, 0.72)",
-  fontSize: 20,
-  fontWeight: 500,
+  color: "#dbe9ff",
+  letterSpacing: "-0.03em",
 };
 
 const bodyStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 20,
-  maxWidth: 620,
+  gap: 22,
+  width: 940,
 };
 
 const heroStyle: CSSProperties = {
   display: "flex",
-  justifyContent: "space-between",
-  gap: 24,
-  alignItems: "stretch",
-};
-
-const eyebrowStyle: CSSProperties = {
-  fontSize: 18,
-  letterSpacing: "0.22em",
-  textTransform: "uppercase",
-  color: "rgba(13, 13, 13, 0.45)",
+  gap: 18,
+  alignItems: "flex-start",
+  marginTop: 10,
 };
 
 const titleStyle: CSSProperties = {
   display: "-webkit-box",
   overflow: "hidden",
-  fontSize: 72,
+  fontSize: 64,
   fontWeight: 700,
-  lineHeight: 1.02,
+  lineHeight: 1.04,
   letterSpacing: "-0.04em",
   WebkitBoxOrient: "vertical",
   WebkitLineClamp: 2,
+  color: "#ffffff",
 };
 
 const descriptionStyle: CSSProperties = {
   display: "-webkit-box",
   overflow: "hidden",
-  maxWidth: 840,
-  fontSize: 30,
-  lineHeight: 1.45,
-  color: "rgba(13, 13, 13, 0.62)",
+  width: 940,
+  fontSize: 29,
+  lineHeight: 1.34,
+  color: "rgba(235, 241, 252, 0.92)",
   WebkitBoxOrient: "vertical",
   WebkitLineClamp: 3,
 };
@@ -172,46 +152,45 @@ const descriptionStyle: CSSProperties = {
 const statsGridStyle: CSSProperties = {
   display: "flex",
   gap: 16,
+  width: 520,
+  marginTop: 10,
 };
 
 const statCardStyle: CSSProperties = {
   display: "flex",
-  flexDirection: "column",
-  flex: 1,
-  gap: 10,
-  padding: "18px 20px",
-  borderRadius: 22,
-  border: "1px solid rgba(13, 13, 13, 0.06)",
-  background: "rgba(255, 255, 255, 0.92)",
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 14,
+  padding: 0,
+  background: "transparent",
 };
 
 const statLabelStyle: CSSProperties = {
-  fontSize: 18,
-  letterSpacing: "0.16em",
+  display: "flex",
+  alignItems: "center",
+  lineHeight: 1,
+  fontSize: 20,
+  letterSpacing: "0.08em",
   textTransform: "uppercase",
-  color: "rgba(13, 13, 13, 0.44)",
+  color: "#9db4d6",
 };
 
 const statValueStyle: CSSProperties = {
-  fontSize: 28,
-  fontWeight: 600,
-  color: "#0d0d0d",
-};
-
-const footerStyle: CSSProperties = {
   display: "flex",
-  flexDirection: "column",
-  gap: 14,
+  alignItems: "center",
+  lineHeight: 1,
+  fontSize: 26,
+  fontWeight: 500,
+  color: "#eff4ff",
 };
 
-const accentLineStyle: CSSProperties = {
-  width: 190,
-  height: 6,
-  borderRadius: 999,
-  background: "linear-gradient(90deg, rgba(24, 226, 153, 1) 0%, rgba(24, 226, 153, 0.16) 100%)",
-};
+function KinicMark({ src }: { src: string }) {
+  return (
+    <img alt="" src={src} width={54} height={63} style={markFrameStyle} />
+  );
+}
 
-const footerTextStyle: CSSProperties = {
-  fontSize: 22,
-  color: "rgba(13, 13, 13, 0.52)",
+const markFrameStyle: CSSProperties = {
+  width: 54,
+  height: 63,
 };

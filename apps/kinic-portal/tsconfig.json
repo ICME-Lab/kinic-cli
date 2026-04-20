@@ -1,6 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // apps/kinic-portal での型検査キャッシュを .next 配下へ隔離する。
+    // 生成物ノイズを Git 差分へ出さないため、追跡外ディレクトリへ固定する。
     "baseUrl": ".",
     "jsx": "preserve",
     "lib": [
@@ -28,7 +30,8 @@
         "./packages/kinic-share/src/*"
       ]
     },
-    "incremental": true
+    "incremental": true,
+    "tsBuildInfoFile": ".next/cache/tsconfig.tsbuildinfo"
   },
   "include": [
     "next-env.d.ts",

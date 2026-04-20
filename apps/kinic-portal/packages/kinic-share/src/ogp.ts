@@ -2,8 +2,8 @@
 // What: normalizes social-card copy and compact stats from one memory payload.
 // Why: keep SSR metadata text and generated image content aligned without duplicating truncation rules.
 
-export const DEFAULT_MEMORY_METADATA_DESCRIPTION = "Public read-only memory";
-export const DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION = "Public read-only memory";
+export const DEFAULT_MEMORY_METADATA_DESCRIPTION = "Public Kinic memory";
+export const DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION = "Shared notes and context from Kinic";
 export const DEFAULT_MEMORY_OGP_IMAGE_TITLE = "Shared Memory";
 export const DEFAULT_MEMORY_OGP_SEARCH_EXCERPT = "Search result preview unavailable";
 
@@ -28,6 +28,11 @@ export type MemoryOgpCardModel = {
   shortMemoryId: string;
 };
 
+export type MemoryOgpImageCopy = {
+  title: string;
+  description: string;
+};
+
 export type MemoryOgpSearchCard = {
   tag: string;
   excerpt: string;
@@ -43,19 +48,31 @@ export function buildMemoryMetadataDescription(description?: string | null): str
 }
 
 export function buildMemoryOgpCardModel(input: MemoryOgpInput): MemoryOgpCardModel {
+  const copy = buildMemoryOgpImageCopy(input);
   return {
-    title: clamp(normalizeAsciiCopy(input.name, DEFAULT_MEMORY_OGP_IMAGE_TITLE), TITLE_LIMIT),
-    description: clamp(normalizeAsciiCopy(input.description, DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION), DESCRIPTION_LIMIT),
-    shortMemoryId: shortenMemoryId(input.memoryId),
+    title: copy.title,
+    description: copy.description,
+    shortMemoryId: normalizeMemoryId(input.memoryId),
+  };
+}
+
+export function buildMemoryOgpImageCopy(input: MemoryOgpInput): MemoryOgpImageCopy {
+  return {
+    title: clamp(normalizeCopy(input.name, DEFAULT_MEMORY_OGP_IMAGE_TITLE), TITLE_LIMIT),
+    description: clamp(normalizeCopy(input.description, DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION), DESCRIPTION_LIMIT),
   };
 }
 
 export function shortenMemoryId(memoryId?: string | null): string {
-  const normalized = normalizeCopy(memoryId, "-");
+  const normalized = normalizeMemoryId(memoryId);
   if (normalized.length <= MEMORY_ID_HEAD + MEMORY_ID_TAIL + 1) {
     return normalized;
   }
   return `${normalized.slice(0, MEMORY_ID_HEAD)}...${normalized.slice(-MEMORY_ID_TAIL)}`;
+}
+
+function normalizeMemoryId(memoryId?: string | null): string {
+  return normalizeCopy(memoryId, "-");
 }
 
 export function buildMemorySearchQuery(input: MemoryOgpInput): string {

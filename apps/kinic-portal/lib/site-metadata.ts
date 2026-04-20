@@ -7,6 +7,9 @@ import type { Metadata } from "next";
 export const DEFAULT_SITE_TITLE = "Kinic Portal";
 export const DEFAULT_SITE_DESCRIPTION =
   "Share public Kinic memory canisters over the web and prepare the path to remote MCP.";
+export const SITE_ICON_PATH = "/favicon.png";
+export const OGP_FRAME_PATH = "/og/kinic-og-frame-clean.png";
+export const OGP_LOGO_PATH = "/og/kinic-logo-transparent.png";
 
 export function resolveSiteOrigin(): URL {
   const raw = process.env.KINIC_PORTAL_ORIGIN?.trim();
@@ -25,6 +28,9 @@ export function buildSiteMetadata(): Metadata {
     metadataBase: resolveSiteOrigin(),
     title: DEFAULT_SITE_TITLE,
     description: DEFAULT_SITE_DESCRIPTION,
+    icons: {
+      icon: SITE_ICON_PATH,
+    },
     openGraph: {
       title: DEFAULT_SITE_TITLE,
       description: DEFAULT_SITE_DESCRIPTION,

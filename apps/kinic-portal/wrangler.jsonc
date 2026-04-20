@@ -24,6 +24,7 @@
   "vars": {
     "DFX_NETWORK": "mainnet",
     "IC_HOST": "https://ic0.app",
+    "KINIC_PORTAL_ORIGIN": "https://kinic-portal.kasane.workers.dev",
     "SUMMARY_CACHE_TTL_SECONDS": "86400"
   }
 }

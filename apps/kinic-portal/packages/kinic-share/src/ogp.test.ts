@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  buildMemoryOgpImageCopy,
   buildMemoryOgpSearchCards,
   DEFAULT_MEMORY_METADATA_DESCRIPTION,
   DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION,
@@ -38,12 +39,46 @@ describe("ogp helpers", () => {
     });
   });
 
-  it("converts non-ascii title and description into ascii-safe OGP copy", () => {
-    expect(buildMemoryOgpCardModel({ name: "Память", description: "Резюме" })).toEqual({
+  it("keeps the full memory id in the card model", () => {
+    expect(
+      buildMemoryOgpCardModel({
+        name: "Alpha",
+        description: "Beta",
+        memoryId: "ywega-gaaaa-aaaak-apg6q-cai",
+      }),
+    ).toEqual({
+      title: "Alpha",
+      description: "Beta",
+      shortMemoryId: "ywega-gaaaa-aaaak-apg6q-cai",
+    });
+  });
+
+  it("uses the new shared-memory fallback copy for blank cards", () => {
+    expect(buildMemoryOgpCardModel({ name: "", description: "", memoryId: null })).toEqual({
       title: DEFAULT_MEMORY_OGP_IMAGE_TITLE,
       description: DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION,
       shortMemoryId: "-",
     });
+  });
+
+  it("keeps non-ascii title and description in OGP copy", () => {
+    expect(buildMemoryOgpCardModel({ name: "Память", description: "Резюме" })).toEqual({
+      title: "Память",
+      description: "Резюме",
+      shortMemoryId: "-",
+    });
+  });
+
+  it("clamps OGP image query copy before it reaches metadata urls", () => {
+    const copy = buildMemoryOgpImageCopy({
+      name: "a".repeat(120),
+      description: "b".repeat(220),
+    });
+
+    expect(copy.title.length).toBeLessThanOrEqual(72);
+    expect(copy.description.length).toBeLessThanOrEqual(160);
+    expect(copy.title.endsWith("…")).toBe(true);
+    expect(copy.description.endsWith("…")).toBe(true);
   });
 
   it("builds the memory page title from the resolved name", () => {

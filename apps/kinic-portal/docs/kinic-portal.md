@@ -43,8 +43,10 @@ Kinic Portal is the public read-only sharing surface built on OpenNext and Cloud
 
 ```bash
 pnpm install
+pnpm --filter @kinic/kinic-portal generate:static-assets
 pnpm --filter @kinic/kinic-portal typecheck
 pnpm --filter @kinic/kinic-portal build:cf
+pnpm --filter @kinic/kinic-portal verify:cf
 pnpm --filter @kinic/remote-mcp typecheck
 pnpm --filter @kinic/remote-mcp build
 ```
@@ -99,3 +101,13 @@ Remote MCP:
 - `wrangler` can hit `EPERM` for log file writes inside the sandbox
 - `wrangler deploy --dry-run` still works as a bundle validation step
 - local development can run without `SUMMARY_CACHE`; summaries still generate, but no persistent cache is written
+
+## Static Asset and OGP Verification
+
+- `build:cf` is the canonical verification path for OGP, metadata, and static asset changes
+- `verify:cf` runs the expected sequence: `generate:static-assets` → targeted OGP tests → `typecheck` → `build:cf`
+- `public/og/*` is the only source of truth for OGP images
+- `lib/ogp-assets.ts` is generated output; re-run `generate:static-assets` after any asset change
+- `public/favicon.ico` is generated from `public/favicon.png` by the same script
+- Do not run `next dev` in parallel with `build:cf`; both write `.next`
+- If local visual inspection is still needed after `build:cf`, restart `next dev` from a clean process before hitting `/opengraph-image`
