@@ -4,7 +4,7 @@ Kinic Portal is the public read-only sharing surface built on Vite, React Router
 
 ## Includes
 
-- Public page at `/m/[memoryId]`
+- Public page at `/m/:memoryId`
 - Dedicated public API Worker for chat and OGP
 - Remote MCP surface for caller-supplied public memories in a separate Worker
   - Details: `apps/kinic-portal/docs/remote-mcp.md`
@@ -16,12 +16,12 @@ Kinic Portal is the public read-only sharing surface built on Vite, React Router
 
 ## Boundaries
 
-- `/m/[memoryId]` is a Worker-rendered shell with route-specific HTML metadata, while public detail and summary load after hydration from the portal Worker itself
+- `/m/:memoryId` is a Worker-rendered shell with route-specific HTML metadata, while public detail and summary load after hydration from the portal Worker itself
 - Public AI summaries below the description are generated on demand and cached in Cloudflare KV on the portal Worker
 - Memory OGP prefers the cached English summary when present; otherwise it falls back to the memory description
 - Memory OGP also caches the minimal metadata subset (`name`, `description`, `version`) in KV on the dedicated public API Worker so warm card renders can skip canister `get_metadata`
 - Public chat and summary routes fetch canister search results, then truncate them server-side to fixed caps before prompt construction
-- `/m/[memoryId]` restores server-side status handling: accessible memories return `200`, anonymous denial returns `403`, missing/invalid memories return `404`, and transient verification failures return `503`
+- `/m/:memoryId` restores server-side status handling: accessible memories return `200`, anonymous denial returns `403`, missing/invalid memories return `404`, and transient verification failures return `503`
 - Future owner or authenticated actions are expected to call the canister directly from the client principal
 - Remote MCP also stays anonymous and read-only, with the caller providing `memory_id` on every request and permission failures surfacing as MCP tool errors
 
@@ -47,8 +47,9 @@ Kinic Portal is the public read-only sharing surface built on Vite, React Router
 pnpm install
 pnpm --filter @kinic/kinic-portal generate:static-assets
 pnpm --filter @kinic/kinic-portal typecheck
-pnpm --filter @kinic/kinic-portal dev:cf
+pnpm --filter @kinic/kinic-portal dev
 pnpm --filter @kinic/kinic-portal dev:cf:local-api
+pnpm --filter @kinic/kinic-portal dev:vite-shell
 pnpm --filter @kinic/kinic-portal verify:deploy-contract
 pnpm --filter @kinic/kinic-portal verify:bundle:cf
 pnpm --filter @kinic/kinic-portal deploy:cf
@@ -68,13 +69,14 @@ Use `apps/kinic-portal` as the working directory for web tasks. Keep generated o
 
 Shared web:
 
-- `KINIC_PORTAL_ORIGIN` absolute origin for OGP and canonical URLs. Defaults to `http://localhost:3000`
-- `KINIC_PUBLIC_API_ORIGIN` absolute origin for the dedicated chat/OGP Worker. Defaults to `https://kinic-portal-public-api.kasane.workers.dev`
-- `KINIC_REMOTE_MCP_ORIGIN` absolute origin for the separate remote MCP Worker. When omitted, `/m/[memoryId]` hides the MCP card
+- `KINIC_PORTAL_ORIGIN` absolute origin for OGP and canonical URLs. Required for Worker deploys and validated by `verify:deploy-contract`
+- `KINIC_PUBLIC_API_ORIGIN` absolute origin for the dedicated chat/OGP Worker. Required for Worker deploys
+- `KINIC_REMOTE_MCP_ORIGIN` absolute origin for the separate remote MCP Worker. When omitted, `/m/:memoryId` hides the MCP card
 - `IC_HOST` is fixed to `https://ic0.app` in `apps/kinic-portal/wrangler.jsonc`
 - `EMBEDDING_API_ENDPOINT` is required on the portal Worker because summary generation moved same-origin
 - `SUMMARY_CACHE` and `SUMMARY_CACHE_TTL_SECONDS` must be present on both `portal` and `public-api`
 - `EMBEDDING_API_ENDPOINT` is declared in `secrets.required` on both Workers, so deploy fails before rollout when the secret is missing
+- `dev:vite-shell` falls back to `window.location.origin` for both runtime origins and intentionally disables chat before any network request
 - local chat development should prefer `pnpm --filter @kinic/kinic-portal dev:cf:local-api`, which injects `KINIC_PUBLIC_API_ORIGIN=http://127.0.0.1:8788`
 
 Summary cache setup:
@@ -104,6 +106,7 @@ pnpm wrangler kv namespace create SUMMARY_CACHE --preview
 
 - `portal` and `public-api` must point at the same `SUMMARY_CACHE` namespace ids
 - `portal` and `public-api` must both declare `EMBEDDING_API_ENDPOINT` in `secrets.required`
+- `portal` `vars.KINIC_PORTAL_ORIGIN` must be present, absolute, and non-`localhost`
 - `portal` `vars.KINIC_PUBLIC_API_ORIGIN` must stay aligned with `https://kinic-portal-public-api.kasane.workers.dev`
 - `pnpm --filter @kinic/kinic-portal verify:deploy-contract` is the canonical read-only drift check
 - `pnpm --filter @kinic/public-api verify:deploy-contract` runs the same contract check from the nested Worker package
@@ -166,9 +169,10 @@ pnpm --filter @kinic/public-api exec wrangler dev --config wrangler.jsonc --port
 pnpm --filter @kinic/kinic-portal dev:cf:local-api
 ```
 
-- `dev:cf` is for shell-only checks against the configured remote public API origin
-- `dev:cf` is enough for detail and summary checks
+- `dev` is the default Worker runtime entrypoint and replaces the old plain Vite dev path
+- `dev:cf` remains as an alias of `dev`
 - `dev:cf:local-api` is the default choice when chat should hit the local `public-api`
+- `dev:vite-shell` is only for client shell checks; it does not inject Worker runtime config
 - local chat requires `workers/public-api/.dev.vars` with `EMBEDDING_API_ENDPOINT`
 
 Remote MCP:

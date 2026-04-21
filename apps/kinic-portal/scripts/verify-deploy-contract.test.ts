@@ -11,6 +11,15 @@ describe("verifyDeployContract", () => {
     expect(result.expectedPublicApiOrigin).toBe("https://kinic-portal-public-api.kasane.workers.dev");
   });
 
+  it("passes when portal origin uses a custom domain", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "https://portal.example.com" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
   it("fails when summary cache ids drift", () => {
     const result = verifyDeployContract(
       portalConfig({ kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "portal-id", preview_id: "shared-preview" }] }),
@@ -79,6 +88,56 @@ describe("verifyDeployContract", () => {
     );
     expect(formatContractErrors(result.errors)).toContain("portal vars.KINIC_PUBLIC_API_ORIGIN");
   });
+
+  it("fails when portal origin is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://kinic-portal-public-api.kasane.workers.dev", SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("portal vars.KINIC_PORTAL_ORIGIN must be set to an absolute non-localhost URL");
+  });
+
+  it("fails when portal origin is not absolute", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "/portal" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PORTAL_ORIGIN must be an absolute URL but got "/portal"');
+  });
+
+  it("fails when portal origin uses localhost", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "http://localhost:4173" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PORTAL_ORIGIN must not use a local loopback host but got "http://localhost:4173/"');
+  });
+
+  it("fails when portal origin uses ipv4 loopback", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "http://127.0.0.1:4173" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PORTAL_ORIGIN must not use a local loopback host but got "http://127.0.0.1:4173/"');
+  });
+
+  it("fails when portal origin uses ipv6 loopback", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "http://[::1]:4173" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PORTAL_ORIGIN must not use a local loopback host but got "http://[::1]:4173/"');
+  });
 });
 
 function portalConfig(overrides: Record<string, unknown> = {}) {
@@ -87,6 +146,7 @@ function portalConfig(overrides: Record<string, unknown> = {}) {
     secrets: { required: ["EMBEDDING_API_ENDPOINT"] },
     kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "shared-id", preview_id: "shared-preview" }],
     vars: {
+      KINIC_PORTAL_ORIGIN: "https://kinic-portal.kasane.workers.dev",
       KINIC_PUBLIC_API_ORIGIN: "https://kinic-portal-public-api.kasane.workers.dev",
       SUMMARY_CACHE_TTL_SECONDS: "86400",
     },

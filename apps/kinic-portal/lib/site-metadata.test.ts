@@ -4,6 +4,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  DEFAULT_SITE_ORIGIN,
   SITE_ICON_PATH,
   buildMemoryPageMetadata,
   buildSiteMetadata,
@@ -22,15 +23,15 @@ describe("site metadata", () => {
     expect(resolveSiteOrigin().toString()).toBe("https://example.com/");
   });
 
-  it("falls back to localhost when unset", () => {
-    expect(resolveSiteOrigin().toString()).toBe("http://localhost:3000/");
+  it("falls back to the public worker origin when unset", () => {
+    expect(resolveSiteOrigin().toString()).toBe(`${DEFAULT_SITE_ORIGIN}/`);
   });
 
   it("builds metadata with the resolved absolute origin", () => {
     process.env.KINIC_PUBLIC_API_ORIGIN = "https://api.example.com";
     const metadata = buildSiteMetadata();
 
-    expect(metadata.canonicalUrl).toBe("http://localhost:3000/");
+    expect(metadata.canonicalUrl).toBe(`${DEFAULT_SITE_ORIGIN}/`);
     expect(metadata.iconPath).toBe(SITE_ICON_PATH);
     expect(SITE_ICON_PATH).toBe("/favicon.png");
     expect(metadata.imageUrl).toBe("https://api.example.com/opengraph-image");

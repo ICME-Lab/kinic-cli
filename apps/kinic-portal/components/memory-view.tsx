@@ -23,6 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { buildPublicApiUrl } from "@/lib/public-api";
 import { cn } from "@/lib/utils";
+import { DEV_VITE_SHELL_CHAT_ERROR, hasInjectedRuntimeConfig } from "@/src/runtime-config";
 
 type ChatResponse = {
   answer: string;
@@ -64,6 +65,9 @@ export function MemoryView({
       setAnswer("");
       setContextCount(0);
       try {
+        if (!hasInjectedRuntimeConfig() && publicApiOrigin === window.location.origin) {
+          throw new Error(DEV_VITE_SHELL_CHAT_ERROR);
+        }
         const response = await fetch(buildPublicApiUrl(`/api/public/memories/${memory.memory_id}/chat`, publicApiOrigin), {
           method: "POST",
           headers: { "content-type": "application/json" },

@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryView } from "./memory-view";
+import { DEV_VITE_SHELL_CHAT_ERROR } from "@/src/runtime-config";
 
 vi.mock("./memory-summary", () => ({
   MemorySummary: () => <div>summary stub</div>,
@@ -35,7 +36,7 @@ describe("MemoryView", () => {
     vi.stubGlobal("open", openMock);
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { href: "https://portal.example.com/m/m1" },
+      value: { href: "https://portal.example.com/m/m1", origin: "https://portal.example.com" },
     });
     Object.defineProperty(window.navigator, "language", {
       configurable: true,
@@ -99,5 +100,25 @@ describe("MemoryView", () => {
     await waitFor(() => {
       expect(screen.getByText("chat unavailable right now")).toBeTruthy();
     });
+  });
+
+  it("blocks chat in dev:vite-shell before any network call", async () => {
+    render(
+      <MemoryView
+        memory={memory}
+        mcpEndpoint={null}
+        publicApiOrigin="https://portal.example.com"
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Ask this public memory"), {
+      target: { value: "What is here?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(DEV_VITE_SHELL_CHAT_ERROR)).toBeTruthy();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

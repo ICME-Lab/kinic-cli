@@ -12,6 +12,7 @@ import { buildPublicApiUrl } from "./public-api";
 export const DEFAULT_SITE_TITLE = "Kinic Portal";
 export const DEFAULT_SITE_DESCRIPTION =
   "Share public Kinic knowledge over the web and prepare the path to remote MCP.";
+export const DEFAULT_SITE_ORIGIN = "https://kinic-portal.kasane.workers.dev";
 export const SITE_ICON_PATH = "/favicon.png";
 export const DEFAULT_NOINDEX_ROBOTS = "noindex, nofollow";
 
@@ -37,10 +38,10 @@ export function resolveSiteOrigin(raw = process.env.KINIC_PORTAL_ORIGIN): URL {
     try {
       return new URL(raw);
     } catch {
-      // Ignore invalid env and keep a deterministic local fallback.
+      // Ignore invalid env and keep a deterministic public fallback.
     }
   }
-  return new URL("http://localhost:3000");
+  return new URL(DEFAULT_SITE_ORIGIN);
 }
 
 export function buildSiteMetadata(options: MetadataOptions = {}): DocumentMetadata {

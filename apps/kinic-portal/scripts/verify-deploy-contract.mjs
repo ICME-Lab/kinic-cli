@@ -73,6 +73,8 @@ export function verifyDeployContract(
     );
   }
 
+  validatePortalOrigin(errors, portalVars.KINIC_PORTAL_ORIGIN);
+
   return {
     ok: errors.length === 0,
     errors,
@@ -106,6 +108,36 @@ function compareField(errors, fieldName, portalValue, publicApiValue) {
 
 function stringifyValue(value) {
   return value === undefined ? "undefined" : String(value);
+}
+
+function validatePortalOrigin(errors, value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    errors.push('portal vars.KINIC_PORTAL_ORIGIN must be set to an absolute non-localhost URL');
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    errors.push(
+      `portal vars.KINIC_PORTAL_ORIGIN must be an absolute URL but got "${stringifyValue(value)}"`,
+    );
+    return;
+  }
+
+  if (isLocalHostname(parsed.hostname)) {
+    errors.push(
+      `portal vars.KINIC_PORTAL_ORIGIN must not use a local loopback host but got "${parsed.toString()}"`,
+    );
+  }
+}
+
+function isLocalHostname(hostname) {
+  return hostname === "localhost"
+    || hostname === "127.0.0.1"
+    || hostname === "::1"
+    || hostname === "[::1]";
 }
 
 function stripJsonComments(source) {
