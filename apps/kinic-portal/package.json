@@ -33,7 +33,6 @@
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.32.3",
     "@cloudflare/workers-types": "^4.20260408.0",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^22.15.17",

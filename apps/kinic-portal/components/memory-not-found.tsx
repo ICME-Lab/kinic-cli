@@ -1,6 +1,4 @@
-"use client";
-
-// Where: client fallback for public memory shell fetch failures that resolve to 404.
+// Where: public memory fallback view for missing or non-public memories.
 // What: explains that the target shared memory does not exist or is no longer public.
 // Why: the portal page no longer returns server-side 404 once the shell is static.
 

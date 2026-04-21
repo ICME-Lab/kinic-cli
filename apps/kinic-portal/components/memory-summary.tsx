@@ -1,6 +1,4 @@
-"use client";
-
-// Where: client component inside the public memory hero.
+// Where: interactive summary block inside the public memory hero.
 // What: fetches an AI summary on mount and renders loading, success, or fallback states.
 // Why: summary should share the portal origin even though chat stays on the dedicated Worker.
 
@@ -14,8 +12,6 @@ type SummaryState =
 
 type SummaryPayload = {
   summary: string;
-  cached: boolean;
-  updatedAt: string;
   error?: string;
 };
 
@@ -75,13 +71,11 @@ export function MemorySummary({ memoryId }: { memoryId: string }) {
 function parseSummaryPayload(value: unknown): SummaryPayload {
   const record = toRecord(value);
   if (!record) {
-    return { summary: "", cached: false, updatedAt: "", error: "invalid response" };
+    return { summary: "", error: "invalid response" };
   }
 
   return {
     summary: typeof record.summary === "string" ? record.summary : "",
-    cached: typeof record.cached === "boolean" ? record.cached : false,
-    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
     error: typeof record.error === "string" ? record.error : undefined,
   };
 }

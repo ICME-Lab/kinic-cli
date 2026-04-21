@@ -1,6 +1,4 @@
-"use client";
-
-// Where: server-rendered fallback for transient public memory verification failures.
+// Where: public memory fallback view for transient verification failures.
 // What: explains that the memory could not be verified right now and suggests retrying.
 // Why: query certificate failures should not crash the page or masquerade as ACL denial.
 

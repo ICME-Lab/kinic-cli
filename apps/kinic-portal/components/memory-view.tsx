@@ -1,6 +1,4 @@
-"use client";
-
-// Where: client component for the resolved public memory view.
+// Where: interactive memory detail view for the public route.
 // What: renders one public memory and drives read-only requests against the dedicated public API Worker.
 // Why: portal pages stay static while interactive API work moves off the Next server path.
 
@@ -18,7 +16,7 @@ import { MemorySummary } from "@/components/memory-summary";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { buildPublicApiUrl } from "@/lib/public-api";
@@ -83,10 +81,6 @@ export function MemoryView({
         setError(nextError instanceof Error ? nextError.message : "request failed");
       }
     });
-  }
-
-  function copyLabel(key: CopyStatusKey): string {
-    return copyStatus === key ? "Copied" : "Copy";
   }
 
   async function copyText(key: CopyStatusKey, value: string) {
@@ -282,23 +276,6 @@ function ShareIconButton({
     >
       {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
     </button>
-  );
-}
-
-function CopyButton({
-  children,
-  copied,
-  onClick,
-}: {
-  children: string;
-  copied: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button variant="outline" size="sm" onClick={onClick} className="shrink-0">
-      {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-      {children}
-    </Button>
   );
 }
 

@@ -48,8 +48,6 @@ describe("MemorySummary", () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         summary: "Alpha summary",
-        cached: false,
-        updatedAt: "2026-04-17T00:00:00.000Z",
       }),
     );
 
@@ -68,15 +66,11 @@ describe("MemorySummary", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           summary: "Alpha summary",
-          cached: false,
-          updatedAt: "2026-04-17T00:00:00.000Z",
         }),
       )
       .mockResolvedValueOnce(
         jsonResponse({
           summary: "Beta summary",
-          cached: false,
-          updatedAt: "2026-04-17T00:00:01.000Z",
         }),
       );
 
@@ -115,8 +109,6 @@ describe("MemorySummary", () => {
       beta.resolve(
         jsonResponse({
           summary: "Beta summary",
-          cached: false,
-          updatedAt: "2026-04-17T00:00:02.000Z",
         }),
       );
     });
@@ -134,8 +126,6 @@ describe("MemorySummary", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           summary: "Recovered summary",
-          cached: false,
-          updatedAt: "2026-04-17T00:00:03.000Z",
         }),
       );
 

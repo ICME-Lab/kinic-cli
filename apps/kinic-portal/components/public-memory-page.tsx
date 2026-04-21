@@ -1,6 +1,4 @@
-"use client";
-
-// Where: client entrypoint for the public memory route shell.
+// Where: interactive route shell for the public memory page.
 // What: fetches read-only memory details from the portal Worker, then renders the resolved view.
 // Why: same-origin detail removes avoidable cross-origin failures during normal page loads.
 

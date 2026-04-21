@@ -1,6 +1,4 @@
-"use client";
-
-// Where: server-rendered fallback for public memory pages.
+// Where: public memory fallback view for anonymous access denial.
 // What: explains that anonymous users cannot read the target memory canister.
 // Why: 403 should be explicit instead of collapsing into a generic not-found page.
 
