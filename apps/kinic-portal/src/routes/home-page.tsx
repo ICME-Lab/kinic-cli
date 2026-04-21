@@ -1,8 +1,8 @@
-// Where: Next.js home page for the Kinic portal.
-// What: explains the v1 public-sharing workflow and points users at the dynamic memory route.
-// Why: initial release has no share creation UI, so the landing page must set expectations clearly.
+// Where: public landing route for the Kinic portal shell.
+// What: explains the public-sharing flow and links to one example memory route.
+// Why: the web shell stays read-only, so the landing page should point users at the memory experience directly.
 
-import Link from "next/link";
+import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 const EXAMPLE_MEMORY_ID = "ywega-gaaaa-aaaak-apg6q-cai";
 
-export default function HomePage() {
+export function HomePage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 pb-20 pt-6 md:px-6 md:pb-24">
       <section className="hero-wash rounded-[32px] border border-border px-6 py-8 md:px-10 md:py-12">
@@ -26,17 +26,17 @@ export default function HomePage() {
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Link
-              href={`/m/${EXAMPLE_MEMORY_ID}`}
+              to={`/m/${EXAMPLE_MEMORY_ID}`}
               className={buttonVariants({ className: "min-w-36 !text-background hover:!text-background" })}
             >
               Example Memory
             </Link>
-            <Link
+            <a
               href="https://github.com/ICME-Lab/kinic-cli"
               className={cn(buttonVariants({ variant: "secondary" }), "min-w-40")}
             >
               Publish from CLI
-            </Link>
+            </a>
           </div>
           <Card className="w-full max-w-xl rounded-full bg-background/90 shadow-none">
             <CardContent className="flex flex-wrap items-center justify-center gap-3 px-5 py-3">

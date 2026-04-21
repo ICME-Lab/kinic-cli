@@ -39,8 +39,9 @@ node_modules/
 .pnpm-store/
 coverage/
 .playwright-cli/
-apps/kinic-portal/.next/
-apps/kinic-portal/.open-next/
 apps/kinic-portal/.wrangler/
+apps/kinic-portal/.cache/
+apps/kinic-portal/dist/
 apps/kinic-portal/.playwright-cli/
+apps/kinic-portal/workers/*/.wrangler/
 *.tsbuildinfo

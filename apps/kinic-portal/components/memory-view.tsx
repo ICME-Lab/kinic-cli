@@ -1,8 +1,8 @@
 "use client";
 
-// Where: client component for the public memory page.
-// What: renders detail cards and drives the public read-only chat request against the Next.js BFF.
-// Why: keep the interactive state on the client while server routes remain thin and deterministic.
+// Where: client component for the resolved public memory view.
+// What: renders one public memory and drives read-only requests against the dedicated public API Worker.
+// Why: portal pages stay static while interactive API work moves off the Next server path.
 
 import { useEffect, useState, useTransition } from "react";
 import {
@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { buildPublicApiUrl } from "@/lib/public-api";
 import { cn } from "@/lib/utils";
 
 type ChatResponse = {
@@ -31,11 +32,13 @@ type ChatResponse = {
 type CopyStatusKey = "share" | "discord" | "chatgpt";
 
 export function MemoryView({
-  initialMemory,
+  memory,
   mcpEndpoint,
+  publicApiOrigin,
 }: {
-  initialMemory: MemoryShowResponse;
+  memory: MemoryShowResponse;
   mcpEndpoint: string | null;
+  publicApiOrigin: string;
 }) {
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -46,9 +49,9 @@ export function MemoryView({
   const [currentUrl, setCurrentUrl] = useState("");
   const [language, setLanguage] = useState("en");
   const [isPending, startTransition] = useTransition();
-  const chatGptPrompt = buildChatGptMemoryPrompt(initialMemory.memory_id);
+  const chatGptPrompt = buildChatGptMemoryPrompt(memory.memory_id);
   const chatGptUrl = buildChatGptPromptUrl(chatGptPrompt);
-  const shareLinks = buildShareLinks(currentUrl, initialMemory.name, initialMemory.description);
+  const shareLinks = buildShareLinks(currentUrl, memory.name, memory.description);
 
   useEffect(() => {
     setCurrentUrl(window.location.href);
@@ -61,7 +64,7 @@ export function MemoryView({
       setAnswer("");
       setContextCount(0);
       try {
-        const response = await fetch(`/api/memories/${initialMemory.memory_id}/chat`, {
+        const response = await fetch(buildPublicApiUrl(`/api/public/memories/${memory.memory_id}/chat`, publicApiOrigin), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ query, language }),
@@ -107,17 +110,17 @@ export function MemoryView({
               Memory Name
             </p>
             <h1 className="text-[clamp(2.6rem,6vw,4.2rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-foreground">
-              {initialMemory.name}
+              {memory.name}
             </h1>
             <p className="max-w-3xl text-base leading-7 text-muted-foreground md:text-lg md:leading-8">
-              {initialMemory.description || "No description"}
+              {memory.description || "No description"}
             </p>
             <div className="grid w-full gap-4">
-              <MemorySummary memoryId={initialMemory.memory_id} />
+              <MemorySummary memoryId={memory.memory_id} />
               <div className="grid gap-3 md:grid-cols-3">
-                <MemoryStat label="Memory ID" value={initialMemory.memory_id} />
-                <MemoryStat label="Version" value={initialMemory.version} />
-                <MemoryStat label="Dim" value={String(initialMemory.dim)} />
+                <MemoryStat label="Memory ID" value={memory.memory_id} />
+                <MemoryStat label="Version" value={memory.version} />
+                <MemoryStat label="Dim" value={String(memory.dim)} />
               </div>
             </div>
           </div>
@@ -185,7 +188,7 @@ export function MemoryView({
                 <button
                   type="button"
                   aria-label="Copy share URL for Discord"
-                  onClick={() => copyText("discord", currentUrl || `/m/${initialMemory.memory_id}`)}
+                  onClick={() => copyText("discord", currentUrl || `/m/${memory.memory_id}`)}
                   className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-indigo-500 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted hover:!text-foreground active:!text-foreground focus-visible:!text-foreground"
                 >
                   {copyStatus === "discord" ? <Check className="size-4" /> : <FaDiscord className="size-4" />}
@@ -193,7 +196,7 @@ export function MemoryView({
                 <ShareIconButton
                   copied={copyStatus === "share"}
                   label="Copy share URL"
-                  onClick={() => copyText("share", currentUrl || `/m/${initialMemory.memory_id}`)}
+                  onClick={() => copyText("share", currentUrl || `/m/${memory.memory_id}`)}
                 />
               </div>
             </CardContent>

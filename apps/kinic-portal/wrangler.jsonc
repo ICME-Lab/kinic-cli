@@ -1,19 +1,12 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "kinic-portal",
-  "main": ".open-next/worker.js",
+  "main": "src/worker.tsx",
   "compatibility_date": "2026-04-15",
   "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": ".open-next/assets",
-    "binding": "ASSETS"
+  "secrets": {
+    "required": ["EMBEDDING_API_ENDPOINT"]
   },
-  "services": [
-    {
-      "binding": "WORKER_SELF_REFERENCE",
-      "service": "kinic-portal"
-    }
-  ],
   "kv_namespaces": [
     {
       "binding": "SUMMARY_CACHE",
@@ -21,10 +14,14 @@
       "preview_id": "3f14e59069344a389ab13828817f5b4f"
     }
   ],
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS"
+  },
   "vars": {
-    "DFX_NETWORK": "mainnet",
     "IC_HOST": "https://ic0.app",
+    "SUMMARY_CACHE_TTL_SECONDS": "86400",
     "KINIC_PORTAL_ORIGIN": "https://kinic-portal.kasane.workers.dev",
-    "SUMMARY_CACHE_TTL_SECONDS": "86400"
+    "KINIC_PUBLIC_API_ORIGIN": "https://kinic-portal-public-api.kasane.workers.dev"
   }
 }

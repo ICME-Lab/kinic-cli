@@ -6,12 +6,13 @@ declare namespace Cloudflare {
 
   interface Env {
     ASSETS: Fetcher;
-    DFX_NETWORK: "mainnet";
-    IC_HOST: "https://ic0.app";
+    IC_HOST?: string;
     EMBEDDING_API_ENDPOINT: string;
     SUMMARY_CACHE?: KVNamespace;
     SUMMARY_CACHE_TTL_SECONDS?: string;
-    WORKER_SELF_REFERENCE: Fetcher;
+    KINIC_PORTAL_ORIGIN: string;
+    KINIC_PUBLIC_API_ORIGIN: string;
+    KINIC_REMOTE_MCP_ORIGIN?: string;
   }
 }
 
@@ -24,6 +25,6 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 declare namespace NodeJS {
   interface ProcessEnv
     extends StringifyValues<
-      Pick<Cloudflare.Env, "DFX_NETWORK" | "IC_HOST" | "EMBEDDING_API_ENDPOINT" | "SUMMARY_CACHE_TTL_SECONDS">
+      Pick<Cloudflare.Env, "KINIC_PORTAL_ORIGIN" | "KINIC_PUBLIC_API_ORIGIN" | "EMBEDDING_API_ENDPOINT" | "SUMMARY_CACHE_TTL_SECONDS">
     > {}
 }

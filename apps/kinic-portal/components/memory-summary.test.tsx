@@ -57,7 +57,7 @@ describe("MemorySummary", () => {
 
     await screen.findByText("Alpha summary");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith("/api/memories/alpha/summary?language=en-US", {
+    expect(fetchMock).toHaveBeenCalledWith("/api/public/memories/alpha/summary?language=en-US", {
       method: "GET",
       signal: expect.any(AbortSignal),
     });
@@ -89,7 +89,7 @@ describe("MemorySummary", () => {
     expect(screen.queryByText("Alpha summary")).toBeNull();
     await screen.findByText("Beta summary");
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/memories/beta/summary?language=en-US", {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/public/memories/beta/summary?language=en-US", {
       method: "GET",
       signal: expect.any(AbortSignal),
     });

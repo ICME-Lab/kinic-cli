@@ -2,7 +2,7 @@
 
 // Where: client component inside the public memory hero.
 // What: fetches an AI summary on mount and renders loading, success, or fallback states.
-// Why: the page should feel fast while still exposing a concise overview of the memory contents.
+// Why: summary should share the portal origin even though chat stays on the dedicated Worker.
 
 import { LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -29,7 +29,7 @@ export function MemorySummary({ memoryId }: { memoryId: string }) {
 
     void (async () => {
       try {
-        const response = await fetch(`/api/memories/${memoryId}/summary?language=${encodeURIComponent(language)}`, {
+        const response = await fetch(`/api/public/memories/${memoryId}/summary?language=${encodeURIComponent(language)}`, {
           method: "GET",
           signal: controller.signal,
         });

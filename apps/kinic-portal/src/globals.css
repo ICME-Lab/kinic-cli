@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
-/* Where: global styles for the Kinic portal app.
+/* Where: global styles for the Kinic portal shell.
    What: defines the Mintlify-inspired token system and base surfaces.
-   Why: keep page-level styling utility-first while centralizing only shared design decisions. */
+   Why: keep route styling utility-first while centralizing only shared design decisions. */
 
 :root {
   --background: 0 0% 100%;

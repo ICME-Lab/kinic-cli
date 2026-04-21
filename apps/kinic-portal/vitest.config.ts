@@ -15,5 +15,6 @@ export default defineConfig({
   test: {
     // Route/helper tests stay on node. Component tests opt into jsdom via file pragma.
     environment: "node",
+    exclude: ["node_modules/**", "workers/**", "dist/**", ".cache/**"],
   },
 });
