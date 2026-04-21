@@ -25,8 +25,9 @@ export function renderPortalDocument(
   pathname: string,
   config: PortalRuntimeConfig,
   memoryState?: PublicMemoryState,
+  memorySummary?: string | null,
 ): { html: string; status: number } {
-  const metadata = resolvePortalMetadata(pathname, config, memoryState);
+  const metadata = resolvePortalMetadata(pathname, config, memoryState, memorySummary);
   const appHtml = renderToString(resolveDocumentBody(pathname, config, memoryState));
 
   return {
@@ -56,6 +57,7 @@ export function resolvePortalMetadata(
   pathname: string,
   config: PortalRuntimeConfig,
   memoryState?: PublicMemoryState,
+  memorySummary?: string | null,
 ): DocumentMetadata {
   if (pathname === "/") {
     return buildSiteMetadata({
@@ -66,7 +68,7 @@ export function resolvePortalMetadata(
 
   const memoryId = matchMemoryId(pathname);
   if (memoryId) {
-    return resolveMemoryRouteMetadata(pathname, memoryId, config, memoryState);
+    return resolveMemoryRouteMetadata(pathname, memoryId, config, memoryState, memorySummary);
   }
 
   return buildMemoryUnavailableMetadata(pathname, {
@@ -144,12 +146,15 @@ function resolveMemoryRouteMetadata(
   memoryId: string,
   config: PortalRuntimeConfig,
   memoryState?: PublicMemoryState,
+  memorySummary?: string | null,
 ): DocumentMetadata {
   if (!memoryState || memoryState.kind === "accessible") {
     return buildMemoryPageMetadata(memoryId, {
       portalOrigin: config.portalOrigin,
       publicApiOrigin: config.publicApiOrigin,
       memoryVersion: memoryState?.kind === "accessible" ? memoryState.memory.version : undefined,
+      memoryName: memoryState?.kind === "accessible" ? memoryState.memory.name : undefined,
+      memoryDescription: memoryState?.kind === "accessible" ? memorySummary || memoryState.memory.description : undefined,
     });
   }
 

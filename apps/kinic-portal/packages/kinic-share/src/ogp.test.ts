@@ -54,7 +54,7 @@ describe("ogp helpers", () => {
     });
   });
 
-  it("uses the new shared-memory fallback copy for blank cards", () => {
+  it("uses the public-memory fallback copy for blank cards", () => {
     expect(buildMemoryOgpCardModel({ name: "", description: "", memoryId: null })).toEqual({
       title: DEFAULT_MEMORY_OGP_IMAGE_TITLE,
       description: DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION,
@@ -102,6 +102,16 @@ describe("ogp helpers", () => {
 
   it("builds the memory page title from the resolved name", () => {
     expect(buildMemoryPageTitle("Quarterly Goals")).toBe("Quarterly Goals | Kinic");
+  });
+
+  it("adds the full memory id to the page title when available", () => {
+    expect(buildMemoryPageTitle("Quarterly Goals", "ywega-gaaaa-aaaak-apg6q-cai")).toBe(
+      "Quarterly Goals · ywega-gaaaa-aaaak-apg6q-cai | Kinic",
+    );
+  });
+
+  it("falls back to the full memory id when the name is absent", () => {
+    expect(buildMemoryPageTitle("", "ywega-gaaaa-aaaak-apg6q-cai")).toBe("ywega-gaaaa-aaaak-apg6q-cai | Kinic");
   });
 
   it("builds an OGP search query from name and description", () => {

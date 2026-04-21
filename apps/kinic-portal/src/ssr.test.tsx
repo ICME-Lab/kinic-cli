@@ -21,10 +21,11 @@ describe("renderPortalDocument", () => {
         stable_memory_size: 10,
         cycle_amount: 20,
       },
-    });
+    }, "Cached summary text");
 
     expect(metadata.status).toBe(200);
-    expect(metadata.title).toBe("Shared Memory | Kinic");
+    expect(metadata.title).toBe("Skill Store · ywega-gaaaa-aaaak-apg6q-cai | Kinic");
+    expect(metadata.description).toBe("Cached summary text");
     expect(metadata.canonicalUrl).toBe("https://portal.example.com/m/ywega-gaaaa-aaaak-apg6q-cai");
     expect(metadata.imageUrl).toBe("https://api.example.com/api/public/og/memories/ywega-gaaaa-aaaak-apg6q-cai?v=0.2.5");
   });
@@ -51,14 +52,33 @@ describe("renderPortalDocument", () => {
         stable_memory_size: 10,
         cycle_amount: 20,
       },
-    });
+    }, "Cached summary text");
 
     expect(document.status).toBe(200);
-    expect(document.html).toContain("<title>Shared Memory | Kinic</title>");
+    expect(document.html).toContain("<title>Skill Store · ywega-gaaaa-aaaak-apg6q-cai | Kinic</title>");
+    expect(document.html).toContain('meta name="description" content="Cached summary text"');
     expect(document.html).toContain('meta property="og:image" content="https://api.example.com/api/public/og/memories/ywega-gaaaa-aaaak-apg6q-cai?v=0.2.5"');
     expect(document.html).toContain('link rel="canonical" href="https://portal.example.com/m/ywega-gaaaa-aaaak-apg6q-cai"');
     expect(document.html).toContain("window.__KINIC_PORTAL_CONFIG__");
     expect(document.html).toContain("Loading");
+  });
+
+  it("falls back to the memory description when no cached summary is available", () => {
+    const metadata = resolvePortalMetadata("/m/ywega-gaaaa-aaaak-apg6q-cai", baseConfig, {
+      kind: "accessible",
+      memory: {
+        memory_id: "ywega-gaaaa-aaaak-apg6q-cai",
+        name: "Skill Store",
+        description: "Shared notes",
+        version: "0.2.5",
+        dim: 1536,
+        owners: ["user"],
+        stable_memory_size: 10,
+        cycle_amount: 20,
+      },
+    });
+
+    expect(metadata.description).toBe("Shared notes");
   });
 
   it("renders a forbidden memory document with noindex robots", () => {

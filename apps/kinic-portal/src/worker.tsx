@@ -4,11 +4,13 @@
 
 import { resolvePublicMemory } from "../workers/shared/public-memory-runtime";
 import { resolvePublicSummary } from "../workers/shared/public-memory-summary-runtime";
+import { buildSummaryCacheKey, getSummaryCache, readSummaryCache } from "../workers/public-api/src/summary-cache";
 import { buildRuntimeConfig } from "./runtime-config";
 import { PORTAL_SCRIPT_PATH, PORTAL_STYLE_PATH, renderPortalDocument, resolvePortalMetadata } from "./ssr";
 
 const DETAIL_ROUTE = /^\/api\/public\/memories\/([^/]+)$/;
 const SUMMARY_ROUTE = /^\/api\/public\/memories\/([^/]+)\/summary$/;
+const OGP_SUMMARY_LANGUAGE = "en";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -34,12 +36,13 @@ export default {
 
     const config = buildRuntimeConfig(env);
     const memoryState = await resolveMemoryRouteState(pathname, env);
+    const memorySummary = await resolveMemoryRouteSummary(env, memoryState);
     if (request.method === "HEAD") {
-      const metadata = resolvePortalMetadata(pathname, config, memoryState);
+      const metadata = resolvePortalMetadata(pathname, config, memoryState, memorySummary);
       return documentResponse(null, metadata.status);
     }
 
-    const document = renderPortalDocument(pathname, config, memoryState);
+    const document = renderPortalDocument(pathname, config, memoryState, memorySummary);
     return documentResponse(document.html, document.status);
   },
 };
@@ -137,6 +140,24 @@ async function resolveMemoryRouteState(pathname: string, env: Env) {
     return undefined;
   }
   return resolvePublicMemory({ IC_HOST: env.IC_HOST }, memoryId);
+}
+
+async function resolveMemoryRouteSummary(
+  env: Env,
+  memoryState: Awaited<ReturnType<typeof resolveMemoryRouteState>>,
+): Promise<string | null> {
+  if (!memoryState || memoryState.kind !== "accessible") {
+    return null;
+  }
+
+  try {
+    const cache = getSummaryCache(env);
+    const key = buildSummaryCacheKey(memoryState.memory.memory_id, memoryState.memory.version, OGP_SUMMARY_LANGUAGE);
+    return (await readSummaryCache(cache, key))?.summary || null;
+  } catch (error) {
+    console.warn("summary cache read failed during metadata render", error);
+    return null;
+  }
 }
 
 function decodeMemoryRouteId(pathname: string): string | null {

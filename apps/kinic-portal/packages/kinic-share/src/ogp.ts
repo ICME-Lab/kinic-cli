@@ -2,9 +2,9 @@
 // What: normalizes social-card copy and compact stats from one memory payload.
 // Why: keep SSR metadata text and generated image content aligned without duplicating truncation rules.
 
-export const DEFAULT_MEMORY_METADATA_DESCRIPTION = "Public Kinic memory";
-export const DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION = "Shared notes and context from Kinic";
-export const DEFAULT_MEMORY_OGP_IMAGE_TITLE = "Shared Memory";
+export const DEFAULT_MEMORY_METADATA_DESCRIPTION = "Explore a public memory shared on Kinic.";
+export const DEFAULT_MEMORY_OGP_IMAGE_DESCRIPTION = "Public notes and context shared on Kinic";
+export const DEFAULT_MEMORY_OGP_IMAGE_TITLE = "Public Memory";
 
 const TITLE_LIMIT = 72;
 const DESCRIPTION_LIMIT = 160;
@@ -31,9 +31,13 @@ export type MemoryOgpImageCopy = {
   description: string;
 };
 
-export function buildMemoryPageTitle(name?: string | null): string {
-  const normalized = normalizeCopy(name, "Untitled Memory");
-  return `${clamp(normalized, TITLE_LIMIT)} | Kinic`;
+export function buildMemoryPageTitle(name?: string | null, memoryId?: string | null): string {
+  const normalizedName = normalizeOptionalCopy(name);
+  const normalizedMemoryId = normalizeOptionalCopy(memoryId);
+  const title = normalizedName
+    ? clamp(normalizedMemoryId ? `${normalizedName} · ${normalizedMemoryId}` : normalizedName, TITLE_LIMIT)
+    : normalizeCopy(normalizedMemoryId, "Untitled Memory");
+  return `${title} | Kinic`;
 }
 
 export function buildMemoryMetadataDescription(description?: string | null): string {

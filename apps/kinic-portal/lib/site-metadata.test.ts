@@ -42,13 +42,24 @@ describe("site metadata", () => {
     process.env.KINIC_PUBLIC_API_ORIGIN = "https://api.example.com";
 
     const metadata = buildMemoryPageMetadata("ywega-gaaaa-aaaak-apg6q-cai", {
+      memoryName: "Skill Store",
+      memoryDescription: "Cached summary text",
       memoryVersion: "0.2.5",
     });
 
-    expect(metadata.title).toBe("Shared Memory | Kinic");
-    expect(metadata.description).toBe("Public Kinic memory");
+    expect(metadata.title).toBe("Skill Store · ywega-gaaaa-aaaak-apg6q-cai | Kinic");
+    expect(metadata.description).toBe("Cached summary text");
     expect(metadata.canonicalUrl).toBe("https://portal.example.com/m/ywega-gaaaa-aaaak-apg6q-cai");
     expect(metadata.imageUrl).toBe("https://api.example.com/api/public/og/memories/ywega-gaaaa-aaaak-apg6q-cai?v=0.2.5");
     expect(metadata.ogType).toBe("article");
+  });
+
+  it("falls back to the memory description when summary text is absent", () => {
+    const metadata = buildMemoryPageMetadata("ywega-gaaaa-aaaak-apg6q-cai", {
+      memoryName: "Skill Store",
+      memoryDescription: "Shared notes",
+    });
+
+    expect(metadata.description).toBe("Shared notes");
   });
 });

@@ -4,7 +4,7 @@
 
 import {
   DEFAULT_MEMORY_METADATA_DESCRIPTION,
-  DEFAULT_MEMORY_OGP_IMAGE_TITLE,
+  buildMemoryMetadataDescription,
   buildMemoryPageTitle,
 } from "@kinic/kinic-share";
 import { buildPublicApiUrl } from "./public-api";
@@ -31,6 +31,8 @@ type MetadataOptions = {
   portalOrigin?: string;
   publicApiOrigin?: string;
   memoryVersion?: string;
+  memoryName?: string | null;
+  memoryDescription?: string | null;
 };
 
 export function resolveSiteOrigin(raw = process.env.KINIC_PORTAL_ORIGIN): URL {
@@ -66,8 +68,8 @@ export function buildMemoryPageMetadata(memoryId: string, options: MetadataOptio
   const imageUrl = buildPublicApiUrl(`/api/public/og/memories/${memoryId}${buildVersionQuery(options)}`, publicApiOrigin);
 
   return {
-    title: buildMemoryPageTitle(DEFAULT_MEMORY_OGP_IMAGE_TITLE),
-    description: DEFAULT_MEMORY_METADATA_DESCRIPTION,
+    title: buildMemoryPageTitle(options.memoryName, memoryId),
+    description: buildMemoryMetadataDescription(options.memoryDescription ?? DEFAULT_MEMORY_METADATA_DESCRIPTION),
     canonicalUrl,
     imageUrl,
     iconPath: SITE_ICON_PATH,
