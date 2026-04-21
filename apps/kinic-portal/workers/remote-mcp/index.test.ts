@@ -23,7 +23,7 @@ vi.mock("@kinic/kinic-share", async () => {
   };
 });
 
-vi.mock("../../../lib/public-memory-runtime", () => ({
+vi.mock("../../shared/public-memory-runtime", () => ({
   classifyPublicMemoryRuntimeError: mocks.classifyPublicMemoryRuntimeError,
   TRANSIENT_PUBLIC_MEMORY_ERROR: "temporary network error",
 }));

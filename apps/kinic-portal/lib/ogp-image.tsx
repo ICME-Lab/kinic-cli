@@ -1,13 +1,13 @@
 // Where: shared by the default and memory-specific OGP image routes.
-// What: renders the dark-framed Kinic social card with static SVG assets and bounded copy.
-// Why: bot OGP fetches must stay cheap while matching the supplied frame and logo art.
+// What: renders the Kinic social card as static chrome plus a small dynamic text overlay.
+// Why: Cloudflare OGP rendering must keep runtime layout work as small as possible.
 
 import type { CSSProperties, ReactElement } from "react";
 import {
   buildMemoryOgpCardModel,
   type MemoryOgpInput,
 } from "@kinic/kinic-share";
-import { OGP_FRAME_SRC, OGP_LOGO_SRC } from "./ogp-assets";
+import { OGP_FRAME_SRC, OGP_LOGO_SRC, OGP_MEMORY_CHROME_SRC } from "./ogp-assets";
 import {
   DEFAULT_SITE_DESCRIPTION,
   DEFAULT_SITE_TITLE,
@@ -19,51 +19,29 @@ type OgpImageProps = {
 
 const CANVAS_WIDTH = 1200;
 const CANVAS_HEIGHT = 630;
-const INNER_INSET = 18;
-const PANEL_WIDTH = CANVAS_WIDTH - INNER_INSET * 2;
-const PANEL_HEIGHT = CANVAS_HEIGHT - INNER_INSET * 2;
-const FOOTER_TAGLINE =
-  "Kinic is your cryptographically secure, searchable memory for AI — every bookmark, email, note, and document in one place.";
 
 export function renderOgpImage({ memory }: OgpImageProps): ReactElement {
-  const card = memory ? buildMemoryOgpCardModel(memory) : { title: DEFAULT_SITE_TITLE, description: DEFAULT_SITE_DESCRIPTION, shortMemoryId: "-", owner: null };
+  if (!memory) {
+    return renderSiteOgpImage();
+  }
+
+  const card = buildMemoryOgpCardModel(memory);
   return (
     <div style={frameStyle}>
-      <div style={outerCardStyle}>
-        <div style={innerPanelStyle}>
-          <img
-            alt=""
-            src={OGP_FRAME_SRC}
-            width={PANEL_WIDTH}
-            height={PANEL_HEIGHT}
-            style={backgroundImageStyle}
-          />
-          <div style={panelStyle}>
-            <div style={headerStyle}>
-              <div style={brandStyle}>
-                <KinicMark src={OGP_LOGO_SRC} />
-                <div style={brandTextStyle}>KinicMemory</div>
-              </div>
-              <div style={metaGridStyle}>
-                <MetaStat label="NETWORK" value="IC Mainnet" />
-                <MetaStat label="VISIBILITY" value="Public" />
-                {card.owner ? <MetaStat label="OWNER" value={shortenOwner(card.owner)} /> : null}
-              </div>
-            </div>
-
-            <div style={heroStyle}>
-              <div style={bodyStyle}>
-                <div style={titleStyle}>{card.title}</div>
-                <div style={descriptionStyle}>{card.description}</div>
-                <div style={statsGridStyle}>
-                  <Stat label="MEMORY ID" value={card.shortMemoryId} />
-                </div>
-              </div>
-            </div>
-            <div style={footerStyle}>
-              <div style={footerLineStyle} />
-              <div style={footerTextStyle}>{FOOTER_TAGLINE}</div>
-            </div>
+      <img
+        alt=""
+        src={OGP_MEMORY_CHROME_SRC}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        style={chromeImageStyle}
+      />
+      <div style={overlayStyle}>
+        <div style={bodyStyle}>
+          <div style={titleStyle}>{card.title}</div>
+          <div style={descriptionStyle}>{card.description}</div>
+          <div style={memoryIdRowStyle}>
+            <span style={memoryIdLabelStyle}>MEMORY ID</span>
+            <span style={memoryIdValueStyle}>{card.shortMemoryId}</span>
           </div>
         </div>
       </div>
@@ -71,37 +49,34 @@ export function renderOgpImage({ memory }: OgpImageProps): ReactElement {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function renderSiteOgpImage(): ReactElement {
   return (
-    <div style={statCardStyle}>
-      <div style={statLabelStyle}>{label}</div>
-      <div style={statValueStyle}>{value}</div>
+    <div style={frameStyle}>
+      <img
+        alt=""
+        src={OGP_FRAME_SRC}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        style={chromeImageStyle}
+      />
+      <div style={siteOverlayStyle}>
+        <div style={siteBrandRowStyle}>
+          <img alt="" src={OGP_LOGO_SRC} width={58} height={68} style={siteLogoStyle} />
+          <div style={siteBrandTitleStyle}>Kinic</div>
+        </div>
+        <div style={siteContentStyle}>
+          <div style={siteTitleStyle}>{DEFAULT_SITE_TITLE}</div>
+          <div style={siteDescriptionStyle}>{DEFAULT_SITE_DESCRIPTION}</div>
+        </div>
+      </div>
     </div>
   );
-}
-
-function MetaStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={metaStatStyle}>
-      <div style={metaLabelStyle}>{label}</div>
-      <div style={metaValueStyle}>{value}</div>
-    </div>
-  );
-}
-
-function shortenOwner(value: string): string {
-  if (value.length <= 9) {
-    return value;
-  }
-  return `${value.slice(0, 5)}...${value.slice(-3)}`;
 }
 
 const frameStyle: CSSProperties = {
   width: "100%",
   height: "100%",
   display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
   position: "relative",
   background: "#060c1b",
   color: "#f7fbff",
@@ -109,98 +84,66 @@ const frameStyle: CSSProperties = {
   overflow: "hidden",
 };
 
-const outerCardStyle: CSSProperties = {
-  width: CANVAS_WIDTH,
-  height: CANVAS_HEIGHT,
-  display: "flex",
-  position: "relative",
-  overflow: "hidden",
-  borderRadius: 24,
-  border: "1px solid rgba(214, 226, 246, 0.16)",
-  background: "rgba(10, 16, 31, 0.86)",
-};
-
-const innerPanelStyle: CSSProperties = {
-  margin: INNER_INSET,
-  width: PANEL_WIDTH,
-  height: PANEL_HEIGHT,
-  display: "flex",
-  position: "relative",
-  overflow: "hidden",
-  borderRadius: 16,
-  border: "1px solid rgba(188, 205, 232, 0.08)",
-  background: "rgba(9, 15, 29, 0.84)",
-};
-
-const backgroundImageStyle: CSSProperties = {
+const chromeImageStyle: CSSProperties = {
   position: "absolute",
   inset: 0,
   width: "100%",
   height: "100%",
 };
 
-const panelStyle: CSSProperties = {
-  margin: 0,
-  padding: "36px 42px 40px",
-  width: "100%",
-  height: "100%",
+const overlayStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  display: "flex",
+};
+
+const siteOverlayStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
   display: "flex",
   flexDirection: "column",
-  gap: 28,
-  justifyContent: "space-between",
-  position: "relative",
+  padding: "56px 60px 64px",
 };
 
-const headerStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-};
-
-const brandStyle: CSSProperties = {
+const siteBrandRowStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 18,
+  gap: 20,
 };
 
-const brandTextStyle: CSSProperties = {
-  fontSize: 40,
-  fontWeight: 600,
+const siteLogoStyle: CSSProperties = {
+  width: 58,
+  height: 68,
+};
+
+const siteBrandTitleStyle: CSSProperties = {
+  fontSize: 42,
+  fontWeight: 700,
+  letterSpacing: "-0.04em",
   color: "#dbe9ff",
-  letterSpacing: "-0.03em",
 };
 
-const metaGridStyle: CSSProperties = {
-  display: "flex",
-  gap: 18,
-  alignItems: "flex-start",
-};
-
-const metaStatStyle: CSSProperties = {
+const siteContentStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 6,
-  minWidth: 112,
-  maxWidth: 168,
+  gap: 26,
+  width: 980,
+  marginTop: 80,
 };
 
-const metaLabelStyle: CSSProperties = {
-  fontSize: 12,
-  lineHeight: 1,
-  letterSpacing: "0.12em",
-  textTransform: "uppercase",
-  color: "#8da2c5",
+const siteTitleStyle: CSSProperties = {
+  fontSize: 92,
+  fontWeight: 800,
+  lineHeight: 0.98,
+  letterSpacing: "-0.06em",
+  color: "#ffffff",
 };
 
-const metaValueStyle: CSSProperties = {
-  display: "-webkit-box",
-  overflow: "hidden",
-  fontSize: 24,
-  lineHeight: 1.1,
-  fontWeight: 600,
-  color: "#eef4ff",
-  WebkitBoxOrient: "vertical",
-  WebkitLineClamp: 2,
+const siteDescriptionStyle: CSSProperties = {
+  width: 880,
+  fontSize: 34,
+  lineHeight: 1.34,
+  color: "rgba(235, 241, 252, 0.92)",
 };
 
 const bodyStyle: CSSProperties = {
@@ -208,14 +151,9 @@ const bodyStyle: CSSProperties = {
   flexDirection: "column",
   gap: 20,
   width: 900,
-};
-
-const heroStyle: CSSProperties = {
-  display: "flex",
-  gap: 18,
-  alignItems: "flex-start",
-  marginTop: 2,
-  flex: 1,
+  position: "absolute",
+  left: 60,
+  top: 158,
 };
 
 const titleStyle: CSSProperties = {
@@ -241,44 +179,14 @@ const descriptionStyle: CSSProperties = {
   WebkitLineClamp: 3,
 };
 
-const statsGridStyle: CSSProperties = {
+const memoryIdRowStyle: CSSProperties = {
   display: "flex",
-  gap: 16,
-  width: 900,
+  gap: 14,
+  alignItems: "center",
   marginTop: 10,
 };
 
-const footerStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 18,
-  width: "100%",
-  paddingBottom: 6,
-};
-
-const footerLineStyle: CSSProperties = {
-  width: "100%",
-  height: 0,
-  borderTop: "1px solid rgba(245, 247, 250, 0.92)",
-};
-
-const footerTextStyle: CSSProperties = {
-  fontSize: 17,
-  lineHeight: 1.35,
-  color: "rgba(245, 247, 250, 0.94)",
-  textAlign: "center",
-};
-
-const statCardStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 14,
-  padding: 0,
-  background: "transparent",
-};
-
-const statLabelStyle: CSSProperties = {
+const memoryIdLabelStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   lineHeight: 1,
@@ -288,22 +196,11 @@ const statLabelStyle: CSSProperties = {
   color: "#9db4d6",
 };
 
-const statValueStyle: CSSProperties = {
+const memoryIdValueStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   lineHeight: 1,
   fontSize: 26,
   fontWeight: 500,
   color: "#eff4ff",
-};
-
-function KinicMark({ src }: { src: string }) {
-  return (
-    <img alt="" src={src} width={54} height={63} style={markFrameStyle} />
-  );
-}
-
-const markFrameStyle: CSSProperties = {
-  width: 54,
-  height: 63,
 };

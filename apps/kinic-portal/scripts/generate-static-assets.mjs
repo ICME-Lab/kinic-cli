@@ -1,5 +1,5 @@
 // Where: portal asset maintenance script.
-// What: regenerates next/og SVG data URLs and favicon.ico from public asset sources.
+// What: regenerates next/og asset data URLs and favicon.ico from public asset sources.
 // Why: public files stay the single source of truth while build-time consumers use generated artifacts.
 
 import fs from "node:fs";
@@ -10,12 +10,14 @@ const publicRoot = path.join(appRoot, "public");
 const ogRoot = path.join(publicRoot, "og");
 const framePath = path.join(ogRoot, "ogp-frame.svg");
 const logoPath = path.join(ogRoot, "ogp-logo.svg");
+const memoryChromePath = path.join(ogRoot, "ogp-memory-chrome.png");
 const faviconPngPath = path.join(publicRoot, "favicon.png");
 const faviconIcoPath = path.join(publicRoot, "favicon.ico");
 const ogpAssetsPath = path.join(appRoot, "lib", "ogp-assets.ts");
 
 const frame = fs.readFileSync(framePath, "utf8");
 const logo = fs.readFileSync(logoPath, "utf8");
+const memoryChrome = fs.readFileSync(memoryChromePath);
 const faviconPng = fs.readFileSync(faviconPngPath);
 
 const ogpModule = `// Where: shared by OGP image routes.
@@ -24,6 +26,7 @@ const ogpModule = `// Where: shared by OGP image routes.
 
 export const OGP_FRAME_SRC = ${JSON.stringify(toSvgDataUrl(frame))};
 export const OGP_LOGO_SRC = ${JSON.stringify(toSvgDataUrl(logo))};
+export const OGP_MEMORY_CHROME_SRC = ${JSON.stringify(toPngDataUrl(memoryChrome))};
 `;
 
 fs.writeFileSync(ogpAssetsPath, ogpModule);
@@ -32,6 +35,10 @@ fs.writeFileSync(faviconIcoPath, buildIcoFromPng(faviconPng));
 function toSvgDataUrl(svg) {
   const normalized = svg.replace(/\r\n/g, "\n").trim();
   return `data:image/svg+xml;base64,${Buffer.from(normalized).toString("base64")}`;
+}
+
+function toPngDataUrl(png) {
+  return `data:image/png;base64,${png.toString("base64")}`;
 }
 
 function buildIcoFromPng(png) {

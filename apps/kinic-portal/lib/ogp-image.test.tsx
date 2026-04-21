@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { OGP_FRAME_SRC, OGP_LOGO_SRC } from "./ogp-assets";
+import { OGP_FRAME_SRC, OGP_LOGO_SRC, OGP_MEMORY_CHROME_SRC } from "./ogp-assets";
 import { renderOgpImage } from "./ogp-image";
 
 describe("renderOgpImage", () => {
@@ -8,20 +8,17 @@ describe("renderOgpImage", () => {
     const markup = renderToStaticMarkup(renderOgpImage({}));
 
     expect(markup).toContain("Kinic Portal");
-    expect(markup).toContain("KinicMemory");
-    expect(markup).toContain("Share public Kinic memory canisters over the web");
-    expect(markup).toContain("NETWORK");
-    expect(markup).toContain("IC Mainnet");
-    expect(markup).toContain("VISIBILITY");
-    expect(markup).toContain("Public");
+    expect(markup).toContain("Share public Kinic knowledge over the web");
+    expect(markup).toContain(">Kinic<");
+    expect(markup).not.toContain("MEMORY ID");
+    expect(markup).not.toContain("KinicMemory");
     expect(markup).toContain(
-      "Kinic is your cryptographically secure, searchable memory for AI",
+      escapeMarkup(OGP_FRAME_SRC),
     );
+    expect(markup).toContain(escapeMarkup(OGP_LOGO_SRC));
     expect(markup).not.toContain("STATUS");
     expect(markup).not.toContain("ASPECT RATIO");
     expect(markup).not.toContain(">Shared notes and context from Kinic<");
-    expect(markup).toContain(escapeMarkup(OGP_FRAME_SRC));
-    expect(markup).toContain(escapeMarkup(OGP_LOGO_SRC));
   });
 
   it("uses memory card copy when a memory payload is present", () => {
@@ -40,11 +37,9 @@ describe("renderOgpImage", () => {
     expect(markup).toContain("Shared notes");
     expect(markup).toContain("MEMORY ID");
     expect(markup).toContain("ywega-gaaaa-aaaak-apg6q-cai");
-    expect(markup).toContain("OWNER");
-    expect(markup).toContain("rdmx6...cai");
-    expect(markup).toContain("IC Mainnet");
-    expect(markup).toContain("Public");
-    expect(markup).toContain("Kinic is your cryptographically secure");
+    expect(markup).not.toContain("rdmx6...cai");
+    expect(markup).not.toContain("OWNER");
+    expect(markup).toContain(escapeMarkup(OGP_MEMORY_CHROME_SRC));
   });
 });
 

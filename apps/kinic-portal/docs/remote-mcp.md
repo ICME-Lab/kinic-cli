@@ -98,7 +98,6 @@ claude mcp add --transport http kinic-local http://127.0.0.1:8787/mcp
 
 ## Required Environment Variables
 
-- `DFX_NETWORK`
 - `IC_HOST`
 - `EMBEDDING_API_ENDPOINT`
   - Required server-only endpoint for embedding generation

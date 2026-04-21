@@ -1,0 +1,21 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "kinic-portal-public-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "secrets": {
+    "required": ["EMBEDDING_API_ENDPOINT"]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SUMMARY_CACHE",
+      "id": "5ae0671d6e7c47fd9867184b609ae990",
+      "preview_id": "3f14e59069344a389ab13828817f5b4f"
+    }
+  ],
+  "vars": {
+    "IC_HOST": "https://ic0.app",
+    "SUMMARY_CACHE_TTL_SECONDS": "86400"
+  }
+}

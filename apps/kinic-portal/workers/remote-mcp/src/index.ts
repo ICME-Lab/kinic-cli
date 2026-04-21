@@ -14,7 +14,7 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { classifyPublicMemoryRuntimeError, TRANSIENT_PUBLIC_MEMORY_ERROR } from "../../../lib/public-memory-runtime";
+import { classifyPublicMemoryRuntimeError, TRANSIENT_PUBLIC_MEMORY_ERROR } from "../../shared/public-memory-runtime";
 
 export const PUBLIC_MEMORY_HELP_OUTPUT = {
   server: "kinic-remote-mcp",

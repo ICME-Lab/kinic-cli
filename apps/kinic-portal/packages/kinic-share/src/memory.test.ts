@@ -69,7 +69,7 @@ describe("memory access helpers", () => {
 
   it("resolves unsupported canisters to not_found before metadata fetch", async () => {
     mocks.createActor.mockReturnValue({
-      get_name: vi.fn(async () => {
+      get_metadata: vi.fn(async () => {
         throw new Error("query method does not exist");
       }),
     });
@@ -94,10 +94,6 @@ describe("memory access helpers", () => {
   });
 
   it("resolves transient verification failures after one retry", async () => {
-    const getName = vi
-      .fn<() => Promise<string>>()
-      .mockRejectedValueOnce(new Error("Invalid certificate: Invalid signature from replica"))
-      .mockResolvedValueOnce("visible");
     const getMetadata = vi.fn(async () => ({
       owners: ["owner"],
       name: JSON.stringify({ name: "Kinic", description: "Public summary" }),
@@ -105,9 +101,9 @@ describe("memory access helpers", () => {
       version: "1.2.3",
       cycle_amount: 1000n,
     }));
+    getMetadata.mockRejectedValueOnce(new Error("Invalid certificate: Invalid signature from replica"));
 
     mocks.createActor.mockReturnValue({
-      get_name: getName,
       get_metadata: getMetadata,
     });
 
@@ -120,7 +116,7 @@ describe("memory access helpers", () => {
         version: "1.2.3",
       },
     });
-    expect(getName).toHaveBeenCalledTimes(2);
+    expect(getMetadata).toHaveBeenCalledTimes(2);
   });
 
   it("surfaces transient query failures after one retry during search", async () => {
@@ -143,7 +139,6 @@ describe("memory access helpers", () => {
 
   it("reduces memory metadata to the public remote summary shape", async () => {
     mocks.createActor.mockReturnValue({
-      get_name: vi.fn(async () => "visible"),
       get_metadata: vi.fn(async () => ({
         owners: ["owner"],
         name: JSON.stringify({ name: "Kinic", description: "Public summary" }),
@@ -161,6 +156,19 @@ describe("memory access helpers", () => {
         description: "Public summary",
         version: "1.2.3",
       },
+    });
+  });
+
+  it("resolves denied memories from metadata permission errors in summary mode", async () => {
+    mocks.createActor.mockReturnValue({
+      get_metadata: vi.fn(async () => {
+        throw new Error('Call failed: "Message": "Permission denied"');
+      }),
+    });
+
+    await expect(resolvePublicMemorySummary(undefined!, "aaaaa-aa")).resolves.toEqual({
+      kind: "denied",
+      error: "anonymous access denied",
     });
   });
 });
