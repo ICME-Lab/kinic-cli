@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   cacheSetExecutionContext: vi.fn(),
   renderOgpImage: vi.fn(),
   resolvePublicMemorySummaryOnly: vi.fn(),
+  getOgpMetadataCache: vi.fn(),
+  readOgpMetadataCache: vi.fn(),
+  writeOgpMetadataCache: vi.fn(),
   buildSummaryCacheKey: vi.fn(),
   getSummaryCache: vi.fn(),
   readSummaryCache: vi.fn(),
@@ -21,6 +24,12 @@ vi.mock("@cf-wasm/og/workerd", () => ({
 
 vi.mock("../../lib/ogp-image", () => ({
   renderOgpImage: mocks.renderOgpImage,
+}));
+
+vi.mock("./src/ogp-metadata-cache", () => ({
+  getOgpMetadataCache: mocks.getOgpMetadataCache,
+  readOgpMetadataCache: mocks.readOgpMetadataCache,
+  writeOgpMetadataCache: mocks.writeOgpMetadataCache,
 }));
 
 vi.mock("./src/public-memory", () => ({
@@ -46,6 +55,8 @@ const pngBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
 describe("public api ogp handlers", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.getOgpMetadataCache.mockReturnValue(null);
+    mocks.readOgpMetadataCache.mockResolvedValue(null);
     mocks.buildSummaryCacheKey.mockReturnValue("memory-summary:m1:v1:en");
     mocks.getSummaryCache.mockReturnValue(null);
     mocks.readSummaryCache.mockResolvedValue(null);
@@ -116,6 +127,16 @@ describe("public api ogp handlers", () => {
         description: "cached summary",
       },
     });
+    expect(mocks.writeOgpMetadataCache).toHaveBeenCalledWith(
+      null,
+      "m1",
+      {
+        name: "Shared Memory",
+        description: "desc",
+        version: "v1",
+      },
+      { IC_HOST: "https://ic0.app" },
+    );
   });
 
   it("falls back to memory description when summary cache misses", async () => {
@@ -137,6 +158,119 @@ describe("public api ogp handlers", () => {
         memoryId: "m1",
         name: "Shared Memory",
         description: "desc",
+      },
+    });
+  });
+
+  it("uses cached metadata without resolving the canister again", async () => {
+    mocks.readOgpMetadataCache.mockResolvedValueOnce({
+      name: "Cached Memory",
+      description: "cached desc",
+      version: "v2",
+    });
+    mocks.buildSummaryCacheKey.mockReturnValueOnce("memory-summary:m1:v2:en");
+    mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
+    mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
+
+    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1");
+
+    expect(mocks.resolvePublicMemorySummaryOnly).not.toHaveBeenCalled();
+    expect(mocks.writeOgpMetadataCache).not.toHaveBeenCalled();
+    expect(mocks.renderOgpImage).toHaveBeenCalledWith({
+      memory: {
+        memoryId: "m1",
+        name: "Cached Memory",
+        description: "cached desc",
+      },
+    });
+  });
+
+  it("treats metadata cache read failure as a cache miss", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const readError = new Error("kv read failed");
+    mocks.readOgpMetadataCache.mockRejectedValueOnce(readError);
+    mocks.resolvePublicMemorySummaryOnly.mockResolvedValueOnce({
+      kind: "accessible",
+      memory: {
+        version: "v1",
+        name: "Shared Memory",
+        description: "desc",
+      },
+    });
+    mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
+    mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
+
+    try {
+      await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1");
+
+      expect(warning).toHaveBeenCalledWith("ogp metadata cache read failed", readError);
+      expect(mocks.resolvePublicMemorySummaryOnly).toHaveBeenCalledWith(
+        { IC_HOST: "https://ic0.app" },
+        "m1",
+      );
+      expect(mocks.renderOgpImage).toHaveBeenCalledWith({
+        memory: {
+          memoryId: "m1",
+          name: "Shared Memory",
+          description: "desc",
+        },
+      });
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("continues rendering when metadata cache write fails", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const writeError = new Error("kv write failed");
+    mocks.writeOgpMetadataCache.mockRejectedValueOnce(writeError);
+    mocks.resolvePublicMemorySummaryOnly.mockResolvedValueOnce({
+      kind: "accessible",
+      memory: {
+        version: "v1",
+        name: "Shared Memory",
+        description: "desc",
+      },
+    });
+    mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
+    mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
+
+    try {
+      const response = await handleMemoryOgp(
+        "GET",
+        { IC_HOST: "https://ic0.app" } as Env,
+        executionCtx,
+        "m1",
+      );
+
+      expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      expect(warning).toHaveBeenCalledWith("ogp metadata cache write failed", writeError);
+      expect(mocks.renderOgpImage).toHaveBeenCalledWith({
+        memory: {
+          memoryId: "m1",
+          name: "Shared Memory",
+          description: "desc",
+        },
+      });
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("does not write metadata cache when memory is not accessible", async () => {
+    mocks.resolvePublicMemorySummaryOnly.mockResolvedValueOnce({
+      kind: "denied",
+      error: "anonymous access denied",
+    });
+    mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
+    mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
+
+    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1");
+
+    expect(mocks.writeOgpMetadataCache).not.toHaveBeenCalled();
+    expect(mocks.renderOgpImage).toHaveBeenCalledWith({
+      memory: {
+        memoryId: "m1",
       },
     });
   });

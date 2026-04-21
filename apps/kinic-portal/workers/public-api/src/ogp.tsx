@@ -5,6 +5,11 @@
 import { ImageResponse, cache } from "@cf-wasm/og/workerd";
 import type { ExecutionContext } from "hono";
 import { renderOgpImage } from "../../../lib/ogp-image";
+import {
+  getOgpMetadataCache,
+  readOgpMetadataCache,
+  writeOgpMetadataCache,
+} from "./ogp-metadata-cache";
 import { resolvePublicMemorySummaryOnly } from "./public-memory";
 import { headFrom, withCors } from "./http";
 import { buildSummaryCacheKey, getSummaryCache, readSummaryCache } from "./summary-cache";
@@ -30,22 +35,57 @@ export async function handleMemoryOgp(
   if (method === "HEAD") {
     return headResponse();
   }
-  const state = await resolvePublicMemorySummaryOnly(env, memoryId);
-  const summary = state.kind === "accessible"
-    ? await readOgpSummary(env, memoryId, state.memory.version)
-    : null;
-  const memory = state.kind === "accessible"
-    ? {
-        memoryId,
-        name: state.memory.name,
-        description: summary || state.memory.description,
-      }
-    : {
-        memoryId,
-      };
+  const memory = await resolveOgpMemory(env, memoryId);
 
   const response = await renderImage(renderOgpImage({ memory }), executionCtx);
   return response;
+}
+
+async function resolveOgpMemory(
+  env: Env,
+  memoryId: string,
+): Promise<{ memoryId: string; name: string; description: string | null } | { memoryId: string }> {
+  const metadataCache = getOgpMetadataCache(env);
+  let cachedMetadata: Awaited<ReturnType<typeof readOgpMetadataCache>> = null;
+  try {
+    cachedMetadata = await readOgpMetadataCache(metadataCache, memoryId);
+  } catch (error) {
+    console.warn("ogp metadata cache read failed", error);
+  }
+  if (cachedMetadata) {
+    const summary = await readOgpSummary(env, memoryId, cachedMetadata.version);
+    return {
+      memoryId,
+      name: cachedMetadata.name,
+      description: summary || cachedMetadata.description,
+    };
+  }
+
+  const state = await resolvePublicMemorySummaryOnly(env, memoryId);
+  if (state.kind !== "accessible") {
+    return { memoryId };
+  }
+
+  try {
+    await writeOgpMetadataCache(
+      metadataCache,
+      memoryId,
+      {
+        name: state.memory.name,
+        description: state.memory.description,
+        version: state.memory.version,
+      },
+      env,
+    );
+  } catch (error) {
+    console.warn("ogp metadata cache write failed", error);
+  }
+  const summary = await readOgpSummary(env, memoryId, state.memory.version);
+  return {
+    memoryId,
+    name: state.memory.name,
+    description: summary || state.memory.description,
+  };
 }
 
 async function readOgpSummary(env: Env, memoryId: string, version: string): Promise<string | null> {

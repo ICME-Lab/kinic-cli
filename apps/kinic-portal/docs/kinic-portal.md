@@ -19,6 +19,7 @@ Kinic Portal is the public read-only sharing surface built on Vite, React Router
 - `/m/[memoryId]` is a Worker-rendered shell with route-specific HTML metadata, while public detail and summary load after hydration from the portal Worker itself
 - Public AI summaries below the description are generated on demand and cached in Cloudflare KV on the portal Worker
 - Memory OGP prefers the cached English summary when present; otherwise it falls back to the memory description
+- Memory OGP also caches the minimal metadata subset (`name`, `description`, `version`) in KV on the dedicated public API Worker so warm card renders can skip canister `get_metadata`
 - Public chat and summary routes fetch canister search results, then truncate them server-side to fixed caps before prompt construction
 - `/m/[memoryId]` restores server-side status handling: accessible memories return `200`, anonymous denial returns `403`, missing/invalid memories return `404`, and transient verification failures return `503`
 - Future owner or authenticated actions are expected to call the canister directly from the client principal
@@ -111,6 +112,7 @@ Public API Worker:
 
 - `EMBEDDING_API_ENDPOINT` required server-only endpoint for embedding generation and chat completion
 - `SUMMARY_CACHE` required shared Cloudflare KV binding for cached AI summaries and OGP summary reuse
+- The same `SUMMARY_CACHE` namespace also stores the OGP metadata subset under a separate `memory-ogp-meta:*` prefix
 - local `public-api` development reads `apps/kinic-portal/workers/public-api/.dev.vars`
 - Routes:
   - `POST /api/public/memories/:memoryId/chat`
@@ -184,6 +186,7 @@ Remote MCP:
 - `verify:bundle:cf` and `wrangler deploy --dry-run` remain useful bundle checks, but sandbox failure alone is not a product defect
 - local development can run without `SUMMARY_CACHE`; summaries still generate, but no persistent cache is written
 - local `portal` and local `public-api` keep separate Miniflare KV state directories, so cross-Worker summary-cache reuse for OGP must be verified against deployed Workers or a shared remote KV
+- Local warm-hit checks for the OGP metadata cache must be performed against the same local `public-api` process because the metadata subset is written and read inside that Worker
 - HTML metadata `og:description` and `twitter:description` still use fixed metadata text; summary cache is only reused by the OGP image Worker path
 - OGP images are served with `Cache-Control: public, max-age=86400`, and memory page metadata appends `?v=<memory.version>` so updated cards bust caches without shortening TTL
 
