@@ -10,9 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     clients::memory::MemoryClient,
-    embedding_config::{
-        API_EMBEDDING_BACKEND_ID, configured_embedding_dimension, selected_embedding_backend_id,
-    },
+    embedding_config::{API_EMBEDDING_BACKEND_ID, selected_embedding_backend_id},
     local_embedding,
     operation_timeout::embedding_request_timeout,
 };
@@ -34,10 +32,6 @@ pub async fn fetch_embedding(text: &str) -> Result<Vec<f32>> {
         return fetch_embedding_remote(text).await;
     }
     local_embedding::embed_query(text).await
-}
-
-pub(crate) fn configured_embedding_dimension_u64() -> Result<u64> {
-    configured_embedding_dimension()
 }
 
 pub(crate) async fn ensure_memory_dim_matches(

@@ -23,23 +23,11 @@ const DEFAULT_CHUNK_OVERLAP: usize = 120;
 pub(crate) const API_EMBEDDING_BACKEND_ID: &str = "api";
 const API_EMBEDDING_BACKEND_LABEL: &str = "API (remote default)";
 const API_EMBEDDING_DIMENSION: usize = 1024;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ModelSpec {
-    id: &'static str,
-    label: &'static str,
-    model: EmbeddingModel,
-    dimension: usize,
-}
-
-const SNOWFLAKE_MODEL: ModelSpec = ModelSpec {
-    id: "Snowflake/snowflake-arctic-embed-s",
-    label: "Snowflake Arctic Embed S",
-    model: EmbeddingModel::SnowflakeArcticEmbedS,
-    dimension: 384,
-};
-
-const SUPPORTED_MODELS: [ModelSpec; 1] = [SNOWFLAKE_MODEL];
+pub(crate) const MXBAI_EMBEDDING_BACKEND_ID: &str = "mixedbread-ai/mxbai-embed-large-v1";
+const MXBAI_EMBEDDING_BACKEND_LABEL: &str = "Mixedbread MXBAI Embed Large V1";
+const MXBAI_EMBEDDING_DIMENSION: usize = 1024;
+pub(crate) const MXBAI_QUERY_PREFIX: &str =
+    "Represent this sentence for searching relevant passages: ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SupportedEmbeddingBackend {
@@ -57,17 +45,13 @@ pub(crate) struct ChunkingConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalEmbeddingConfig {
-    pub model_id: &'static str,
-    pub dimension: usize,
     pub cache_dir: PathBuf,
     pub max_length: usize,
     pub chunking: ChunkingConfig,
-    model: EmbeddingModel,
 }
 
 impl LocalEmbeddingConfig {
-    pub(crate) fn for_model_id(model_id: &str) -> Result<Self> {
-        let spec = parse_model_spec(model_id)?;
+    pub(crate) fn mxbai() -> Result<Self> {
         let max_length = env_usize(MAX_LENGTH_ENV_VAR, DEFAULT_MAX_LENGTH)?;
         let soft_limit = env_usize(CHUNK_SOFT_LIMIT_ENV_VAR, DEFAULT_CHUNK_SOFT_LIMIT)?;
         let hard_limit = env_usize(CHUNK_HARD_LIMIT_ENV_VAR, DEFAULT_CHUNK_HARD_LIMIT)?;
@@ -83,8 +67,6 @@ impl LocalEmbeddingConfig {
         }
 
         Ok(Self {
-            model_id: spec.id,
-            dimension: spec.dimension,
             cache_dir: cache_dir()?,
             max_length,
             chunking: ChunkingConfig {
@@ -92,12 +74,11 @@ impl LocalEmbeddingConfig {
                 hard_limit,
                 overlap,
             },
-            model: spec.model,
         })
     }
 
     pub(crate) fn text_init_options(&self) -> TextInitOptions {
-        TextInitOptions::new(self.model.clone())
+        TextInitOptions::new(EmbeddingModel::MxbaiEmbedLargeV1)
             .with_cache_dir(self.cache_dir.clone())
             .with_max_length(self.max_length)
             .with_show_download_progress(false)
@@ -108,20 +89,16 @@ pub(crate) fn selected_embedding_backend_id() -> Result<&'static str> {
     resolve_embedding_backend_id()
 }
 
-pub(crate) fn configured_embedding_dimension() -> Result<u64> {
-    let backend_id = resolve_embedding_backend_id()?;
-    if backend_id == API_EMBEDDING_BACKEND_ID {
-        return Ok(API_EMBEDDING_DIMENSION as u64);
-    }
-    Ok(LocalEmbeddingConfig::for_model_id(backend_id)?.dimension as u64)
+pub(crate) fn create_memory_dimension_u64() -> u64 {
+    API_EMBEDDING_DIMENSION as u64
 }
 
 pub(crate) fn selected_local_embedding_config() -> Result<Option<LocalEmbeddingConfig>> {
-    let backend_id = resolve_embedding_backend_id()?;
-    if backend_id == API_EMBEDDING_BACKEND_ID {
-        return Ok(None);
+    match resolve_embedding_backend_id()? {
+        API_EMBEDDING_BACKEND_ID => Ok(None),
+        MXBAI_EMBEDDING_BACKEND_ID => LocalEmbeddingConfig::mxbai().map(Some),
+        _ => unreachable!("embedding backend should already be normalized"),
     }
-    LocalEmbeddingConfig::for_model_id(backend_id).map(Some)
 }
 
 fn resolve_embedding_backend_id() -> Result<&'static str> {
@@ -142,49 +119,26 @@ fn load_embedding_preferences() -> Result<crate::preferences::UserPreferences> {
 }
 
 pub(crate) fn supported_embedding_backends() -> Vec<SupportedEmbeddingBackend> {
-    std::iter::once(SupportedEmbeddingBackend {
-        id: API_EMBEDDING_BACKEND_ID,
-        label: API_EMBEDDING_BACKEND_LABEL,
-        dimension: API_EMBEDDING_DIMENSION,
-    })
-    .chain(
-        SUPPORTED_MODELS
-            .iter()
-            .map(|spec| SupportedEmbeddingBackend {
-                id: spec.id,
-                label: spec.label,
-                dimension: spec.dimension,
-            }),
-    )
-    .collect()
+    vec![
+        SupportedEmbeddingBackend {
+            id: API_EMBEDDING_BACKEND_ID,
+            label: API_EMBEDDING_BACKEND_LABEL,
+            dimension: API_EMBEDDING_DIMENSION,
+        },
+        SupportedEmbeddingBackend {
+            id: MXBAI_EMBEDDING_BACKEND_ID,
+            label: MXBAI_EMBEDDING_BACKEND_LABEL,
+            dimension: MXBAI_EMBEDDING_DIMENSION,
+        },
+    ]
 }
 
 pub(crate) fn normalize_supported_embedding_backend_id(raw: &str) -> &'static str {
-    let trimmed = raw.trim();
-    if trimmed == API_EMBEDDING_BACKEND_ID {
-        return API_EMBEDDING_BACKEND_ID;
+    match raw.trim() {
+        API_EMBEDDING_BACKEND_ID => API_EMBEDDING_BACKEND_ID,
+        MXBAI_EMBEDDING_BACKEND_ID => MXBAI_EMBEDDING_BACKEND_ID,
+        _ => API_EMBEDDING_BACKEND_ID,
     }
-    parse_model_spec(trimmed)
-        .map(|spec| spec.id)
-        .unwrap_or(API_EMBEDDING_BACKEND_ID)
-}
-
-fn parse_model_spec(raw: &str) -> Result<ModelSpec> {
-    let trimmed = raw.trim();
-    SUPPORTED_MODELS
-        .iter()
-        .find(|spec| spec.id == trimmed)
-        .cloned()
-        .ok_or_else(|| {
-            anyhow!(
-                "Embedding backend must be one of: {}",
-                supported_embedding_backends()
-                    .iter()
-                    .map(|spec| spec.id)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
 }
 
 fn cache_dir() -> Result<PathBuf> {
@@ -226,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn configured_dimension_defaults_to_api() {
+    fn selected_local_embedding_config_defaults_to_api_backend() {
         let _guard = env_guard();
         reset_test_preference_error();
         unsafe {
@@ -236,13 +190,13 @@ mod tests {
             env::remove_var(CHUNK_HARD_LIMIT_ENV_VAR);
             env::remove_var(CHUNK_OVERLAP_ENV_VAR);
         }
-        let config = configured_embedding_dimension().expect("api dimension should load");
+        let config = selected_local_embedding_config().expect("api backend should load");
 
-        assert_eq!(config, 1024);
+        assert_eq!(config, None);
     }
 
     #[test]
-    fn local_model_config_uses_snowflake() {
+    fn local_model_config_uses_mxbai() {
         let _guard = env_guard();
         reset_test_preference_error();
         unsafe {
@@ -252,11 +206,8 @@ mod tests {
             env::remove_var(CHUNK_HARD_LIMIT_ENV_VAR);
             env::remove_var(CHUNK_OVERLAP_ENV_VAR);
         }
-        let config = LocalEmbeddingConfig::for_model_id("Snowflake/snowflake-arctic-embed-s")
-            .expect("local config should load");
+        let config = LocalEmbeddingConfig::mxbai().expect("local config should load");
 
-        assert_eq!(config.model_id, "Snowflake/snowflake-arctic-embed-s");
-        assert_eq!(config.dimension, 384);
         assert_eq!(config.max_length, 512);
         assert_eq!(config.chunking.soft_limit, 800);
     }
@@ -270,25 +221,13 @@ mod tests {
             env::set_var(CHUNK_HARD_LIMIT_ENV_VAR, "1200");
         }
 
-        let error = LocalEmbeddingConfig::for_model_id("Snowflake/snowflake-arctic-embed-s")
-            .expect_err("invalid bounds should fail");
+        let error = LocalEmbeddingConfig::mxbai().expect_err("invalid bounds should fail");
         assert!(error.to_string().contains("soft limit"));
 
         unsafe {
             env::remove_var(CHUNK_SOFT_LIMIT_ENV_VAR);
             env::remove_var(CHUNK_HARD_LIMIT_ENV_VAR);
         }
-    }
-
-    #[test]
-    fn unsupported_model_is_rejected() {
-        reset_test_preference_error();
-        let error = parse_model_spec("bad-model").expect_err("bad model should fail");
-        assert!(
-            error
-                .to_string()
-                .contains("Embedding backend must be one of")
-        );
     }
 
     #[test]
@@ -301,11 +240,12 @@ mod tests {
     }
 
     #[test]
-    fn configured_dimension_errors_when_preferences_fail_to_load() {
+    fn selected_local_embedding_config_errors_when_preferences_fail_to_load() {
         let _guard = env_guard();
         preferences::set_load_user_preferences_error_for_tests(true);
 
-        let error = configured_embedding_dimension().expect_err("load failure should reach caller");
+        let error =
+            selected_local_embedding_config().expect_err("load failure should reach caller");
 
         assert!(
             error
@@ -313,5 +253,10 @@ mod tests {
                 .contains("shared settings directory is unavailable")
         );
         reset_test_preference_error();
+    }
+
+    #[test]
+    fn create_memory_dimension_is_fixed_to_1024() {
+        assert_eq!(create_memory_dimension_u64(), 1024);
     }
 }

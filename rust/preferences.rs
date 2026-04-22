@@ -11,6 +11,8 @@ use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 
+use crate::embedding_config::{API_EMBEDDING_BACKEND_ID, MXBAI_EMBEDDING_BACKEND_ID};
+
 #[cfg(not(test))]
 const APP_NAMESPACE: &str = "kinic";
 #[cfg(not(test))]
@@ -19,8 +21,7 @@ pub use kinic_core::prefs_policy::{
     DEFAULT_CHAT_MMR_LAMBDA, DEFAULT_CHAT_OVERALL_TOP_K, DEFAULT_CHAT_PER_MEMORY_CAP,
 };
 
-const DEFAULT_EMBEDDING_MODEL_ID: &str = "api";
-const SUPPORTED_EMBEDDING_MODEL_IDS: &[&str] = &["api", "Snowflake/snowflake-arctic-embed-s"];
+const DEFAULT_EMBEDDING_MODEL_ID: &str = API_EMBEDDING_BACKEND_ID;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 // Missing legacy fields are backfilled with defaults and unknown fields are ignored.
@@ -160,11 +161,11 @@ pub fn chat_diversity_display(value: u8) -> String {
 }
 
 pub fn normalize_embedding_model_id(value: String) -> String {
-    let trimmed = value.trim();
-    if trimmed.is_empty() || !SUPPORTED_EMBEDDING_MODEL_IDS.contains(&trimmed) {
-        return default_embedding_model_id();
+    match value.trim() {
+        API_EMBEDDING_BACKEND_ID => API_EMBEDDING_BACKEND_ID.to_string(),
+        MXBAI_EMBEDDING_BACKEND_ID => MXBAI_EMBEDDING_BACKEND_ID.to_string(),
+        _ => default_embedding_model_id(),
     }
-    trimmed.to_string()
 }
 
 fn normalize_default_memory_id(memory_id: Option<String>) -> Option<String> {

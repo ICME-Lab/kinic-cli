@@ -433,6 +433,20 @@ mod tests {
     }
 
     #[test]
+    fn show_preferences_preserves_mxbai_embedding_model_id() {
+        let serialized = serde_json::to_value(ShowPreferences::from(UserPreferences {
+            embedding_model_id: "mixedbread-ai/mxbai-embed-large-v1".to_string(),
+            ..UserPreferences::default()
+        }))
+        .expect("show preferences should serialize");
+
+        assert_eq!(
+            serialized["embedding_model_id"],
+            "mixedbread-ai/mxbai-embed-large-v1"
+        );
+    }
+
+    #[test]
     fn show_preferences_from_user_preferences_omits_chat_fields() {
         let serialized = serde_json::to_value(ShowPreferences::from(UserPreferences::default()))
             .expect("show preferences should serialize");

@@ -30,7 +30,7 @@ const APP_NAMESPACE: &str = "kinic";
 const CHAT_HISTORY_FILE_NAME: &str = "chat-threads.yaml";
 const UNAVAILABLE: &str = "unavailable";
 const NOT_SET: &str = "not set";
-const EMBEDDING_MODEL_NOTE: &str = "Affects create/search/insert. API keeps existing memories usable. Local backends may require reindex. Same-dimension model mismatches are not detectable.";
+const EMBEDDING_MODEL_NOTE: &str = "Affects search/insert. New memories are created at 1024 dims. API keeps existing memories usable. Reindex or reset older non-1024 memories before local search/insert.";
 const CHAT_HISTORY_MAX_MESSAGES: usize = 40;
 const CHAT_MESSAGE_MAX_CONTENT_LEN: usize = 4096;
 
