@@ -48,10 +48,10 @@ impl<'a> TuiKitUi<'a> {
     pub(super) fn render_memories_divider(&self, area: Rect, buf: &mut Buffer) {
         let style = self.theme.style_border();
         for y in area.top()..area.bottom() {
-            if area.width > 0 {
-                if let Some(cell) = buf.cell_mut((area.x, y)) {
-                    cell.set_symbol("│").set_style(style);
-                }
+            if area.width > 0
+                && let Some(cell) = buf.cell_mut((area.x, y))
+            {
+                cell.set_symbol("│").set_style(style);
             }
         }
     }

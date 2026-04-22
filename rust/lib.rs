@@ -1,3 +1,33 @@
+// Where: root library for the published `kinic-cli` crate.
+// What: owns the CLI/TUI entrypoints and re-exports embedded internal crate code.
+// Why: crates.io rejects path-only dependencies, so internal workspace crates are absorbed here.
+
+extern crate self as kinic_core;
+extern crate self as tui_kit_host;
+extern crate self as tui_kit_model;
+extern crate self as tui_kit_render;
+extern crate self as tui_kit_runtime;
+
+#[path = "internal/kinic_core/lib.rs"]
+mod kinic_core_impl;
+pub use kinic_core_impl::*;
+
+#[path = "internal/tui_kit_model/lib.rs"]
+mod tui_kit_model_impl;
+pub use tui_kit_model_impl::*;
+
+#[path = "internal/tui_kit_runtime/lib.rs"]
+mod tui_kit_runtime_impl;
+pub use tui_kit_runtime_impl::*;
+
+#[path = "internal/tui_kit_host/lib.rs"]
+mod tui_kit_host_impl;
+pub use tui_kit_host_impl::*;
+
+#[path = "internal/tui_kit_render/lib.rs"]
+mod tui_kit_render_impl;
+pub use tui_kit_render_impl::*;
+
 pub mod agent;
 #[path = "cli_defs.rs"]
 pub mod cli;

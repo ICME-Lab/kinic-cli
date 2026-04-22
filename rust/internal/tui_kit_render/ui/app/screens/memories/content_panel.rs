@@ -15,17 +15,19 @@ impl<'a> TuiKitUi<'a> {
                 .and_then(|tree_idx| self.context_tree.get(tree_idx))
                 .map(|(n, _)| n.as_str());
 
-            if self.context_details_loading && self.ui_context_node.is_none() {
-                if let Some(name) = selected_context_name {
-                    context_view::render_context_loading(self.theme, area, buf, name);
-                    return;
-                }
+            if self.context_details_loading
+                && self.ui_context_node.is_none()
+                && let Some(name) = selected_context_name
+            {
+                context_view::render_context_loading(self.theme, area, buf, name);
+                return;
             }
-            if self.context_details_failed && self.ui_context_node.is_none() {
-                if let Some(name) = selected_context_name {
-                    context_view::render_context_load_failed(self.theme, area, buf, name);
-                    return;
-                }
+            if self.context_details_failed
+                && self.ui_context_node.is_none()
+                && let Some(name) = selected_context_name
+            {
+                context_view::render_context_load_failed(self.theme, area, buf, name);
+                return;
             }
 
             let context_view = ContextView::new(self.theme)

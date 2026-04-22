@@ -2,6 +2,32 @@
 name = "kinic-cli"
 version = "0.1.2"
 edition = "2024"
+rust-version = "1.86"
+description = "CLI and terminal UI for operating Kinic memory canisters"
+license = "MIT"
+repository = "https://github.com/ICME-Lab/kinic-cli"
+readme = "README.md"
+keywords = ["kinic", "internet-computer", "cli", "tui"]
+categories = ["command-line-utilities"]
+include = [
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/LICENSE",
+    "/README.md",
+    "/docs/cli.md",
+    "/docs/tui.md",
+    "/docs/crates-io.md",
+    "/docs/images/**",
+    "/rust/**/*.rs",
+    "/rust/commands/ii_login_page.html",
+    "/crates/kinic-core/src/**/*.rs",
+    "/tui/crates/tui-kit-model/src/**/*.rs",
+    "/tui/crates/tui-kit-runtime/src/**/*.rs",
+    "/tui/crates/tui-kit-host/src/**/*.rs",
+    "/tui/crates/tui-kit-render/src/**/*.rs",
+    "/tests/**/*.rs",
+    "/tests/fixtures/**",
+]
 
 [dependencies]
 anyhow = "1.0.100"
@@ -32,6 +58,8 @@ reqwest = { version = "0.12.7", default-features = false, features = ["json", "r
 dotenvy = "0.15.7"
 serde_json = "1.0.145"
 rmcp = { version = "0.5.0", features = ["server", "transport-io"] }
+crossterm = "0.28"
+dirs = "6"
 pyo3 = { version = "0.27", features = ["extension-module", "abi3-py38"], optional = true }
 pdf-extract = "0.8"
 gag = "1.0"
@@ -40,14 +68,15 @@ der = "0.7.10"
 pkcs8 = "0.10.2"
 ic-ed25519 = "0.2.0"
 fastembed = { version = "5.13.2", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
-kinic-core = { path = "crates/kinic-core" }
-tui-kit-host = { path = "tui/crates/tui-kit-host" }
-tui-kit-runtime = { path = "tui/crates/tui-kit-runtime" }
-tui-kit-model = { path = "tui/crates/tui-kit-model" }
-tui-kit-render = { path = "tui/crates/tui-kit-render" }
+fuzzy-matcher = "0.3"
+ratatui = "0.29"
+ratatui-textarea = "0.8"
+serde_yaml = "0.9"
+tempfile = "3"
+unicode-width = "0.2"
+webbrowser = "0.8"
 
 [dev-dependencies]
-serde_yaml = "0.9"
 tower = "0.5"
 
 [features]
@@ -65,14 +94,6 @@ name = "kinic-cli"
 path = "rust/cli.rs"
 
 [workspace]
-members = [
-    ".",
-    "crates/kinic-core",
-    "tui/crates/tui-kit",
-    "tui/crates/tui-kit-host",
-    "tui/crates/tui-kit-runtime",
-    "tui/crates/tui-kit-model",
-    "tui/crates/tui-kit-render",
-]
+members = ["."]
 default-members = ["."]
 resolver = "3"

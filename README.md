@@ -8,6 +8,34 @@ Python bindings for the Kinic CLI core, enabling you to build AI agents with ver
 
 Looking for the docs? See `docs/cli.md` for the command-line interface and `docs/tui.md` for the terminal UI.
 
+## Install with Cargo
+
+Install the published CLI/TUI package:
+
+```bash
+cargo install kinic-cli
+kinic-cli --help
+kinic-cli tui --help
+```
+
+Mainnet launch:
+
+```bash
+kinic-cli --identity alice --ic tui
+```
+
+Local replica launch:
+
+```bash
+kinic-cli --identity alice tui
+```
+
+Extra local tools:
+
+- `yazi`: optional file picker for TUI `File` mode
+- `pdftotext`: required for PDF insertion
+- `docs/crates-io.md`: maintainer release checklist for crates.io packaging
+
 Made with ❤️ by [ICME Labs](https://blog.icme.io/).
 
 <img width="983" height="394" alt="icme_labs" src="https://github.com/user-attachments/assets/ffc334ed-c301-4ce6-8ca3-a565328904fe" />

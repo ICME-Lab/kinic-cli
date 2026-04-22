@@ -43,20 +43,20 @@ fn markdown_line_to_spans(line: &str, theme: &Theme, base_style: Style) -> Vec<S
     }
 
     while !s.is_empty() {
-        if let Some(rest) = s.strip_prefix("**") {
-            if let Some(end) = rest.find("**") {
-                spans.push(Span::styled(rest[..end].to_string(), bold));
-                s = &rest[end + 2..];
-                continue;
-            }
+        if let Some(rest) = s.strip_prefix("**")
+            && let Some(end) = rest.find("**")
+        {
+            spans.push(Span::styled(rest[..end].to_string(), bold));
+            s = &rest[end + 2..];
+            continue;
         }
-        if s.starts_with('`') {
-            if let Some(end) = s[1..].find('`') {
-                let code = &s[1..=end];
-                spans.push(Span::styled(code.to_string(), code_style));
-                s = &s[end + 2..];
-                continue;
-            }
+        if s.starts_with('`')
+            && let Some(end) = s[1..].find('`')
+        {
+            let code = &s[1..=end];
+            spans.push(Span::styled(code.to_string(), code_style));
+            s = &s[end + 2..];
+            continue;
         }
         let next_bold = s.find("**");
         let next_code = s.find('`');

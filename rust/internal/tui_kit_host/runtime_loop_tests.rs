@@ -76,6 +76,102 @@ fn host_paste(text: &str) -> HostInputEvent {
     HostInputEvent::Paste(text.to_string())
 }
 
+fn handle_overlay_input_test<P: DataProvider>(
+    provider: &mut P,
+    state: &mut CoreState,
+    show_settings: bool,
+    code: crossterm::event::KeyCode,
+    modifiers: crossterm::event::KeyModifiers,
+) -> OverlayInputResult {
+    let mut provider_render_state = ProviderRenderState::default();
+    super::handle_overlay_input(
+        provider,
+        state,
+        &mut provider_render_state,
+        show_settings,
+        code,
+        modifiers,
+    )
+}
+
+fn handle_paste_input_test<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    text: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut provider_render_state = ProviderRenderState::default();
+    super::handle_paste_input(provider, state, hooks, &mut provider_render_state, text)
+}
+
+fn handle_textarea_input_test<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    textareas: &mut FormTextareas,
+    input: &HostInputEvent,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut provider_render_state = ProviderRenderState::default();
+    super::handle_textarea_input(
+        provider,
+        state,
+        hooks,
+        &mut provider_render_state,
+        textareas,
+        input,
+    )
+}
+
+fn handle_chat_submit_or_command_test<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    textareas: &mut FormTextareas,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut provider_render_state = ProviderRenderState::default();
+    super::handle_chat_submit_or_command(
+        provider,
+        state,
+        hooks,
+        &mut provider_render_state,
+        textareas,
+    )
+}
+
+fn open_form_tab_test<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    target_tab_id: &'static str,
+    clear_persistent_status: bool,
+) {
+    let mut provider_render_state = ProviderRenderState::default();
+    super::open_form_tab(
+        provider,
+        state,
+        hooks,
+        &mut provider_render_state,
+        target_tab_id,
+        clear_persistent_status,
+    );
+}
+
+fn switch_to_tab_test<P: DataProvider, H: RuntimeLoopHooks<P>>(
+    provider: &mut P,
+    state: &mut CoreState,
+    hooks: &mut H,
+    target_tab_id: &'static str,
+) -> Result<(), String> {
+    let mut provider_render_state = ProviderRenderState::default();
+    super::switch_to_tab(
+        provider,
+        state,
+        hooks,
+        &mut provider_render_state,
+        target_tab_id,
+    )
+}
+
 #[test]
 fn normalize_focus_keeps_memories_on_tabs_after_tab_switch() {
     let mut state = CoreState {
@@ -196,11 +292,12 @@ fn build_ui_renders_rename_overlay_contents() {
     };
     let textareas = FormTextareas::default();
     let animation = AnimationState::new();
+    let provider_render_state = ProviderRenderState::default();
     let ui = build_ui(
         &theme,
         &cfg,
         &state,
-        &ProviderRenderState::default(),
+        &provider_render_state,
         &textareas,
         0,
         0,
@@ -238,7 +335,7 @@ fn handle_overlay_input_returns_dispatch_error_when_selector_action_fails() {
         ..CoreState::default()
     };
 
-    let result = handle_overlay_input(
+    let result = handle_overlay_input_test(
         &mut provider,
         &mut state,
         false,
@@ -259,7 +356,7 @@ fn handle_overlay_input_closes_settings_without_provider_dispatch() {
     let mut provider = TestProvider::err("should not run");
     let mut state = CoreState::default();
 
-    let result = handle_overlay_input(
+    let result = handle_overlay_input_test(
         &mut provider,
         &mut state,
         true,
@@ -284,7 +381,7 @@ fn handle_overlay_input_consumes_unknown_selector_keys() {
         ..CoreState::default()
     };
 
-    let result = handle_overlay_input(
+    let result = handle_overlay_input_test(
         &mut provider,
         &mut state,
         false,
@@ -304,7 +401,7 @@ fn paste_input_updates_search_query() {
         ..CoreState::default()
     };
 
-    let handled = handle_paste_input(&mut provider, &mut state, &mut hooks, "alpha\nbeta")
+    let handled = handle_paste_input_test(&mut provider, &mut state, &mut hooks, "alpha\nbeta")
         .expect("search paste");
 
     assert!(handled);
@@ -327,7 +424,7 @@ fn paste_input_updates_rename_modal_name() {
         ..CoreState::default()
     };
 
-    let handled = handle_paste_input(&mut provider, &mut state, &mut hooks, "Alpha Memory")
+    let handled = handle_paste_input_test(&mut provider, &mut state, &mut hooks, "Alpha Memory")
         .expect("rename paste");
 
     assert!(handled);
@@ -348,11 +445,12 @@ fn paste_input_normalizes_crlf_for_access_control_principal() {
         ..CoreState::default()
     };
 
-    let handled = handle_paste_input(&mut provider, &mut state, &mut hooks, "aaaa\r\nbbbb\rcccc")
-        .expect("access paste");
+    let handled =
+        handle_paste_input_test(&mut provider, &mut state, &mut hooks, "aaaa\r\nbbbb\rcccc")
+            .expect("access paste");
 
     assert!(handled);
-    assert_eq!(state.access_control.principal_id, "aaaa bbbb cccc");
+    assert_eq!(state.access_control.principal_id, "aaaabbbbcccc");
 }
 
 #[test]
@@ -366,7 +464,7 @@ fn paste_input_updates_create_name_when_form_focus_is_single_line() {
         ..CoreState::default()
     };
 
-    let handled = handle_paste_input(&mut provider, &mut state, &mut hooks, "new memory")
+    let handled = handle_paste_input_test(&mut provider, &mut state, &mut hooks, "new memory")
         .expect("create paste");
 
     assert!(handled);
@@ -385,7 +483,7 @@ fn textarea_input_updates_create_description_with_newlines() {
     };
     let mut textareas = FormTextareas::default();
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -398,7 +496,7 @@ fn textarea_input_updates_create_description_with_newlines() {
     .expect("textarea input");
     assert!(handled);
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -426,7 +524,7 @@ fn textarea_paste_normalizes_carriage_returns_in_create_description() {
     };
     let mut textareas = FormTextareas::default();
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -452,7 +550,7 @@ fn textarea_paste_normalizes_crlf_and_cr_in_insert_text() {
     };
     let mut textareas = FormTextareas::default();
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -479,7 +577,7 @@ fn textarea_up_on_first_create_description_row_moves_to_previous_field() {
     let mut textareas = FormTextareas::default();
     sync_form_textareas_from_state(&mut textareas, &state);
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -518,7 +616,7 @@ fn textarea_down_on_last_create_description_row_moves_to_submit() {
             ),
         ));
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -553,7 +651,7 @@ fn textarea_down_inside_insert_text_moves_cursor_before_leaving_field() {
     let mut textareas = FormTextareas::default();
     sync_form_textareas_from_state(&mut textareas, &state);
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -591,7 +689,7 @@ fn textarea_down_on_last_insert_text_row_moves_to_next_field() {
         ),
     ));
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -621,7 +719,7 @@ fn chat_textarea_shift_enter_submits_instead_of_inserting_newline() {
     let mut textareas = FormTextareas::default();
     sync_form_textareas_from_state(&mut textareas, &state);
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -650,7 +748,7 @@ fn chat_textarea_enter_submits_without_inserting_text() {
     let mut textareas = FormTextareas::default();
     sync_form_textareas_from_state(&mut textareas, &state);
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -676,7 +774,7 @@ fn chat_textarea_multiline_paste_normalizes_widget_and_state_to_single_line() {
         ..CoreState::default()
     };
     let mut textareas = FormTextareas::default();
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -703,7 +801,7 @@ fn chat_textarea_crlf_paste_normalizes_widget_and_state_to_single_line() {
         ..CoreState::default()
     };
     let mut textareas = FormTextareas::default();
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -724,8 +822,10 @@ fn chat_textarea_crlf_paste_normalizes_widget_and_state_to_single_line() {
 #[test]
 fn chat_textarea_sync_state_preserves_trailing_space() {
     let mut state = CoreState::default();
-    let mut textareas = FormTextareas::default();
-    textareas.chat_input = chat_input_from_text("hello ");
+    let textareas = FormTextareas {
+        chat_input: chat_input_from_text("hello "),
+        ..FormTextareas::default()
+    };
 
     sync_state_from_textareas(&mut state, &textareas);
 
@@ -744,8 +844,10 @@ fn chat_textarea_display_value_preserves_trailing_space() {
 
 #[test]
 fn chat_textarea_sync_from_state_preserves_equivalent_trailing_space_in_widget() {
-    let mut textareas = FormTextareas::default();
-    textareas.chat_input = chat_input_from_text("hello ");
+    let mut textareas = FormTextareas {
+        chat_input: chat_input_from_text("hello "),
+        ..FormTextareas::default()
+    };
     let state = CoreState {
         chat_input: "hello ".to_string(),
         ..CoreState::default()
@@ -758,8 +860,10 @@ fn chat_textarea_sync_from_state_preserves_equivalent_trailing_space_in_widget()
 
 #[test]
 fn chat_textarea_sync_from_state_keeps_cursor_when_text_is_unchanged() {
-    let mut textareas = FormTextareas::default();
-    textareas.chat_input = chat_input_from_text("hello ");
+    let mut textareas = FormTextareas {
+        chat_input: chat_input_from_text("hello "),
+        ..FormTextareas::default()
+    };
     textareas.chat_input.input(textarea_input_from_key_event(
         crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Left,
@@ -861,7 +965,7 @@ fn chat_textarea_multiline_paste_up_down_do_not_move_hidden_rows() {
     sync_state_from_textareas(&mut state, &textareas);
     sync_form_textareas_from_state(&mut textareas, &state);
 
-    let moved_up = handle_textarea_input(
+    let moved_up = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -873,7 +977,7 @@ fn chat_textarea_multiline_paste_up_down_do_not_move_hidden_rows() {
     )
     .expect("chat up");
     let cursor_after_up = textareas.chat_input.cursor();
-    let moved_down = handle_textarea_input(
+    let moved_down = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -912,7 +1016,7 @@ fn chat_textarea_multiline_paste_home_end_backspace_follow_visible_single_line()
     sync_state_from_textareas(&mut state, &textareas);
     sync_form_textareas_from_state(&mut textareas, &state);
 
-    handle_textarea_input(
+    handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -925,7 +1029,7 @@ fn chat_textarea_multiline_paste_home_end_backspace_follow_visible_single_line()
     .expect("chat home");
     assert_eq!(textareas.chat_input.cursor(), (0, 0));
 
-    handle_textarea_input(
+    handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -938,7 +1042,7 @@ fn chat_textarea_multiline_paste_home_end_backspace_follow_visible_single_line()
     .expect("chat end");
     assert_eq!(textareas.chat_input.cursor(), (0, 22));
 
-    handle_textarea_input(
+    handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -980,7 +1084,7 @@ fn chat_textarea_midline_space_input_preserves_cursor_position() {
     }
     let cursor_before = textareas.chat_input.cursor();
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -1016,7 +1120,7 @@ fn chat_textarea_space_input_updates_state_and_widget_cursor() {
     let mut textareas = FormTextareas::default();
     sync_form_textareas_from_state(&mut textareas, &state);
 
-    let handled = handle_textarea_input(
+    let handled = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -1052,12 +1156,13 @@ fn build_ui_places_chat_cursor_after_trailing_space() {
     };
     let mut textareas = FormTextareas::default();
     sync_form_textareas_from_state(&mut textareas, &state);
+    let provider_render_state = ProviderRenderState::default();
 
     let ui = build_ui(
         &theme,
         &cfg,
         &state,
-        &ProviderRenderState::default(),
+        &provider_render_state,
         &textareas,
         0,
         0,
@@ -1085,7 +1190,7 @@ fn chat_textarea_up_down_moves_slash_command_selection() {
     let mut textareas = FormTextareas::default();
     sync_form_textareas_from_state(&mut textareas, &state);
 
-    let moved_down = handle_textarea_input(
+    let moved_down = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -1099,7 +1204,7 @@ fn chat_textarea_up_down_moves_slash_command_selection() {
     assert!(moved_down);
     assert_eq!(textareas.chat_command_selected, 1);
 
-    let moved_up = handle_textarea_input(
+    let moved_up = handle_textarea_input_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -1236,7 +1341,7 @@ fn chat_submit_slash_new_starts_new_thread_without_sending_message() {
     let mut textareas = FormTextareas::default();
 
     let handled =
-        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+        handle_chat_submit_or_command_test(&mut provider, &mut state, &mut hooks, &mut textareas)
             .expect("slash command");
 
     assert!(handled);
@@ -1258,11 +1363,13 @@ fn chat_submit_uses_selected_slash_command_candidate() {
         chat_scope: tui_kit_runtime::ChatScope::Selected,
         ..CoreState::default()
     };
-    let mut textareas = FormTextareas::default();
-    textareas.chat_command_selected = 1;
+    let mut textareas = FormTextareas {
+        chat_command_selected: 1,
+        ..FormTextareas::default()
+    };
 
     let handled =
-        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+        handle_chat_submit_or_command_test(&mut provider, &mut state, &mut hooks, &mut textareas)
             .expect("slash command");
 
     assert!(handled);
@@ -1284,7 +1391,7 @@ fn chat_submit_slash_all_switches_scope_without_sending_message() {
     let mut textareas = FormTextareas::default();
 
     let handled =
-        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+        handle_chat_submit_or_command_test(&mut provider, &mut state, &mut hooks, &mut textareas)
             .expect("slash command");
 
     assert!(handled);
@@ -1309,7 +1416,7 @@ fn chat_submit_normalizes_multiline_input_before_sending_message() {
     sync_state_from_textareas(&mut state, &textareas);
 
     let handled =
-        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+        handle_chat_submit_or_command_test(&mut provider, &mut state, &mut hooks, &mut textareas)
             .expect("chat submit");
 
     assert!(handled);
@@ -1334,7 +1441,7 @@ fn chat_submit_slash_all_is_idempotent_when_already_on_all_scope() {
     let mut textareas = FormTextareas::default();
 
     let handled =
-        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+        handle_chat_submit_or_command_test(&mut provider, &mut state, &mut hooks, &mut textareas)
             .expect("slash command");
 
     assert!(handled);
@@ -1357,7 +1464,7 @@ fn chat_submit_slash_all_trims_trailing_space_before_matching_command() {
     let mut textareas = FormTextareas::default();
 
     let handled =
-        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+        handle_chat_submit_or_command_test(&mut provider, &mut state, &mut hooks, &mut textareas)
             .expect("slash command");
 
     assert!(handled);
@@ -1379,7 +1486,7 @@ fn chat_submit_unknown_slash_command_keeps_input_and_sets_status() {
     let mut textareas = FormTextareas::default();
 
     let handled =
-        handle_chat_submit_or_command(&mut provider, &mut state, &mut hooks, &mut textareas)
+        handle_chat_submit_or_command_test(&mut provider, &mut state, &mut hooks, &mut textareas)
             .expect("slash command");
 
     assert!(handled);
@@ -1404,13 +1511,10 @@ fn open_insert_tab_failure_keeps_insert_form_state_and_focus() {
         status_message: Some("ready".into()),
         ..CoreState::default()
     };
-    let mut provider_render_state = ProviderRenderState::default();
-
-    open_form_tab(
+    open_form_tab_test(
         &mut provider,
         &mut state,
         &mut hooks,
-        &mut provider_render_state,
         KINIC_INSERT_TAB_ID,
         true,
     );
@@ -1440,7 +1544,7 @@ fn open_form_tab_failure_keeps_form_state_and_existing_focus() {
         ..CoreState::default()
     };
 
-    open_form_tab(
+    open_form_tab_test(
         &mut provider,
         &mut state,
         &mut hooks,
@@ -1471,7 +1575,7 @@ fn switch_to_tab_failure_keeps_existing_focus_when_target_tab_allows_it() {
         ..CoreState::default()
     };
 
-    let result = switch_to_tab(&mut provider, &mut state, &mut hooks, KINIC_MEMORIES_TAB_ID);
+    let result = switch_to_tab_test(&mut provider, &mut state, &mut hooks, KINIC_MEMORIES_TAB_ID);
 
     assert_eq!(result, Err("Dispatch error: tab failed".into()));
     assert_eq!(state.focus, PaneFocus::Content);

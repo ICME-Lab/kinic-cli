@@ -5342,7 +5342,7 @@ fn format_count(value: u32) -> String {
     let len = digits.len();
     let mut formatted = String::with_capacity(len + (len.saturating_sub(1) / 3));
     for (index, ch) in digits.chars().enumerate() {
-        if index > 0 && (len - index).is_multiple_of(3) {
+        if index > 0 && (len - index) % 3 == 0 {
             formatted.push(',');
         }
         formatted.push(ch);

@@ -100,12 +100,11 @@ pub fn run_splash(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyh
             hint.render(chunks[2], frame.buffer_mut());
         })?;
 
-        if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    break;
-                }
-            }
+        if event::poll(Duration::from_millis(50))?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            break;
         }
     }
 

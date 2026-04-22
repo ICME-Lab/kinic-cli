@@ -453,11 +453,7 @@ mod tests {
 
         let notes_cell = (0..20)
             .flat_map(|y| (0..60).map(move |x| (x, y)))
-            .find_map(|(x, y)| {
-                buf.cell((x, y))
-                    .filter(|cell| cell.symbol() == "N")
-                    .map(|cell| cell)
-            })
+            .find_map(|(x, y)| buf.cell((x, y)).filter(|cell| cell.symbol() == "N"))
             .expect("notes cell");
 
         assert_eq!(notes_cell.fg, theme.fg);

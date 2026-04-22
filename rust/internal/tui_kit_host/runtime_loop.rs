@@ -291,16 +291,16 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
             {
                 continue;
             }
-            if let HostInputEvent::Paste(text) = &input {
-                if handle_paste_input(
+            if let HostInputEvent::Paste(text) = &input
+                && handle_paste_input(
                     provider,
                     &mut state,
                     hooks,
                     &mut provider_render_state,
                     text.as_str(),
-                )? {
-                    continue;
-                }
+                )?
+            {
+                continue;
             }
             let (_key_event, code, modifiers) = match &input {
                 HostInputEvent::Key {
@@ -502,12 +502,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 
             let action = code.and_then(|code| {
                 form_tab_action_from_key(code, &mut state).or_else(|| {
-                    if code == crossterm::event::KeyCode::Enter {
-                        if let Some(action) = selected_settings_row_behavior(&state)
+                    if code == crossterm::event::KeyCode::Enter
+                        && let Some(action) = selected_settings_row_behavior(&state)
                             .and_then(|behavior| behavior.enter_action)
-                        {
-                            return Some(action);
-                        }
+                    {
+                        return Some(action);
                     }
                     action_from_keycode(code, state.focus, state.current_tab_id.as_str()).and_then(
                         |a| {
@@ -647,6 +646,7 @@ fn ui_focus_from_pane(focus: PaneFocus) -> Focus {
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 fn build_ui<'a>(
     theme: &'a Theme,
     cfg: &RuntimeLoopConfig,

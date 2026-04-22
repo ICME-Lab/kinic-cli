@@ -96,11 +96,11 @@ pub fn highlight_fuzzy_match<'a>(text: &'a str, query: &str, theme: &Theme) -> L
     let mut match_indices = Vec::new();
 
     for (i, c) in &chars {
-        if let Some(&qc) = query_chars.peek() {
-            if c.to_lowercase().next() == qc.to_lowercase().next() {
-                match_indices.push(*i);
-                query_chars.next();
-            }
+        if let Some(&qc) = query_chars.peek()
+            && c.to_lowercase().next() == qc.to_lowercase().next()
+        {
+            match_indices.push(*i);
+            query_chars.next();
         }
     }
 

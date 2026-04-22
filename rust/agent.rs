@@ -224,11 +224,12 @@ fn parse_identity_from_pem_bytes(pem_bytes: &[u8]) -> Result<Arc<dyn Identity>> 
     let mut last_decode_error = None;
     for pem in &pems {
         match pem.tag() {
-            "PRIVATE KEY" => match BasicIdentity::from_pem(Cursor::new(pem_text.clone())) {
+            "PRIVATE KEY" => match BasicIdentity::from_pem(Cursor::new(pem_text.as_bytes())) {
                 Ok(identity) => return Ok(Arc::new(identity)),
                 Err(error) => last_decode_error = Some(error.into()),
             },
-            "EC PRIVATE KEY" => match Secp256k1Identity::from_pem(Cursor::new(pem_text.clone())) {
+            "EC PRIVATE KEY" => match Secp256k1Identity::from_pem(Cursor::new(pem_text.as_bytes()))
+            {
                 Ok(identity) => return Ok(Arc::new(identity)),
                 Err(error) => last_decode_error = Some(error.into()),
             },
