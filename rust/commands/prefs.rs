@@ -452,17 +452,14 @@ mod tests {
     }
 
     #[test]
-    fn show_preferences_preserves_mxbai_embedding_model_id() {
+    fn show_preferences_preserves_bgem3_embedding_model_id() {
         let serialized = serde_json::to_value(ShowPreferences::from(UserPreferences {
-            embedding_model_id: "mixedbread-ai/mxbai-embed-large-v1".to_string(),
+            embedding_model_id: "BAAI/bge-m3".to_string(),
             ..UserPreferences::default()
         }))
         .expect("show preferences should serialize");
 
-        assert_eq!(
-            serialized["embedding_model_id"],
-            "mixedbread-ai/mxbai-embed-large-v1"
-        );
+        assert_eq!(serialized["embedding_model_id"], "BAAI/bge-m3");
     }
 
     #[test]

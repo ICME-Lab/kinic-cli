@@ -23,11 +23,9 @@ const DEFAULT_CHUNK_OVERLAP: usize = 120;
 pub(crate) const API_EMBEDDING_BACKEND_ID: &str = "api";
 const API_EMBEDDING_BACKEND_LABEL: &str = "API (remote default)";
 const API_EMBEDDING_DIMENSION: usize = 1024;
-pub(crate) const MXBAI_EMBEDDING_BACKEND_ID: &str = "mixedbread-ai/mxbai-embed-large-v1";
-const MXBAI_EMBEDDING_BACKEND_LABEL: &str = "Mixedbread MXBAI Embed Large V1";
-const MXBAI_EMBEDDING_DIMENSION: usize = 1024;
-pub(crate) const MXBAI_QUERY_PREFIX: &str =
-    "Represent this sentence for searching relevant passages: ";
+pub(crate) const BGEM3_EMBEDDING_BACKEND_ID: &str = "BAAI/bge-m3";
+const BGEM3_EMBEDDING_BACKEND_LABEL: &str = "BAAI BGE-M3";
+const BGEM3_EMBEDDING_DIMENSION: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SupportedEmbeddingBackend {
@@ -51,7 +49,7 @@ pub(crate) struct LocalEmbeddingConfig {
 }
 
 impl LocalEmbeddingConfig {
-    pub(crate) fn mxbai() -> Result<Self> {
+    pub(crate) fn bgem3() -> Result<Self> {
         let max_length = env_usize(MAX_LENGTH_ENV_VAR, DEFAULT_MAX_LENGTH)?;
         let soft_limit = env_usize(CHUNK_SOFT_LIMIT_ENV_VAR, DEFAULT_CHUNK_SOFT_LIMIT)?;
         let hard_limit = env_usize(CHUNK_HARD_LIMIT_ENV_VAR, DEFAULT_CHUNK_HARD_LIMIT)?;
@@ -81,7 +79,7 @@ impl LocalEmbeddingConfig {
     }
 
     pub(crate) fn text_init_options(&self) -> TextInitOptions {
-        TextInitOptions::new(EmbeddingModel::MxbaiEmbedLargeV1)
+        TextInitOptions::new(EmbeddingModel::BGEM3)
             .with_cache_dir(self.cache_dir.clone())
             .with_max_length(self.max_length)
             .with_show_download_progress(false)
@@ -99,7 +97,7 @@ pub(crate) fn create_memory_dimension_u64() -> u64 {
 pub(crate) fn selected_local_embedding_config() -> Result<Option<LocalEmbeddingConfig>> {
     match resolve_embedding_backend_id()? {
         API_EMBEDDING_BACKEND_ID => Ok(None),
-        MXBAI_EMBEDDING_BACKEND_ID => LocalEmbeddingConfig::mxbai().map(Some),
+        BGEM3_EMBEDDING_BACKEND_ID => LocalEmbeddingConfig::bgem3().map(Some),
         _ => unreachable!("embedding backend should already be normalized"),
     }
 }
@@ -135,9 +133,9 @@ pub(crate) fn supported_embedding_backends() -> Vec<SupportedEmbeddingBackend> {
             dimension: API_EMBEDDING_DIMENSION,
         },
         SupportedEmbeddingBackend {
-            id: MXBAI_EMBEDDING_BACKEND_ID,
-            label: MXBAI_EMBEDDING_BACKEND_LABEL,
-            dimension: MXBAI_EMBEDDING_DIMENSION,
+            id: BGEM3_EMBEDDING_BACKEND_ID,
+            label: BGEM3_EMBEDDING_BACKEND_LABEL,
+            dimension: BGEM3_EMBEDDING_DIMENSION,
         },
     ]
 }
@@ -145,7 +143,7 @@ pub(crate) fn supported_embedding_backends() -> Vec<SupportedEmbeddingBackend> {
 pub(crate) fn normalize_supported_embedding_backend_id(raw: &str) -> &'static str {
     match raw.trim() {
         API_EMBEDDING_BACKEND_ID => API_EMBEDDING_BACKEND_ID,
-        MXBAI_EMBEDDING_BACKEND_ID => MXBAI_EMBEDDING_BACKEND_ID,
+        BGEM3_EMBEDDING_BACKEND_ID => BGEM3_EMBEDDING_BACKEND_ID,
         _ => API_EMBEDDING_BACKEND_ID,
     }
 }
@@ -153,7 +151,7 @@ pub(crate) fn normalize_supported_embedding_backend_id(raw: &str) -> &'static st
 pub(crate) fn embedding_dimension_for_backend(backend_id: &str) -> usize {
     match normalize_supported_embedding_backend_id(backend_id) {
         API_EMBEDDING_BACKEND_ID => API_EMBEDDING_DIMENSION,
-        MXBAI_EMBEDDING_BACKEND_ID => MXBAI_EMBEDDING_DIMENSION,
+        BGEM3_EMBEDDING_BACKEND_ID => BGEM3_EMBEDDING_DIMENSION,
         _ => unreachable!("embedding backend should already be normalized"),
     }
 }
@@ -213,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn local_model_config_uses_mxbai() {
+    fn local_model_config_uses_bgem3() {
         let _guard = env_guard();
         reset_test_preference_error();
         unsafe {
@@ -223,7 +221,7 @@ mod tests {
             env::remove_var(CHUNK_HARD_LIMIT_ENV_VAR);
             env::remove_var(CHUNK_OVERLAP_ENV_VAR);
         }
-        let config = LocalEmbeddingConfig::mxbai().expect("local config should load");
+        let config = LocalEmbeddingConfig::bgem3().expect("local config should load");
 
         assert_eq!(config.max_length, 512);
         assert_eq!(config.chunking.soft_limit, 800);
@@ -238,7 +236,7 @@ mod tests {
             env::set_var(CHUNK_HARD_LIMIT_ENV_VAR, "1200");
         }
 
-        let error = LocalEmbeddingConfig::mxbai().expect_err("invalid bounds should fail");
+        let error = LocalEmbeddingConfig::bgem3().expect_err("invalid bounds should fail");
         assert!(error.to_string().contains("soft limit"));
 
         unsafe {
@@ -252,6 +250,15 @@ mod tests {
         reset_test_preference_error();
         assert_eq!(
             normalize_supported_embedding_backend_id("bad-model"),
+            API_EMBEDDING_BACKEND_ID
+        );
+    }
+
+    #[test]
+    fn legacy_mxbai_backend_normalizes_to_api() {
+        reset_test_preference_error();
+        assert_eq!(
+            normalize_supported_embedding_backend_id("mixedbread-ai/mxbai-embed-large-v1"),
             API_EMBEDDING_BACKEND_ID
         );
     }
@@ -309,7 +316,7 @@ mod tests {
             env::set_var(MAX_LENGTH_ENV_VAR, "0");
         }
 
-        let error = LocalEmbeddingConfig::mxbai().expect_err("zero max length should fail");
+        let error = LocalEmbeddingConfig::bgem3().expect_err("zero max length should fail");
 
         assert!(error.to_string().contains(MAX_LENGTH_ENV_VAR));
         unsafe {

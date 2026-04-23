@@ -399,7 +399,7 @@ Embedding backend initialization:
 
 - initial saved backend: `api`
 - API dimension: `1024`
-- local option example: `mixedbread-ai/mxbai-embed-large-v1`
+- local option example: `BAAI/bge-m3`
 - local cache dir: `$HOME/.cache/kinic-cli/embeddings`
 - new memories are created with dimension `1024`
 

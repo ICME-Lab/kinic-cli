@@ -11,7 +11,7 @@ use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
 
-use crate::embedding_config::{API_EMBEDDING_BACKEND_ID, MXBAI_EMBEDDING_BACKEND_ID};
+use crate::embedding_config::{API_EMBEDDING_BACKEND_ID, BGEM3_EMBEDDING_BACKEND_ID};
 
 #[cfg(not(test))]
 const APP_NAMESPACE: &str = "kinic";
@@ -181,7 +181,7 @@ pub fn chat_diversity_display(value: u8) -> String {
 pub fn normalize_embedding_model_id(value: String) -> String {
     match value.trim() {
         API_EMBEDDING_BACKEND_ID => API_EMBEDDING_BACKEND_ID.to_string(),
-        MXBAI_EMBEDDING_BACKEND_ID => MXBAI_EMBEDDING_BACKEND_ID.to_string(),
+        BGEM3_EMBEDDING_BACKEND_ID => BGEM3_EMBEDDING_BACKEND_ID.to_string(),
         _ => default_embedding_model_id(),
     }
 }
@@ -301,6 +301,19 @@ embedding_model_id: "   "
 "#,
         )
         .expect("blank embedding model should deserialize");
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);
+    }
+
+    #[test]
+    fn user_preferences_normalizes_legacy_mxbai_embedding_model_id_to_default() {
+        let preferences: UserPreferences = serde_yaml::from_str(
+            r#"
+embedding_model_id: "mixedbread-ai/mxbai-embed-large-v1"
+"#,
+        )
+        .expect("legacy embedding model should deserialize");
 
         let normalized = normalize_user_preferences(preferences);
         assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);

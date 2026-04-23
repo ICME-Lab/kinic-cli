@@ -308,7 +308,7 @@ fn prefs_set_embedding_backend_updates_yaml_and_show_output() {
     fs::create_dir_all(&kinic_dir).unwrap();
     fs::write(
         kinic_dir.join("tui.yaml"),
-        "embedding_model_id: mixedbread-ai/mxbai-embed-large-v1\n",
+        "embedding_model_id: BAAI/bge-m3\n",
     )
     .unwrap();
 
@@ -357,6 +357,33 @@ fn prefs_set_embedding_backend_updates_yaml_and_show_output() {
     let parsed: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("show output should parse");
     assert_eq!(parsed["embedding_model_id"], json!("api"));
+}
+
+#[test]
+fn prefs_set_embedding_backend_accepts_bgem3() {
+    let config_dir = temp_config_dir("embedding-backend-bgem3");
+
+    let output = prefs_command(&config_dir)
+        .args([
+            "prefs",
+            "set-embedding-backend",
+            "--model-id",
+            "BAAI/bge-m3",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("json response should parse");
+    assert_eq!(
+        parsed,
+        json!({
+            "resource": "embedding_model_id",
+            "action": "set",
+            "status": "updated",
+            "value": "BAAI/bge-m3"
+        })
+    );
 }
 
 #[test]

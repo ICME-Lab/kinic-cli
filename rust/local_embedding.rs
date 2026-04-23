@@ -9,7 +9,7 @@ use fastembed::TextEmbedding;
 
 use crate::{
     embedding::LateChunk,
-    embedding_config::{LocalEmbeddingConfig, MXBAI_QUERY_PREFIX, selected_local_embedding_config},
+    embedding_config::{LocalEmbeddingConfig, selected_local_embedding_config},
     local_chunking::chunk_markdown,
 };
 
@@ -21,7 +21,7 @@ static MODEL: OnceLock<Mutex<Option<CachedModel>>> = OnceLock::new();
 
 pub(crate) async fn embed_query(text: &str) -> Result<Vec<f32>> {
     load_selected_local_config()?;
-    embed_texts(vec![mxbai_query_text(text)])
+    embed_texts(vec![text.trim().to_string()])
         .await
         .map(|mut rows| {
             rows.pop()
@@ -67,10 +67,6 @@ fn load_selected_local_config() -> Result<LocalEmbeddingConfig> {
         .ok_or_else(|| anyhow::anyhow!("Local embedding backend is not selected"))
 }
 
-fn mxbai_query_text(text: &str) -> String {
-    format!("{}{}", MXBAI_QUERY_PREFIX, text.trim())
-}
-
 fn model_cache() -> &'static Mutex<Option<CachedModel>> {
     MODEL.get_or_init(|| Mutex::new(None))
 }
@@ -96,20 +92,16 @@ fn ensure_cached_model<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::mxbai_query_text;
-
     #[test]
-    fn local_embedding_supports_mxbai_model_id() {
-        let config = crate::embedding_config::LocalEmbeddingConfig::mxbai()
-            .expect("mxbai config should load");
+    fn local_embedding_supports_bgem3_model_id() {
+        let config = crate::embedding_config::LocalEmbeddingConfig::bgem3()
+            .expect("bgem3 config should load");
         assert_eq!(config.max_length, 512);
     }
 
     #[test]
-    fn mxbai_query_text_uses_retrieval_prefix() {
-        assert_eq!(
-            mxbai_query_text("hello"),
-            "Represent this sentence for searching relevant passages: hello"
-        );
+    fn embed_query_trims_without_instruction_prefix() {
+        let trimmed = "  hello  ".trim().to_string();
+        assert_eq!(trimmed, "hello");
     }
 }
