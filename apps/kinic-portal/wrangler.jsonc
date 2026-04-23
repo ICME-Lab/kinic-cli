@@ -4,6 +4,21 @@
   "main": "src/worker.tsx",
   "compatibility_date": "2026-04-15",
   "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  },
   "secrets": {
     "required": ["EMBEDDING_API_ENDPOINT"]
   },
@@ -18,10 +33,17 @@
     "directory": "dist/client",
     "binding": "ASSETS"
   },
+  "routes": [
+    {
+      "pattern": "memory.kinic.xyz",
+      "custom_domain": true
+    }
+  ],
   "vars": {
     "IC_HOST": "https://ic0.app",
     "SUMMARY_CACHE_TTL_SECONDS": "86400",
-    "KINIC_PORTAL_ORIGIN": "https://kinic-portal.kasane.workers.dev",
-    "KINIC_PUBLIC_API_ORIGIN": "https://kinic-portal-public-api.kasane.workers.dev"
+    "KINIC_PORTAL_ORIGIN": "https://memory.kinic.xyz",
+    "KINIC_PUBLIC_API_ORIGIN": "https://api.kinic.xyz",
+    "KINIC_REMOTE_MCP_ORIGIN": "https://mcp.kinic.xyz"
   }
 }

@@ -170,6 +170,22 @@ describe("remote MCP tool guidance", () => {
     });
   });
 
+  it("returns denied when metadata would be readable but the public get_name predicate denies access", async () => {
+    mocks.resolvePublicMemorySummary.mockResolvedValueOnce({
+      kind: "denied",
+      error: "anonymous access denied",
+    });
+
+    await expect(showMemory({ IC_HOST: "https://ic0.app" }, "aaaaa-aa")).resolves.toEqual({
+      content: [{ type: "text", text: "anonymous access denied" }],
+      structuredContent: {
+        error: "anonymous access denied",
+        memory_id: "aaaaa-aa",
+      },
+      isError: true,
+    });
+  });
+
   it("returns a structured tool error when anonymous access is denied", async () => {
     mocks.resolvePublicMemorySummary.mockResolvedValueOnce({
       kind: "denied",

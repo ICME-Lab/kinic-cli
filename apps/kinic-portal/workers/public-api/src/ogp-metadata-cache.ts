@@ -40,12 +40,16 @@ export function getOgpMetadataCache(env: Env): SummaryCacheNamespace | null {
 export async function readOgpMetadataCache(
   cache: SummaryCacheNamespace | null,
   memoryId: string,
+  requestedVersion?: string | null,
 ): Promise<OgpMetadataCacheEntry | null> {
   if (!cache) {
     return null;
   }
   const pointer = await readPointer(cache, buildOgpMetadataPointerKey(memoryId));
   if (!pointer) {
+    return null;
+  }
+  if (requestedVersion && pointer.version !== requestedVersion) {
     return null;
   }
   const entry = await readEntry(cache, pointer.key);

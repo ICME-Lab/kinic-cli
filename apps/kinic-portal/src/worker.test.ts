@@ -244,7 +244,7 @@ describe("portal worker", () => {
 
   it("serves same-origin summary", async () => {
     const response = await worker.fetch(
-      new Request("https://portal.kinic.test/api/public/memories/m1/summary?language=ja"),
+      new Request("https://portal.kinic.test/api/public/memories/m1/summary?language=en-US"),
       env(),
     );
 
@@ -254,6 +254,7 @@ describe("portal worker", () => {
       cached: false,
       updatedAt: "2026-04-20T00:00:00.000Z",
     });
+    expect(mocks.resolvePublicSummary).toHaveBeenCalledWith(expect.anything(), "m1", "en");
   });
 
   it("keeps JSON headers and empty body for summary HEAD requests", async () => {

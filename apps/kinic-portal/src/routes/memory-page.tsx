@@ -17,7 +17,9 @@ export function MemoryPage({ config }: { config: PortalRuntimeConfig }) {
 
   return (
     <PublicMemoryPage
+      key={memoryId}
       memoryId={memoryId}
+      initialState={config.initialMemoryState?.memoryId === memoryId ? config.initialMemoryState : null}
       mcpEndpoint={config.mcpEndpoint}
       publicApiOrigin={config.publicApiOrigin}
     />

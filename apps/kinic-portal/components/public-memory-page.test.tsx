@@ -1,16 +1,33 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryPage } from "@/src/routes/memory-page";
 import { PublicMemoryPage } from "./public-memory-page";
 
 const memoryViewMock = vi.fn();
 
 vi.mock("./memory-view", () => ({
-  MemoryView: (props: unknown) => {
+  MemoryView: (props: { memory: { memory_id: string } }) => {
     memoryViewMock(props);
-    return <div>memory ready</div>;
+    const [draft, setDraft] = useState(props.memory.memory_id);
+    return (
+      <div>
+        <div>memory ready</div>
+        <div>draft:{draft}</div>
+        <button type="button" onClick={() => setDraft(`dirty:${props.memory.memory_id}`)}>
+          mutate draft
+        </button>
+      </div>
+    );
   },
+}));
+
+const useParamsMock = vi.fn();
+
+vi.mock("react-router", () => ({
+  useParams: () => useParamsMock(),
 }));
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
@@ -26,6 +43,7 @@ describe("PublicMemoryPage", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     memoryViewMock.mockReset();
+    useParamsMock.mockReset();
   });
 
   afterEach(() => {
@@ -51,6 +69,7 @@ describe("PublicMemoryPage", () => {
     render(
       <PublicMemoryPage
         memoryId="m1"
+        initialState={null}
         publicApiOrigin="https://api.kinic.test"
         mcpEndpoint="https://mcp.kinic.test/mcp"
       />,
@@ -69,11 +88,101 @@ describe("PublicMemoryPage", () => {
     render(
       <PublicMemoryPage
         memoryId="m1"
+        initialState={null}
         publicApiOrigin="https://api.kinic.test"
         mcpEndpoint={null}
       />,
     );
 
     await screen.findByText("Anonymous access is blocked.");
+  });
+
+  it("remounts PublicMemoryPage when the route memory id changes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          memory_id: "m1",
+          name: "Skill Store",
+          description: "Shared notes",
+          version: "0.2.5",
+          dim: 1536,
+          owners: ["user"],
+          stable_memory_size: 10,
+          cycle_amount: 20,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          memory_id: "m2",
+          name: "Second Memory",
+          description: "Other notes",
+          version: "0.2.6",
+          dim: 1536,
+          owners: ["user"],
+          stable_memory_size: 11,
+          cycle_amount: 21,
+        }),
+      );
+
+    useParamsMock.mockReturnValue({ memoryId: "m1" });
+    const view = render(
+      <MemoryPage
+        config={{
+          portalOrigin: "https://memory.kinic.xyz",
+          publicApiOrigin: "https://api.kinic.test",
+          mcpEndpoint: "https://mcp.kinic.test/mcp",
+          initialMemoryState: null,
+        }}
+      />,
+    );
+
+    await screen.findByText("draft:m1");
+    fireEvent.click(screen.getByRole("button", { name: "mutate draft" }));
+    expect(screen.getByText("draft:dirty:m1")).toBeTruthy();
+
+    useParamsMock.mockReturnValue({ memoryId: "m2" });
+    view.rerender(
+      <MemoryPage
+        config={{
+          portalOrigin: "https://memory.kinic.xyz",
+          publicApiOrigin: "https://api.kinic.test",
+          mcpEndpoint: "https://mcp.kinic.test/mcp",
+          initialMemoryState: null,
+        }}
+      />,
+    );
+
+    await screen.findByText("draft:m2");
+    expect(screen.queryByText("draft:dirty:m1")).toBeNull();
+  });
+
+  it("ignores injected initialState when it belongs to another memory id", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        memory_id: "m2",
+        name: "Second Memory",
+        description: "Other notes",
+        version: "0.2.6",
+        dim: 1536,
+        owners: ["user"],
+        stable_memory_size: 11,
+        cycle_amount: 21,
+      }),
+    );
+
+    useParamsMock.mockReturnValue({ memoryId: "m2" });
+    render(
+      <MemoryPage
+        config={{
+          portalOrigin: "https://memory.kinic.xyz",
+          publicApiOrigin: "https://api.kinic.test",
+          mcpEndpoint: "https://mcp.kinic.test/mcp",
+          initialMemoryState: { kind: "denied", memoryId: "m1" },
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("Anonymous access is blocked.")).toBeNull();
+    await screen.findByText("draft:m2");
   });
 });

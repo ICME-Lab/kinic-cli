@@ -10,7 +10,6 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORTAL_ROOT = path.resolve(SCRIPT_DIR, "..");
 const PORTAL_WRANGLER_PATH = path.join(PORTAL_ROOT, "wrangler.jsonc");
 const PUBLIC_API_WRANGLER_PATH = path.join(PORTAL_ROOT, "workers/public-api/wrangler.jsonc");
-const PUBLIC_API_ROUTE_ORIGIN_SUFFIX = ".kasane.workers.dev";
 const REQUIRED_SECRET = "EMBEDDING_API_ENDPOINT";
 const SUMMARY_CACHE_BINDING = "SUMMARY_CACHE";
 
@@ -25,14 +24,12 @@ export function verifyDeployContract(
   options = {},
 ) {
   const errors = [];
-  const expectedPublicApiOrigin = `https://${publicApiConfig.name}${PUBLIC_API_ROUTE_ORIGIN_SUFFIX}`;
   const portalSummaryCache = findKvBinding(portalConfig, SUMMARY_CACHE_BINDING);
   const publicApiSummaryCache = findKvBinding(publicApiConfig, SUMMARY_CACHE_BINDING);
   const portalRequiredSecrets = listRequiredSecrets(portalConfig);
   const publicApiRequiredSecrets = listRequiredSecrets(publicApiConfig);
   const portalVars = portalConfig.vars ?? {};
   const publicApiVars = publicApiConfig.vars ?? {};
-  const expectedPortalPublicApiOrigin = options.expectedPortalPublicApiOrigin ?? expectedPublicApiOrigin;
 
   if (!portalConfig.name) {
     errors.push(`portal wrangler config is missing "name": ${PORTAL_WRANGLER_PATH}`);
@@ -67,18 +64,12 @@ export function verifyDeployContract(
     errors.push(`public-api secrets.required must include "${REQUIRED_SECRET}"`);
   }
 
-  if (portalVars.KINIC_PUBLIC_API_ORIGIN !== expectedPortalPublicApiOrigin) {
-    errors.push(
-      `portal vars.KINIC_PUBLIC_API_ORIGIN must equal "${expectedPortalPublicApiOrigin}" but got "${stringifyValue(portalVars.KINIC_PUBLIC_API_ORIGIN)}"`,
-    );
-  }
-
-  validatePortalOrigin(errors, portalVars.KINIC_PORTAL_ORIGIN);
+  validateAbsoluteOrigin(errors, "KINIC_PORTAL_ORIGIN", portalVars.KINIC_PORTAL_ORIGIN);
+  validateAbsoluteOrigin(errors, "KINIC_PUBLIC_API_ORIGIN", portalVars.KINIC_PUBLIC_API_ORIGIN);
 
   return {
     ok: errors.length === 0,
     errors,
-    expectedPublicApiOrigin,
   };
 }
 
@@ -110,9 +101,9 @@ function stringifyValue(value) {
   return value === undefined ? "undefined" : String(value);
 }
 
-function validatePortalOrigin(errors, value) {
+function validateAbsoluteOrigin(errors, fieldName, value) {
   if (typeof value !== "string" || value.trim() === "") {
-    errors.push('portal vars.KINIC_PORTAL_ORIGIN must be set to an absolute non-localhost URL');
+    errors.push(`portal vars.${fieldName} must be set to an absolute non-localhost URL`);
     return;
   }
 
@@ -121,14 +112,14 @@ function validatePortalOrigin(errors, value) {
     parsed = new URL(value);
   } catch {
     errors.push(
-      `portal vars.KINIC_PORTAL_ORIGIN must be an absolute URL but got "${stringifyValue(value)}"`,
+      `portal vars.${fieldName} must be an absolute URL but got "${stringifyValue(value)}"`,
     );
     return;
   }
 
   if (isLocalHostname(parsed.hostname)) {
     errors.push(
-      `portal vars.KINIC_PORTAL_ORIGIN must not use a local loopback host but got "${parsed.toString()}"`,
+      `portal vars.${fieldName} must not use a local loopback host but got "${parsed.toString()}"`,
     );
   }
 }
@@ -206,7 +197,6 @@ function main() {
   }
 
   console.log("deploy contract check passed");
-  console.log(`public-api origin: ${result.expectedPublicApiOrigin}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

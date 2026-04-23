@@ -5,6 +5,7 @@ const baseConfig = {
   portalOrigin: "https://portal.example.com",
   publicApiOrigin: "https://api.example.com",
   mcpEndpoint: "https://mcp.example.com/mcp",
+  initialMemoryState: null,
 };
 
 describe("renderPortalDocument", () => {
@@ -91,6 +92,7 @@ describe("renderPortalDocument", () => {
     expect(document.html).toContain("<title>Access Denied | Kinic</title>");
     expect(document.html).toContain('meta name="robots" content="noindex, nofollow"');
     expect(document.html).toContain("Anonymous access is blocked.");
+    expect(document.html).toContain('"initialMemoryState":{"kind":"denied","memoryId":"private-memory"}');
   });
 
   it("renders a not-found memory document with noindex robots", () => {
@@ -103,6 +105,7 @@ describe("renderPortalDocument", () => {
     expect(document.html).toContain("<title>Not Found | Kinic</title>");
     expect(document.html).toContain('meta name="robots" content="noindex, nofollow"');
     expect(document.html).toContain("Shared memory not found.");
+    expect(document.html).toContain('"initialMemoryState":{"kind":"not_found","memoryId":"missing-memory"}');
   });
 
   it("renders a transient memory document with noindex robots", () => {
@@ -115,6 +118,7 @@ describe("renderPortalDocument", () => {
     expect(document.html).toContain("<title>Temporary Error | Kinic</title>");
     expect(document.html).toContain('meta name="robots" content="noindex, nofollow"');
     expect(document.html).toContain("Temporary network error");
+    expect(document.html).toContain('"initialMemoryState":{"kind":"temporary_error","memoryId":"flaky-memory"}');
   });
 
   it("returns a 404 document for unknown routes", () => {

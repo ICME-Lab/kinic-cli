@@ -4,6 +4,21 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  },
   "secrets": {
     "required": ["EMBEDDING_API_ENDPOINT"]
   },
@@ -12,6 +27,12 @@
       "binding": "SUMMARY_CACHE",
       "id": "5ae0671d6e7c47fd9867184b609ae990",
       "preview_id": "3f14e59069344a389ab13828817f5b4f"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "api.kinic.xyz",
+      "custom_domain": true
     }
   ],
   "vars": {

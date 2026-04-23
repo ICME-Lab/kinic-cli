@@ -5,9 +5,6 @@
 import type { ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router";
-import { MemoryAccessDenied } from "@/components/memory-access-denied";
-import { MemoryNotFound } from "@/components/memory-not-found";
-import { MemoryTemporaryError } from "@/components/memory-temporary-error";
 import { App } from "./app";
 import type { PortalRuntimeConfig } from "./runtime-config";
 import {
@@ -28,7 +25,8 @@ export function renderPortalDocument(
   memorySummary?: string | null,
 ): { html: string; status: number } {
   const metadata = resolvePortalMetadata(pathname, config, memoryState, memorySummary);
-  const appHtml = renderToString(resolveDocumentBody(pathname, config, memoryState));
+  const documentConfig = attachInitialMemoryState(pathname, config, memoryState);
+  const appHtml = renderToString(resolveDocumentBody(pathname, documentConfig));
 
   return {
     html: [
@@ -44,7 +42,7 @@ export function renderPortalDocument(
       "</head>",
       '<body class="font-sans antialiased">',
       `<div id="root">${appHtml}</div>`,
-      `<script>window.__KINIC_PORTAL_CONFIG__=${serializeForScript(config)};</script>`,
+      `<script>window.__KINIC_PORTAL_CONFIG__=${serializeForScript(documentConfig)};</script>`,
       `<script type="module" src="${PORTAL_SCRIPT_PATH}"></script>`,
       "</body>",
       "</html>",
@@ -113,32 +111,12 @@ function escapeHtml(value: string): string {
 function resolveDocumentBody(
   pathname: string,
   config: PortalRuntimeConfig,
-  memoryState?: PublicMemoryState,
 ): ReactElement {
-  const memoryId = matchMemoryId(pathname);
-  if (!memoryId || !memoryState || memoryState.kind === "accessible") {
-    return (
-      <StaticRouter location={pathname}>
-        <App config={config} />
-      </StaticRouter>
-    );
-  }
-
-  switch (memoryState.kind) {
-    case "invalid":
-    case "not_found":
-      return <MemoryNotFound memoryId={memoryId} />;
-    case "denied":
-      return <MemoryAccessDenied memoryId={memoryId} />;
-    case "transient_error":
-      return <MemoryTemporaryError memoryId={memoryId} />;
-    default:
-      return (
-        <StaticRouter location={pathname}>
-          <App config={config} />
-        </StaticRouter>
-      );
-  }
+  return (
+    <StaticRouter location={pathname}>
+      <App config={config} />
+    </StaticRouter>
+  );
 }
 
 function resolveMemoryRouteMetadata(
@@ -197,4 +175,28 @@ function matchMemoryId(pathname: string): string | null {
   } catch {
     return null;
   }
+}
+
+function attachInitialMemoryState(
+  pathname: string,
+  config: PortalRuntimeConfig,
+  memoryState?: PublicMemoryState,
+): PortalRuntimeConfig {
+  const memoryId = matchMemoryId(pathname);
+  if (!memoryId || !memoryState || memoryState.kind === "accessible" || memoryState.kind === "invalid") {
+    return config;
+  }
+  if (memoryState.kind === "transient_error") {
+    return {
+      ...config,
+      initialMemoryState: { kind: "temporary_error", memoryId },
+    };
+  }
+  return {
+    ...config,
+    initialMemoryState: {
+      kind: memoryState.kind,
+      memoryId,
+    },
+  };
 }

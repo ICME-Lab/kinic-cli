@@ -4,13 +4,19 @@
 
 import { resolveRemoteMcpEndpoint } from "@kinic/kinic-share";
 
-const DEFAULT_PORTAL_ORIGIN = "https://kinic-portal.kasane.workers.dev";
-const DEFAULT_PUBLIC_API_ORIGIN = "https://kinic-portal-public-api.kasane.workers.dev";
+const DEFAULT_PORTAL_ORIGIN = "https://memory.kinic.xyz";
+const DEFAULT_PUBLIC_API_ORIGIN = "https://api.kinic.xyz";
+
+export type InitialMemoryRouteState =
+  | { kind: "denied"; memoryId: string }
+  | { kind: "not_found"; memoryId: string }
+  | { kind: "temporary_error"; memoryId: string };
 
 export type PortalRuntimeConfig = {
   portalOrigin: string;
   publicApiOrigin: string;
   mcpEndpoint: string | null;
+  initialMemoryState: InitialMemoryRouteState | null;
 };
 
 type RuntimeEnv = {
@@ -33,6 +39,7 @@ export function buildRuntimeConfig(env: RuntimeEnv): PortalRuntimeConfig {
     portalOrigin: normalizeOrigin(env.KINIC_PORTAL_ORIGIN, DEFAULT_PORTAL_ORIGIN),
     publicApiOrigin: normalizeOrigin(env.KINIC_PUBLIC_API_ORIGIN, DEFAULT_PUBLIC_API_ORIGIN),
     mcpEndpoint: resolveRemoteMcpEndpoint(env.KINIC_REMOTE_MCP_ORIGIN),
+    initialMemoryState: null,
   };
 }
 
@@ -44,6 +51,7 @@ export function readRuntimeConfig(): PortalRuntimeConfig {
       portalOrigin: browserOrigin,
       publicApiOrigin: browserOrigin,
       mcpEndpoint: null,
+      initialMemoryState: null,
     };
   }
   return config;

@@ -51,6 +51,7 @@ const executionCtx = {
 } as Env["executionCtx"];
 
 const pngBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const memoryOgpUrl = "https://api.kinic.test/api/public/og/memories/m1";
 
 describe("public api ogp handlers", () => {
   beforeEach(() => {
@@ -94,6 +95,7 @@ describe("public api ogp handlers", () => {
       { IC_HOST: "https://ic0.app" } as Env,
       executionCtx,
       "m1",
+      memoryOgpUrl,
     );
 
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=86400");
@@ -117,7 +119,7 @@ describe("public api ogp handlers", () => {
     mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
     mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
 
-    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1");
+    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1", memoryOgpUrl);
 
     expect(mocks.buildSummaryCacheKey).toHaveBeenCalledWith("m1", "v1", "en");
     expect(mocks.renderOgpImage).toHaveBeenCalledWith({
@@ -151,7 +153,7 @@ describe("public api ogp handlers", () => {
     mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
     mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
 
-    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1");
+    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1", memoryOgpUrl);
 
     expect(mocks.renderOgpImage).toHaveBeenCalledWith({
       memory: {
@@ -172,10 +174,11 @@ describe("public api ogp handlers", () => {
     mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
     mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
 
-    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1");
+    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1", memoryOgpUrl);
 
     expect(mocks.resolvePublicMemorySummaryOnly).not.toHaveBeenCalled();
     expect(mocks.writeOgpMetadataCache).not.toHaveBeenCalled();
+    expect(mocks.readOgpMetadataCache).toHaveBeenCalledWith(null, "m1", null);
     expect(mocks.renderOgpImage).toHaveBeenCalledWith({
       memory: {
         memoryId: "m1",
@@ -201,7 +204,7 @@ describe("public api ogp handlers", () => {
     mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
 
     try {
-      await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1");
+      await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1", memoryOgpUrl);
 
       expect(warning).toHaveBeenCalledWith("ogp metadata cache read failed", readError);
       expect(mocks.resolvePublicMemorySummaryOnly).toHaveBeenCalledWith(
@@ -241,6 +244,7 @@ describe("public api ogp handlers", () => {
         { IC_HOST: "https://ic0.app" } as Env,
         executionCtx,
         "m1",
+        memoryOgpUrl,
       );
 
       expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
@@ -265,7 +269,7 @@ describe("public api ogp handlers", () => {
     mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
     mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
 
-    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1");
+    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1", memoryOgpUrl);
 
     expect(mocks.writeOgpMetadataCache).not.toHaveBeenCalled();
     expect(mocks.renderOgpImage).toHaveBeenCalledWith({
@@ -273,6 +277,30 @@ describe("public api ogp handlers", () => {
         memoryId: "m1",
       },
     });
+  });
+
+  it("bypasses stale cached metadata when the requested version changes", async () => {
+    mocks.resolvePublicMemorySummaryOnly.mockResolvedValueOnce({
+      kind: "accessible",
+      memory: {
+        version: "v3",
+        name: "Fresh Memory",
+        description: "fresh desc",
+      },
+    });
+    mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
+    mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
+
+    await handleMemoryOgp(
+      "GET",
+      { IC_HOST: "https://ic0.app" } as Env,
+      executionCtx,
+      "m1",
+      `${memoryOgpUrl}?v=v3`,
+    );
+
+    expect(mocks.readOgpMetadataCache).toHaveBeenCalledWith(null, "m1", "v3");
+    expect(mocks.resolvePublicMemorySummaryOnly).toHaveBeenCalledOnce();
   });
 
   it("throws when the renderer returns an empty image body", async () => {

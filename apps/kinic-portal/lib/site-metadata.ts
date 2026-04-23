@@ -12,7 +12,7 @@ import { buildPublicApiUrl } from "./public-api";
 export const DEFAULT_SITE_TITLE = "Kinic Portal";
 export const DEFAULT_SITE_DESCRIPTION =
   "Share public Kinic knowledge over the web and prepare the path to remote MCP.";
-export const DEFAULT_SITE_ORIGIN = "https://kinic-portal.kasane.workers.dev";
+export const DEFAULT_SITE_ORIGIN = "https://memory.kinic.xyz";
 export const SITE_ICON_PATH = "/favicon.png";
 export const DEFAULT_NOINDEX_ROBOTS = "noindex, nofollow";
 
@@ -100,7 +100,7 @@ export function buildMemoryUnavailableMetadata(
 function resolvePublicApiOrigin(raw = process.env.KINIC_PUBLIC_API_ORIGIN): string {
   const normalized = raw?.trim();
   if (!normalized) {
-    return "https://kinic-portal-public-api.kasane.workers.dev";
+    return "https://api.kinic.xyz";
   }
   return normalized.replace(/\/+$/, "");
 }

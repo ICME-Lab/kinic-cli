@@ -59,6 +59,25 @@ describe("public api hono router", () => {
     expect(mocks.handleSiteOgp).toHaveBeenCalledWith("HEAD", expect.anything());
   });
 
+  it("dispatches memory ogp with the request url", async () => {
+    mocks.handleMemoryOgp.mockResolvedValueOnce(new Response(null, { status: 200, headers: { "content-type": "image/png" } }));
+
+    const response = await app.fetch(
+      new Request("https://api.kinic.test/api/public/og/memories/m1?v=0.2.5"),
+      env(),
+      executionCtx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.handleMemoryOgp).toHaveBeenCalledWith(
+      "GET",
+      expect.objectContaining({ IC_HOST: "https://ic0.app" }),
+      expect.anything(),
+      "m1",
+      "https://api.kinic.test/api/public/og/memories/m1?v=0.2.5",
+    );
+  });
+
   it("returns not found for unknown routes", async () => {
     const response = await app.fetch(new Request("https://api.kinic.test/missing"), env());
 

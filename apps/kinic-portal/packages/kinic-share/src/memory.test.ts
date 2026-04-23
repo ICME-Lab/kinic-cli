@@ -69,6 +69,7 @@ describe("memory access helpers", () => {
 
   it("resolves unsupported canisters to not_found before metadata fetch", async () => {
     mocks.createActor.mockReturnValue({
+      get_name: vi.fn(async () => "Kinic"),
       get_metadata: vi.fn(async () => {
         throw new Error("query method does not exist");
       }),
@@ -104,6 +105,7 @@ describe("memory access helpers", () => {
     getMetadata.mockRejectedValueOnce(new Error("Invalid certificate: Invalid signature from replica"));
 
     mocks.createActor.mockReturnValue({
+      get_name: vi.fn(async () => "Kinic"),
       get_metadata: getMetadata,
     });
 
@@ -139,6 +141,7 @@ describe("memory access helpers", () => {
 
   it("reduces memory metadata to the public remote summary shape", async () => {
     mocks.createActor.mockReturnValue({
+      get_name: vi.fn(async () => "Kinic"),
       get_metadata: vi.fn(async () => ({
         owners: ["owner"],
         name: JSON.stringify({ name: "Kinic", description: "Public summary" }),
@@ -161,9 +164,30 @@ describe("memory access helpers", () => {
 
   it("resolves denied memories from metadata permission errors in summary mode", async () => {
     mocks.createActor.mockReturnValue({
+      get_name: vi.fn(async () => "Kinic"),
       get_metadata: vi.fn(async () => {
         throw new Error('Call failed: "Message": "Permission denied"');
       }),
+    });
+
+    await expect(resolvePublicMemorySummary(undefined!, "aaaaa-aa")).resolves.toEqual({
+      kind: "denied",
+      error: "anonymous access denied",
+    });
+  });
+
+  it("uses the anonymous probe as the public-access predicate in summary mode", async () => {
+    mocks.createActor.mockReturnValue({
+      get_name: vi.fn(async () => {
+        throw new Error('Call failed: "Message": "Permission denied"');
+      }),
+      get_metadata: vi.fn(async () => ({
+        owners: ["owner"],
+        name: JSON.stringify({ name: "Kinic", description: "Public summary" }),
+        stable_memory_size: 42,
+        version: "1.2.3",
+        cycle_amount: 1000n,
+      })),
     });
 
     await expect(resolvePublicMemorySummary(undefined!, "aaaaa-aa")).resolves.toEqual({

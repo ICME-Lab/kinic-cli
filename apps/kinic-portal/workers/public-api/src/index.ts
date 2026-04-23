@@ -23,7 +23,7 @@ app.use("*", async (c, next) => {
 app.on(["GET", "HEAD"], "/opengraph-image", (c) => handleSiteOgp(c.req.method, c.executionCtx));
 
 app.on(["GET", "HEAD"], "/api/public/og/memories/:memoryId", (c) =>
-  handleMemoryOgp(c.req.method, c.env, c.executionCtx, requireParam(c, "memoryId")));
+  handleMemoryOgp(c.req.method, c.env, c.executionCtx, requireParam(c, "memoryId"), c.req.url));
 
 app.post("/api/public/memories/:memoryId/chat", handleMemoryChat);
 

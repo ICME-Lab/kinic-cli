@@ -8,7 +8,6 @@ describe("verifyDeployContract", () => {
 
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
-    expect(result.expectedPublicApiOrigin).toBe("https://kinic-portal-public-api.kasane.workers.dev");
   });
 
   it("passes when portal origin uses a custom domain", () => {
@@ -46,7 +45,7 @@ describe("verifyDeployContract", () => {
 
   it("fails when ttl drifts", () => {
     const result = verifyDeployContract(
-      portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://kinic-portal-public-api.kasane.workers.dev", SUMMARY_CACHE_TTL_SECONDS: "3600" } }),
+      portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz", SUMMARY_CACHE_TTL_SECONDS: "3600" } }),
       publicApiConfig({ vars: { IC_HOST: "https://ic0.app", SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
     );
 
@@ -76,22 +75,40 @@ describe("verifyDeployContract", () => {
     expect(result.errors).toContain('portal secrets.required must include "EMBEDDING_API_ENDPOINT"');
   });
 
-  it("fails when portal public api origin drifts from the worker name", () => {
+  it("fails when portal public api origin is missing", () => {
     const result = verifyDeployContract(
-      portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://wrong.example.com", SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
+      portalConfig({ vars: { SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
       publicApiConfig(),
     );
 
     expect(result.ok).toBe(false);
-    expect(result.errors).toContain(
-      'portal vars.KINIC_PUBLIC_API_ORIGIN must equal "https://kinic-portal-public-api.kasane.workers.dev" but got "https://wrong.example.com"',
-    );
+    expect(result.errors).toContain("portal vars.KINIC_PUBLIC_API_ORIGIN must be set to an absolute non-localhost URL");
     expect(formatContractErrors(result.errors)).toContain("portal vars.KINIC_PUBLIC_API_ORIGIN");
+  });
+
+  it("fails when portal public api origin is not absolute", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PUBLIC_API_ORIGIN: "/api" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PUBLIC_API_ORIGIN must be an absolute URL but got "/api"');
+  });
+
+  it("fails when portal public api origin uses localhost", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PUBLIC_API_ORIGIN: "http://localhost:8788" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PUBLIC_API_ORIGIN must not use a local loopback host but got "http://localhost:8788/"');
   });
 
   it("fails when portal origin is missing", () => {
     const result = verifyDeployContract(
-      portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://kinic-portal-public-api.kasane.workers.dev", SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
+      portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz", SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
       publicApiConfig(),
     );
 
@@ -146,8 +163,8 @@ function portalConfig(overrides: Record<string, unknown> = {}) {
     secrets: { required: ["EMBEDDING_API_ENDPOINT"] },
     kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "shared-id", preview_id: "shared-preview" }],
     vars: {
-      KINIC_PORTAL_ORIGIN: "https://kinic-portal.kasane.workers.dev",
-      KINIC_PUBLIC_API_ORIGIN: "https://kinic-portal-public-api.kasane.workers.dev",
+      KINIC_PORTAL_ORIGIN: "https://memory.kinic.xyz",
+      KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz",
       SUMMARY_CACHE_TTL_SECONDS: "86400",
     },
     ...overrides,

@@ -31,11 +31,12 @@ export async function handleMemoryOgp(
   env: Env,
   executionCtx: ExecutionContext,
   memoryId: string,
+  requestUrl: string,
 ): Promise<Response> {
   if (method === "HEAD") {
     return headResponse();
   }
-  const memory = await resolveOgpMemory(env, memoryId);
+  const memory = await resolveOgpMemory(env, memoryId, resolveRequestedVersion(requestUrl));
 
   const response = await renderImage(renderOgpImage({ memory }), executionCtx);
   return response;
@@ -44,11 +45,12 @@ export async function handleMemoryOgp(
 async function resolveOgpMemory(
   env: Env,
   memoryId: string,
+  requestedVersion: string | null,
 ): Promise<{ memoryId: string; name: string; description: string | null } | { memoryId: string }> {
   const metadataCache = getOgpMetadataCache(env);
   let cachedMetadata: Awaited<ReturnType<typeof readOgpMetadataCache>> = null;
   try {
-    cachedMetadata = await readOgpMetadataCache(metadataCache, memoryId);
+    cachedMetadata = await readOgpMetadataCache(metadataCache, memoryId, requestedVersion);
   } catch (error) {
     console.warn("ogp metadata cache read failed", error);
   }
@@ -86,6 +88,11 @@ async function resolveOgpMemory(
     name: state.memory.name,
     description: summary || state.memory.description,
   };
+}
+
+function resolveRequestedVersion(requestUrl: string): string | null {
+  const version = new URL(requestUrl).searchParams.get("v")?.trim();
+  return version ? version : null;
 }
 
 async function readOgpSummary(env: Env, memoryId: string, version: string): Promise<string | null> {

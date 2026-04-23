@@ -39,9 +39,9 @@ describe("remote mcp helpers", () => {
   it("builds a ChatGPT prompt and prefill url", () => {
     const prompt = buildChatGptMemoryPrompt("aaaaa-aa");
     expect(prompt).toContain("@Kinic-Memory");
-    expect(prompt).toContain("public_memory_show");
-    expect(prompt).toContain("public_memory_search");
-    expect(prompt).toContain("memory_id aaaaa-aa");
+    expect(prompt).toContain("public memory aaaaa-aa");
+    expect(prompt).toContain("Search this memory before answering.");
+    expect(prompt).toContain("Use public_memory_show only when metadata is needed.");
     expect(buildChatGptPromptUrl(prompt)).toMatch(/^https:\/\/chatgpt\.com\/\?q=/);
   });
 });

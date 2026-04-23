@@ -32,7 +32,7 @@ The Kinic Portal remote MCP is an anonymous read-only surface running on a Cloud
 ## External Clients
 
 - Use `http` transport
-- Endpoint: `https://<worker-host>/mcp`
+- Endpoint: `https://mcp.kinic.xyz/mcp`
 - Authentication is not required
 - The caller must pass `memory_id` on every tool call
 - The public portal can render the same endpoint as copyable UI when `KINIC_REMOTE_MCP_ORIGIN` is set
@@ -42,7 +42,7 @@ The Kinic Portal remote MCP is an anonymous read-only surface running on a Cloud
 Add the remote MCP server:
 
 ```bash
-claude mcp add --transport http kinic https://<worker-host>/mcp
+claude mcp add --transport http kinic https://mcp.kinic.xyz/mcp
 ```
 
 Inspect the configured server:
@@ -59,7 +59,7 @@ To share the configuration across a project, add `.mcp.json` at the repository r
   "mcpServers": {
     "kinic": {
       "type": "http",
-      "url": "https://<worker-host>/mcp"
+      "url": "https://mcp.kinic.xyz/mcp"
     }
   }
 }
@@ -90,9 +90,10 @@ claude mcp add --transport http kinic-local http://127.0.0.1:8787/mcp
 
 - The caller must provide `memory_id` on every request
 - Canister access stays anonymous only
+- Public access is gated by the same anonymous `get_name()` probe used by the portal page and OGP path
 - Search results are memory payloads from the selected canister
 - The remote MCP does not expose implementation inspection
-- Permission failures from `get_metadata` or `search` surface as MCP tool errors
+- If the `get_name()` probe or later canister reads deny anonymous access, the Worker returns the MCP tool error `anonymous access denied`
 - `memory_create`, `memory_insert_markdown`, `memory_list`, and `memory_search_all` are not exposed
 - Search remains read-only, but still depends on `EMBEDDING_API_ENDPOINT` for embedding generation
 

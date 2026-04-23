@@ -4,6 +4,7 @@
 
 import { resolvePublicMemory } from "../workers/shared/public-memory-runtime";
 import { resolvePublicSummary } from "../workers/shared/public-memory-summary-runtime";
+import { resolveSummaryLanguage } from "../workers/public-api/src/public-summary";
 import { buildSummaryCacheKey, getSummaryCache, readSummaryCache } from "../workers/public-api/src/summary-cache";
 import { buildRuntimeConfig } from "./runtime-config";
 import { PORTAL_SCRIPT_PATH, PORTAL_STYLE_PATH, renderPortalDocument, resolvePortalMetadata } from "./ssr";
@@ -84,7 +85,7 @@ async function handleMemorySummary(method: "GET" | "HEAD", request: Request, env
     }
   }
 
-  const language = new URL(request.url).searchParams.get("language")?.trim() || "en";
+  const language = resolveSummaryLanguage(request);
   const state = await resolvePublicSummary(env, memoryId, language);
   switch (state.kind) {
     case "ready":

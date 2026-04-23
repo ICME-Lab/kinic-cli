@@ -9,6 +9,7 @@ import { MemoryAccessDenied } from "@/components/memory-access-denied";
 import { MemoryNotFound } from "@/components/memory-not-found";
 import { MemoryTemporaryError } from "@/components/memory-temporary-error";
 import { MemoryView } from "@/components/memory-view";
+import type { InitialMemoryRouteState } from "@/src/runtime-config";
 
 type MemoryLoadState =
   | { kind: "loading" }
@@ -19,14 +20,16 @@ type MemoryLoadState =
 
 export function PublicMemoryPage({
   memoryId,
+  initialState,
   mcpEndpoint,
   publicApiOrigin,
 }: {
   memoryId: string;
+  initialState: InitialMemoryRouteState | null;
   mcpEndpoint: string | null;
   publicApiOrigin: string;
 }) {
-  const [state, setState] = useState<MemoryLoadState>({ kind: "loading" });
+  const [state, setState] = useState<MemoryLoadState>(() => initialStateToLoadState(initialState));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -144,4 +147,14 @@ function parseMemoryShowResponse(value: Record<string, unknown>): MemoryShowResp
 
 function toRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value)) : null;
+}
+
+function initialStateToLoadState(initialState: InitialMemoryRouteState | null): MemoryLoadState {
+  if (!initialState) {
+    return { kind: "loading" };
+  }
+  if (initialState.kind === "temporary_error") {
+    return { kind: "temporary_error" };
+  }
+  return { kind: initialState.kind };
 }

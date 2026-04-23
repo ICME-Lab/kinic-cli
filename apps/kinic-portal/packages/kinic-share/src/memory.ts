@@ -86,24 +86,7 @@ export async function resolvePublicMemoryDetails(agent: HttpAgent, memoryId: str
 }
 
 export async function resolvePublicMemorySummary(agent: HttpAgent, memoryId: string): Promise<PublicMemorySummaryState> {
-  if (!isValidPrincipalText(memoryId)) {
-    return { kind: "invalid", error: "invalid memory id" };
-  }
-
-  try {
-    return { kind: "accessible", memory: await getMemorySummary(agent, memoryId) };
-  } catch (error) {
-    if (isRuntimeErrorKind(error, "not_found")) {
-      return { kind: "not_found", error: "memory not found" };
-    }
-    if (isRuntimeErrorKind(error, "denied")) {
-      return { kind: "denied", error: "anonymous access denied" };
-    }
-    if (isRuntimeErrorKind(error, "transient")) {
-      return { kind: "transient_error", error: TRANSIENT_QUERY_ERROR };
-    }
-    throw error;
-  }
+  return resolvePublicMemoryState(memoryId, () => checkAnonymousAccess(agent, memoryId), () => getMemorySummary(agent, memoryId));
 }
 
 export async function searchMemory(agent: HttpAgent, memoryId: string, embedding: number[]): Promise<Array<{ score: number; payload: string }>> {

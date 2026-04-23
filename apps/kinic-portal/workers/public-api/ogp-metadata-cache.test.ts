@@ -25,6 +25,16 @@ describe("ogp metadata cache", () => {
     await expect(readOgpMetadataCache(cache, "m1")).resolves.toBeNull();
   });
 
+  it("treats requested version mismatch as a cache miss", async () => {
+    const cache = {
+      get: vi.fn().mockResolvedValueOnce({ key: "memory-ogp-meta:m1:v1", version: "v1" }),
+      put: vi.fn(),
+    };
+
+    await expect(readOgpMetadataCache(cache, "m1", "v2")).resolves.toBeNull();
+    expect(cache.get).toHaveBeenCalledTimes(1);
+  });
+
   it("writes both versioned entry and memory pointer", async () => {
     const cache = {
       get: vi.fn(),

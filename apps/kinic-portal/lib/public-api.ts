@@ -2,7 +2,7 @@
 // What: resolves the dedicated public API Worker origin and builds absolute URLs.
 // Why: portal pages must stay light while read-only APIs move to a separate Worker.
 
-const DEFAULT_PUBLIC_API_ORIGIN = "https://kinic-portal-public-api.kasane.workers.dev";
+const DEFAULT_PUBLIC_API_ORIGIN = "https://api.kinic.xyz";
 
 export function resolvePublicApiOrigin(): string {
   const raw = process.env.KINIC_PUBLIC_API_ORIGIN?.trim();

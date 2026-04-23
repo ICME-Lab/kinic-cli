@@ -11,7 +11,7 @@ Kinic Portal is the public read-only sharing surface built on Vite, React Router
 
 ## Sharing Conditions
 
-- The memory canister already grants the `anonymous reader` role
+- The memory canister must pass the anonymous `get_name()` probe used by the shared public-memory resolver
 - The web surface does not maintain its own ACL
 
 ## Boundaries
@@ -19,7 +19,7 @@ Kinic Portal is the public read-only sharing surface built on Vite, React Router
 - `/m/:memoryId` is a Worker-rendered shell with route-specific HTML metadata, while public detail and summary load after hydration from the portal Worker itself
 - Public AI summaries below the description are generated on demand and cached in Cloudflare KV on the portal Worker
 - Memory OGP prefers the cached English summary when present; otherwise it falls back to the memory description
-- Memory OGP also caches the minimal metadata subset (`name`, `description`, `version`) in KV on the dedicated public API Worker so warm card renders can skip canister `get_metadata`
+- Memory OGP also caches the minimal metadata subset (`name`, `description`, `version`) in KV on the dedicated public API Worker so warm card renders can skip repeated canister reads after the anonymous `get_name()` probe has already established public access
 - Public chat and summary routes fetch canister search results, then truncate them server-side to fixed caps before prompt construction
 - `/m/:memoryId` restores server-side status handling: accessible memories return `200`, anonymous denial returns `403`, missing/invalid memories return `404`, and transient verification failures return `503`
 - Future owner or authenticated actions are expected to call the canister directly from the client principal
@@ -71,7 +71,7 @@ Shared web:
 
 - `KINIC_PORTAL_ORIGIN` absolute origin for OGP and canonical URLs. Required for Worker deploys and validated by `verify:deploy-contract`
 - `KINIC_PUBLIC_API_ORIGIN` absolute origin for the dedicated chat/OGP Worker. Required for Worker deploys
-- `KINIC_REMOTE_MCP_ORIGIN` absolute origin for the separate remote MCP Worker. When omitted, `/m/:memoryId` hides the MCP card
+- `KINIC_REMOTE_MCP_ORIGIN` absolute origin for the separate remote MCP Worker. Production value is `https://mcp.kinic.xyz`
 - `IC_HOST` is fixed to `https://ic0.app` in `apps/kinic-portal/wrangler.jsonc`
 - `EMBEDDING_API_ENDPOINT` is required on the portal Worker because summary generation moved same-origin
 - `SUMMARY_CACHE` and `SUMMARY_CACHE_TTL_SECONDS` must be present on both `portal` and `public-api`
@@ -107,7 +107,8 @@ pnpm wrangler kv namespace create SUMMARY_CACHE --preview
 - `portal` and `public-api` must point at the same `SUMMARY_CACHE` namespace ids
 - `portal` and `public-api` must both declare `EMBEDDING_API_ENDPOINT` in `secrets.required`
 - `portal` `vars.KINIC_PORTAL_ORIGIN` must be present, absolute, and non-`localhost`
-- `portal` `vars.KINIC_PUBLIC_API_ORIGIN` must stay aligned with `https://kinic-portal-public-api.kasane.workers.dev`
+- `portal` `vars.KINIC_PUBLIC_API_ORIGIN` must be present, absolute, and non-`localhost`
+- production origins are `https://memory.kinic.xyz`, `https://api.kinic.xyz`, `https://mcp.kinic.xyz`
 - `pnpm --filter @kinic/kinic-portal verify:deploy-contract` is the canonical read-only drift check
 - `pnpm --filter @kinic/public-api verify:deploy-contract` runs the same contract check from the nested Worker package
 
@@ -115,7 +116,7 @@ Public API Worker:
 
 - `EMBEDDING_API_ENDPOINT` required server-only endpoint for embedding generation and chat completion
 - `SUMMARY_CACHE` required shared Cloudflare KV binding for cached AI summaries and OGP summary reuse
-- The same `SUMMARY_CACHE` namespace also stores the OGP metadata subset under a separate `memory-ogp-meta:*` prefix
+- The same `SUMMARY_CACHE` namespace also stores the OGP metadata subset under a separate `memory-ogp-meta:*` prefix, with a `memory-ogp-meta-current:*` pointer for the latest version per memory
 - local `public-api` development reads `apps/kinic-portal/workers/public-api/.dev.vars`
 - Routes:
   - `POST /api/public/memories/:memoryId/chat`
@@ -145,6 +146,7 @@ pnpm wrangler kv namespace create SUMMARY_CACHE --preview
 - Deploy `public-api` first so the Worker exists before secret operations
 - Write the returned `SUMMARY_CACHE` ids into both Wrangler configs
 - Keep `KINIC_PUBLIC_API_ORIGIN` on `portal` aligned with the deployed `public-api` Worker origin
+- Set `KINIC_REMOTE_MCP_ORIGIN=https://mcp.kinic.xyz` on `portal` so the MCP card stays visible in production
 
 Regular production deploy:
 
@@ -183,6 +185,7 @@ Remote MCP:
 - `public_memory_search` defaults to 10 results and accepts `top_k` from 1 through 50
 - Portal routes use fixed post-fetch truncate caps: chat `5`, summary `5`, OGP no longer searches
 - Detailed spec: `apps/kinic-portal/docs/remote-mcp.md`
+- Production endpoint: `https://mcp.kinic.xyz/mcp`
 
 ## Notes
 
@@ -193,6 +196,7 @@ Remote MCP:
 - Local warm-hit checks for the OGP metadata cache must be performed against the same local `public-api` process because the metadata subset is written and read inside that Worker
 - HTML metadata `og:description` and `twitter:description` still use fixed metadata text; summary cache is only reused by the OGP image Worker path
 - OGP images are served with `Cache-Control: public, max-age=86400`, and memory page metadata appends `?v=<memory.version>` so updated cards bust caches without shortening TTL
+- The dedicated public API Worker also treats `?v=<memory.version>` as a freshness input: if the requested version differs from the current metadata-cache pointer version, it bypasses the warm metadata entry and refreshes from the live public resolver instead of serving stale card data
 
 ## Static Asset and OGP Verification
 

@@ -37,6 +37,13 @@ describe("site metadata", () => {
     expect(metadata.imageUrl).toBe("https://api.example.com/opengraph-image");
   });
 
+  it("uses memory.kinic.xyz defaults when env is absent", () => {
+    const metadata = buildSiteMetadata();
+
+    expect(metadata.canonicalUrl).toBe("https://memory.kinic.xyz/");
+    expect(metadata.imageUrl).toBe("https://api.kinic.xyz/opengraph-image");
+  });
+
   it("builds memory metadata without canister fetches", () => {
     process.env.KINIC_PORTAL_ORIGIN = "https://portal.example.com";
     process.env.KINIC_PUBLIC_API_ORIGIN = "https://api.example.com";
