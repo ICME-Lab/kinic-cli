@@ -16,6 +16,7 @@ use crate::{
     clients::memory::MemoryClient,
     commands::convert_pdf::pdf_to_markdown,
     embedding::{ensure_vector_dim_matches, late_chunking},
+    embedding_config::selected_embedding_dimension,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,8 +89,13 @@ pub async fn execute_insert_request(
 ) -> Result<InsertExecutionResult> {
     validate_insert_request_fields(request)?;
     let validated = validate_and_transform_insert_request(request)?;
+    let expected_dim = client
+        .get_dim()
+        .await
+        .context("Failed to load memory embedding dimension")?;
+    ensure_request_matches_memory_dim(&validated, request.memory_id(), expected_dim)?;
     let prepared = prepare_insert_request(&validated).await?;
-    ensure_prepared_items_match_memory(client, request.memory_id(), &prepared).await?;
+    ensure_prepared_items_match_memory(request.memory_id(), &prepared, expected_dim)?;
     let inserted_count = prepared.len();
     let source_name = validated.source_name();
 
@@ -152,18 +158,30 @@ pub fn validate_insert_request_fields(request: &InsertRequest) -> Result<()> {
     Ok(())
 }
 
-async fn ensure_prepared_items_match_memory(
-    client: &MemoryClient,
+fn ensure_request_matches_memory_dim(
+    request: &ValidatedInsertRequest,
+    memory_id: &str,
+    expected_dim: u64,
+) -> Result<()> {
+    match request {
+        ValidatedInsertRequest::Raw { embedding, .. } => {
+            ensure_vector_dim_matches(memory_id, embedding.len(), expected_dim)
+        }
+        ValidatedInsertRequest::Normal { .. } | ValidatedInsertRequest::Pdf { .. } => {
+            let selected_dim = selected_embedding_dimension()?;
+            ensure_vector_dim_matches(memory_id, selected_dim, expected_dim)
+        }
+    }
+}
+
+fn ensure_prepared_items_match_memory(
     memory_id: &str,
     items: &[PreparedInsertItem],
+    expected_dim: u64,
 ) -> Result<()> {
     let Some(first) = items.first() else {
         bail!("Insert content did not produce any chunks.");
     };
-    let expected_dim = client
-        .get_dim()
-        .await
-        .context("Failed to load memory embedding dimension")?;
     ensure_vector_dim_matches(memory_id, first.embedding.len(), expected_dim)
 }
 
@@ -478,7 +496,58 @@ mod tests {
 
     #[test]
     fn prepared_items_match_expected_dimension() {
-        ensure_vector_dim_matches("aaaaa-aa", 2, 2).unwrap();
+        ensure_prepared_items_match_memory(
+            "aaaaa-aa",
+            &[PreparedInsertItem {
+                embedding: vec![0.1, 0.2],
+                payload: "{}".to_string(),
+            }],
+            2,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn prepared_items_reject_dimension_mismatch() {
+        let error = ensure_prepared_items_match_memory(
+            "aaaaa-aa",
+            &[PreparedInsertItem {
+                embedding: vec![0.1, 0.2],
+                payload: "{}".to_string(),
+            }],
+            3,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("Embedding dimension mismatch"));
+    }
+
+    #[test]
+    fn raw_insert_request_fails_fast_on_dimension_mismatch() {
+        let request = ValidatedInsertRequest::Raw {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: "payload".to_string(),
+            embedding: vec![0.1, 0.2],
+        };
+
+        let error = ensure_request_matches_memory_dim(&request, "aaaaa-aa", 3).unwrap_err();
+
+        assert!(error.to_string().contains("Embedding dimension mismatch"));
+    }
+
+    #[test]
+    fn normal_insert_request_uses_selected_backend_dimension_for_fail_fast_checks() {
+        let request = ValidatedInsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("payload".to_string()),
+            file_path: None,
+        };
+
+        let error = ensure_request_matches_memory_dim(&request, "aaaaa-aa", 3).unwrap_err();
+
+        assert!(error.to_string().contains("Embedding dimension mismatch"));
     }
 
     #[test]

@@ -73,6 +73,13 @@ pub fn default_embedding_model_id() -> String {
 }
 
 #[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TestLoadPreferencesError {
+    NoConfigDir,
+    Yaml,
+}
+
+#[cfg(test)]
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
     if let Some(error) = test_load_error() {
         return Err(error);
@@ -92,22 +99,33 @@ pub fn save_user_preferences(_preferences: &UserPreferences) -> Result<(), Setti
 }
 
 #[cfg(test)]
-pub fn set_load_user_preferences_error_for_tests(enabled: bool) {
-    TEST_LOAD_ERROR.with(|slot| slot.set(enabled));
+pub fn set_load_user_preferences_error_for_tests(error: Option<TestLoadPreferencesError>) {
+    TEST_LOAD_ERROR.with(|slot| slot.set(test_load_error_code(error)));
 }
 
 #[cfg(test)]
 fn test_load_error() -> Option<SettingsError> {
-    if TEST_LOAD_ERROR.with(Cell::get) {
-        Some(SettingsError::NoConfigDir)
-    } else {
-        None
+    match TEST_LOAD_ERROR.with(Cell::get) {
+        1 => Some(SettingsError::NoConfigDir),
+        2 => Some(SettingsError::Yaml(
+            serde_yaml::from_str::<UserPreferences>(":").unwrap_err(),
+        )),
+        _ => None,
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    static TEST_LOAD_ERROR: Cell<bool> = const { Cell::new(false) };
+    static TEST_LOAD_ERROR: Cell<u8> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+const fn test_load_error_code(error: Option<TestLoadPreferencesError>) -> u8 {
+    match error {
+        Some(TestLoadPreferencesError::NoConfigDir) => 1,
+        Some(TestLoadPreferencesError::Yaml) => 2,
+        None => 0,
+    }
 }
 
 #[cfg(not(test))]

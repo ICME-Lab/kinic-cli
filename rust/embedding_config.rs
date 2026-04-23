@@ -56,6 +56,9 @@ impl LocalEmbeddingConfig {
         let soft_limit = env_usize(CHUNK_SOFT_LIMIT_ENV_VAR, DEFAULT_CHUNK_SOFT_LIMIT)?;
         let hard_limit = env_usize(CHUNK_HARD_LIMIT_ENV_VAR, DEFAULT_CHUNK_HARD_LIMIT)?;
         let overlap = env_usize(CHUNK_OVERLAP_ENV_VAR, DEFAULT_CHUNK_OVERLAP)?;
+        if max_length == 0 {
+            bail!("{MAX_LENGTH_ENV_VAR} must be a positive integer");
+        }
         if soft_limit == 0 || hard_limit == 0 {
             bail!("Chunk limits must be positive.");
         }
@@ -101,6 +104,12 @@ pub(crate) fn selected_local_embedding_config() -> Result<Option<LocalEmbeddingC
     }
 }
 
+pub(crate) fn selected_embedding_dimension() -> Result<usize> {
+    Ok(embedding_dimension_for_backend(
+        resolve_embedding_backend_id()?,
+    ))
+}
+
 fn resolve_embedding_backend_id() -> Result<&'static str> {
     let preferences = load_embedding_preferences()?;
     Ok(normalize_supported_embedding_backend_id(
@@ -109,13 +118,13 @@ fn resolve_embedding_backend_id() -> Result<&'static str> {
 }
 
 fn load_embedding_preferences() -> Result<crate::preferences::UserPreferences> {
-    preferences::load_user_preferences().map_err(|error| match error {
-        SettingsError::NoConfigDir => anyhow!(
-            "Embedding backend could not be resolved because the shared settings directory is unavailable. Kinic requires a writable config directory for shared preferences."
-        ),
-        other => anyhow!(other)
-            .context("Failed to load shared embedding backend from tui.yaml"),
-    })
+    match preferences::load_user_preferences() {
+        Ok(preferences) => Ok(preferences),
+        Err(SettingsError::NoConfigDir) => Ok(preferences::UserPreferences::default()),
+        Err(other) => {
+            Err(anyhow!(other).context("Failed to load shared embedding backend from tui.yaml"))
+        }
+    }
 }
 
 pub(crate) fn supported_embedding_backends() -> Vec<SupportedEmbeddingBackend> {
@@ -138,6 +147,14 @@ pub(crate) fn normalize_supported_embedding_backend_id(raw: &str) -> &'static st
         API_EMBEDDING_BACKEND_ID => API_EMBEDDING_BACKEND_ID,
         MXBAI_EMBEDDING_BACKEND_ID => MXBAI_EMBEDDING_BACKEND_ID,
         _ => API_EMBEDDING_BACKEND_ID,
+    }
+}
+
+pub(crate) fn embedding_dimension_for_backend(backend_id: &str) -> usize {
+    match normalize_supported_embedding_backend_id(backend_id) {
+        API_EMBEDDING_BACKEND_ID => API_EMBEDDING_DIMENSION,
+        MXBAI_EMBEDDING_BACKEND_ID => MXBAI_EMBEDDING_DIMENSION,
+        _ => unreachable!("embedding backend should already be normalized"),
     }
 }
 
@@ -176,7 +193,7 @@ mod tests {
     }
 
     fn reset_test_preference_error() {
-        preferences::set_load_user_preferences_error_for_tests(false);
+        preferences::set_load_user_preferences_error_for_tests(None);
     }
 
     #[test]
@@ -240,19 +257,64 @@ mod tests {
     }
 
     #[test]
-    fn selected_local_embedding_config_errors_when_preferences_fail_to_load() {
+    fn selected_local_embedding_config_defaults_to_api_when_no_config_dir_is_available() {
         let _guard = env_guard();
-        preferences::set_load_user_preferences_error_for_tests(true);
+        preferences::set_load_user_preferences_error_for_tests(Some(
+            preferences::TestLoadPreferencesError::NoConfigDir,
+        ));
+
+        let config = selected_local_embedding_config().expect("no config dir should fall back");
+
+        assert_eq!(config, None);
+        reset_test_preference_error();
+    }
+
+    #[test]
+    fn selected_embedding_backend_defaults_to_api_when_no_config_dir_is_available() {
+        let _guard = env_guard();
+        preferences::set_load_user_preferences_error_for_tests(Some(
+            preferences::TestLoadPreferencesError::NoConfigDir,
+        ));
+
+        let backend =
+            selected_embedding_backend_id().expect("no config dir should select api backend");
+
+        assert_eq!(backend, API_EMBEDDING_BACKEND_ID);
+        reset_test_preference_error();
+    }
+
+    #[test]
+    fn selected_local_embedding_config_still_errors_on_yaml_failure() {
+        let _guard = env_guard();
+        preferences::set_load_user_preferences_error_for_tests(Some(
+            preferences::TestLoadPreferencesError::Yaml,
+        ));
 
         let error =
-            selected_local_embedding_config().expect_err("load failure should reach caller");
+            selected_local_embedding_config().expect_err("yaml failure should reach caller");
 
         assert!(
             error
                 .to_string()
-                .contains("shared settings directory is unavailable")
+                .contains("Failed to load shared embedding backend from tui.yaml")
         );
         reset_test_preference_error();
+    }
+
+    #[test]
+    fn local_model_config_rejects_zero_max_length() {
+        let _guard = env_guard();
+        reset_test_preference_error();
+        unsafe {
+            env::set_var(MAX_LENGTH_ENV_VAR, "0");
+        }
+
+        let error = LocalEmbeddingConfig::mxbai().expect_err("zero max length should fail");
+
+        assert!(error.to_string().contains(MAX_LENGTH_ENV_VAR));
+        unsafe {
+            env::remove_var(MAX_LENGTH_ENV_VAR);
+        }
     }
 
     #[test]
