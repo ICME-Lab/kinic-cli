@@ -42,9 +42,9 @@ export function buildChatGptMemoryPrompt(memoryId: string): string {
   return [
     "@Kinic-Memory",
     "",
-    `Answer only from public memory ${memoryId}.`,
-    "Search this memory before answering.",
-    "Use public_memory_show only when metadata is needed.",
+    `Use memory ${memoryId}.`,
+    `Call public_memory_search with top_k ${DEFAULT_REMOTE_MCP_SEARCH_TOP_K} before answering.`,
+    "Only call public_memory_show if search results are insufficient.",
     "If the answer is not in the memory, say so.",
   ].join("\n");
 }
