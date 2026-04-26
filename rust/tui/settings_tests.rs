@@ -291,7 +291,7 @@ fn settings_snapshot_projects_chat_retrieval_section() {
             chat_overall_top_k: 10,
             chat_per_memory_cap: 4,
             chat_mmr_lambda: 80,
-            embedding_model_id: "Snowflake/snowflake-arctic-embed-s".to_string(),
+            embedding_model_id: "BAAI/bge-m3".to_string(),
             ..UserPreferences::default()
         },
         &Vec::new(),
@@ -317,7 +317,7 @@ fn settings_snapshot_projects_chat_retrieval_section() {
             "Saved preferences",
             SETTINGS_ENTRY_EMBEDDING_MODEL_ID
         ),
-        "Snowflake Arctic Embed S (384)"
+        "BAAI BGE-M3 (1024)"
     );
 }
 

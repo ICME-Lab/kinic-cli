@@ -427,13 +427,15 @@ Embedding backend initialization:
 
 - initial saved backend: `api`
 - API dimension: `1024`
-- local option example: `Snowflake/snowflake-arctic-embed-s`
+- local option example: `BAAI/bge-m3`
 - local cache dir: `$HOME/.cache/kinic-cli/embeddings`
+- new memories are created with dimension `1024`
 
 Shared settings behavior:
 
 - if the shared config directory is available and `tui.yaml` is missing, Kinic initializes with the saved default `api`
 - if the shared config directory is unavailable, embedding-backed commands fail explicitly instead of falling back
+- local search/insert against older non-`1024` memories fails explicitly until the memory is reset or reindexed
 
 Local runtime overrides:
 

@@ -23,23 +23,9 @@ const DEFAULT_CHUNK_OVERLAP: usize = 120;
 pub(crate) const API_EMBEDDING_BACKEND_ID: &str = "api";
 const API_EMBEDDING_BACKEND_LABEL: &str = "API (remote default)";
 const API_EMBEDDING_DIMENSION: usize = 1024;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ModelSpec {
-    id: &'static str,
-    label: &'static str,
-    model: EmbeddingModel,
-    dimension: usize,
-}
-
-const SNOWFLAKE_MODEL: ModelSpec = ModelSpec {
-    id: "Snowflake/snowflake-arctic-embed-s",
-    label: "Snowflake Arctic Embed S",
-    model: EmbeddingModel::SnowflakeArcticEmbedS,
-    dimension: 384,
-};
-
-const SUPPORTED_MODELS: [ModelSpec; 1] = [SNOWFLAKE_MODEL];
+pub(crate) const BGEM3_EMBEDDING_BACKEND_ID: &str = "BAAI/bge-m3";
+const BGEM3_EMBEDDING_BACKEND_LABEL: &str = "BAAI BGE-M3";
+const BGEM3_EMBEDDING_DIMENSION: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SupportedEmbeddingBackend {
@@ -57,21 +43,20 @@ pub(crate) struct ChunkingConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalEmbeddingConfig {
-    pub model_id: &'static str,
-    pub dimension: usize,
     pub cache_dir: PathBuf,
     pub max_length: usize,
     pub chunking: ChunkingConfig,
-    model: EmbeddingModel,
 }
 
 impl LocalEmbeddingConfig {
-    pub(crate) fn for_model_id(model_id: &str) -> Result<Self> {
-        let spec = parse_model_spec(model_id)?;
+    pub(crate) fn bgem3() -> Result<Self> {
         let max_length = env_usize(MAX_LENGTH_ENV_VAR, DEFAULT_MAX_LENGTH)?;
         let soft_limit = env_usize(CHUNK_SOFT_LIMIT_ENV_VAR, DEFAULT_CHUNK_SOFT_LIMIT)?;
         let hard_limit = env_usize(CHUNK_HARD_LIMIT_ENV_VAR, DEFAULT_CHUNK_HARD_LIMIT)?;
         let overlap = env_usize(CHUNK_OVERLAP_ENV_VAR, DEFAULT_CHUNK_OVERLAP)?;
+        if max_length == 0 {
+            bail!("{MAX_LENGTH_ENV_VAR} must be a positive integer");
+        }
         if soft_limit == 0 || hard_limit == 0 {
             bail!("Chunk limits must be positive.");
         }
@@ -83,8 +68,6 @@ impl LocalEmbeddingConfig {
         }
 
         Ok(Self {
-            model_id: spec.id,
-            dimension: spec.dimension,
             cache_dir: cache_dir()?,
             max_length,
             chunking: ChunkingConfig {
@@ -92,12 +75,11 @@ impl LocalEmbeddingConfig {
                 hard_limit,
                 overlap,
             },
-            model: spec.model,
         })
     }
 
     pub(crate) fn text_init_options(&self) -> TextInitOptions {
-        TextInitOptions::new(self.model.clone())
+        TextInitOptions::new(EmbeddingModel::BGEM3)
             .with_cache_dir(self.cache_dir.clone())
             .with_max_length(self.max_length)
             .with_show_download_progress(false)
@@ -108,20 +90,22 @@ pub(crate) fn selected_embedding_backend_id() -> Result<&'static str> {
     resolve_embedding_backend_id()
 }
 
-pub(crate) fn configured_embedding_dimension() -> Result<u64> {
-    let backend_id = resolve_embedding_backend_id()?;
-    if backend_id == API_EMBEDDING_BACKEND_ID {
-        return Ok(API_EMBEDDING_DIMENSION as u64);
-    }
-    Ok(LocalEmbeddingConfig::for_model_id(backend_id)?.dimension as u64)
+pub(crate) fn create_memory_dimension_u64() -> u64 {
+    API_EMBEDDING_DIMENSION as u64
 }
 
 pub(crate) fn selected_local_embedding_config() -> Result<Option<LocalEmbeddingConfig>> {
-    let backend_id = resolve_embedding_backend_id()?;
-    if backend_id == API_EMBEDDING_BACKEND_ID {
-        return Ok(None);
+    match resolve_embedding_backend_id()? {
+        API_EMBEDDING_BACKEND_ID => Ok(None),
+        BGEM3_EMBEDDING_BACKEND_ID => LocalEmbeddingConfig::bgem3().map(Some),
+        _ => unreachable!("embedding backend should already be normalized"),
     }
-    LocalEmbeddingConfig::for_model_id(backend_id).map(Some)
+}
+
+pub(crate) fn selected_embedding_dimension() -> Result<usize> {
+    Ok(embedding_dimension_for_backend(
+        resolve_embedding_backend_id()?,
+    ))
 }
 
 fn resolve_embedding_backend_id() -> Result<&'static str> {
@@ -132,59 +116,44 @@ fn resolve_embedding_backend_id() -> Result<&'static str> {
 }
 
 fn load_embedding_preferences() -> Result<crate::preferences::UserPreferences> {
-    preferences::load_user_preferences().map_err(|error| match error {
-        SettingsError::NoConfigDir => anyhow!(
-            "Embedding backend could not be resolved because the shared settings directory is unavailable. Kinic requires a writable config directory for shared preferences."
-        ),
-        other => anyhow!(other)
-            .context("Failed to load shared embedding backend from tui.yaml"),
-    })
+    match preferences::load_user_preferences() {
+        Ok(preferences) => Ok(preferences),
+        Err(SettingsError::NoConfigDir) => Ok(preferences::UserPreferences::default()),
+        Err(other) => {
+            Err(anyhow!(other).context("Failed to load shared embedding backend from tui.yaml"))
+        }
+    }
 }
 
 pub(crate) fn supported_embedding_backends() -> Vec<SupportedEmbeddingBackend> {
-    std::iter::once(SupportedEmbeddingBackend {
-        id: API_EMBEDDING_BACKEND_ID,
-        label: API_EMBEDDING_BACKEND_LABEL,
-        dimension: API_EMBEDDING_DIMENSION,
-    })
-    .chain(
-        SUPPORTED_MODELS
-            .iter()
-            .map(|spec| SupportedEmbeddingBackend {
-                id: spec.id,
-                label: spec.label,
-                dimension: spec.dimension,
-            }),
-    )
-    .collect()
+    vec![
+        SupportedEmbeddingBackend {
+            id: API_EMBEDDING_BACKEND_ID,
+            label: API_EMBEDDING_BACKEND_LABEL,
+            dimension: API_EMBEDDING_DIMENSION,
+        },
+        SupportedEmbeddingBackend {
+            id: BGEM3_EMBEDDING_BACKEND_ID,
+            label: BGEM3_EMBEDDING_BACKEND_LABEL,
+            dimension: BGEM3_EMBEDDING_DIMENSION,
+        },
+    ]
 }
 
 pub(crate) fn normalize_supported_embedding_backend_id(raw: &str) -> &'static str {
-    let trimmed = raw.trim();
-    if trimmed == API_EMBEDDING_BACKEND_ID {
-        return API_EMBEDDING_BACKEND_ID;
+    match raw.trim() {
+        API_EMBEDDING_BACKEND_ID => API_EMBEDDING_BACKEND_ID,
+        BGEM3_EMBEDDING_BACKEND_ID => BGEM3_EMBEDDING_BACKEND_ID,
+        _ => API_EMBEDDING_BACKEND_ID,
     }
-    parse_model_spec(trimmed)
-        .map(|spec| spec.id)
-        .unwrap_or(API_EMBEDDING_BACKEND_ID)
 }
 
-fn parse_model_spec(raw: &str) -> Result<ModelSpec> {
-    let trimmed = raw.trim();
-    SUPPORTED_MODELS
-        .iter()
-        .find(|spec| spec.id == trimmed)
-        .cloned()
-        .ok_or_else(|| {
-            anyhow!(
-                "Embedding backend must be one of: {}",
-                supported_embedding_backends()
-                    .iter()
-                    .map(|spec| spec.id)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
+pub(crate) fn embedding_dimension_for_backend(backend_id: &str) -> usize {
+    match normalize_supported_embedding_backend_id(backend_id) {
+        API_EMBEDDING_BACKEND_ID => API_EMBEDDING_DIMENSION,
+        BGEM3_EMBEDDING_BACKEND_ID => BGEM3_EMBEDDING_DIMENSION,
+        _ => unreachable!("embedding backend should already be normalized"),
+    }
 }
 
 fn cache_dir() -> Result<PathBuf> {
@@ -222,11 +191,11 @@ mod tests {
     }
 
     fn reset_test_preference_error() {
-        preferences::set_load_user_preferences_error_for_tests(false);
+        preferences::set_load_user_preferences_error_for_tests(None);
     }
 
     #[test]
-    fn configured_dimension_defaults_to_api() {
+    fn selected_local_embedding_config_defaults_to_api_backend() {
         let _guard = env_guard();
         reset_test_preference_error();
         unsafe {
@@ -236,13 +205,13 @@ mod tests {
             env::remove_var(CHUNK_HARD_LIMIT_ENV_VAR);
             env::remove_var(CHUNK_OVERLAP_ENV_VAR);
         }
-        let config = configured_embedding_dimension().expect("api dimension should load");
+        let config = selected_local_embedding_config().expect("api backend should load");
 
-        assert_eq!(config, 1024);
+        assert_eq!(config, None);
     }
 
     #[test]
-    fn local_model_config_uses_snowflake() {
+    fn local_model_config_uses_bgem3() {
         let _guard = env_guard();
         reset_test_preference_error();
         unsafe {
@@ -252,11 +221,8 @@ mod tests {
             env::remove_var(CHUNK_HARD_LIMIT_ENV_VAR);
             env::remove_var(CHUNK_OVERLAP_ENV_VAR);
         }
-        let config = LocalEmbeddingConfig::for_model_id("Snowflake/snowflake-arctic-embed-s")
-            .expect("local config should load");
+        let config = LocalEmbeddingConfig::bgem3().expect("local config should load");
 
-        assert_eq!(config.model_id, "Snowflake/snowflake-arctic-embed-s");
-        assert_eq!(config.dimension, 384);
         assert_eq!(config.max_length, 512);
         assert_eq!(config.chunking.soft_limit, 800);
     }
@@ -270,25 +236,13 @@ mod tests {
             env::set_var(CHUNK_HARD_LIMIT_ENV_VAR, "1200");
         }
 
-        let error = LocalEmbeddingConfig::for_model_id("Snowflake/snowflake-arctic-embed-s")
-            .expect_err("invalid bounds should fail");
+        let error = LocalEmbeddingConfig::bgem3().expect_err("invalid bounds should fail");
         assert!(error.to_string().contains("soft limit"));
 
         unsafe {
             env::remove_var(CHUNK_SOFT_LIMIT_ENV_VAR);
             env::remove_var(CHUNK_HARD_LIMIT_ENV_VAR);
         }
-    }
-
-    #[test]
-    fn unsupported_model_is_rejected() {
-        reset_test_preference_error();
-        let error = parse_model_spec("bad-model").expect_err("bad model should fail");
-        assert!(
-            error
-                .to_string()
-                .contains("Embedding backend must be one of")
-        );
     }
 
     #[test]
@@ -301,17 +255,77 @@ mod tests {
     }
 
     #[test]
-    fn configured_dimension_errors_when_preferences_fail_to_load() {
-        let _guard = env_guard();
-        preferences::set_load_user_preferences_error_for_tests(true);
+    fn legacy_mxbai_backend_normalizes_to_api() {
+        reset_test_preference_error();
+        assert_eq!(
+            normalize_supported_embedding_backend_id("mixedbread-ai/mxbai-embed-large-v1"),
+            API_EMBEDDING_BACKEND_ID
+        );
+    }
 
-        let error = configured_embedding_dimension().expect_err("load failure should reach caller");
+    #[test]
+    fn selected_local_embedding_config_defaults_to_api_when_no_config_dir_is_available() {
+        let _guard = env_guard();
+        preferences::set_load_user_preferences_error_for_tests(Some(
+            preferences::TestLoadPreferencesError::NoConfigDir,
+        ));
+
+        let config = selected_local_embedding_config().expect("no config dir should fall back");
+
+        assert_eq!(config, None);
+        reset_test_preference_error();
+    }
+
+    #[test]
+    fn selected_embedding_backend_defaults_to_api_when_no_config_dir_is_available() {
+        let _guard = env_guard();
+        preferences::set_load_user_preferences_error_for_tests(Some(
+            preferences::TestLoadPreferencesError::NoConfigDir,
+        ));
+
+        let backend =
+            selected_embedding_backend_id().expect("no config dir should select api backend");
+
+        assert_eq!(backend, API_EMBEDDING_BACKEND_ID);
+        reset_test_preference_error();
+    }
+
+    #[test]
+    fn selected_local_embedding_config_still_errors_on_yaml_failure() {
+        let _guard = env_guard();
+        preferences::set_load_user_preferences_error_for_tests(Some(
+            preferences::TestLoadPreferencesError::Yaml,
+        ));
+
+        let error =
+            selected_local_embedding_config().expect_err("yaml failure should reach caller");
 
         assert!(
             error
                 .to_string()
-                .contains("shared settings directory is unavailable")
+                .contains("Failed to load shared embedding backend from tui.yaml")
         );
         reset_test_preference_error();
+    }
+
+    #[test]
+    fn local_model_config_rejects_zero_max_length() {
+        let _guard = env_guard();
+        reset_test_preference_error();
+        unsafe {
+            env::set_var(MAX_LENGTH_ENV_VAR, "0");
+        }
+
+        let error = LocalEmbeddingConfig::bgem3().expect_err("zero max length should fail");
+
+        assert!(error.to_string().contains(MAX_LENGTH_ENV_VAR));
+        unsafe {
+            env::remove_var(MAX_LENGTH_ENV_VAR);
+        }
+    }
+
+    #[test]
+    fn create_memory_dimension_is_fixed_to_1024() {
+        assert_eq!(create_memory_dimension_u64(), 1024);
     }
 }

@@ -13,17 +13,15 @@ use crate::{
     local_chunking::chunk_markdown,
 };
 
-const SNOWFLAKE_QUERY_PREFIX: &str = "Represent this sentence for searching relevant passages: ";
-
 struct CachedModel {
-    model_id: String,
     model: TextEmbedding,
 }
 
 static MODEL: OnceLock<Mutex<Option<CachedModel>>> = OnceLock::new();
 
 pub(crate) async fn embed_query(text: &str) -> Result<Vec<f32>> {
-    embed_texts(vec![snowflake_query_text(text)])
+    load_selected_local_config()?;
+    embed_texts(vec![text.trim().to_string()])
         .await
         .map(|mut rows| {
             rows.pop()
@@ -69,10 +67,6 @@ fn load_selected_local_config() -> Result<LocalEmbeddingConfig> {
         .ok_or_else(|| anyhow::anyhow!("Local embedding backend is not selected"))
 }
 
-fn snowflake_query_text(text: &str) -> String {
-    format!("{SNOWFLAKE_QUERY_PREFIX}{}", text.trim())
-}
-
 fn model_cache() -> &'static Mutex<Option<CachedModel>> {
     MODEL.get_or_init(|| Mutex::new(None))
 }
@@ -81,10 +75,7 @@ fn ensure_cached_model<'a>(
     cache: &'a mut Option<CachedModel>,
     config: &LocalEmbeddingConfig,
 ) -> Result<&'a mut CachedModel> {
-    let needs_reload = cache
-        .as_ref()
-        .is_none_or(|cached| cached.model_id != config.model_id);
-    if needs_reload {
+    if cache.is_none() {
         std::fs::create_dir_all(&config.cache_dir).with_context(|| {
             format!(
                 "Failed to create embedding cache dir {}",
@@ -92,10 +83,7 @@ fn ensure_cached_model<'a>(
             )
         })?;
         let model = TextEmbedding::try_new(config.text_init_options())?;
-        *cache = Some(CachedModel {
-            model_id: config.model_id.to_string(),
-            model,
-        });
+        *cache = Some(CachedModel { model });
     }
     Ok(cache
         .as_mut()
@@ -104,22 +92,16 @@ fn ensure_cached_model<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::snowflake_query_text;
-
     #[test]
-    fn local_embedding_supports_snowflake_model_id() {
-        let config = crate::embedding_config::LocalEmbeddingConfig::for_model_id(
-            "Snowflake/snowflake-arctic-embed-s",
-        )
-        .expect("snowflake config should load");
-        assert_eq!(config.dimension, 384);
+    fn local_embedding_supports_bgem3_model_id() {
+        let config = crate::embedding_config::LocalEmbeddingConfig::bgem3()
+            .expect("bgem3 config should load");
+        assert_eq!(config.max_length, 512);
     }
 
     #[test]
-    fn snowflake_query_text_uses_retrieval_prefix() {
-        assert_eq!(
-            snowflake_query_text("hello"),
-            "Represent this sentence for searching relevant passages: hello"
-        );
+    fn embed_query_trims_without_instruction_prefix() {
+        let trimmed = "  hello  ".trim().to_string();
+        assert_eq!(trimmed, "hello");
     }
 }

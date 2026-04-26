@@ -1,8 +1,7 @@
-use std::{cmp::Ordering, fs, path::PathBuf};
+use std::{cmp::Ordering, path::PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use ic_agent::export::Principal;
-use serde_json::json;
 
 use crate::{
     agent::AgentFactory,
@@ -13,9 +12,10 @@ use crate::{
     },
     commands::{
         ask_ai::{AskAiResult, ask_ai_flow},
-        convert_pdf, create,
+        create,
     },
-    embedding::{fetch_embedding, late_chunking},
+    embedding::{ensure_memory_dim_matches, ensure_vector_dim_matches, fetch_embedding},
+    insert_service::{InsertRequest, execute_insert_request},
     memory_client_builder::build_memory_client_from_identity,
 };
 use icrc_ledger_types::icrc1::account::Account;
@@ -52,21 +52,19 @@ pub(crate) async fn insert_memory(
     text: Option<String>,
     file_path: Option<PathBuf>,
 ) -> Result<usize> {
-    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
-    let content = resolve_insert_content(text, file_path)?;
-    let chunks = late_chunking(&content).await?;
-    let chunk_count = chunks.len();
-
-    for chunk in chunks {
-        let payload = json!({
-            "tag": &tag,
-            "sentence": &chunk.sentence
-        })
-        .to_string();
-        client.insert(chunk.embedding, &payload).await?;
-    }
-
-    Ok(chunk_count)
+    let client =
+        build_memory_client_from_identity(use_mainnet, identity, memory_id.clone()).await?;
+    let result = execute_insert_request(
+        &client,
+        &InsertRequest::Normal {
+            memory_id,
+            tag,
+            text,
+            file_path,
+        },
+    )
+    .await?;
+    Ok(result.inserted_count)
 }
 
 pub(crate) async fn insert_memory_raw(
@@ -77,14 +75,20 @@ pub(crate) async fn insert_memory_raw(
     text: String,
     embedding: Vec<f32>,
 ) -> Result<usize> {
-    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
-    let payload = json!({
-        "tag": &tag,
-        "sentence": &text
-    })
-    .to_string();
-    client.insert(embedding, &payload).await?;
-    Ok(1)
+    let client =
+        build_memory_client_from_identity(use_mainnet, identity, memory_id.clone()).await?;
+    let result = execute_insert_request(
+        &client,
+        &InsertRequest::Raw {
+            memory_id,
+            tag,
+            text,
+            embedding_json: serde_json::to_string(&embedding)
+                .context("Failed to serialize raw embedding")?,
+        },
+    )
+    .await?;
+    Ok(result.inserted_count)
 }
 
 pub(crate) async fn insert_memory_pdf(
@@ -94,8 +98,18 @@ pub(crate) async fn insert_memory_pdf(
     tag: String,
     file_path: PathBuf,
 ) -> Result<usize> {
-    let markdown = convert_pdf::pdf_to_markdown(&file_path)?;
-    insert_memory(use_mainnet, identity, memory_id, tag, Some(markdown), None).await
+    let client =
+        build_memory_client_from_identity(use_mainnet, identity, memory_id.clone()).await?;
+    let result = execute_insert_request(
+        &client,
+        &InsertRequest::Pdf {
+            memory_id,
+            tag,
+            file_path,
+        },
+    )
+    .await?;
+    Ok(result.inserted_count)
 }
 
 pub(crate) async fn search_memories(
@@ -104,8 +118,10 @@ pub(crate) async fn search_memories(
     memory_id: String,
     query: String,
 ) -> Result<Vec<(f32, String)>> {
-    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
+    let client =
+        build_memory_client_from_identity(use_mainnet, identity, memory_id.clone()).await?;
     let embedding = fetch_embedding(&query).await?;
+    ensure_memory_dim_matches(&client, &memory_id, embedding.len()).await?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
     Ok(results)
@@ -117,7 +133,13 @@ pub(crate) async fn search_memories_raw(
     memory_id: String,
     embedding: Vec<f32>,
 ) -> Result<Vec<(f32, String)>> {
-    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
+    let client =
+        build_memory_client_from_identity(use_mainnet, identity, memory_id.clone()).await?;
+    let expected_dim = client
+        .get_dim()
+        .await
+        .context("Failed to load memory embedding dimension")?;
+    ensure_vector_dim_matches(&memory_id, embedding.len(), expected_dim)?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
     Ok(results)
@@ -224,19 +246,6 @@ pub(crate) async fn reset_memory(
 ) -> Result<()> {
     let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     client.reset(dim).await
-}
-
-fn resolve_insert_content(text: Option<String>, file_path: Option<PathBuf>) -> Result<String> {
-    if let Some(text) = text {
-        return Ok(text);
-    }
-
-    if let Some(path) = file_path {
-        return fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read file path {}", path.display()));
-    }
-
-    bail!("either text or file_path must be provided");
 }
 
 fn parse_role(role: &str) -> Result<u8> {

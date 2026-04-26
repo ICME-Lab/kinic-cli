@@ -116,7 +116,7 @@ pub enum Command {
     Capabilities(CapabilitiesArgs),
     #[command(
         about = "Manage local Kinic preferences shared with the TUI. All prefs commands return JSON.",
-        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id MEMORY_CANISTER_ID\n  kinic-cli prefs set-chat-overall-top-k --value 10\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer, \"embedding_model_id\": string}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|integer|null}"
+        after_help = "Examples:\n  kinic-cli prefs show\n  kinic-cli prefs set-default-memory --memory-id MEMORY_CANISTER_ID\n  kinic-cli prefs set-embedding-backend --model-id BAAI/bge-m3\n  kinic-cli prefs set-chat-overall-top-k --value 10\n\nReturns:\n  show -> {\"default_memory_id\": string|null, \"saved_tags\": string[], \"manual_memory_ids\": string[], \"chat_overall_top_k\": integer, \"chat_per_memory_cap\": integer, \"chat_mmr_lambda\": integer, \"embedding_model_id\": string}\n  mutations -> {\"resource\": string, \"action\": string, \"status\": \"updated\"|\"unchanged\", \"value\": string|integer|null}"
     )]
     Prefs(PrefsArgs),
     #[command(
@@ -459,6 +459,11 @@ pub enum PrefsCommand {
         after_help = "Returns:\n  {\"resource\": \"chat_mmr_lambda\", \"action\": \"set\", \"status\": \"updated\"|\"unchanged\", \"value\": integer}\n\nExample:\n  kinic-cli prefs set-chat-mmr-lambda --value 80"
     )]
     SetChatMmrLambda(ChatMmrLambdaArgs),
+    #[command(
+        about = "Set the embedding backend shared with the TUI. Returns JSON.",
+        after_help = "Returns:\n  {\"resource\": \"embedding_model_id\", \"action\": \"set\", \"status\": \"updated\"|\"unchanged\", \"value\": string}\n\nExample:\n  kinic-cli prefs set-embedding-backend --model-id BAAI/bge-m3"
+    )]
+    SetEmbeddingBackend(EmbeddingBackendArgs),
 }
 
 #[derive(Args, Debug)]
@@ -531,6 +536,16 @@ pub struct ChatMmrLambdaArgs {
         help = "MMR lambda percentage, one of 60, 70, 80, 90"
     )]
     pub value: u8,
+}
+
+#[derive(Args, Debug)]
+pub struct EmbeddingBackendArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Embedding backend id shared with the TUI, e.g. api or BAAI/bge-m3"
+    )]
+    pub model_id: String,
 }
 
 #[derive(Args, Debug)]

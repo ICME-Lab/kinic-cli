@@ -35,6 +35,8 @@ pylate-index/
 .next/
 node_modules/
 .playwright-cli/
+
+# local app artifacts
 apps/kinic-portal/.env.local
 apps/kinic-portal/.dev.vars
 apps/kinic-portal/.cache/

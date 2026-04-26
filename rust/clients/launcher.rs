@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use crate::{
     clients::{LAUNCHER_CANISTER, LEDGER_CANISTER},
-    embedding::configured_embedding_dimension_u64,
+    embedding_config::create_memory_dimension_u64,
 };
 const APPROVAL_TTL_NS: u64 = 10 * 60 * 1_000_000_000;
 
@@ -134,7 +134,7 @@ fn encode_deploy_args(name: &str, description: &str) -> Result<Vec<u8>> {
     .to_string();
     Ok(candid::encode_args((
         payload,
-        configured_embedding_dimension_u64()?,
+        create_memory_dimension_u64(),
     ))?)
 }
 

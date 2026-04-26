@@ -1044,6 +1044,32 @@
               "value_kind": "integer"
             }
           ]
+        },
+        {
+          "name": "set-embedding-backend",
+          "summary": "Set the embedding backend shared with the TUI. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "model_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            }
+          ]
         }
       ]
     },

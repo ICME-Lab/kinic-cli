@@ -112,6 +112,13 @@ fn capabilities_describes_prefs_and_tui_contracts() {
             .iter()
             .any(|entry| entry["name"] == "set-default-memory")
     );
+    assert!(
+        prefs["subcommands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["name"] == "set-embedding-backend")
+    );
     let prefs_add_memory = prefs["subcommands"]
         .as_array()
         .unwrap()
