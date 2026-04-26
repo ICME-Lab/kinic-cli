@@ -162,7 +162,7 @@ The chat panel asks AI against either all searchable memories or one memory from
 - v1 does not include a thread list yet, so you cannot reopen older threads from the UI
 - Existing saved chat history is not migrated; the TUI starts from the new thread store file
 - Use `↑` `↓` in the list and `Enter` to open details
-- Move focus to the detail pane and press `Enter` on the selected `Name` row to rename the currently selected memory
+- Move focus to the detail pane and press `Enter` on the selected `Name` row to edit the selected memory name and description
 - Move to `+ Add Existing Memory Canister` at the end of the list and press `Enter` to register an existing memory manually
 - In the modal, enter an existing memory canister id and submit it to validate access via `get_users()`
 - For manually added memories, move focus to the detail pane and use `Tab` / `Shift+Tab` to jump between actions, including `Remove from list`

@@ -64,13 +64,17 @@ impl<'a> TuiKitUi<'a> {
     }
 
     pub(super) fn rename_memory_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
-        if !self.rename_memory.form.open || self.rename_memory.focus != RenameModalFocus::Name {
+        if !self.rename_memory.form.open {
             return None;
         }
         let rect = rename_memory_area(area)?;
         let inner = bordered_inner_area(rect)?;
-        let x = inner.x + 2 + visible_width(self.rename_memory.form.value.to_string());
-        let y = inner.y + 2;
+        let (value, y) = match self.rename_memory.focus {
+            RenameModalFocus::Name => (self.rename_memory.form.value.as_str(), inner.y + 2),
+            RenameModalFocus::Description => (self.rename_memory.description.as_str(), inner.y + 5),
+            RenameModalFocus::Submit => return None,
+        };
+        let x = inner.x + 2 + visible_width(value.to_string());
         Some((x.min(inner.right().saturating_sub(1)), y))
     }
 
@@ -459,6 +463,13 @@ impl<'a> TuiKitUi<'a> {
         } else {
             self.theme.style_normal()
         };
+        let description_style = if self.rename_memory.focus == RenameModalFocus::Description {
+            self.theme.style_accent_bold()
+        } else if self.rename_memory.description.is_empty() {
+            self.theme.style_muted()
+        } else {
+            self.theme.style_normal()
+        };
         let submit_style = if self.rename_memory.focus == RenameModalFocus::Submit {
             self.theme.style_accent_bold()
         } else {
@@ -481,6 +492,19 @@ impl<'a> TuiKitUi<'a> {
                         self.rename_memory.form.value.to_string()
                     },
                     name_style,
+                ),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("Description", self.theme.style_dim())),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    if self.rename_memory.description.is_empty() {
+                        "<enter memory description>".to_string()
+                    } else {
+                        self.rename_memory.description.to_string()
+                    },
+                    description_style,
                 ),
             ]),
             Line::from(""),
@@ -520,7 +544,7 @@ fn remove_memory_area(area: Rect) -> Option<Rect> {
 }
 
 fn rename_memory_area(area: Rect) -> Option<Rect> {
-    centered_overlay_area(area, 58, 11, 8)
+    centered_overlay_area(area, 64, 14, 11)
 }
 
 fn access_control_area(area: Rect, mode: AccessControlMode) -> Option<Rect> {

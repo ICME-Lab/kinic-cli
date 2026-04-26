@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use super::*;
 
@@ -16,6 +19,15 @@ fn file_insert_state(file_path: &str) -> CoreState {
     CoreState {
         insert_mode: InsertMode::File,
         insert_tag: "docs".to_string(),
+        insert_file_path_input: file_path.to_string(),
+        ..CoreState::default()
+    }
+}
+
+fn file_insert_state_without_tag(file_path: &str) -> CoreState {
+    CoreState {
+        insert_mode: InsertMode::File,
+        insert_tag: String::new(),
         insert_file_path_input: file_path.to_string(),
         ..CoreState::default()
     }
@@ -109,6 +121,25 @@ fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
 }
 
 #[test]
+fn build_insert_request_derives_tag_from_relative_file_path_when_blank() {
+    let provider = provider_with_active_memory("aaaaa-aa");
+    let request = provider.build_insert_request(&file_insert_state_without_tag("docs/spec/api.md"));
+
+    assert!(matches!(
+        request,
+        InsertRequest::Normal {
+            memory_id,
+            tag,
+            text: None,
+            file_path: Some(path),
+        } if memory_id == "aaaaa-aa"
+            && path == Path::new("docs/spec/api.md")
+            && tag.starts_with("api-")
+            && tag.len() == 12
+    ));
+}
+
+#[test]
 fn build_insert_request_prefers_selected_file_path_over_manual_input() {
     let provider = provider_with_active_memory("aaaaa-aa");
     let request = provider.build_insert_request(&CoreState {
@@ -127,6 +158,44 @@ fn build_insert_request_prefers_selected_file_path_over_manual_input() {
             file_path: PathBuf::from("/tmp/dialog.pdf"),
         }
     );
+}
+
+#[test]
+fn build_insert_request_strips_wrapping_quotes_from_file_path_input() {
+    let provider = provider_with_active_memory("aaaaa-aa");
+    let request = provider.build_insert_request(&CoreState {
+        insert_mode: InsertMode::File,
+        insert_tag: String::new(),
+        insert_file_path_input: "\"/tmp/doc.pdf\"".to_string(),
+        ..CoreState::default()
+    });
+
+    assert!(matches!(
+        request,
+        InsertRequest::Pdf {
+            file_path,
+            tag,
+            ..
+        } if file_path == Path::new("/tmp/doc.pdf")
+            && tag.starts_with("doc-")
+            && tag.len() == 12
+    ));
+}
+
+#[test]
+fn build_insert_request_keeps_existing_tag_for_file_insert() {
+    let provider = provider_with_active_memory("aaaaa-aa");
+    let request = provider.build_insert_request(&CoreState {
+        insert_mode: InsertMode::File,
+        insert_tag: "manual-tag".to_string(),
+        insert_file_path_input: "docs/spec/api.md".to_string(),
+        ..CoreState::default()
+    });
+
+    assert!(matches!(
+        request,
+        InsertRequest::Normal { tag, .. } if tag == "manual-tag"
+    ));
 }
 
 #[test]

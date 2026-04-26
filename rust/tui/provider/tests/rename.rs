@@ -25,8 +25,9 @@ fn open_rename_memory_uses_active_memory_name() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::OpenRenameMemory { memory_id, current_name }
+        CoreEffect::OpenRenameMemory { memory_id, current_name, current_description }
             if memory_id == "aaaaa-aa" && current_name == "Alpha Memory"
+                && current_description.is_none()
     )));
 }
 
@@ -65,8 +66,9 @@ fn memory_content_open_selected_opens_rename_modal_for_name_row() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::OpenRenameMemory { memory_id, current_name }
+        CoreEffect::OpenRenameMemory { memory_id, current_name, current_description }
             if memory_id == "aaaaa-aa" && current_name == "Alpha Memory"
+                && current_description.is_none()
     )));
 }
 
@@ -95,8 +97,9 @@ fn open_rename_memory_uses_resolved_name_from_metadata_object() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::OpenRenameMemory { memory_id, current_name }
+        CoreEffect::OpenRenameMemory { memory_id, current_name, current_description }
             if memory_id == "aaaaa-aa" && current_name == "tetete"
+                && current_description.as_deref() == Some("ddddd")
     )));
 }
 
@@ -239,8 +242,9 @@ fn open_rename_memory_does_not_parse_jsonish_metadata_name() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::OpenRenameMemory { memory_id, current_name }
+        CoreEffect::OpenRenameMemory { memory_id, current_name, current_description }
             if memory_id == "aaaaa-aa" && current_name == "prefix \"name\":\"fake\""
+                && current_description.is_none()
     )));
 }
 

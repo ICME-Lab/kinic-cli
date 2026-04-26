@@ -12,3 +12,4 @@ path = "src/lib.rs"
 
 [dependencies]
 candid = "0.10.20"
+sha2 = "0.10.9"

@@ -16,7 +16,7 @@ use crate::{
             visible_memory_users,
         },
         cross_memory_search::SearchHit,
-        memory_metadata::encode_renamed_memory_metadata,
+        memory_metadata::{encode_memory_metadata, parse_memory_metadata},
     },
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
@@ -476,6 +476,7 @@ pub async fn rename_memory(
     auth: TuiAuth,
     memory_id: String,
     name: String,
+    description: Option<String>,
 ) -> Result<RenameMemorySuccess, RenameMemoryError> {
     let factory = resolve_agent_factory(use_mainnet, &auth)
         .map_err(|error| RenameMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
@@ -486,11 +487,18 @@ pub async fn rename_memory(
     let memory = Principal::from_text(&memory_id)
         .map_err(|error| RenameMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let client = MemoryClient::new(agent, memory);
-    let metadata = client
-        .get_metadata()
-        .await
-        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
-    let payload = encode_renamed_memory_metadata(&metadata.name, &name)
+    let metadata_description = if description.is_none() {
+        let metadata_name = client
+            .get_metadata()
+            .await
+            .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?
+            .name;
+        parse_memory_metadata(metadata_name.as_str()).and_then(|metadata| metadata.description)
+    } else {
+        None
+    };
+    let description = description.as_deref().or(metadata_description.as_deref());
+    let payload = encode_memory_metadata(&name, description)
         .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
 
     client

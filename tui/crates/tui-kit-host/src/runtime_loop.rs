@@ -1,6 +1,7 @@
 #[path = "form_tab_flow.rs"]
 mod form_tab_flow;
 
+use kinic_core::derive_file_tag;
 use ratatui_textarea::{Input as TextAreaInput, Key as TextAreaKey, TextArea};
 use std::{io, time::Duration};
 use tui_kit_render::theme::Theme;
@@ -605,6 +606,17 @@ fn apply_insert_file_dialog_selection(
     let display_path = path.display().to_string();
     state.insert_file_path_input = display_path.clone();
     state.insert_selected_file_path = Some(path);
+    if state.insert_tag.trim().is_empty() || state.insert_tag_is_auto {
+        if let Some(tag) = derive_file_tag(
+            state
+                .insert_selected_file_path
+                .as_ref()
+                .expect("selected file path should exist after assignment"),
+        ) {
+            state.insert_tag = tag;
+            state.insert_tag_is_auto = true;
+        }
+    }
     state.insert_focus = tui_kit_runtime::InsertFormFocus::Submit;
     state.insert_error = None;
     if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
@@ -1095,7 +1107,10 @@ fn paste_actions_for_access_control(state: &CoreState, text: &str) -> Option<Vec
     if state.access_control.mode == AccessControlMode::Add
         && state.access_control.focus == AccessControlFocus::Principal
     {
-        return Some(char_input_actions(text, CoreAction::AccessInput));
+        return Some(char_input_actions(
+            &flatten_single_line_paste(text),
+            CoreAction::AccessInput,
+        ));
     }
 
     None
@@ -1119,8 +1134,14 @@ fn paste_actions_for_transfer(state: &CoreState, text: &str) -> Option<Vec<CoreA
 fn paste_actions_for_rename(state: &CoreState, text: &str) -> Option<Vec<CoreAction>> {
     use tui_kit_runtime::RenameModalFocus;
 
-    if state.rename_memory.focus == RenameModalFocus::Name {
-        return nonempty_actions(char_input_actions(text, CoreAction::RenameMemoryInput));
+    if matches!(
+        state.rename_memory.focus,
+        RenameModalFocus::Name | RenameModalFocus::Description
+    ) {
+        return nonempty_actions(char_input_actions(
+            &flatten_single_line_paste(text),
+            CoreAction::RenameMemoryInput,
+        ));
     }
 
     None
@@ -1811,7 +1832,10 @@ fn rename_overlay_action(
 
     focusable_text_overlay_action(
         code,
-        state.rename_memory.focus == RenameModalFocus::Name,
+        matches!(
+            state.rename_memory.focus,
+            RenameModalFocus::Name | RenameModalFocus::Description
+        ),
         CoreAction::CloseRenameMemory,
         CoreAction::RenameMemorySubmit,
         CoreAction::RenameMemoryNextField,

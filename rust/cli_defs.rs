@@ -224,8 +224,11 @@ pub struct InsertArgs {
     )]
     pub file_path: Option<PathBuf>,
 
-    #[arg(long, required = true, help = "Tag metadata stored alongside the text")]
-    pub tag: String,
+    #[arg(
+        long,
+        help = "Tag metadata stored alongside the text (auto-derived from --file-path when omitted)"
+    )]
+    pub tag: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -272,8 +275,11 @@ pub struct InsertPdfArgs {
     )]
     pub file_path: PathBuf,
 
-    #[arg(long, required = true, help = "Tag metadata stored alongside the text")]
-    pub tag: String,
+    #[arg(
+        long,
+        help = "Tag metadata stored alongside the text (auto-derived from --file-path when omitted)"
+    )]
+    pub tag: Option<String>,
 }
 
 #[derive(Args, Debug)]
