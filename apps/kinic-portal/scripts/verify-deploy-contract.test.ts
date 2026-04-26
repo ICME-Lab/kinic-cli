@@ -4,7 +4,7 @@ import { formatContractErrors, verifyDeployContract } from "./verify-deploy-cont
 
 describe("verifyDeployContract", () => {
   it("passes when portal and public-api share the expected deploy contract", () => {
-    const result = verifyDeployContract(portalConfig(), publicApiConfig());
+    const result = verifyDeployContract(portalConfig(), publicApiConfig(), remoteMcpConfig());
 
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
@@ -14,6 +14,7 @@ describe("verifyDeployContract", () => {
     const result = verifyDeployContract(
       portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "https://portal.example.com" } }),
       publicApiConfig(),
+      remoteMcpConfig(),
     );
 
     expect(result.ok).toBe(true);
@@ -73,6 +74,17 @@ describe("verifyDeployContract", () => {
 
     expect(result.ok).toBe(false);
     expect(result.errors).toContain('portal secrets.required must include "EMBEDDING_API_ENDPOINT"');
+  });
+
+  it("fails when remote-mcp required secret is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig(),
+      publicApiConfig(),
+      remoteMcpConfig({ secrets: { required: [] } }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('remote-mcp secrets.required must include "EMBEDDING_API_ENDPOINT"');
   });
 
   it("fails when portal public api origin is missing", () => {
@@ -179,6 +191,17 @@ function publicApiConfig(overrides: Record<string, unknown> = {}) {
     vars: {
       IC_HOST: "https://ic0.app",
       SUMMARY_CACHE_TTL_SECONDS: "86400",
+    },
+    ...overrides,
+  };
+}
+
+function remoteMcpConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "kinic-remote-mcp",
+    secrets: { required: ["EMBEDDING_API_ENDPOINT"] },
+    vars: {
+      IC_HOST: "https://ic0.app",
     },
     ...overrides,
   };

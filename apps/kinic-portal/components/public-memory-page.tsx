@@ -32,6 +32,9 @@ export function PublicMemoryPage({
   const [state, setState] = useState<MemoryLoadState>(() => initialStateToLoadState(initialState));
 
   useEffect(() => {
+    if (initialState) {
+      return undefined;
+    }
     const controller = new AbortController();
     setState({ kind: "loading" });
 
@@ -66,7 +69,7 @@ export function PublicMemoryPage({
     })();
 
     return () => controller.abort();
-  }, [memoryId]);
+  }, [initialState, memoryId]);
 
   if (state.kind === "loading") {
     return <MemoryLoading memoryId={memoryId} />;

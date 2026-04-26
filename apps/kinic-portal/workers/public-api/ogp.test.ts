@@ -164,11 +164,19 @@ describe("public api ogp handlers", () => {
     });
   });
 
-  it("uses cached metadata without resolving the canister again", async () => {
+  it("uses cached metadata only after confirming anonymous access", async () => {
     mocks.readOgpMetadataCache.mockResolvedValueOnce({
       name: "Cached Memory",
       description: "cached desc",
       version: "v2",
+    });
+    mocks.resolvePublicMemorySummaryOnly.mockResolvedValueOnce({
+      kind: "accessible",
+      memory: {
+        version: "v2",
+        name: "Fresh Memory",
+        description: "fresh desc",
+      },
     });
     mocks.buildSummaryCacheKey.mockReturnValueOnce("memory-summary:m1:v2:en");
     mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
@@ -176,7 +184,10 @@ describe("public api ogp handlers", () => {
 
     await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1", memoryOgpUrl);
 
-    expect(mocks.resolvePublicMemorySummaryOnly).not.toHaveBeenCalled();
+    expect(mocks.resolvePublicMemorySummaryOnly).toHaveBeenCalledWith(
+      { IC_HOST: "https://ic0.app" },
+      "m1",
+    );
     expect(mocks.writeOgpMetadataCache).not.toHaveBeenCalled();
     expect(mocks.readOgpMetadataCache).toHaveBeenCalledWith(null, "m1", null);
     expect(mocks.renderOgpImage).toHaveBeenCalledWith({
@@ -184,6 +195,68 @@ describe("public api ogp handlers", () => {
         memoryId: "m1",
         name: "Cached Memory",
         description: "cached desc",
+      },
+    });
+  });
+
+  it("ignores cached metadata when anonymous access is denied", async () => {
+    mocks.resolvePublicMemorySummaryOnly.mockResolvedValueOnce({
+      kind: "denied",
+      error: "anonymous access denied",
+    });
+    mocks.readOgpMetadataCache.mockResolvedValueOnce({
+      name: "Cached Memory",
+      description: "cached desc",
+      version: "v2",
+    });
+    mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
+    mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
+
+    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1", memoryOgpUrl);
+
+    expect(mocks.readOgpMetadataCache).not.toHaveBeenCalled();
+    expect(mocks.writeOgpMetadataCache).not.toHaveBeenCalled();
+    expect(mocks.renderOgpImage).toHaveBeenCalledWith({
+      memory: {
+        memoryId: "m1",
+      },
+    });
+  });
+
+  it("refreshes cached metadata when the accessible memory version changes", async () => {
+    mocks.readOgpMetadataCache.mockResolvedValueOnce({
+      name: "Cached Memory",
+      description: "cached desc",
+      version: "v2",
+    });
+    mocks.resolvePublicMemorySummaryOnly.mockResolvedValueOnce({
+      kind: "accessible",
+      memory: {
+        version: "v3",
+        name: "Fresh Memory",
+        description: "fresh desc",
+      },
+    });
+    mocks.renderOgpImage.mockReturnValueOnce("<div>memory</div>");
+    mocks.ImageResponseAsync.mockResolvedValueOnce(new Response(pngBytes));
+
+    await handleMemoryOgp("GET", { IC_HOST: "https://ic0.app" } as Env, executionCtx, "m1", memoryOgpUrl);
+
+    expect(mocks.writeOgpMetadataCache).toHaveBeenCalledWith(
+      null,
+      "m1",
+      {
+        name: "Fresh Memory",
+        description: "fresh desc",
+        version: "v3",
+      },
+      { IC_HOST: "https://ic0.app" },
+    );
+    expect(mocks.renderOgpImage).toHaveBeenCalledWith({
+      memory: {
+        memoryId: "m1",
+        name: "Fresh Memory",
+        description: "fresh desc",
       },
     });
   });

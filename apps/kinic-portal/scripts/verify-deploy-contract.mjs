@@ -10,6 +10,7 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORTAL_ROOT = path.resolve(SCRIPT_DIR, "..");
 const PORTAL_WRANGLER_PATH = path.join(PORTAL_ROOT, "wrangler.jsonc");
 const PUBLIC_API_WRANGLER_PATH = path.join(PORTAL_ROOT, "workers/public-api/wrangler.jsonc");
+const REMOTE_MCP_WRANGLER_PATH = path.join(PORTAL_ROOT, "workers/remote-mcp/wrangler.jsonc");
 const REQUIRED_SECRET = "EMBEDDING_API_ENDPOINT";
 const SUMMARY_CACHE_BINDING = "SUMMARY_CACHE";
 
@@ -21,6 +22,7 @@ export function loadWranglerConfig(configPath) {
 export function verifyDeployContract(
   portalConfig,
   publicApiConfig,
+  remoteMcpConfig = null,
   options = {},
 ) {
   const errors = [];
@@ -28,6 +30,7 @@ export function verifyDeployContract(
   const publicApiSummaryCache = findKvBinding(publicApiConfig, SUMMARY_CACHE_BINDING);
   const portalRequiredSecrets = listRequiredSecrets(portalConfig);
   const publicApiRequiredSecrets = listRequiredSecrets(publicApiConfig);
+  const remoteMcpRequiredSecrets = remoteMcpConfig ? listRequiredSecrets(remoteMcpConfig) : [];
   const portalVars = portalConfig.vars ?? {};
   const publicApiVars = publicApiConfig.vars ?? {};
 
@@ -36,6 +39,9 @@ export function verifyDeployContract(
   }
   if (!publicApiConfig.name) {
     errors.push(`public-api wrangler config is missing "name": ${PUBLIC_API_WRANGLER_PATH}`);
+  }
+  if (remoteMcpConfig && !remoteMcpConfig.name) {
+    errors.push(`remote-mcp wrangler config is missing "name": ${REMOTE_MCP_WRANGLER_PATH}`);
   }
 
   if (!portalSummaryCache) {
@@ -62,6 +68,9 @@ export function verifyDeployContract(
   }
   if (!publicApiRequiredSecrets.includes(REQUIRED_SECRET)) {
     errors.push(`public-api secrets.required must include "${REQUIRED_SECRET}"`);
+  }
+  if (remoteMcpConfig && !remoteMcpRequiredSecrets.includes(REQUIRED_SECRET)) {
+    errors.push(`remote-mcp secrets.required must include "${REQUIRED_SECRET}"`);
   }
 
   validateAbsoluteOrigin(errors, "KINIC_PORTAL_ORIGIN", portalVars.KINIC_PORTAL_ORIGIN);
@@ -187,7 +196,8 @@ function stripJsonComments(source) {
 function main() {
   const portalConfig = loadWranglerConfig(PORTAL_WRANGLER_PATH);
   const publicApiConfig = loadWranglerConfig(PUBLIC_API_WRANGLER_PATH);
-  const result = verifyDeployContract(portalConfig, publicApiConfig);
+  const remoteMcpConfig = loadWranglerConfig(REMOTE_MCP_WRANGLER_PATH);
+  const result = verifyDeployContract(portalConfig, publicApiConfig, remoteMcpConfig);
 
   if (!result.ok) {
     console.error("deploy contract check failed");

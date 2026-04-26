@@ -51,6 +51,7 @@ export function MemoryView({
   const chatGptPrompt = buildChatGptMemoryPrompt(memory.memory_id);
   const chatGptUrl = buildChatGptPromptUrl(chatGptPrompt);
   const shareLinks = buildShareLinks(currentUrl, memory.name, memory.description);
+  const isShareReady = currentUrl.length > 0;
 
   useEffect(() => {
     setCurrentUrl(window.location.href);
@@ -174,27 +175,29 @@ export function MemoryView({
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-3">
-                <ShareLink href={shareLinks.x} label="Share on X" className="!text-zinc-900 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
+                <ShareLink disabled={!isShareReady} href={shareLinks.x} label="Share on X" className="!text-zinc-900 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
                   <FaXTwitter className="size-4" />
                 </ShareLink>
-                <ShareLink href={shareLinks.linkedin} label="Share on LinkedIn" className="!text-sky-700 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
+                <ShareLink disabled={!isShareReady} href={shareLinks.linkedin} label="Share on LinkedIn" className="!text-sky-700 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
                   <FaLinkedinIn className="size-4" />
                 </ShareLink>
-                <ShareLink href={shareLinks.telegram} label="Share on Telegram" className="!text-sky-500 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
+                <ShareLink disabled={!isShareReady} href={shareLinks.telegram} label="Share on Telegram" className="!text-sky-500 hover:!text-foreground active:!text-foreground focus-visible:!text-foreground">
                   <FaTelegram className="size-4" />
                 </ShareLink>
                 <button
                   type="button"
                   aria-label="Copy share URL for Discord"
-                  onClick={() => copyText("discord", currentUrl || `/m/${memory.memory_id}`)}
-                  className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-indigo-500 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted hover:!text-foreground active:!text-foreground focus-visible:!text-foreground"
+                  disabled={!isShareReady}
+                  onClick={() => copyText("discord", currentUrl)}
+                  className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-indigo-500 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted hover:!text-foreground active:!text-foreground focus-visible:!text-foreground disabled:pointer-events-none disabled:opacity-50"
                 >
                   {copyStatus === "discord" ? <Check className="size-4" /> : <FaDiscord className="size-4" />}
                 </button>
                 <ShareIconButton
                   copied={copyStatus === "share"}
+                  disabled={!isShareReady}
                   label="Copy share URL"
-                  onClick={() => copyText("share", currentUrl || `/m/${memory.memory_id}`)}
+                  onClick={() => copyText("share", currentUrl)}
                 />
               </div>
             </CardContent>
@@ -234,24 +237,34 @@ export function MemoryView({
 function ShareLink({
   className,
   children,
+  disabled,
   href,
   label,
 }: {
   className?: string;
   children: React.ReactNode;
+  disabled: boolean;
   href: string;
   label: string;
 }) {
+  const classes = cn(
+    "inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted disabled:pointer-events-none disabled:opacity-50",
+    className,
+  );
+  if (disabled) {
+    return (
+      <button type="button" disabled aria-label={label} className={classes}>
+        {children}
+      </button>
+    );
+  }
   return (
     <a
       href={href}
       target="_blank"
       rel="noreferrer"
       aria-label={label}
-      className={cn(
-        "inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted",
-        className,
-      )}
+      className={classes}
     >
       {children}
     </a>
@@ -260,10 +273,12 @@ function ShareLink({
 
 function ShareIconButton({
   copied,
+  disabled,
   label,
   onClick,
 }: {
   copied: boolean;
+  disabled: boolean;
   label: string;
   onClick: () => void;
 }) {
@@ -271,8 +286,9 @@ function ShareIconButton({
     <button
       type="button"
       aria-label={label}
+      disabled={disabled}
       onClick={onClick}
-      className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted"
+      className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-input hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
     >
       {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
     </button>

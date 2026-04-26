@@ -30,10 +30,16 @@ const memory = {
 describe("MemoryView", () => {
   const fetchMock = vi.fn<typeof fetch>();
   const openMock = vi.fn();
+  const writeTextMock = vi.fn();
 
   beforeEach(() => {
+    writeTextMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("open", openMock);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: writeTextMock },
+    });
     Object.defineProperty(window, "location", {
       configurable: true,
       value: { href: "https://portal.example.com/m/m1", origin: "https://portal.example.com" },
@@ -120,5 +126,48 @@ describe("MemoryView", () => {
       expect(screen.getByText(DEV_VITE_SHELL_CHAT_ERROR)).toBeTruthy();
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps share controls disabled until an absolute browser URL is available", () => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { href: "", origin: "https://portal.example.com" },
+    });
+
+    render(
+      <MemoryView
+        memory={memory}
+        mcpEndpoint={null}
+        publicApiOrigin="https://api.example.com"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Share on X" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Copy share URL" })).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "Copy share URL" }));
+    expect(writeTextMock).not.toHaveBeenCalled();
+  });
+
+  it("shares the absolute browser URL after it is available", async () => {
+    writeTextMock.mockResolvedValueOnce(undefined);
+
+    render(
+      <MemoryView
+        memory={memory}
+        mcpEndpoint={null}
+        publicApiOrigin="https://api.example.com"
+      />,
+    );
+
+    const shareOnX = await screen.findByRole("link", { name: "Share on X" });
+    expect(shareOnX.getAttribute("href")).toEqual(
+      expect.stringContaining(encodeURIComponent("https://portal.example.com/m/m1")),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy share URL" }));
+
+    await waitFor(() => {
+      expect(writeTextMock).toHaveBeenCalledWith("https://portal.example.com/m/m1");
+    });
   });
 });

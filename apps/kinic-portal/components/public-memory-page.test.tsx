@@ -97,6 +97,51 @@ describe("PublicMemoryPage", () => {
     await screen.findByText("Anonymous access is blocked.");
   });
 
+  it("keeps injected denied state without returning to loading", () => {
+    render(
+      <PublicMemoryPage
+        memoryId="m1"
+        initialState={{ kind: "denied", memoryId: "m1" }}
+        publicApiOrigin="https://api.kinic.test"
+        mcpEndpoint={null}
+      />,
+    );
+
+    expect(screen.getByText("Anonymous access is blocked.")).toBeTruthy();
+    expect(screen.queryByText("Loading")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps injected not found state without returning to loading", () => {
+    render(
+      <PublicMemoryPage
+        memoryId="m1"
+        initialState={{ kind: "not_found", memoryId: "m1" }}
+        publicApiOrigin="https://api.kinic.test"
+        mcpEndpoint={null}
+      />,
+    );
+
+    expect(screen.getByText("Shared memory not found.")).toBeTruthy();
+    expect(screen.queryByText("Loading")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps injected temporary error state without returning to loading", () => {
+    render(
+      <PublicMemoryPage
+        memoryId="m1"
+        initialState={{ kind: "temporary_error", memoryId: "m1" }}
+        publicApiOrigin="https://api.kinic.test"
+        mcpEndpoint={null}
+      />,
+    );
+
+    expect(screen.getByText("Temporary network error")).toBeTruthy();
+    expect(screen.queryByText("Loading")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("remounts PublicMemoryPage when the route memory id changes", async () => {
     fetchMock
       .mockResolvedValueOnce(
