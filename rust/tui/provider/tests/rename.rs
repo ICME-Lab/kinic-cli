@@ -172,6 +172,84 @@ fn rename_memory_submit_rejects_blank_name() {
 }
 
 #[test]
+fn validate_rename_submit_preserves_unedited_description() {
+    let provider = KinicProvider::new(live_config());
+    let state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Beta".to_string(),
+                ..TextInputModalState::default()
+            },
+            memory_id: "aaaaa-aa".to_string(),
+            description_loaded: false,
+            description: "existing".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    let (_, _, update) = provider
+        .validate_rename_submit(&state)
+        .expect("rename submit should validate");
+
+    assert_eq!(update, bridge::DescriptionUpdate::Preserve);
+}
+
+#[test]
+fn validate_rename_submit_clears_edited_blank_description() {
+    let provider = KinicProvider::new(live_config());
+    let state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Beta".to_string(),
+                ..TextInputModalState::default()
+            },
+            memory_id: "aaaaa-aa".to_string(),
+            description_loaded: true,
+            description: "   ".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    let (_, _, update) = provider
+        .validate_rename_submit(&state)
+        .expect("rename submit should validate");
+
+    assert_eq!(update, bridge::DescriptionUpdate::Set(None));
+}
+
+#[test]
+fn validate_rename_submit_sets_edited_description() {
+    let provider = KinicProvider::new(live_config());
+    let state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Beta".to_string(),
+                ..TextInputModalState::default()
+            },
+            memory_id: "aaaaa-aa".to_string(),
+            description_loaded: true,
+            description: " Quarterly goals ".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    let (_, _, update) = provider
+        .validate_rename_submit(&state)
+        .expect("rename submit should validate");
+
+    assert_eq!(
+        update,
+        bridge::DescriptionUpdate::Set(Some("Quarterly goals".to_string()))
+    );
+}
+
+#[test]
 fn poll_rename_submit_background_updates_memory_name_and_closes_overlay() {
     let mut provider = KinicProvider::new(live_config());
     provider.memory_summaries = vec![running_memory_summary("aaaaa-aa", "detail")];

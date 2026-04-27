@@ -16,8 +16,8 @@ use crate::{
     create_domain::derive_create_cost,
     embedding::fetch_embedding,
     insert_service::{
-        InsertRequest, parse_embedding_json, resolved_insert_tag, validate_insert_request_fields,
-        validate_insert_request_for_submit,
+        InsertRequest, parse_embedding_json, preview_file_insert_tag,
+        validate_insert_request_fields, validate_insert_request_for_submit,
     },
     preferences::{self, UserPreferences},
     shared::{
@@ -2693,7 +2693,7 @@ impl KinicProvider {
         &mut self,
         memory_id: String,
         next_name: String,
-        next_description: Option<String>,
+        description_update: bridge::DescriptionUpdate,
     ) -> CoreEffect {
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
@@ -2704,7 +2704,7 @@ impl KinicProvider {
                 auth,
                 memory_id.clone(),
                 next_name.clone(),
-                next_description.clone(),
+                description_update.clone(),
             ));
             let (stored_name, result) = match result {
                 Ok(output) => (Some(output.stored_name), Ok(())),
@@ -2910,41 +2910,39 @@ impl KinicProvider {
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
         let memory_id = self.effective_insert_memory_id().unwrap_or_default();
         let file_path = resolved_insert_file_path(state);
-        let tag = resolved_insert_tag(
-            state.insert_tag.as_str(),
-            (!state.insert_text.trim().is_empty()).then_some(state.insert_text.as_str()),
-            file_path.as_deref(),
-        );
 
         match state.insert_mode {
             InsertMode::File => match file_path {
                 Some(path) if insert_file_path_is_pdf(path.as_path()) => InsertRequest::Pdf {
                     memory_id,
-                    tag,
+                    tag: preview_file_insert_tag(state.insert_tag.as_str(), Some(path.as_path()))
+                        .unwrap_or_default(),
                     file_path: path,
                 },
                 Some(path) => InsertRequest::Normal {
                     memory_id,
-                    tag,
+                    tag: preview_file_insert_tag(state.insert_tag.as_str(), Some(path.as_path()))
+                        .unwrap_or_default(),
                     text: None,
                     file_path: Some(path),
                 },
                 None => InsertRequest::Normal {
                     memory_id,
-                    tag,
+                    tag: preview_file_insert_tag(state.insert_tag.as_str(), None)
+                        .unwrap_or_default(),
                     text: None,
                     file_path: None,
                 },
             },
             InsertMode::InlineText => InsertRequest::Normal {
                 memory_id,
-                tag,
+                tag: state.insert_tag.trim().to_string(),
                 text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
                 file_path: None,
             },
             InsertMode::ManualEmbedding => InsertRequest::Raw {
                 memory_id,
-                tag,
+                tag: state.insert_tag.trim().to_string(),
                 text: state.insert_text.clone(),
                 embedding_json: state.insert_embedding.clone(),
             },
@@ -3438,7 +3436,7 @@ impl KinicProvider {
     fn validate_rename_submit(
         &self,
         state: &CoreState,
-    ) -> Result<(String, String, Option<String>), String> {
+    ) -> Result<(String, String, bridge::DescriptionUpdate), String> {
         let memory_id = state.rename_memory.memory_id.trim();
         if memory_id.is_empty() {
             return Err("Select a memory before renaming.".to_string());
@@ -3450,15 +3448,19 @@ impl KinicProvider {
         if next_name.is_empty() {
             return Err("Memory name is required.".to_string());
         }
-        let next_description = state
-            .rename_memory
-            .description_loaded
-            .then(|| state.rename_memory.description.trim().to_string());
+        let description_update = if state.rename_memory.description_loaded {
+            let next_description = state.rename_memory.description.trim();
+            bridge::DescriptionUpdate::Set(
+                (!next_description.is_empty()).then(|| next_description.to_string()),
+            )
+        } else {
+            bridge::DescriptionUpdate::Preserve
+        };
 
         Ok((
             memory_id.to_string(),
             next_name.to_string(),
-            next_description,
+            description_update,
         ))
     }
 

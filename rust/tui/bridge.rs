@@ -112,6 +112,12 @@ pub struct RenameMemorySuccess {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DescriptionUpdate {
+    Preserve,
+    Set(Option<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateMemoryError {
     Principal(String),
     Balance(String),
@@ -476,7 +482,7 @@ pub async fn rename_memory(
     auth: TuiAuth,
     memory_id: String,
     name: String,
-    description: Option<String>,
+    description_update: DescriptionUpdate,
 ) -> Result<RenameMemorySuccess, RenameMemoryError> {
     let factory = resolve_agent_factory(use_mainnet, &auth)
         .map_err(|error| RenameMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
@@ -487,18 +493,17 @@ pub async fn rename_memory(
     let memory = Principal::from_text(&memory_id)
         .map_err(|error| RenameMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let client = MemoryClient::new(agent, memory);
-    let metadata_description = if description.is_none() {
+    let description = if description_update == DescriptionUpdate::Preserve {
         let metadata_name = client
             .get_metadata()
             .await
             .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?
             .name;
-        parse_memory_metadata(metadata_name.as_str()).and_then(|metadata| metadata.description)
+        rename_description_for_payload(Some(metadata_name.as_str()), &description_update)
     } else {
-        None
+        rename_description_for_payload(None, &description_update)
     };
-    let description = description.as_deref().or(metadata_description.as_deref());
-    let payload = encode_memory_metadata(&name, description)
+    let payload = encode_memory_metadata(&name, description.as_deref())
         .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
 
     client
@@ -509,6 +514,18 @@ pub async fn rename_memory(
     Ok(RenameMemorySuccess {
         stored_name: payload,
     })
+}
+
+fn rename_description_for_payload(
+    existing_raw: Option<&str>,
+    update: &DescriptionUpdate,
+) -> Option<String> {
+    match update {
+        DescriptionUpdate::Preserve => existing_raw
+            .and_then(parse_memory_metadata)
+            .and_then(|metadata| metadata.description),
+        DescriptionUpdate::Set(description) => description.clone(),
+    }
 }
 
 pub async fn validate_manual_memory_access(
@@ -802,6 +819,36 @@ mod tests {
         let message = "insert failed\nmore detail";
 
         assert_eq!(format_insert_execute_error(message), "insert failed");
+    }
+
+    #[test]
+    fn rename_description_update_preserves_existing_description() {
+        let description = rename_description_for_payload(
+            Some("{\"name\":\"Alpha\",\"description\":\"Quarterly goals\"}"),
+            &DescriptionUpdate::Preserve,
+        );
+
+        assert_eq!(description.as_deref(), Some("Quarterly goals"));
+    }
+
+    #[test]
+    fn rename_description_update_clears_description() {
+        let description = rename_description_for_payload(
+            Some("{\"name\":\"Alpha\",\"description\":\"Quarterly goals\"}"),
+            &DescriptionUpdate::Set(None),
+        );
+
+        assert_eq!(description, None);
+    }
+
+    #[test]
+    fn rename_description_update_sets_description() {
+        let description = rename_description_for_payload(
+            Some("{\"name\":\"Alpha\",\"description\":\"Old\"}"),
+            &DescriptionUpdate::Set(Some("New".to_string())),
+        );
+
+        assert_eq!(description.as_deref(), Some("New"));
     }
 
     #[test]

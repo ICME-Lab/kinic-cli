@@ -124,6 +124,9 @@ pub fn validate_insert_request_fields(request: &InsertRequest) -> Result<()> {
             let has_file_path = file_path
                 .as_ref()
                 .is_some_and(|path| !path.as_os_str().is_empty());
+            if has_inline_text && has_file_path {
+                bail!("Provide either text or file path, not both.");
+            }
             if !has_inline_text && !has_file_path {
                 bail!("Provide text or file path for normal insert.");
             }
@@ -176,6 +179,9 @@ fn validate_and_transform_insert_request(
             let file_path = normalized_optional_path(file_path.clone());
             if text.is_none() && file_path.is_none() {
                 bail!("Provide text or file path for normal insert.");
+            }
+            if text.is_some() && file_path.is_some() {
+                bail!("Provide either text or file path, not both.");
             }
             if text.is_none() {
                 let path = file_path
@@ -275,7 +281,12 @@ async fn prepare_chunked_insert(tag: &str, markdown: &str) -> Result<Vec<Prepare
 }
 
 fn load_normal_content(text: Option<&String>, file_path: Option<&PathBuf>) -> Result<String> {
-    if let Some(content) = text.filter(|value| !value.trim().is_empty()) {
+    let inline_text = text.filter(|value| !value.trim().is_empty());
+    if inline_text.is_some() && file_path.is_some() {
+        bail!("Provide either text or file path, not both.");
+    }
+
+    if let Some(content) = inline_text {
         return Ok(content.to_string());
     }
 
@@ -287,8 +298,8 @@ fn load_normal_content(text: Option<&String>, file_path: Option<&PathBuf>) -> Re
     bail!("Provide text or file path for normal insert.")
 }
 
-pub fn resolved_insert_tag(tag: &str, text: Option<&str>, file_path: Option<&Path>) -> String {
-    resolved_tag(tag, text, file_path).unwrap_or_default()
+pub fn preview_file_insert_tag(tag: &str, file_path: Option<&Path>) -> Option<String> {
+    resolved_tag(tag, None, file_path).ok()
 }
 
 fn validate_memory_id_required(memory_id: &str) -> Result<()> {
@@ -481,14 +492,17 @@ mod tests {
     }
 
     #[test]
-    fn normal_insert_prefers_inline_text() {
-        let content = load_normal_content(
+    fn load_normal_content_rejects_inline_text_and_file_path_together() {
+        let err = load_normal_content(
             Some(&"  inline text  ".to_string()),
             Some(&PathBuf::from("/tmp/unused.md")),
         )
-        .unwrap();
+        .unwrap_err();
 
-        assert_eq!(content, "  inline text  ");
+        assert_eq!(
+            err.to_string(),
+            "Provide either text or file path, not both."
+        );
     }
 
     #[test]
@@ -607,6 +621,22 @@ mod tests {
     }
 
     #[test]
+    fn validate_insert_request_fields_rejects_inline_text_and_file_path_together() {
+        let err = validate_insert_request_fields(&InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("payload".to_string()),
+            file_path: Some(PathBuf::from("/tmp/doc.md")),
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Provide either text or file path, not both."
+        );
+    }
+
+    #[test]
     fn validate_insert_request_fields_rejects_blank_inline_text_tag() {
         let err = validate_insert_request_fields(&InsertRequest::Normal {
             memory_id: "aaaaa-aa".to_string(),
@@ -688,14 +718,19 @@ mod tests {
     }
 
     #[test]
-    fn validate_insert_request_for_submit_accepts_inline_text_with_missing_file_path() {
-        validate_insert_request_for_submit(&InsertRequest::Normal {
+    fn validate_insert_request_for_submit_rejects_inline_text_with_file_path() {
+        let err = validate_insert_request_for_submit(&InsertRequest::Normal {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             text: Some("payload".to_string()),
             file_path: Some(PathBuf::from("/path/that/does/not/need/to/exist.md")),
         })
-        .unwrap();
+        .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Provide either text or file path, not both."
+        );
     }
 
     #[test]
@@ -766,10 +801,17 @@ mod tests {
     }
 
     #[test]
-    fn resolved_insert_tag_preserves_existing_tag() {
-        let tag = resolved_insert_tag("docs", None, Some(Path::new("nested/spec.md")));
+    fn preview_file_insert_tag_preserves_existing_tag() {
+        let tag = preview_file_insert_tag("docs", Some(Path::new("nested/spec.md")));
 
-        assert_eq!(tag, "docs");
+        assert_eq!(tag.as_deref(), Some("docs"));
+    }
+
+    #[test]
+    fn preview_file_insert_tag_returns_none_when_tag_and_file_path_are_missing() {
+        let tag = preview_file_insert_tag("", None);
+
+        assert_eq!(tag, None);
     }
 
     #[test]

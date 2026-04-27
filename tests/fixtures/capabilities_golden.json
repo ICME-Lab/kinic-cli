@@ -204,7 +204,7 @@
         },
         {
           "name": "tag",
-          "required": true,
+          "required": false,
           "input_shape": "single_value",
           "value_kind": "string"
         }
@@ -311,7 +311,7 @@
         },
         {
           "name": "tag",
-          "required": true,
+          "required": false,
           "input_shape": "single_value",
           "value_kind": "string"
         }

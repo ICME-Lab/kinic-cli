@@ -205,7 +205,12 @@ pub struct ShowArgs {
 }
 
 #[derive(Args, Debug)]
-#[command(group = ArgGroup::new("insert_input").required(true).args(["text", "file_path"]))]
+#[command(group(
+    ArgGroup::new("insert_input")
+        .required(true)
+        .multiple(false)
+        .args(["text", "file_path"])
+))]
 pub struct InsertArgs {
     #[arg(
         long,

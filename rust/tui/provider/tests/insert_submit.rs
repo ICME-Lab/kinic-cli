@@ -99,6 +99,28 @@ fn build_insert_request_uses_inline_text_mode_without_file_path() {
 }
 
 #[test]
+fn build_insert_request_does_not_derive_tag_from_file_path_in_inline_text_mode() {
+    let provider = provider_with_active_memory("aaaaa-aa");
+    let request = provider.build_insert_request(&CoreState {
+        insert_mode: InsertMode::InlineText,
+        insert_tag: String::new(),
+        insert_text: "hello".to_string(),
+        insert_file_path_input: "docs/spec/api.md".to_string(),
+        ..CoreState::default()
+    });
+
+    assert_eq!(
+        request,
+        InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: String::new(),
+            text: Some("hello".to_string()),
+            file_path: None,
+        }
+    );
+}
+
+#[test]
 fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
     let provider = provider_with_active_memory("aaaaa-aa");
     let request = provider.build_insert_request(&CoreState {
