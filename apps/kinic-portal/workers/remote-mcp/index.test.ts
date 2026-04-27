@@ -344,6 +344,17 @@ describe("remote MCP tool guidance", () => {
     });
   });
 
+  it("serves the OpenAI Apps challenge token from the well-known root path", async () => {
+    const response = await worker.fetch(
+      new Request("https://mcp.kinic.xyz/.well-known/openai-apps-challenge"),
+      {} as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    await expect(response.text()).resolves.toBe("UaOm7dXCucOkq9wf-oC9RnuqdbnHJhbrqs4xaTVpd3Q");
+  });
+
   it("returns http 400 for non-json requests", async () => {
     const response = await worker.fetch(
       new Request("https://mcp.kinic.io/mcp", {

@@ -12,6 +12,9 @@ The Kinic Portal remote MCP is an anonymous read-only surface running on a Cloud
 
 - Worker path: `/mcp`
 - Health check: `/health`
+- OpenAI Apps challenge: `/.well-known/openai-apps-challenge`
+  - Serves the verification token from the origin root
+  - This is not an MCP tool endpoint
 
 ## Exposed Tools
 

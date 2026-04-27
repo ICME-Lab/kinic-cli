@@ -46,6 +46,9 @@ const REMOTE_MCP_TOOL_NAMES = [
   "public_memory_search",
 ] as const;
 
+const OPENAI_APPS_CHALLENGE_PATH = "/.well-known/openai-apps-challenge";
+const OPENAI_APPS_CHALLENGE_TOKEN = "UaOm7dXCucOkq9wf-oC9RnuqdbnHJhbrqs4xaTVpd3Q";
+
 export const PUBLIC_MEMORY_SHOW_DESCRIPTION =
   "Show a metadata summary for one anonymous-readable public memory canister. This is not MCP server metadata.";
 
@@ -60,6 +63,13 @@ export default {
     }
     if (request.method === "GET" && url.pathname === "/health") {
       return withCors(Response.json({ ok: true, name: "kinic-remote-mcp" }));
+    }
+    if (request.method === "GET" && url.pathname === OPENAI_APPS_CHALLENGE_PATH) {
+      return withCors(
+        new Response(OPENAI_APPS_CHALLENGE_TOKEN, {
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        }),
+      );
     }
     if (request.method !== "POST" || url.pathname !== "/mcp") {
       return withCors(Response.json({ error: "not found" }, { status: 404 }));
