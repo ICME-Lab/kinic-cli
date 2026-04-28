@@ -3,12 +3,17 @@
   "private": true,
   "packageManager": "pnpm@10.29.2",
   "scripts": {
+    "build:desktop": "pnpm --filter @kinic/kinic-desktop build",
+    "build:desktop:update": "pnpm --filter @kinic/kinic-desktop tauri:build:update",
     "build:web": "pnpm --filter @kinic/kinic-portal build:cf",
     "build:public-api": "pnpm --filter @kinic/public-api build",
     "build:mcp": "pnpm --filter @kinic/remote-mcp build",
+    "check:desktop": "pnpm --filter @kinic/kinic-desktop typecheck",
     "check:web": "pnpm --filter @kinic/kinic-portal typecheck",
     "check:public-api": "pnpm --filter @kinic/public-api typecheck",
     "check:mcp": "pnpm --filter @kinic/remote-mcp typecheck",
+    "dev:desktop": "pnpm --filter @kinic/kinic-desktop tauri dev",
+    "test:desktop": "pnpm --filter @kinic/kinic-desktop test",
     "test:web": "pnpm --filter @kinic/kinic-share test && pnpm --filter @kinic/public-api test",
     "test:ts": "pnpm --filter @kinic/kinic-share test && pnpm --filter @kinic/kinic-portal typecheck && pnpm --filter @kinic/public-api typecheck && pnpm --filter @kinic/remote-mcp typecheck"
   }

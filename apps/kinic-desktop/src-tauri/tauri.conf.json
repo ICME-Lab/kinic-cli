@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Kinic Memory",
+  "version": "0.1.0",
+  "identifier": "xyz.kinic.memory",
+  "mainBinaryName": "kinic-memory",
+  "build": {
+    "beforeDevCommand": "pnpm --filter @kinic/kinic-desktop dev:vite",
+    "beforeBuildCommand": "pnpm --filter @kinic/kinic-desktop build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Kinic Memory",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 1040,
+        "minHeight": 700
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "Productivity",
+    "icon": [
+      "../../kinic-portal/public/favicon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJCNkFENDZDN0E1QkFDQTcKUldTbnJGdDZiTlJxSzRYYnZTODNUSDJ2MGxISVNwYVZ6VzdMdEJiQVJMb3hrUnRCbHhQaDcyMjAK",
+      "endpoints": [
+        "https://github.com/ICME-Lab/kinic-cli/releases/latest/download/kinic-memory-latest.json"
+      ]
+    }
+  }
+}

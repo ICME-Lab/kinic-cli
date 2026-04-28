@@ -66,6 +66,7 @@ path = "rust/cli.rs"
 [workspace]
 members = [
     ".",
+    "apps/kinic-desktop/src-tauri",
     "crates/kinic-core",
     "tui/crates/tui-kit",
     "tui/crates/tui-kit-host",
