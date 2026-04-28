@@ -208,6 +208,29 @@ class MemoriesApiTests(unittest.TestCase):
             ],
         )
 
+    def test_deprecated_insert_pdf_rejects_missing_path(self) -> None:
+        with self.assertWarns(DeprecationWarning):
+            with self.assertRaises(ValueError):
+                self.memories.insert_pdf("default", "aaaaa-aa", "manual")
+
+        self.assertEqual(self.native.calls, [])
+
+    def test_deprecated_insert_file_rejects_missing_path(self) -> None:
+        with self.assertWarns(DeprecationWarning):
+            with self.assertRaises(ValueError):
+                self.memories.insert_file("default", "aaaaa-aa", "manual")
+
+        self.assertEqual(self.native.calls, [])
+
+    def test_kinic_memories_deprecated_insert_file_rejects_missing_path(self) -> None:
+        client = self.memories.KinicMemories("default")
+
+        with self.assertWarns(DeprecationWarning):
+            with self.assertRaises(ValueError):
+                client.insert_file("aaaaa-aa", "manual")
+
+        self.assertEqual(self.native.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

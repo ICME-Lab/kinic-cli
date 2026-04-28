@@ -51,8 +51,8 @@ fn file_stem_tag(file_path: &Path) -> Option<String> {
 
 fn short_path_hash(file_path: &Path) -> String {
     let digest = Sha256::digest(file_path.to_string_lossy().as_bytes());
-    let mut short = String::with_capacity(8);
-    for byte in digest.iter().take(4) {
+    let mut short = String::with_capacity(16);
+    for byte in digest.iter().take(8) {
         use std::fmt::Write;
         let _ = write!(&mut short, "{byte:02x}");
     }
@@ -93,7 +93,9 @@ mod tests {
 
         let tag = derive_file_tag(&path);
 
-        assert!(matches!(tag, Some(value) if value.starts_with("api-") && value.len() == 12));
+        assert!(
+            matches!(tag, Some(value) if value.strip_prefix("api-").is_some_and(|suffix| suffix.len() == 16))
+        );
         fs::remove_dir_all(dir).expect("temporary directory should be removable");
     }
 

@@ -141,7 +141,7 @@ fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
         } if memory_id == "aaaaa-aa"
             && path == Path::new("/tmp/doc.md")
             && tag.starts_with("doc-")
-            && tag.len() == 12
+            && tag.len() == 20
     ));
 }
 
@@ -160,7 +160,7 @@ fn build_insert_request_derives_tag_from_relative_file_path_when_blank() {
         } if memory_id == "aaaaa-aa"
             && path == Path::new("docs/spec/api.md")
             && tag.starts_with("api-")
-            && tag.len() == 12
+            && tag.len() == 20
     ));
 }
 
@@ -184,7 +184,7 @@ fn build_insert_request_prefers_selected_file_path_over_manual_input() {
         } if memory_id == "aaaaa-aa"
             && file_path == Path::new("/tmp/dialog.pdf")
             && tag.starts_with("dialog-")
-            && tag.len() == 15
+            && tag.len() == 23
     ));
 }
 
@@ -206,7 +206,7 @@ fn build_insert_request_strips_wrapping_quotes_from_file_path_input() {
             ..
         } if file_path == Path::new("/tmp/doc.pdf")
             && tag.starts_with("doc-")
-            && tag.len() == 12
+            && tag.len() == 20
     ));
 }
 
@@ -222,7 +222,7 @@ fn build_insert_request_ignores_existing_tag_for_file_insert() {
 
     assert!(matches!(
         request,
-        InsertRequest::Normal { tag, .. } if tag.starts_with("api-") && tag.len() == 12
+        InsertRequest::Normal { tag, .. } if tag.starts_with("api-") && tag.len() == 20
     ));
 }
 
@@ -245,7 +245,7 @@ fn build_insert_request_uses_file_mode_for_pdf_paths() {
         } if memory_id == "aaaaa-aa"
             && file_path == Path::new("/tmp/doc.PDF")
             && tag.starts_with("doc-")
-            && tag.len() == 12
+            && tag.len() == 20
     ));
 }
 

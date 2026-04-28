@@ -795,7 +795,7 @@ mod tests {
         assert!(matches!(
             validated,
             ValidatedInsertRequest::Normal { tag, .. }
-                if tag.starts_with("api-") && tag.len() == 12
+                if tag.strip_prefix("api-").is_some_and(|suffix| suffix.len() == 16)
         ));
         fs::remove_file(path).expect("workspace markdown file should be removable");
     }

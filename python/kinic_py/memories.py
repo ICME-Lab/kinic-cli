@@ -137,6 +137,8 @@ class KinicMemories:
     ) -> int:
         """Deprecated: use insert_markdown_file instead."""
         warnings.warn("insert_file is deprecated; use insert_markdown_file", DeprecationWarning, stacklevel=2)
+        if path is None:
+            raise ValueError("path must be provided")
         return self.insert_markdown_file(memory_id, tag, path)
 
     def search(self, memory_id: str, query: str) -> ScoreResult:
@@ -345,6 +347,8 @@ def insert_pdf(
     ic: bool | None = None,
 ) -> int:
     warnings.warn("insert_pdf is deprecated; use insert_pdf_file", DeprecationWarning, stacklevel=2)
+    if path is None:
+        raise ValueError("path must be provided")
     return insert_pdf_file(identity, memory_id, tag, path, ic=ic)
 
 
@@ -369,6 +373,8 @@ def insert_file(
     ic: bool | None = None,
 ) -> int:
     warnings.warn("insert_file is deprecated; use insert_markdown_file", DeprecationWarning, stacklevel=2)
+    if path is None:
+        raise ValueError("path must be provided")
     return insert_markdown_file(identity, memory_id, tag, path, ic=ic)
 
 
