@@ -13,7 +13,7 @@ use crate::cli::GlobalOpts;
 use crate::{TUI_IDENTITY_REQUIRED_MESSAGE, resolve_tui_identity};
 
 mod adapter;
-mod bridge;
+pub(crate) mod bridge;
 mod chat_prompt;
 mod chat_retrieval;
 mod chat_service;

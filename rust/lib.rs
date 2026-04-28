@@ -5,6 +5,7 @@ pub mod cli_policy;
 pub(crate) mod clients;
 mod commands;
 pub(crate) mod create_domain;
+pub mod desktop;
 mod embedding;
 pub(crate) mod identity_store;
 pub(crate) mod insert_service;
