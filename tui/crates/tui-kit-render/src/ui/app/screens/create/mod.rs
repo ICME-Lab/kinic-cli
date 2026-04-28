@@ -12,9 +12,12 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::{Focus, TuiKitUi, shared, types::CreateOverlayText};
 
-use super::{FormRows, submit_button_text};
+use super::{
+    FormRows, MULTILINE_TEXTAREA_HEIGHT, multiline_cursor_x, multiline_visible_row,
+    submit_button_text, visible_multiline_rows,
+};
 
-const CREATE_DESCRIPTION_HEIGHT: u16 = 5;
+const CREATE_DESCRIPTION_PLACEHOLDER: &str = "<enter a short description>";
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_create_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -42,15 +45,13 @@ impl<'a> TuiKitUi<'a> {
             let (cursor_row, cursor_col) = self.create_description_cursor.unwrap_or_default();
             let visible = visible_multiline_rows(
                 self.create_description,
-                "<enter a short description>",
-                CREATE_DESCRIPTION_HEIGHT,
+                CREATE_DESCRIPTION_PLACEHOLDER,
+                MULTILINE_TEXTAREA_HEIGHT,
                 cursor_row,
                 screen.layout.input_width(0),
             );
-            let row = cursor_row
-                .saturating_sub(visible.scroll_row)
-                .min(CREATE_DESCRIPTION_HEIGHT.saturating_sub(1) as usize)
-                as u16;
+            let row =
+                multiline_visible_row(cursor_row, visible.scroll_row, MULTILINE_TEXTAREA_HEIGHT);
             let x = screen.layout.field_x()
                 + multiline_cursor_x(
                     visible.rows[row as usize].as_str(),
@@ -144,11 +145,6 @@ impl CreateFormLines<'_> {
     }
 }
 
-struct VisibleMultilineRows {
-    rows: Vec<String>,
-    scroll_row: usize,
-}
-
 fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> CreateFormLines<'a> {
     let name_style = create_field_style(ui, CreateModalFocus::Name);
     let description_style = create_field_style(ui, CreateModalFocus::Description);
@@ -165,8 +161,8 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
     );
     let description_rows = visible_multiline_rows(
         ui.create_description,
-        "<enter a short description>",
-        CREATE_DESCRIPTION_HEIGHT,
+        CREATE_DESCRIPTION_PLACEHOLDER,
+        MULTILINE_TEXTAREA_HEIGHT,
         ui.create_description_cursor
             .map(|(row, _)| row)
             .unwrap_or_default(),
@@ -446,47 +442,6 @@ fn is_pending_create_entry(ui: &TuiKitUi<'_>, focus: CreateModalFocus) -> bool {
 }
 fn display_create_value<'a>(value: &'a str, placeholder: &'a str) -> &'a str {
     if value.is_empty() { placeholder } else { value }
-}
-
-fn visible_multiline_rows(
-    value: &str,
-    placeholder: &str,
-    height: u16,
-    cursor_row: usize,
-    max_width: u16,
-) -> VisibleMultilineRows {
-    let mut source_rows = if value.is_empty() {
-        vec![placeholder.to_string()]
-    } else {
-        value
-            .split('\n')
-            .map(|row| row.to_string())
-            .collect::<Vec<_>>()
-    };
-    if source_rows.is_empty() {
-        source_rows.push(String::new());
-    }
-    let height_usize = height as usize;
-    let scroll_row = if cursor_row >= height_usize {
-        cursor_row + 1 - height_usize
-    } else {
-        0
-    };
-    let mut rows = source_rows
-        .into_iter()
-        .skip(scroll_row)
-        .take(height_usize)
-        .map(|row| fit_single_line(row.as_str(), max_width, false))
-        .collect::<Vec<_>>();
-    while rows.len() < height_usize {
-        rows.push(String::new());
-    }
-    VisibleMultilineRows { rows, scroll_row }
-}
-
-fn multiline_cursor_x(line: &str, cursor_col: usize, max_width: u16) -> u16 {
-    let prefix = line.chars().take(cursor_col).collect::<String>();
-    terminal_str_width(fit_single_line(prefix.as_str(), max_width, false).as_str())
 }
 
 fn create_submit_text(ui: &TuiKitUi<'_>) -> String {

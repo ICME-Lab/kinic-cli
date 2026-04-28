@@ -222,7 +222,6 @@ mod effect_application {
         assert_eq!(state.rename_memory.memory_id, "aaaaa-aa");
         assert_eq!(state.rename_memory.form.value, "Alpha");
         assert_eq!(state.rename_memory.description, "Current");
-        assert!(state.rename_memory.description_loaded);
         assert!(!state.rename_memory.description_dirty);
     }
 

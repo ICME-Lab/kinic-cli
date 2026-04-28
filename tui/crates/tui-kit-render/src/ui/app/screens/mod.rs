@@ -9,7 +9,7 @@ pub mod settings;
 use ratatui::{buffer::Buffer, layout::Rect, text::Line};
 use tui_kit_runtime::CreateSubmitState;
 use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::TuiKitUi;
 
@@ -80,6 +80,13 @@ pub(crate) struct FormRows<F> {
     rows: Vec<(F, u16, u16)>,
 }
 
+pub(crate) struct VisibleMultilineRows {
+    pub rows: Vec<String>,
+    pub scroll_row: usize,
+}
+
+pub(crate) const MULTILINE_TEXTAREA_HEIGHT: u16 = 5;
+
 impl<F> Default for FormRows<F> {
     fn default() -> Self {
         Self { rows: Vec::new() }
@@ -126,4 +133,85 @@ impl<F: Copy + PartialEq> FormRows<F> {
             .map(|(_, _, width)| *width)
             .unwrap_or(0)
     }
+}
+
+pub(crate) fn visible_multiline_rows(
+    value: &str,
+    placeholder: &str,
+    height: u16,
+    cursor_row: usize,
+    max_width: u16,
+) -> VisibleMultilineRows {
+    let mut source_rows = if value.is_empty() {
+        vec![placeholder.to_string()]
+    } else {
+        value
+            .split('\n')
+            .map(|row| row.to_string())
+            .collect::<Vec<_>>()
+    };
+    if source_rows.is_empty() {
+        source_rows.push(String::new());
+    }
+    let height_usize = height as usize;
+    let scroll_row = if cursor_row >= height_usize {
+        cursor_row + 1 - height_usize
+    } else {
+        0
+    };
+    let mut rows = source_rows
+        .into_iter()
+        .skip(scroll_row)
+        .take(height_usize)
+        .map(|row| fit_multiline_row(row.as_str(), max_width))
+        .collect::<Vec<_>>();
+    while rows.len() < height_usize {
+        rows.push(String::new());
+    }
+    VisibleMultilineRows { rows, scroll_row }
+}
+
+pub(crate) fn multiline_cursor_x(line: &str, cursor_col: usize, max_width: u16) -> u16 {
+    let prefix = line.chars().take(cursor_col).collect::<String>();
+    terminal_str_width(fit_multiline_row(prefix.as_str(), max_width).as_str())
+}
+
+pub(crate) fn multiline_visible_row(cursor_row: usize, scroll_row: usize, height: u16) -> u16 {
+    cursor_row
+        .saturating_sub(scroll_row)
+        .min(height.saturating_sub(1) as usize) as u16
+}
+
+fn fit_multiline_row(value: &str, max_width: u16) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if terminal_str_width(value) <= max_width {
+        return value.to_string();
+    }
+    take_prefix_by_width(value, max_width)
+}
+
+fn take_prefix_by_width(value: &str, max_width: u16) -> String {
+    let mut width = 0;
+    let mut out = String::new();
+    for ch in value.chars() {
+        let ch_width = char_width(ch);
+        if width + ch_width > max_width {
+            break;
+        }
+        width += ch_width;
+        out.push(ch);
+    }
+    out
+}
+
+fn char_width(ch: char) -> u16 {
+    UnicodeWidthChar::width(ch)
+        .unwrap_or(0)
+        .min(u16::MAX as usize) as u16
+}
+
+fn terminal_str_width(s: &str) -> u16 {
+    UnicodeWidthStr::width(s).min(u16::MAX as usize) as u16
 }

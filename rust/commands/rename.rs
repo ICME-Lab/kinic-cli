@@ -9,7 +9,10 @@ use tracing::info;
 use crate::{
     cli::RenameArgs,
     memory_client_builder::build_memory_client,
-    shared::memory_metadata::{DescriptionUpdate, encode_renamed_memory_metadata_with_description},
+    shared::memory_metadata::{
+        DescriptionUpdate, description_update_from_optional,
+        encode_renamed_memory_metadata_with_description,
+    },
 };
 
 use super::CommandContext;
@@ -18,13 +21,21 @@ pub async fn handle(args: RenameArgs, ctx: &CommandContext) -> Result<()> {
     let next_name = validate_name(&args.name)?;
 
     let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
-    let metadata = client
-        .get_metadata()
-        .await
-        .context("Failed to fetch metadata from memory canister before rename")?;
-    let description_update = description_update_from_args(&args);
+    let description_update =
+        description_update_from_optional(args.description.as_deref(), args.clear_description);
+    let existing_raw = if should_fetch_existing_metadata(&description_update) {
+        Some(
+            client
+                .get_metadata()
+                .await
+                .context("Failed to fetch metadata from memory canister before rename")?
+                .name,
+        )
+    } else {
+        None
+    };
     let payload = encode_renamed_memory_metadata_with_description(
-        Some(metadata.name.as_str()),
+        existing_raw.as_deref(),
         next_name,
         &description_update,
     )
@@ -53,22 +64,16 @@ fn validate_name(raw: &str) -> Result<&str> {
     Ok(trimmed)
 }
 
-fn description_update_from_args(args: &RenameArgs) -> DescriptionUpdate {
-    if args.clear_description {
-        return DescriptionUpdate::Set(None);
-    }
-    match args.description.as_deref() {
-        Some(description) => DescriptionUpdate::Set(
-            (!description.trim().is_empty()).then(|| description.trim().to_string()),
-        ),
-        None => DescriptionUpdate::Preserve,
-    }
+fn should_fetch_existing_metadata(description_update: &DescriptionUpdate) -> bool {
+    *description_update == DescriptionUpdate::Preserve
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{description_update_from_args, validate_name};
-    use crate::{cli::RenameArgs, shared::memory_metadata::DescriptionUpdate};
+    use super::{should_fetch_existing_metadata, validate_name};
+    use crate::shared::memory_metadata::{
+        DescriptionUpdate, encode_renamed_memory_metadata_with_description,
+    };
 
     #[test]
     fn validate_name_rejects_blank_values() {
@@ -77,47 +82,40 @@ mod tests {
     }
 
     #[test]
-    fn description_update_preserves_when_description_is_omitted() {
-        let args = RenameArgs {
-            memory_id: "aaaaa-aa".to_string(),
-            name: "Alpha".to_string(),
-            description: None,
-            clear_description: false,
-        };
+    fn rename_fetches_existing_metadata_only_when_preserving_description() {
+        assert!(should_fetch_existing_metadata(&DescriptionUpdate::Preserve));
+        assert!(!should_fetch_existing_metadata(&DescriptionUpdate::Set(
+            Some("Quarterly goals".to_string())
+        )));
+        assert!(!should_fetch_existing_metadata(&DescriptionUpdate::Set(
+            None
+        )));
+    }
+
+    #[test]
+    fn rename_encodes_explicit_description_without_existing_metadata() {
+        let encoded = encode_renamed_memory_metadata_with_description(
+            None,
+            "Alpha",
+            &DescriptionUpdate::Set(Some("Quarterly goals".to_string())),
+        )
+        .expect("explicit description should encode without existing metadata");
 
         assert_eq!(
-            description_update_from_args(&args),
-            DescriptionUpdate::Preserve
+            encoded,
+            r#"{"name":"Alpha","description":"Quarterly goals"}"#
         );
     }
 
     #[test]
-    fn description_update_sets_trimmed_description() {
-        let args = RenameArgs {
-            memory_id: "aaaaa-aa".to_string(),
-            name: "Alpha".to_string(),
-            description: Some(" Quarterly goals ".to_string()),
-            clear_description: false,
-        };
+    fn rename_encodes_cleared_description_without_existing_metadata() {
+        let encoded = encode_renamed_memory_metadata_with_description(
+            None,
+            "Alpha",
+            &DescriptionUpdate::Set(None),
+        )
+        .expect("cleared description should encode without existing metadata");
 
-        assert_eq!(
-            description_update_from_args(&args),
-            DescriptionUpdate::Set(Some("Quarterly goals".to_string()))
-        );
-    }
-
-    #[test]
-    fn description_update_clears_description() {
-        let args = RenameArgs {
-            memory_id: "aaaaa-aa".to_string(),
-            name: "Alpha".to_string(),
-            description: None,
-            clear_description: true,
-        };
-
-        assert_eq!(
-            description_update_from_args(&args),
-            DescriptionUpdate::Set(None)
-        );
+        assert_eq!(encoded, r#"{"name":"Alpha"}"#);
     }
 }

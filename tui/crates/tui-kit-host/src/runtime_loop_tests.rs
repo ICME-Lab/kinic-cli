@@ -445,6 +445,234 @@ fn textarea_input_updates_create_description_with_newlines() {
 }
 
 #[test]
+fn textarea_input_updates_rename_description_with_newlines() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                ..TextInputModalState::default()
+            },
+            focus: tui_kit_runtime::RenameModalFocus::Description,
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut ProviderRenderState::default(),
+        &mut textareas,
+        &host_key(
+            crossterm::event::KeyCode::Char('a'),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("rename textarea input");
+    assert!(handled);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut ProviderRenderState::default(),
+        &mut textareas,
+        &host_key(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("rename textarea input");
+    assert!(handled);
+
+    assert_eq!(state.rename_memory.description, "a\n");
+    assert!(state.rename_memory.description_dirty);
+}
+
+#[test]
+fn textarea_paste_preserves_rename_description_newlines() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                ..TextInputModalState::default()
+            },
+            focus: tui_kit_runtime::RenameModalFocus::Description,
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut ProviderRenderState::default(),
+        &mut textareas,
+        &host_paste("first\r\nsecond\rthird"),
+    )
+    .expect("rename textarea paste");
+
+    assert!(handled);
+    assert_eq!(state.rename_memory.description, "first\nsecond\nthird");
+    assert!(state.rename_memory.description_dirty);
+}
+
+#[test]
+fn rename_description_tab_moves_focus_without_editing_textarea() {
+    let mut provider = TestProvider::ok();
+    let mut state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                ..TextInputModalState::default()
+            },
+            focus: tui_kit_runtime::RenameModalFocus::Description,
+            description: "current".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    let result = handle_overlay_input(
+        &mut provider,
+        &mut state,
+        &mut ProviderRenderState::default(),
+        false,
+        crossterm::event::KeyCode::Tab,
+        crossterm::event::KeyModifiers::NONE,
+    );
+
+    assert!(matches!(result, OverlayInputResult::ApplyEffects(_)));
+    assert_eq!(
+        state.rename_memory.focus,
+        tui_kit_runtime::RenameModalFocus::Submit
+    );
+    assert_eq!(state.rename_memory.description, "current");
+    assert!(!state.rename_memory.description_dirty);
+}
+
+#[test]
+fn rename_description_down_on_last_row_moves_to_submit() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                ..TextInputModalState::default()
+            },
+            focus: tui_kit_runtime::RenameModalFocus::Description,
+            description: "first\nsecond".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut ProviderRenderState::default(),
+        &mut textareas,
+        &host_key(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("rename textarea down");
+
+    assert!(handled);
+    if state.rename_memory.focus == tui_kit_runtime::RenameModalFocus::Description {
+        let handled = handle_textarea_input(
+            &mut provider,
+            &mut state,
+            &mut hooks,
+            &mut ProviderRenderState::default(),
+            &mut textareas,
+            &host_key(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        )
+        .expect("rename textarea down");
+        assert!(handled);
+    }
+    assert_eq!(
+        state.rename_memory.focus,
+        tui_kit_runtime::RenameModalFocus::Submit
+    );
+}
+
+#[test]
+fn rename_description_up_on_first_row_moves_to_name() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                ..TextInputModalState::default()
+            },
+            focus: tui_kit_runtime::RenameModalFocus::Description,
+            description: "first\nsecond".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut ProviderRenderState::default(),
+        &mut textareas,
+        &host_key(
+            crossterm::event::KeyCode::Up,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("rename textarea up");
+
+    assert!(handled);
+    assert_eq!(
+        state.rename_memory.focus,
+        tui_kit_runtime::RenameModalFocus::Name
+    );
+}
+
+#[test]
+fn open_rename_syncs_multiline_description_without_dirty_state() {
+    let mut state = CoreState::default();
+    let mut textareas = FormTextareas::default();
+
+    execute_effects_to_status(
+        &mut state,
+        vec![CoreEffect::OpenRenameMemory {
+            memory_id: "aaaaa-aa".to_string(),
+            current_name: "Alpha".to_string(),
+            current_description: Some("first\nsecond".to_string()),
+        }],
+    );
+    sync_form_textareas_from_state(&mut textareas, &state);
+    sync_state_from_textareas(&mut state, &textareas);
+
+    assert_eq!(state.rename_memory.description, "first\nsecond");
+    assert!(!state.rename_memory.description_dirty);
+}
+
+#[test]
 fn textarea_paste_normalizes_carriage_returns_in_create_description() {
     let mut provider = TestProvider::ok();
     let mut hooks = NoopRuntimeHooks;

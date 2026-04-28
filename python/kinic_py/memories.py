@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import List, Sequence, Tuple
+from typing import List, Sequence, Tuple, overload
 
 from . import _lib as native
 
@@ -47,27 +47,77 @@ class KinicMemories:
         """Insert markdown text directly."""
         return insert_markdown(self.identity, memory_id, tag, text, ic=self.ic)
 
+    @overload
+    def insert_markdown_file(self, memory_id: str, path: str) -> int: ...
+
+    @overload
+    def insert_markdown_file(self, memory_id: str, tag: str, path: str) -> int: ...
+
+    @overload
     def insert_markdown_file(
         self,
         memory_id: str,
-        tag: str,
+        path_or_tag: None = None,
         path: str | None = None,
+        *,
+        tag: str,
+    ) -> int: ...
+
+    def insert_markdown_file(
+        self,
+        memory_id: str,
+        path_or_tag: str | None = None,
+        path: str | None = None,
+        *,
+        tag: str | None = None,
     ) -> int:
         """Insert markdown loaded from disk."""
-        return insert_markdown_file(self.identity, memory_id, tag, path, ic=self.ic)
+        return insert_markdown_file(
+            self.identity,
+            memory_id,
+            path_or_tag,
+            path,
+            tag=tag,
+            ic=self.ic,
+        )
 
     def insert_raw(self, memory_id: str, tag: str, text: str, embedding: Sequence[float]) -> int:
         """Insert a precomputed embedding with text."""
         return insert_raw(self.identity, memory_id, tag, text, embedding, ic=self.ic)
 
+    @overload
+    def insert_pdf_file(self, memory_id: str, path: str) -> int: ...
+
+    @overload
+    def insert_pdf_file(self, memory_id: str, tag: str, path: str) -> int: ...
+
+    @overload
     def insert_pdf_file(
         self,
         memory_id: str,
-        tag: str,
+        path_or_tag: None = None,
         path: str | None = None,
+        *,
+        tag: str,
+    ) -> int: ...
+
+    def insert_pdf_file(
+        self,
+        memory_id: str,
+        path_or_tag: str | None = None,
+        path: str | None = None,
+        *,
+        tag: str | None = None,
     ) -> int:
         """Convert a PDF to markdown and insert it."""
-        return insert_pdf_file(self.identity, memory_id, tag, path, ic=self.ic)
+        return insert_pdf_file(
+            self.identity,
+            memory_id,
+            path_or_tag,
+            path,
+            tag=tag,
+            ic=self.ic,
+        )
 
     def insert_pdf(self, memory_id: str, tag: str, path: str) -> int:
         """Deprecated: use insert_pdf_file instead."""
@@ -182,15 +232,49 @@ def insert_markdown(
     return native.insert_memory(identity, memory_id, tag, text=text, ic=ic)
 
 
+@overload
+def insert_markdown_file(
+    identity: str,
+    memory_id: str,
+    path: str,
+    *,
+    ic: bool | None = None,
+) -> int: ...
+
+
+@overload
 def insert_markdown_file(
     identity: str,
     memory_id: str,
     tag: str,
-    path: str | None = None,
+    path: str,
     *,
     ic: bool | None = None,
+) -> int: ...
+
+
+@overload
+def insert_markdown_file(
+    identity: str,
+    memory_id: str,
+    path_or_tag: None = None,
+    path: str | None = None,
+    *,
+    tag: str,
+    ic: bool | None = None,
+) -> int: ...
+
+
+def insert_markdown_file(
+    identity: str,
+    memory_id: str,
+    path_or_tag: str | None = None,
+    path: str | None = None,
+    *,
+    tag: str | None = None,
+    ic: bool | None = None,
 ) -> int:
-    resolved_tag, resolved_path = _resolve_file_insert_args(tag, path)
+    resolved_tag, resolved_path = _resolve_file_insert_args(path_or_tag, path, tag)
     return native.insert_memory(identity, memory_id, resolved_tag, file_path=resolved_path, ic=ic)
 
 
@@ -206,15 +290,49 @@ def insert_raw(
     return native.insert_memory_raw(identity, memory_id, tag, text, list(embedding), ic=ic)
 
 
+@overload
+def insert_pdf_file(
+    identity: str,
+    memory_id: str,
+    path: str,
+    *,
+    ic: bool | None = None,
+) -> int: ...
+
+
+@overload
 def insert_pdf_file(
     identity: str,
     memory_id: str,
     tag: str,
-    path: str | None = None,
+    path: str,
     *,
     ic: bool | None = None,
+) -> int: ...
+
+
+@overload
+def insert_pdf_file(
+    identity: str,
+    memory_id: str,
+    path_or_tag: None = None,
+    path: str | None = None,
+    *,
+    tag: str,
+    ic: bool | None = None,
+) -> int: ...
+
+
+def insert_pdf_file(
+    identity: str,
+    memory_id: str,
+    path_or_tag: str | None = None,
+    path: str | None = None,
+    *,
+    tag: str | None = None,
+    ic: bool | None = None,
 ) -> int:
-    resolved_tag, resolved_path = _resolve_file_insert_args(tag, path)
+    resolved_tag, resolved_path = _resolve_file_insert_args(path_or_tag, path, tag)
     return native.insert_memory_pdf(identity, memory_id, resolved_tag, resolved_path, ic=ic)
 
 
@@ -254,10 +372,22 @@ def insert_file(
     return insert_markdown_file(identity, memory_id, tag, path, ic=ic)
 
 
-def _resolve_file_insert_args(tag: str, path: str | None) -> tuple[str | None, str]:
+def _resolve_file_insert_args(
+    path_or_tag: str | None,
+    path: str | None,
+    tag: str | None,
+) -> tuple[str | None, str]:
+    if path_or_tag is not None and tag is not None:
+        raise ValueError("path_or_tag and tag cannot both be set")
+    if tag is not None:
+        if path is None:
+            raise ValueError("path must be provided when tag is set")
+        return tag, path
     if path is None:
-        return None, tag
-    return tag, path
+        if path_or_tag is None:
+            raise ValueError("path must be provided")
+        return None, path_or_tag
+    return path_or_tag, path
 
 
 def search_memories(

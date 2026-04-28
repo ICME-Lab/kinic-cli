@@ -12,9 +12,10 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::{Focus, TuiKitUi, shared};
 
-use super::{FormRows, submit_button_text};
-
-const INSERT_TEXT_HEIGHT: u16 = 5;
+use super::{
+    FormRows, MULTILINE_TEXTAREA_HEIGHT, multiline_cursor_x, multiline_visible_row,
+    submit_button_text, visible_multiline_rows,
+};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_insert_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -52,14 +53,12 @@ impl<'a> TuiKitUi<'a> {
             let visible = visible_multiline_rows(
                 self.insert_text,
                 text_placeholder(self.insert_mode),
-                INSERT_TEXT_HEIGHT,
+                MULTILINE_TEXTAREA_HEIGHT,
                 cursor_row,
                 layout.form_area.width.saturating_sub(6),
             );
-            let visible_row = cursor_row
-                .saturating_sub(visible.scroll_row)
-                .min(INSERT_TEXT_HEIGHT.saturating_sub(1) as usize)
-                as u16;
+            let visible_row =
+                multiline_visible_row(cursor_row, visible.scroll_row, MULTILINE_TEXTAREA_HEIGHT);
             let x = layout.form_area.x
                 + 3
                 + multiline_cursor_x(
@@ -92,11 +91,6 @@ fn insert_layout(area: Rect, has_tabs: bool) -> InsertLayout {
 struct InsertForm<'a> {
     lines: Vec<Line<'a>>,
     rows: FormRows<InsertFormFocus>,
-}
-
-struct VisibleMultilineRows {
-    rows: Vec<String>,
-    scroll_row: usize,
 }
 
 impl InsertForm<'_> {
@@ -151,7 +145,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         let text_rows = visible_multiline_rows(
             ui.insert_text,
             text_placeholder(ui.insert_mode),
-            INSERT_TEXT_HEIGHT,
+            MULTILINE_TEXTAREA_HEIGHT,
             ui.insert_text_cursor
                 .map(|(row, _)| row)
                 .unwrap_or_default(),
@@ -332,47 +326,6 @@ fn display_value(value: &str, placeholder: &str) -> String {
     } else {
         value.to_string()
     }
-}
-
-fn visible_multiline_rows(
-    value: &str,
-    placeholder: &str,
-    height: u16,
-    cursor_row: usize,
-    max_width: u16,
-) -> VisibleMultilineRows {
-    let mut source_rows = if value.is_empty() {
-        vec![placeholder.to_string()]
-    } else {
-        value
-            .split('\n')
-            .map(|row| row.to_string())
-            .collect::<Vec<_>>()
-    };
-    if source_rows.is_empty() {
-        source_rows.push(String::new());
-    }
-    let height_usize = height as usize;
-    let scroll_row = if cursor_row >= height_usize {
-        cursor_row + 1 - height_usize
-    } else {
-        0
-    };
-    let mut rows = source_rows
-        .into_iter()
-        .skip(scroll_row)
-        .take(height_usize)
-        .map(|row| trim_to_width(row.as_str(), max_width))
-        .collect::<Vec<_>>();
-    while rows.len() < height_usize {
-        rows.push(String::new());
-    }
-    VisibleMultilineRows { rows, scroll_row }
-}
-
-fn multiline_cursor_x(line: &str, cursor_col: usize, max_width: u16) -> u16 {
-    let prefix = line.chars().take(cursor_col).collect::<String>();
-    UnicodeWidthStr::width(trim_to_width(prefix.as_str(), max_width).as_str()) as u16
 }
 
 fn memory_id_value(ui: &TuiKitUi<'_>) -> String {

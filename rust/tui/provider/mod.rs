@@ -22,7 +22,7 @@ use crate::{
     preferences::{self, UserPreferences},
     shared::{
         cross_memory_search::{collect_searchable_memory_ids, fold_search_batches},
-        memory_metadata::parse_memory_metadata,
+        memory_metadata::{description_update_from_dirty, parse_memory_metadata},
     },
     tui::TuiAuth,
 };
@@ -3448,14 +3448,10 @@ impl KinicProvider {
         if next_name.is_empty() {
             return Err("Memory name is required.".to_string());
         }
-        let description_update = if state.rename_memory.description_dirty {
-            let next_description = state.rename_memory.description.trim();
-            bridge::DescriptionUpdate::Set(
-                (!next_description.is_empty()).then(|| next_description.to_string()),
-            )
-        } else {
-            bridge::DescriptionUpdate::Preserve
-        };
+        let description_update = description_update_from_dirty(
+            state.rename_memory.description.as_str(),
+            state.rename_memory.description_dirty,
+        );
 
         Ok((
             memory_id.to_string(),

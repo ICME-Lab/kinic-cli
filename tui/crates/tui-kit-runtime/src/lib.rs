@@ -299,7 +299,6 @@ pub struct RenameMemoryModalState {
     pub form: TextInputModalState,
     pub memory_id: String,
     pub description: String,
-    pub description_loaded: bool,
     pub description_dirty: bool,
     pub focus: RenameModalFocus,
 }
@@ -314,7 +313,6 @@ impl RenameMemoryModalState {
     pub fn close(&mut self) {
         self.form.open = false;
         self.description.clear();
-        self.description_loaded = false;
         self.description_dirty = false;
         self.focus = RenameModalFocus::Name;
         self.form.reset_submission();
@@ -1845,10 +1843,8 @@ fn refresh_auto_insert_tag(state: &mut CoreState) {
         return;
     }
 
-    if let Some(tag) = derive_file_tag(PathBuf::from(normalized).as_path()) {
-        state.insert_tag = tag;
-        state.insert_tag_is_auto = true;
-    }
+    state.insert_tag = derive_file_tag(PathBuf::from(normalized).as_path()).unwrap_or_default();
+    state.insert_tag_is_auto = true;
 }
 
 fn clear_file_mode_auto_tag_on_mode_change(state: &mut CoreState, previous_mode: InsertMode) {
@@ -2251,7 +2247,6 @@ fn apply_rename_input(state: &mut CoreState, c: char) {
     match state.rename_memory.focus {
         RenameModalFocus::Name => state.rename_memory.form.value.push(c),
         RenameModalFocus::Description => {
-            state.rename_memory.description_loaded = true;
             state.rename_memory.description_dirty = true;
             state.rename_memory.description.push(c);
         }
@@ -2269,7 +2264,6 @@ fn apply_rename_backspace(state: &mut CoreState) {
             state.rename_memory.form.value.pop();
         }
         RenameModalFocus::Description => {
-            state.rename_memory.description_loaded = true;
             state.rename_memory.description_dirty = true;
             state.rename_memory.description.pop();
         }
@@ -3351,7 +3345,6 @@ mod tests {
                 ..TextInputModalState::default()
             },
             description: "draft".to_string(),
-            description_loaded: true,
             description_dirty: true,
             focus: RenameModalFocus::Description,
             ..RenameMemoryModalState::default()
@@ -3361,7 +3354,6 @@ mod tests {
 
         assert!(!modal.form.open);
         assert_eq!(modal.description, "");
-        assert!(!modal.description_loaded);
         assert!(!modal.description_dirty);
         assert_eq!(modal.focus, RenameModalFocus::Name);
     }
@@ -4844,6 +4836,22 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::InsertInput('x'));
 
         assert!(state.insert_tag.starts_with("doc-"));
+        assert!(state.insert_tag_is_auto);
+    }
+
+    #[test]
+    fn insert_file_path_edit_clears_auto_tag_when_tag_cannot_be_derived() {
+        let mut state = CoreState {
+            insert_focus: InsertFormFocus::FilePath,
+            insert_tag: "doc-11111111".to_string(),
+            insert_tag_is_auto: true,
+            insert_file_path_input: String::new(),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertInput('/'));
+
+        assert_eq!(state.insert_tag, "");
         assert!(state.insert_tag_is_auto);
     }
 

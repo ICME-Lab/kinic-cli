@@ -17,7 +17,10 @@ use crate::{
     embedding::fetch_embedding,
     insert_service::{InsertRequest, execute_insert_request},
     memory_client_builder::build_memory_client_from_identity,
-    shared::memory_metadata::{DescriptionUpdate, encode_renamed_memory_metadata_with_description},
+    shared::memory_metadata::{
+        DescriptionUpdate, description_update_from_optional,
+        encode_renamed_memory_metadata_with_description,
+    },
 };
 use icrc_ledger_types::icrc1::account::Account;
 
@@ -119,23 +122,22 @@ pub(crate) async fn rename_memory(
         bail!("name must not be empty");
     }
 
+    let description_update =
+        description_update_from_optional(description.as_deref(), clear_description);
     let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
-    let metadata = client
-        .get_metadata()
-        .await
-        .context("Failed to fetch metadata from memory canister before rename")?;
-    let description_update = if clear_description {
-        DescriptionUpdate::Set(None)
+    let existing_raw = if description_update == DescriptionUpdate::Preserve {
+        Some(
+            client
+                .get_metadata()
+                .await
+                .context("Failed to fetch metadata from memory canister before rename")?
+                .name,
+        )
     } else {
-        match description {
-            Some(description) => DescriptionUpdate::Set(
-                (!description.trim().is_empty()).then(|| description.trim().to_string()),
-            ),
-            None => DescriptionUpdate::Preserve,
-        }
+        None
     };
     let payload = encode_renamed_memory_metadata_with_description(
-        Some(metadata.name.as_str()),
+        existing_raw.as_deref(),
         next_name,
         &description_update,
     )?;

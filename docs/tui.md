@@ -129,7 +129,7 @@ In multiline text fields, `Enter` inserts a newline instead of submitting. Move 
 
 1. Move to the `Insert` tab
 2. Set `Mode` to `File`
-3. Enter `Memory ID` and `Tag`
+3. Enter `Memory ID`
 4. Select a PDF file or type its path
 5. Run it with `Submit`
 
@@ -137,10 +137,11 @@ PDFs are converted to Markdown before insertion. This will fail if `pdftotext` i
 
 ### Reuse Saved Tags
 
-1. Select `Tag` in the `Insert` tab
-2. Choose the tag you need from the saved tag list
-3. If needed, save a new tag with `+ Add new tag`
-4. Delete unnecessary tags from tag management in `Settings`
+1. Set `Mode` to `Inline Text` or `Manual Embedding`
+2. Select `Tag` in the `Insert` tab
+3. Choose the tag you need from the saved tag list
+4. If needed, save a new tag with `+ Add new tag`
+5. Delete unnecessary tags from tag management in `Settings`
 
 ## Memories Tab
 
@@ -185,7 +186,6 @@ In the `Insert` tab, you choose how to add data to a memory. There are three mod
 
 - `Mode`: insertion method
 - `Memory ID`: target memory for insertion
-- `Tag`: tag to save with the content
 - `Submit`: run the insertion
 
 If `Memory ID` is left empty and a default memory is set, that value is shown as a placeholder candidate.
@@ -203,6 +203,8 @@ You can provide `FilePath` in two ways.
 - Press `Enter` to open the `yazi` chooser and select a file
 - Type the path directly
 
+File mode auto-derives the tag from `FilePath` and shows it as `Auto Tag`. It does not show the manual `Tag` field or use the saved tag picker.
+
 If `yazi` is not installed, the chooser is unavailable, but manual `FilePath` input still works. On macOS, install it with `brew install yazi` if needed.
 
 If you select a `pdf`, it is converted to Markdown before insertion. On macOS, install `pdftotext` with `brew install poppler` if needed.
@@ -210,12 +212,14 @@ If you select a `pdf`, it is converted to Markdown before insertion. On macOS, i
 ### Inline Text Mode
 
 This stores text entered directly in the UI after generating an embedding. It is useful for short notes or test data.
+`Tag` is required and identifies the inserted content.
 `Inline Text` supports multiple lines.
 
 ### Manual Embedding Mode
 
 Use this when you already have an embedding.
 
+- `Tag`: required identifier for the inserted content
 - `Text`: body text to save together with the embedding
 - `Embedding`: vector in JSON array format
 
@@ -225,7 +229,7 @@ In this mode, the expected dimension and current dimension are shown when availa
 
 ### Reusing Tags
 
-Tags can be reused from the picker. If saved tags exist, you can choose from the list, and tags added or removed in `Settings` are also reflected here.
+In `Inline Text` and `Manual Embedding` modes, tags can be reused from the picker. If saved tags exist, you can choose from the list, and tags added or removed in `Settings` are also reflected here.
 
 ## Create Tab
 

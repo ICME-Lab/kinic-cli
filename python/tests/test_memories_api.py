@@ -121,6 +121,51 @@ class MemoriesApiTests(unittest.TestCase):
             ],
         )
 
+    def test_insert_pdf_file_accepts_auto_tag_form(self) -> None:
+        result = self.memories.insert_pdf_file("default", "aaaaa-aa", "./paper.pdf")
+
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            self.native.calls,
+            [
+                (
+                    "insert_memory_pdf",
+                    ("default", "aaaaa-aa", None, "./paper.pdf"),
+                    {"ic": None},
+                )
+            ],
+        )
+
+    def test_insert_pdf_file_accepts_legacy_tag_keyword(self) -> None:
+        result = self.memories.insert_pdf_file(
+            "default",
+            "aaaaa-aa",
+            tag="manual",
+            path="./paper.pdf",
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            self.native.calls,
+            [
+                (
+                    "insert_memory_pdf",
+                    ("default", "aaaaa-aa", "manual", "./paper.pdf"),
+                    {"ic": None},
+                )
+            ],
+        )
+
+    def test_insert_markdown_file_rejects_ambiguous_tag_forms(self) -> None:
+        with self.assertRaises(ValueError):
+            self.memories.insert_markdown_file(
+                "default",
+                "aaaaa-aa",
+                "manual",
+                path="./note.md",
+                tag="other",
+            )
+
     def test_kinic_memories_insert_pdf_file_accepts_legacy_tag_keyword(self) -> None:
         client = self.memories.KinicMemories("default")
 

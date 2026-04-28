@@ -17,6 +17,28 @@ pub(crate) enum DescriptionUpdate {
     Set(Option<String>),
 }
 
+pub(crate) fn description_update_from_optional(
+    description: Option<&str>,
+    clear_description: bool,
+) -> DescriptionUpdate {
+    if clear_description {
+        return DescriptionUpdate::Set(None);
+    }
+    description
+        .map(|description| {
+            DescriptionUpdate::Set(normalize_metadata_field(Some(description.to_string())))
+        })
+        .unwrap_or(DescriptionUpdate::Preserve)
+}
+
+pub(crate) fn description_update_from_dirty(description: &str, dirty: bool) -> DescriptionUpdate {
+    if dirty {
+        DescriptionUpdate::Set(normalize_metadata_field(Some(description.to_string())))
+    } else {
+        DescriptionUpdate::Preserve
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 struct MemoryMetadataEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -177,5 +199,45 @@ mod tests {
         .expect("metadata should encode");
 
         assert_eq!(encoded, "{\"name\":\"Beta\"}");
+    }
+
+    #[test]
+    fn description_update_from_optional_preserves_when_omitted() {
+        assert_eq!(
+            description_update_from_optional(None, false),
+            DescriptionUpdate::Preserve
+        );
+    }
+
+    #[test]
+    fn description_update_from_optional_sets_trimmed_description() {
+        assert_eq!(
+            description_update_from_optional(Some(" Quarterly goals "), false),
+            DescriptionUpdate::Set(Some("Quarterly goals".to_string()))
+        );
+    }
+
+    #[test]
+    fn description_update_from_optional_clears_when_requested() {
+        assert_eq!(
+            description_update_from_optional(Some("ignored"), true),
+            DescriptionUpdate::Set(None)
+        );
+    }
+
+    #[test]
+    fn description_update_from_dirty_preserves_when_clean() {
+        assert_eq!(
+            description_update_from_dirty("ignored", false),
+            DescriptionUpdate::Preserve
+        );
+    }
+
+    #[test]
+    fn description_update_from_dirty_clears_blank_description() {
+        assert_eq!(
+            description_update_from_dirty("   ", true),
+            DescriptionUpdate::Set(None)
+        );
     }
 }

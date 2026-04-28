@@ -344,6 +344,12 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn rename_description_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.rename_description_cursor = value;
+        self
+    }
+
+    #[must_use]
     pub fn transfer_modal(mut self, value: TransferModalState) -> Self {
         self.transfer_modal = value;
         self

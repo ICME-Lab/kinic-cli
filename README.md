@@ -372,7 +372,7 @@ You can tag inserted content such as `notes` or `summary_q1` and manage it later
 
 Python (preferred: `insert_pdf_file`):
 ```python
-num_chunks = km.insert_pdf_file(memory_id, "quarterly_report", "./docs/report.pdf")
+num_chunks = km.insert_pdf_file(memory_id, "./docs/report.pdf")
 print(f"Inserted {num_chunks} PDF chunks")
 ```
 
@@ -521,7 +521,7 @@ Stateless alternatives available:
 - `insert_markdown_file(identity, memory_id, tag, path, ic=False)`
 - `insert_pdf_file(identity, memory_id, path, ic=False)`
 - `insert_pdf_file(identity, memory_id, tag, path, ic=False)`
-- `insert_pdf(identity, memory_id, path, ic=False)`
+- `insert_pdf(identity, memory_id, tag, path, ic=False)` (deprecated)
 - `search_memories(identity, memory_id, query, ic=False)`
 - `ask_ai(identity, memory_id, query, top_k=None, language=None, ic=False)`
 - `get_balance(identity, ic=False)`
