@@ -1769,14 +1769,14 @@ fn apply_form_command(state: &mut CoreState, action: &CoreAction) {
         (FormKind::Insert, FormCommand::HorizontalChangePrev) => {
             let previous_mode = state.insert_mode;
             state.insert_mode = prev_insert_mode(previous_mode);
-            clear_file_mode_auto_tag_on_mode_change(state, previous_mode);
+            sync_insert_tag_after_mode_change(state, previous_mode);
             state.insert_focus = InsertFormFocus::Mode;
             clear_insert_error_state(state);
         }
         (FormKind::Insert, FormCommand::HorizontalChangeNext) => {
             let previous_mode = state.insert_mode;
             state.insert_mode = next_insert_mode(previous_mode);
-            clear_file_mode_auto_tag_on_mode_change(state, previous_mode);
+            sync_insert_tag_after_mode_change(state, previous_mode);
             state.insert_focus = InsertFormFocus::Mode;
             clear_insert_error_state(state);
         }
@@ -1855,6 +1855,13 @@ fn clear_file_mode_auto_tag_on_mode_change(state: &mut CoreState, previous_mode:
     if previous_mode == InsertMode::File && state.insert_tag_is_auto {
         state.insert_tag.clear();
         state.insert_tag_is_auto = false;
+    }
+}
+
+fn sync_insert_tag_after_mode_change(state: &mut CoreState, previous_mode: InsertMode) {
+    clear_file_mode_auto_tag_on_mode_change(state, previous_mode);
+    if state.insert_mode == InsertMode::File {
+        refresh_auto_insert_tag(state);
     }
 }
 
@@ -5428,6 +5435,40 @@ mod tests {
         assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
         assert_eq!(state.insert_tag, "research");
         assert!(!state.insert_tag_is_auto);
+    }
+
+    #[test]
+    fn insert_mode_change_to_file_refreshes_tag_from_file_path() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::ManualEmbedding,
+            insert_tag: "manual-tag".to_string(),
+            insert_tag_is_auto: false,
+            insert_file_path_input: "/tmp/report.pdf".to_string(),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
+
+        assert_eq!(state.insert_mode, InsertMode::File);
+        assert!(state.insert_tag.starts_with("report-"));
+        assert_ne!(state.insert_tag, "manual-tag");
+        assert!(state.insert_tag_is_auto);
+    }
+
+    #[test]
+    fn insert_mode_change_to_file_clears_tag_when_file_path_is_empty() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::ManualEmbedding,
+            insert_tag: "manual-tag".to_string(),
+            insert_tag_is_auto: false,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
+
+        assert_eq!(state.insert_mode, InsertMode::File);
+        assert_eq!(state.insert_tag, "");
+        assert!(state.insert_tag_is_auto);
     }
 
     #[test]

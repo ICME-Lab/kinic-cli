@@ -176,6 +176,12 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             display_value(ui.insert_file_path, "<file path>"),
             max_width,
         );
+        push_readonly_field(
+            &mut lines,
+            ui,
+            "Auto Tag",
+            display_value(ui.insert_tag, "<auto from file path>"),
+        );
     }
     if matches!(ui.insert_mode, InsertMode::ManualEmbedding) {
         push_field(
@@ -540,6 +546,31 @@ mod tests {
             assert_eq!(lines.contains("<file path>"), has_file_path);
             assert_eq!(lines.contains("<json array>"), has_embedding);
         }
+    }
+
+    #[test]
+    fn insert_file_form_shows_readonly_auto_tag_under_file_path() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_mode(InsertMode::File)
+            .insert_file_path("/tmp/report.pdf")
+            .insert_tag("report-12345678");
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        let file_path_index = rendered
+            .iter()
+            .position(|line| line.contains("/tmp/report.pdf"))
+            .expect("file path should render");
+        let auto_tag_index = rendered
+            .iter()
+            .position(|line| line.contains("Auto Tag"))
+            .expect("auto tag label should render");
+
+        assert!(auto_tag_index > file_path_index);
+        assert!(rendered.iter().any(|line| line.contains("report-12345678")));
     }
 
     #[test]
