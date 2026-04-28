@@ -30,7 +30,7 @@ use kinic_core::{
     amount::{
         KinicAmountParseError, format_e8s_to_kinic_string_u128, parse_required_kinic_amount_to_e8s,
     },
-    prefs_policy,
+    derive_file_tag, normalize_insert_file_path_input, prefs_policy,
     principal::parse_required_principal,
     tag,
 };
@@ -2899,8 +2899,8 @@ impl KinicProvider {
 
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
         let memory_id = self.effective_insert_memory_id().unwrap_or_default();
-        let tag = state.insert_tag.trim().to_string();
         let file_path = resolved_insert_file_path(state);
+        let tag = insert_tag_for_request(state, file_path.as_deref());
 
         match state.insert_mode {
             InsertMode::File => match file_path {
@@ -4278,23 +4278,6 @@ impl KinicProvider {
     }
 }
 
-fn normalize_insert_file_path_input(path: &str) -> &str {
-    let trimmed = path.trim();
-    if let Some(inner) = trimmed
-        .strip_prefix('\'')
-        .and_then(|value| value.strip_suffix('\''))
-    {
-        return inner;
-    }
-    if let Some(inner) = trimmed
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-    {
-        return inner;
-    }
-    trimmed
-}
-
 fn validate_supported_file_mode_path(path: &Path) -> Result<(), String> {
     if path.as_os_str().is_empty() {
         return Err("File path is required for file insert.".to_string());
@@ -4339,6 +4322,17 @@ fn resolved_insert_file_path(state: &CoreState) -> Option<std::path::PathBuf> {
         let normalized = normalize_insert_file_path_input(state.insert_file_path_input.trim());
         (!normalized.is_empty()).then(|| std::path::PathBuf::from(normalized))
     })
+}
+
+fn insert_tag_for_request(state: &CoreState, file_path: Option<&Path>) -> String {
+    let tag = state.insert_tag.trim();
+    if !tag.is_empty() {
+        return tag.to_string();
+    }
+    if state.insert_mode != InsertMode::File {
+        return String::new();
+    }
+    file_path.and_then(derive_file_tag).unwrap_or_default()
 }
 
 impl DataProvider for KinicProvider {

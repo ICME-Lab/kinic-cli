@@ -109,6 +109,23 @@ fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
 }
 
 #[test]
+fn build_insert_request_derives_file_tag_when_file_tag_is_blank() {
+    let provider = provider_with_active_memory("aaaaa-aa");
+    let file_path = write_temp_file_with_extension("md", "payload");
+    let request = provider.build_insert_request(&CoreState {
+        insert_mode: InsertMode::File,
+        insert_tag: " ".to_string(),
+        insert_file_path_input: file_path.clone(),
+        ..CoreState::default()
+    });
+
+    let tag = request.tag();
+    assert!(tag.starts_with("kinic-provider-test-"));
+    assert!(matches!(tag.rsplit_once('-'), Some((_, hash)) if hash.len() == 8));
+    fs::remove_file(file_path).expect("temporary file should be removable");
+}
+
+#[test]
 fn build_insert_request_prefers_selected_file_path_over_manual_input() {
     let provider = provider_with_active_memory("aaaaa-aa");
     let request = provider.build_insert_request(&CoreState {
