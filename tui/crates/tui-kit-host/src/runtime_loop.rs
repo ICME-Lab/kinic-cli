@@ -802,13 +802,11 @@ fn handle_overlay_input<P: DataProvider>(
     }
 
     if state.rename_memory.form.open {
-        return dispatch_overlay_action(
-            provider,
-            state,
-            provider_render_state,
-            rename_overlay_action(code, modifiers, state),
-            false,
-        );
+        let action = rename_overlay_action(code, modifiers, state);
+        if action.is_none() && active_textarea(state).is_some() {
+            return OverlayInputResult::NotHandled;
+        }
+        return dispatch_overlay_action(provider, state, provider_render_state, action, false);
     }
 
     if state.transfer_modal.open {

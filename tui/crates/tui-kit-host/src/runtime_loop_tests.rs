@@ -494,6 +494,59 @@ fn textarea_input_updates_rename_description_with_newlines() {
 }
 
 #[test]
+fn rename_description_key_reaches_textarea_after_overlay_handling() {
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                ..TextInputModalState::default()
+            },
+            focus: tui_kit_runtime::RenameModalFocus::Description,
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+    let mut textareas = FormTextareas::default();
+    let mut provider_render_state = ProviderRenderState::default();
+    let input = host_key(
+        crossterm::event::KeyCode::Char('D'),
+        crossterm::event::KeyModifiers::NONE,
+    );
+    let HostInputEvent::Key {
+        code, modifiers, ..
+    } = input
+    else {
+        panic!("host_key should build a key input");
+    };
+
+    let result = handle_overlay_input(
+        &mut provider,
+        &mut state,
+        &mut provider_render_state,
+        false,
+        code,
+        modifiers,
+    );
+
+    assert!(matches!(result, OverlayInputResult::NotHandled));
+    let handled = handle_textarea_input(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut provider_render_state,
+        &mut textareas,
+        &input,
+    )
+    .expect("rename textarea input");
+
+    assert!(handled);
+    assert_eq!(state.rename_memory.description, "D");
+    assert!(state.rename_memory.description_dirty);
+}
+
+#[test]
 fn textarea_paste_preserves_rename_description_newlines() {
     let mut provider = TestProvider::ok();
     let mut hooks = NoopRuntimeHooks;
