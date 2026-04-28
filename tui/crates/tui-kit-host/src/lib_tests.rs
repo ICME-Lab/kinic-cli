@@ -165,6 +165,68 @@ mod effect_application {
     }
 
     #[test]
+    fn reset_insert_form_for_repeat_clears_auto_tag() {
+        let mut state = CoreState {
+            insert_tag: "report".to_string(),
+            insert_tag_is_auto: true,
+            insert_text: "text".to_string(),
+            insert_file_path_input: "docs/report.md".to_string(),
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::ResetInsertFormForRepeat]);
+
+        assert_eq!(state.insert_tag, "");
+        assert!(!state.insert_tag_is_auto);
+        assert_eq!(state.insert_text, "");
+        assert_eq!(state.insert_file_path_input, "");
+    }
+
+    #[test]
+    fn reset_insert_form_for_repeat_preserves_manual_tag() {
+        let mut state = CoreState {
+            insert_tag: "research".to_string(),
+            insert_tag_is_auto: false,
+            insert_text: "text".to_string(),
+            insert_file_path_input: "docs/report.md".to_string(),
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::ResetInsertFormForRepeat]);
+
+        assert_eq!(state.insert_tag, "research");
+        assert!(!state.insert_tag_is_auto);
+        assert_eq!(state.insert_text, "");
+        assert_eq!(state.insert_file_path_input, "");
+    }
+
+    #[test]
+    fn open_rename_memory_loads_description_without_dirty_state() {
+        let mut state = CoreState {
+            rename_memory: tui_kit_runtime::RenameMemoryModalState {
+                description_dirty: true,
+                ..tui_kit_runtime::RenameMemoryModalState::default()
+            },
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(
+            &mut state,
+            vec![CoreEffect::OpenRenameMemory {
+                memory_id: "aaaaa-aa".to_string(),
+                current_name: "Alpha".to_string(),
+                current_description: Some("Current".to_string()),
+            }],
+        );
+
+        assert_eq!(state.rename_memory.memory_id, "aaaaa-aa");
+        assert_eq!(state.rename_memory.form.value, "Alpha");
+        assert_eq!(state.rename_memory.description, "Current");
+        assert!(state.rename_memory.description_loaded);
+        assert!(!state.rename_memory.description_dirty);
+    }
+
+    #[test]
     fn transfer_effects_reset_modal_state_consistently() {
         let mut state = CoreState {
             transfer_modal: TransferModalState {

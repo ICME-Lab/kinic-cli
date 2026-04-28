@@ -65,6 +65,7 @@ enum InsertFieldAvailability {
     Always,
     FileOnly,
     TextModes,
+    TaggedTextModes,
     ManualEmbeddingOnly,
 }
 impl InsertFieldAvailability {
@@ -73,6 +74,9 @@ impl InsertFieldAvailability {
             Self::Always => true,
             Self::FileOnly => mode == InsertMode::File,
             Self::TextModes => matches!(mode, InsertMode::InlineText | InsertMode::ManualEmbedding),
+            Self::TaggedTextModes => {
+                matches!(mode, InsertMode::InlineText | InsertMode::ManualEmbedding)
+            }
             Self::ManualEmbeddingOnly => mode == InsertMode::ManualEmbedding,
         }
     }
@@ -138,7 +142,7 @@ const INSERT_FIELDS: [InsertFieldSpec; 7] = [
             accepts_input: false,
             supports_horizontal_change: false,
         },
-        availability: InsertFieldAvailability::Always,
+        availability: InsertFieldAvailability::TaggedTextModes,
     },
     InsertFieldSpec {
         field: FormFieldSpec {

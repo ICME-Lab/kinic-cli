@@ -2915,14 +2915,12 @@ impl KinicProvider {
             InsertMode::File => match file_path {
                 Some(path) if insert_file_path_is_pdf(path.as_path()) => InsertRequest::Pdf {
                     memory_id,
-                    tag: preview_file_insert_tag(state.insert_tag.as_str(), Some(path.as_path()))
-                        .unwrap_or_default(),
+                    tag: preview_file_insert_tag("", Some(path.as_path())).unwrap_or_default(),
                     file_path: path,
                 },
                 Some(path) => InsertRequest::Normal {
                     memory_id,
-                    tag: preview_file_insert_tag(state.insert_tag.as_str(), Some(path.as_path()))
-                        .unwrap_or_default(),
+                    tag: preview_file_insert_tag("", Some(path.as_path())).unwrap_or_default(),
                     text: None,
                     file_path: Some(path),
                 },
@@ -3448,7 +3446,7 @@ impl KinicProvider {
         if next_name.is_empty() {
             return Err("Memory name is required.".to_string());
         }
-        let description_update = if state.rename_memory.description_loaded {
+        let description_update = if state.rename_memory.description_dirty {
             let next_description = state.rename_memory.description.trim();
             bridge::DescriptionUpdate::Set(
                 (!next_description.is_empty()).then(|| next_description.to_string()),

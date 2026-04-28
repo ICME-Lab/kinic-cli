@@ -22,6 +22,15 @@ fn command_by_name<'a>(commands: &'a [Value], name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("command `{name}` should be present"))
 }
 
+fn argument_by_name<'a>(command: &'a Value, name: &str) -> &'a Value {
+    command["arguments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .unwrap_or_else(|| panic!("argument `{name}` should be present"))
+}
+
 /// Every `capabilities` node must mirror clap subcommand names at the same depth.
 fn assert_capabilities_subcommand_tree_matches_clap(cap: &[Value], clap_cmd: &ClapCommand) {
     let cap_names: Vec<&str> = cap.iter().map(|v| v["name"].as_str().unwrap()).collect();
@@ -223,6 +232,24 @@ fn capabilities_describes_major_arguments_for_network_commands() {
                     "input_shape": "flag",
                     "value_kind": "boolean"
                 }))
+    );
+}
+
+#[test]
+fn capabilities_describes_insert_text_tag_runtime_requirement() {
+    let parsed = run_capabilities();
+    let commands = parsed["commands"].as_array().unwrap();
+    let insert = command_by_name(commands, "insert");
+    let tag = argument_by_name(insert, "tag");
+
+    assert_eq!(tag["required"], false);
+    assert_eq!(
+        tag["runtime_required_when"],
+        json!([{
+            "argument": "text",
+            "present": true,
+            "unless_argument": "file_path"
+        }])
     );
 }
 

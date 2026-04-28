@@ -231,7 +231,7 @@ pub struct InsertArgs {
 
     #[arg(
         long,
-        help = "Tag metadata stored alongside the text (auto-derived from --file-path when omitted)"
+        help = "Tag metadata stored alongside the text (required with --text; auto-derived from --file-path when omitted)"
     )]
     pub tag: Option<String>,
 }

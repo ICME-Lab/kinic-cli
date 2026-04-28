@@ -365,7 +365,9 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.create_focus = CreateModalFocus::Name;
             }
             CoreEffect::ResetInsertFormForRepeat => {
-                state.insert_tag.clear();
+                if state.insert_tag_is_auto {
+                    state.insert_tag.clear();
+                }
                 state.insert_tag_is_auto = false;
                 state.insert_text.clear();
                 state.insert_file_path_input.clear();
@@ -502,6 +504,7 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.rename_memory.memory_id = memory_id;
                 state.rename_memory.form.value = current_name;
                 state.rename_memory.description_loaded = current_description.is_some();
+                state.rename_memory.description_dirty = false;
                 state.rename_memory.description = current_description.unwrap_or_default();
             }
             CoreEffect::CloseRenameMemory => {

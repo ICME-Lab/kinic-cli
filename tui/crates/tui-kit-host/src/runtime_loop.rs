@@ -606,16 +606,14 @@ fn apply_insert_file_dialog_selection(
     let display_path = path.display().to_string();
     state.insert_file_path_input = display_path.clone();
     state.insert_selected_file_path = Some(path);
-    if state.insert_tag.trim().is_empty() || state.insert_tag_is_auto {
-        if let Some(tag) = derive_file_tag(
-            state
-                .insert_selected_file_path
-                .as_ref()
-                .expect("selected file path should exist after assignment"),
-        ) {
-            state.insert_tag = tag;
-            state.insert_tag_is_auto = true;
-        }
+    if let Some(tag) = derive_file_tag(
+        state
+            .insert_selected_file_path
+            .as_ref()
+            .expect("selected file path should exist after assignment"),
+    ) {
+        state.insert_tag = tag;
+        state.insert_tag_is_auto = true;
     }
     state.insert_focus = tui_kit_runtime::InsertFormFocus::Submit;
     state.insert_error = None;

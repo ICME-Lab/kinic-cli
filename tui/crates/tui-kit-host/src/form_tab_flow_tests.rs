@@ -46,6 +46,7 @@ fn insert_tag_field_uses_selector_instead_of_free_input() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Tag,
         ..CoreState::default()
     };
@@ -94,6 +95,7 @@ fn insert_tag_field_opens_selector_on_enter() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Tag,
         ..CoreState::default()
     };
@@ -170,6 +172,7 @@ fn insert_form_down_moves_to_next_field() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Tag,
         ..CoreState::default()
     };
@@ -177,6 +180,21 @@ fn insert_form_down_moves_to_next_field() {
     let action = form_tab_action_from_key(KeyCode::Down, &mut state);
 
     assert_eq!(action, Some(CoreAction::InsertNextField));
+}
+
+#[test]
+fn file_insert_form_skips_tag_field() {
+    let mut state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: InsertMode::File,
+        insert_focus: InsertFormFocus::Tag,
+        ..CoreState::default()
+    };
+
+    let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+    assert_eq!(action, None);
 }
 
 #[test]
@@ -331,6 +349,7 @@ fn insert_tag_focus_uses_enter_to_move_to_next_field() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Tag,
         ..CoreState::default()
     };

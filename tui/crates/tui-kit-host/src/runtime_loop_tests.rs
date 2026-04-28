@@ -1768,7 +1768,7 @@ fn apply_insert_file_dialog_selection_sets_tag_when_blank() {
 }
 
 #[test]
-fn apply_insert_file_dialog_selection_keeps_existing_tag() {
+fn apply_insert_file_dialog_selection_replaces_existing_tag() {
     let mut state = CoreState {
         insert_tag: "manual-tag".into(),
         ..CoreState::default()
@@ -1776,8 +1776,8 @@ fn apply_insert_file_dialog_selection_keeps_existing_tag() {
 
     apply_insert_file_dialog_selection(&mut state, Some(PathBuf::from("/tmp/doc.pdf")));
 
-    assert_eq!(state.insert_tag, "manual-tag");
-    assert!(!state.insert_tag_is_auto);
+    assert!(state.insert_tag.starts_with("doc-"));
+    assert!(state.insert_tag_is_auto);
 }
 
 #[test]

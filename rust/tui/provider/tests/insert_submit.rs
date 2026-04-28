@@ -131,15 +131,18 @@ fn build_insert_request_uses_file_mode_for_non_pdf_paths() {
         ..CoreState::default()
     });
 
-    assert_eq!(
+    assert!(matches!(
         request,
         InsertRequest::Normal {
-            memory_id: "aaaaa-aa".to_string(),
-            tag: "docs".to_string(),
+            memory_id,
+            tag,
             text: None,
-            file_path: Some(PathBuf::from("/tmp/doc.md")),
-        }
-    );
+            file_path: Some(path),
+        } if memory_id == "aaaaa-aa"
+            && path == Path::new("/tmp/doc.md")
+            && tag.starts_with("doc-")
+            && tag.len() == 12
+    ));
 }
 
 #[test]
@@ -172,14 +175,17 @@ fn build_insert_request_prefers_selected_file_path_over_manual_input() {
         ..CoreState::default()
     });
 
-    assert_eq!(
+    assert!(matches!(
         request,
         InsertRequest::Pdf {
-            memory_id: "aaaaa-aa".to_string(),
-            tag: "docs".to_string(),
-            file_path: PathBuf::from("/tmp/dialog.pdf"),
-        }
-    );
+            memory_id,
+            tag,
+            file_path,
+        } if memory_id == "aaaaa-aa"
+            && file_path == Path::new("/tmp/dialog.pdf")
+            && tag.starts_with("dialog-")
+            && tag.len() == 15
+    ));
 }
 
 #[test]
@@ -205,7 +211,7 @@ fn build_insert_request_strips_wrapping_quotes_from_file_path_input() {
 }
 
 #[test]
-fn build_insert_request_keeps_existing_tag_for_file_insert() {
+fn build_insert_request_ignores_existing_tag_for_file_insert() {
     let provider = provider_with_active_memory("aaaaa-aa");
     let request = provider.build_insert_request(&CoreState {
         insert_mode: InsertMode::File,
@@ -216,7 +222,7 @@ fn build_insert_request_keeps_existing_tag_for_file_insert() {
 
     assert!(matches!(
         request,
-        InsertRequest::Normal { tag, .. } if tag == "manual-tag"
+        InsertRequest::Normal { tag, .. } if tag.starts_with("api-") && tag.len() == 12
     ));
 }
 
@@ -230,14 +236,17 @@ fn build_insert_request_uses_file_mode_for_pdf_paths() {
         ..CoreState::default()
     });
 
-    assert_eq!(
+    assert!(matches!(
         request,
         InsertRequest::Pdf {
-            memory_id: "aaaaa-aa".to_string(),
-            tag: "docs".to_string(),
-            file_path: PathBuf::from("/tmp/doc.PDF"),
-        }
-    );
+            memory_id,
+            tag,
+            file_path,
+        } if memory_id == "aaaaa-aa"
+            && file_path == Path::new("/tmp/doc.PDF")
+            && tag.starts_with("doc-")
+            && tag.len() == 12
+    ));
 }
 
 #[cfg(unix)]
@@ -257,15 +266,15 @@ fn build_insert_request_preserves_non_utf8_selected_file_path() {
         ..CoreState::default()
     });
 
-    assert_eq!(
+    assert!(matches!(
         request,
         InsertRequest::Normal {
-            memory_id: "aaaaa-aa".to_string(),
-            tag: "docs".to_string(),
+            memory_id,
+            tag,
             text: None,
-            file_path: Some(selected_path),
-        }
-    );
+            file_path: Some(path),
+        } if memory_id == "aaaaa-aa" && path == selected_path && tag != "docs"
+    ));
 }
 
 #[test]

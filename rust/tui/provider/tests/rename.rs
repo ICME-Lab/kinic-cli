@@ -197,6 +197,32 @@ fn validate_rename_submit_preserves_unedited_description() {
 }
 
 #[test]
+fn validate_rename_submit_preserves_loaded_unedited_description() {
+    let provider = KinicProvider::new(live_config());
+    let state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Beta".to_string(),
+                ..TextInputModalState::default()
+            },
+            memory_id: "aaaaa-aa".to_string(),
+            description_loaded: true,
+            description_dirty: false,
+            description: "existing".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    let (_, _, update) = provider
+        .validate_rename_submit(&state)
+        .expect("rename submit should validate");
+
+    assert_eq!(update, bridge::DescriptionUpdate::Preserve);
+}
+
+#[test]
 fn validate_rename_submit_clears_edited_blank_description() {
     let provider = KinicProvider::new(live_config());
     let state = CoreState {
@@ -208,6 +234,7 @@ fn validate_rename_submit_clears_edited_blank_description() {
             },
             memory_id: "aaaaa-aa".to_string(),
             description_loaded: true,
+            description_dirty: true,
             description: "   ".to_string(),
             ..RenameMemoryModalState::default()
         },
@@ -233,6 +260,7 @@ fn validate_rename_submit_sets_edited_description() {
             },
             memory_id: "aaaaa-aa".to_string(),
             description_loaded: true,
+            description_dirty: true,
             description: " Quarterly goals ".to_string(),
             ..RenameMemoryModalState::default()
         },

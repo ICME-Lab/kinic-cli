@@ -300,6 +300,7 @@ pub struct RenameMemoryModalState {
     pub memory_id: String,
     pub description: String,
     pub description_loaded: bool,
+    pub description_dirty: bool,
     pub focus: RenameModalFocus,
 }
 
@@ -314,6 +315,7 @@ impl RenameMemoryModalState {
         self.form.open = false;
         self.description.clear();
         self.description_loaded = false;
+        self.description_dirty = false;
         self.focus = RenameModalFocus::Name;
         self.form.reset_submission();
     }
@@ -1718,7 +1720,6 @@ fn insert_focus_order(mode: InsertMode) -> &'static [InsertFormFocus] {
         InsertMode::File => &[
             InsertFormFocus::Mode,
             InsertFormFocus::MemoryId,
-            InsertFormFocus::Tag,
             InsertFormFocus::FilePath,
             InsertFormFocus::Submit,
         ],
@@ -1766,12 +1767,16 @@ fn apply_form_command(state: &mut CoreState, action: &CoreAction) {
         }
         (FormKind::Insert, FormCommand::Submit) => start_insert_submit(state),
         (FormKind::Insert, FormCommand::HorizontalChangePrev) => {
-            state.insert_mode = prev_insert_mode(state.insert_mode);
+            let previous_mode = state.insert_mode;
+            state.insert_mode = prev_insert_mode(previous_mode);
+            clear_file_mode_auto_tag_on_mode_change(state, previous_mode);
             state.insert_focus = InsertFormFocus::Mode;
             clear_insert_error_state(state);
         }
         (FormKind::Insert, FormCommand::HorizontalChangeNext) => {
-            state.insert_mode = next_insert_mode(state.insert_mode);
+            let previous_mode = state.insert_mode;
+            state.insert_mode = next_insert_mode(previous_mode);
+            clear_file_mode_auto_tag_on_mode_change(state, previous_mode);
             state.insert_focus = InsertFormFocus::Mode;
             clear_insert_error_state(state);
         }
@@ -1833,18 +1838,23 @@ fn apply_insert_backspace(state: &mut CoreState) {
 }
 
 fn refresh_auto_insert_tag(state: &mut CoreState) {
-    if !state.insert_tag_is_auto {
-        return;
-    }
-
     let normalized = normalize_insert_file_path_input(state.insert_file_path_input.trim());
     if normalized.is_empty() {
         state.insert_tag.clear();
+        state.insert_tag_is_auto = true;
         return;
     }
 
     if let Some(tag) = derive_file_tag(PathBuf::from(normalized).as_path()) {
         state.insert_tag = tag;
+        state.insert_tag_is_auto = true;
+    }
+}
+
+fn clear_file_mode_auto_tag_on_mode_change(state: &mut CoreState, previous_mode: InsertMode) {
+    if previous_mode == InsertMode::File && state.insert_tag_is_auto {
+        state.insert_tag.clear();
+        state.insert_tag_is_auto = false;
     }
 }
 
@@ -2235,6 +2245,7 @@ fn apply_rename_input(state: &mut CoreState, c: char) {
         RenameModalFocus::Name => state.rename_memory.form.value.push(c),
         RenameModalFocus::Description => {
             state.rename_memory.description_loaded = true;
+            state.rename_memory.description_dirty = true;
             state.rename_memory.description.push(c);
         }
         RenameModalFocus::Submit => return,
@@ -2252,6 +2263,7 @@ fn apply_rename_backspace(state: &mut CoreState) {
         }
         RenameModalFocus::Description => {
             state.rename_memory.description_loaded = true;
+            state.rename_memory.description_dirty = true;
             state.rename_memory.description.pop();
         }
         RenameModalFocus::Submit => return,
@@ -3320,7 +3332,31 @@ mod tests {
         apply_core_action(&mut state, &CoreAction::RenameMemoryInput('D'));
 
         assert_eq!(state.rename_memory.description, "D");
+        assert!(state.rename_memory.description_dirty);
         assert_eq!(state.rename_memory.form.value, "");
+    }
+
+    #[test]
+    fn rename_memory_close_resets_description_dirty() {
+        let mut modal = RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                ..TextInputModalState::default()
+            },
+            description: "draft".to_string(),
+            description_loaded: true,
+            description_dirty: true,
+            focus: RenameModalFocus::Description,
+            ..RenameMemoryModalState::default()
+        };
+
+        modal.close();
+
+        assert!(!modal.form.open);
+        assert_eq!(modal.description, "");
+        assert!(!modal.description_loaded);
+        assert!(!modal.description_dirty);
+        assert_eq!(modal.focus, RenameModalFocus::Name);
     }
 
     #[test]
@@ -4788,7 +4824,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_file_path_edit_keeps_manual_tag() {
+    fn insert_file_path_edit_replaces_manual_tag() {
         let mut state = CoreState {
             insert_focus: InsertFormFocus::FilePath,
             insert_tag: "manual-tag".to_string(),
@@ -4800,8 +4836,8 @@ mod tests {
 
         apply_core_action(&mut state, &CoreAction::InsertInput('x'));
 
-        assert_eq!(state.insert_tag, "manual-tag");
-        assert!(!state.insert_tag_is_auto);
+        assert!(state.insert_tag.starts_with("doc-"));
+        assert!(state.insert_tag_is_auto);
     }
 
     #[test]
@@ -5363,10 +5399,42 @@ mod tests {
     }
 
     #[test]
-    fn insert_file_mode_skips_text_and_embedding_fields() {
+    fn insert_mode_change_clears_file_auto_tag() {
         let mut state = CoreState {
             insert_mode: InsertMode::File,
-            insert_focus: InsertFormFocus::Tag,
+            insert_tag: "doc-11111111".to_string(),
+            insert_tag_is_auto: true,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
+
+        assert_eq!(state.insert_mode, InsertMode::InlineText);
+        assert_eq!(state.insert_tag, "");
+        assert!(!state.insert_tag_is_auto);
+    }
+
+    #[test]
+    fn insert_mode_change_preserves_manual_text_tag() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::InlineText,
+            insert_tag: "research".to_string(),
+            insert_tag_is_auto: false,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::InsertNextMode);
+
+        assert_eq!(state.insert_mode, InsertMode::ManualEmbedding);
+        assert_eq!(state.insert_tag, "research");
+        assert!(!state.insert_tag_is_auto);
+    }
+
+    #[test]
+    fn insert_file_mode_skips_tag_text_and_embedding_fields() {
+        let mut state = CoreState {
+            insert_mode: InsertMode::File,
+            insert_focus: InsertFormFocus::MemoryId,
             ..CoreState::default()
         };
 

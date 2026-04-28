@@ -130,15 +130,20 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         memory_id_value(ui),
         max_width,
     );
-    push_field(
-        &mut lines,
-        &mut rows,
-        ui,
-        InsertFormFocus::Tag,
-        ui.ui_config.insert.tag_label.as_str(),
-        display_value(ui.insert_tag, "<tag>"),
-        max_width,
-    );
+    if matches!(
+        ui.insert_mode,
+        InsertMode::InlineText | InsertMode::ManualEmbedding
+    ) {
+        push_field(
+            &mut lines,
+            &mut rows,
+            ui,
+            InsertFormFocus::Tag,
+            ui.ui_config.insert.tag_label.as_str(),
+            display_value(ui.insert_tag, "<tag>"),
+            max_width,
+        );
+    }
     if matches!(
         ui.insert_mode,
         InsertMode::InlineText | InsertMode::ManualEmbedding
@@ -209,6 +214,10 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             .lines()
             .map(|line| Line::from(Span::styled(line.to_string(), ui.theme.style_muted()))),
     );
+    lines.push(Line::from(Span::styled(
+        tag_help_line(ui.insert_mode),
+        ui.theme.style_muted(),
+    )));
     if let Some(error) = ui.insert_error {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -416,6 +425,15 @@ fn text_placeholder(mode: InsertMode) -> &'static str {
     }
 }
 
+fn tag_help_line(mode: InsertMode) -> &'static str {
+    match mode {
+        InsertMode::File => "File inserts use an auto tag derived from the file path.",
+        InsertMode::InlineText | InsertMode::ManualEmbedding => {
+            "Tag identifies inserted content and is required."
+        }
+    }
+}
+
 fn expected_dim_value(ui: &TuiKitUi<'_>) -> Option<String> {
     if ui.insert_expected_dim_loading {
         return Some("loading...".to_string());
@@ -515,6 +533,10 @@ mod tests {
                 InsertMode::File => false,
             };
             assert_eq!(has_text_placeholder, has_inline_text);
+            assert_eq!(
+                lines.contains("<tag>"),
+                matches!(mode, InsertMode::InlineText | InsertMode::ManualEmbedding)
+            );
             assert_eq!(lines.contains("<file path>"), has_file_path);
             assert_eq!(lines.contains("<json array>"), has_embedding);
         }
@@ -547,6 +569,19 @@ mod tests {
             .join("\n");
 
         assert!(rendered.contains("Inline Text"));
+    }
+
+    #[test]
+    fn insert_form_shows_mode_specific_tag_help() {
+        assert!(
+            render_insert_form(InsertMode::InlineText)
+                .contains(tag_help_line(InsertMode::InlineText))
+        );
+        assert!(
+            render_insert_form(InsertMode::ManualEmbedding)
+                .contains(tag_help_line(InsertMode::ManualEmbedding))
+        );
+        assert!(render_insert_form(InsertMode::File).contains(tag_help_line(InsertMode::File)));
     }
 
     #[test]
