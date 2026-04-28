@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/* Where: global styling for the Kinic Memory desktop shell.
+   What: copies the portal token language and adjusts density for app workflows.
+   Why: keep brand continuity without sharing portal route/component code. */
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 5%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 5%;
+  --primary: 0 0% 5%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 100%;
+  --secondary-foreground: 0 0% 5%;
+  --muted: 0 0% 98%;
+  --muted-foreground: 0 0% 40%;
+  --accent: 151 82% 49%;
+  --accent-foreground: 0 0% 5%;
+  --border: 0 0% 5% / 0.06;
+  --input: 0 0% 5% / 0.1;
+  --ring: 151 82% 49%;
+}
+
+@theme inline {
+  --font-sans: "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Hiragino Sans", "Yu Gothic UI",
+    "Yu Gothic", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", "JetBrains Mono", "IBM Plex Mono", "Roboto Mono", "Noto Sans Mono",
+    "Menlo", "Consolas", monospace;
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: hsl(var(--foreground));
+  background: linear-gradient(180deg, #fbfffd 0%, #ffffff 22%, #ffffff 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(24, 226, 153, 0.22);
+}
