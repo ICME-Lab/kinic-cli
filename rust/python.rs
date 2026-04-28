@@ -1,8 +1,7 @@
-use std::{cmp::Ordering, fs, path::PathBuf};
+use std::{cmp::Ordering, path::PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use ic_agent::export::Principal;
-use serde_json::json;
 
 use crate::{
     agent::AgentFactory,
@@ -13,10 +12,12 @@ use crate::{
     },
     commands::{
         ask_ai::{AskAiResult, ask_ai_flow},
-        convert_pdf, create,
+        create,
     },
-    embedding::{fetch_embedding, late_chunking},
+    embedding::fetch_embedding,
+    insert_service::{InsertRequest, execute_insert_request},
     memory_client_builder::build_memory_client_from_identity,
+    shared::memory_metadata::{DescriptionUpdate, encode_renamed_memory_metadata_with_description},
 };
 use icrc_ledger_types::icrc1::account::Account;
 
@@ -48,25 +49,20 @@ pub(crate) async fn insert_memory(
     use_mainnet: bool,
     identity: String,
     memory_id: String,
-    tag: String,
+    tag: Option<String>,
     text: Option<String>,
     file_path: Option<PathBuf>,
 ) -> Result<usize> {
     let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
-    let content = resolve_insert_content(text, file_path)?;
-    let chunks = late_chunking(&content).await?;
-    let chunk_count = chunks.len();
-
-    for chunk in chunks {
-        let payload = json!({
-            "tag": &tag,
-            "sentence": &chunk.sentence
-        })
-        .to_string();
-        client.insert(chunk.embedding, &payload).await?;
-    }
-
-    Ok(chunk_count)
+    let request = InsertRequest::Normal {
+        memory_id: client.canister_id().to_text(),
+        tag: tag.unwrap_or_default(),
+        text,
+        file_path,
+    };
+    execute_insert_request(&client, &request)
+        .await
+        .map(|result| result.inserted_count)
 }
 
 pub(crate) async fn insert_memory_raw(
@@ -78,24 +74,72 @@ pub(crate) async fn insert_memory_raw(
     embedding: Vec<f32>,
 ) -> Result<usize> {
     let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
-    let payload = json!({
-        "tag": &tag,
-        "sentence": &text
-    })
-    .to_string();
-    client.insert(embedding, &payload).await?;
-    Ok(1)
+    let request = InsertRequest::Raw {
+        memory_id: client.canister_id().to_text(),
+        tag,
+        text,
+        embedding_json: serde_json::to_string(&embedding)?,
+    };
+    execute_insert_request(&client, &request)
+        .await
+        .map(|result| result.inserted_count)
 }
 
 pub(crate) async fn insert_memory_pdf(
     use_mainnet: bool,
     identity: String,
     memory_id: String,
-    tag: String,
+    tag: Option<String>,
     file_path: PathBuf,
 ) -> Result<usize> {
-    let markdown = convert_pdf::pdf_to_markdown(&file_path)?;
-    insert_memory(use_mainnet, identity, memory_id, tag, Some(markdown), None).await
+    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
+    let request = InsertRequest::Pdf {
+        memory_id: client.canister_id().to_text(),
+        tag: tag.unwrap_or_default(),
+        file_path,
+    };
+    execute_insert_request(&client, &request)
+        .await
+        .map(|result| result.inserted_count)
+}
+
+pub(crate) async fn rename_memory(
+    use_mainnet: bool,
+    identity: String,
+    memory_id: String,
+    name: String,
+    description: Option<String>,
+    clear_description: bool,
+) -> Result<()> {
+    if description.is_some() && clear_description {
+        bail!("description and clear_description cannot be used together");
+    }
+    let next_name = name.trim();
+    if next_name.is_empty() {
+        bail!("name must not be empty");
+    }
+
+    let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
+    let metadata = client
+        .get_metadata()
+        .await
+        .context("Failed to fetch metadata from memory canister before rename")?;
+    let description_update = if clear_description {
+        DescriptionUpdate::Set(None)
+    } else {
+        match description {
+            Some(description) => DescriptionUpdate::Set(
+                (!description.trim().is_empty()).then(|| description.trim().to_string()),
+            ),
+            None => DescriptionUpdate::Preserve,
+        }
+    };
+    let payload = encode_renamed_memory_metadata_with_description(
+        Some(metadata.name.as_str()),
+        next_name,
+        &description_update,
+    )?;
+    client.change_name(&payload).await
 }
 
 pub(crate) async fn search_memories(
@@ -224,19 +268,6 @@ pub(crate) async fn reset_memory(
 ) -> Result<()> {
     let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     client.reset(dim).await
-}
-
-fn resolve_insert_content(text: Option<String>, file_path: Option<PathBuf>) -> Result<String> {
-    if let Some(text) = text {
-        return Ok(text);
-    }
-
-    if let Some(path) = file_path {
-        return fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read file path {}", path.display()));
-    }
-
-    bail!("either text or file_path must be provided");
 }
 
 fn parse_role(role: &str) -> Result<u8> {

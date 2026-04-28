@@ -11,6 +11,12 @@ pub(crate) struct ParsedMemoryMetadata {
     pub description: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DescriptionUpdate {
+    Preserve,
+    Set(Option<String>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 struct MemoryMetadataEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,11 +55,17 @@ pub(crate) fn encode_memory_metadata(
     })
 }
 
-pub(crate) fn encode_renamed_memory_metadata(
-    existing_raw: &str,
+pub(crate) fn encode_renamed_memory_metadata_with_description(
+    existing_raw: Option<&str>,
     next_name: &str,
+    description_update: &DescriptionUpdate,
 ) -> Result<String, serde_json::Error> {
-    let description = parse_memory_metadata(existing_raw).and_then(|parsed| parsed.description);
+    let description = match description_update {
+        DescriptionUpdate::Preserve => existing_raw
+            .and_then(parse_memory_metadata)
+            .and_then(|parsed| parsed.description),
+        DescriptionUpdate::Set(description) => description.clone(),
+    };
     encode_memory_metadata(next_name, description.as_deref())
 }
 
@@ -105,10 +117,11 @@ mod tests {
     }
 
     #[test]
-    fn encode_renamed_memory_metadata_preserves_existing_description() {
-        let encoded = encode_renamed_memory_metadata(
-            "{\"name\":\"Alpha\",\"description\":\"Quarterly goals\"}",
+    fn encode_renamed_memory_metadata_with_description_preserves_existing_description() {
+        let encoded = encode_renamed_memory_metadata_with_description(
+            Some("{\"name\":\"Alpha\",\"description\":\"Quarterly goals\"}"),
             "Beta",
+            &DescriptionUpdate::Preserve,
         )
         .expect("metadata should encode");
 
@@ -119,9 +132,49 @@ mod tests {
     }
 
     #[test]
-    fn encode_renamed_memory_metadata_omits_unknown_description() {
-        let encoded =
-            encode_renamed_memory_metadata("Alpha", "Beta").expect("metadata should encode");
+    fn encode_renamed_memory_metadata_with_description_omits_unknown_description() {
+        let encoded = encode_renamed_memory_metadata_with_description(
+            Some("Alpha"),
+            "Beta",
+            &DescriptionUpdate::Preserve,
+        )
+        .expect("metadata should encode");
+
+        assert_eq!(encoded, "{\"name\":\"Beta\"}");
+    }
+
+    #[test]
+    fn encode_renamed_memory_metadata_with_description_updates_description() {
+        let encoded = encode_renamed_memory_metadata_with_description(
+            Some("{\"name\":\"Alpha\",\"description\":\"Old\"}"),
+            "Beta",
+            &DescriptionUpdate::Set(Some("New".to_string())),
+        )
+        .expect("metadata should encode");
+
+        assert_eq!(encoded, "{\"name\":\"Beta\",\"description\":\"New\"}");
+    }
+
+    #[test]
+    fn encode_renamed_memory_metadata_with_description_clears_description() {
+        let encoded = encode_renamed_memory_metadata_with_description(
+            Some("{\"name\":\"Alpha\",\"description\":\"Old\"}"),
+            "Beta",
+            &DescriptionUpdate::Set(None),
+        )
+        .expect("metadata should encode");
+
+        assert_eq!(encoded, "{\"name\":\"Beta\"}");
+    }
+
+    #[test]
+    fn encode_renamed_memory_metadata_with_description_handles_plain_existing_name() {
+        let encoded = encode_renamed_memory_metadata_with_description(
+            Some("Alpha"),
+            "Beta",
+            &DescriptionUpdate::Preserve,
+        )
+        .expect("metadata should encode");
 
         assert_eq!(encoded, "{\"name\":\"Beta\"}");
     }

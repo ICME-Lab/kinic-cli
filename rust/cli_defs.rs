@@ -565,6 +565,20 @@ pub struct RenameArgs {
 
     #[arg(long, required = true, help = "New memory name")]
     pub name: String,
+
+    #[arg(
+        long,
+        conflicts_with = "clear_description",
+        help = "New memory description. Omit to preserve the current description"
+    )]
+    pub description: Option<String>,
+
+    #[arg(
+        long,
+        conflicts_with = "description",
+        help = "Clear the current memory description"
+    )]
+    pub clear_description: bool,
 }
 
 #[derive(Args, Debug)]

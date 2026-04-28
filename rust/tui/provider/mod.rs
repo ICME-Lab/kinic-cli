@@ -1508,13 +1508,15 @@ impl KinicProvider {
             history: history.clone(),
             active_memory_context: active_memory_context.clone(),
         });
+        #[cfg(test)]
+        let test_chat_submit_result = take_test_chat_submit_result();
 
         spawn_request_task(
             &mut self.next_chat_request_id,
             &mut self.chat_submit_task,
             move |request_id, tx| {
                 #[cfg(test)]
-                if let Some(result) = take_test_chat_submit_result() {
+                if let Some(result) = test_chat_submit_result {
                     let _ = tx.send(ChatTaskOutput {
                         request_id,
                         history_thread_key: history_thread_key.clone(),

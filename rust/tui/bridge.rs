@@ -16,7 +16,7 @@ use crate::{
             visible_memory_users,
         },
         cross_memory_search::SearchHit,
-        memory_metadata::{encode_memory_metadata, parse_memory_metadata},
+        memory_metadata::encode_renamed_memory_metadata_with_description,
     },
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
@@ -26,6 +26,8 @@ use anyhow::{Context, Result};
 use ic_agent::{Agent, export::Principal};
 use kinic_core::amount::format_e8s_to_kinic_string_nat;
 use tui_kit_runtime::{AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview};
+
+pub(crate) use crate::shared::memory_metadata::DescriptionUpdate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySummary {
@@ -109,12 +111,6 @@ pub struct TransferKinicSuccess {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenameMemorySuccess {
     pub stored_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DescriptionUpdate {
-    Preserve,
-    Set(Option<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -493,18 +489,23 @@ pub async fn rename_memory(
     let memory = Principal::from_text(&memory_id)
         .map_err(|error| RenameMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let client = MemoryClient::new(agent, memory);
-    let description = if description_update == DescriptionUpdate::Preserve {
-        let metadata_name = client
-            .get_metadata()
-            .await
-            .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?
-            .name;
-        rename_description_for_payload(Some(metadata_name.as_str()), &description_update)
+    let existing_raw = if description_update == DescriptionUpdate::Preserve {
+        Some(
+            client
+                .get_metadata()
+                .await
+                .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?
+                .name,
+        )
     } else {
-        rename_description_for_payload(None, &description_update)
+        None
     };
-    let payload = encode_memory_metadata(&name, description.as_deref())
-        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
+    let payload = encode_renamed_memory_metadata_with_description(
+        existing_raw.as_deref(),
+        &name,
+        &description_update,
+    )
+    .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
 
     client
         .change_name(&payload)
@@ -514,18 +515,6 @@ pub async fn rename_memory(
     Ok(RenameMemorySuccess {
         stored_name: payload,
     })
-}
-
-fn rename_description_for_payload(
-    existing_raw: Option<&str>,
-    update: &DescriptionUpdate,
-) -> Option<String> {
-    match update {
-        DescriptionUpdate::Preserve => existing_raw
-            .and_then(parse_memory_metadata)
-            .and_then(|metadata| metadata.description),
-        DescriptionUpdate::Set(description) => description.clone(),
-    }
 }
 
 pub async fn validate_manual_memory_access(
@@ -819,36 +808,6 @@ mod tests {
         let message = "insert failed\nmore detail";
 
         assert_eq!(format_insert_execute_error(message), "insert failed");
-    }
-
-    #[test]
-    fn rename_description_update_preserves_existing_description() {
-        let description = rename_description_for_payload(
-            Some("{\"name\":\"Alpha\",\"description\":\"Quarterly goals\"}"),
-            &DescriptionUpdate::Preserve,
-        );
-
-        assert_eq!(description.as_deref(), Some("Quarterly goals"));
-    }
-
-    #[test]
-    fn rename_description_update_clears_description() {
-        let description = rename_description_for_payload(
-            Some("{\"name\":\"Alpha\",\"description\":\"Quarterly goals\"}"),
-            &DescriptionUpdate::Set(None),
-        );
-
-        assert_eq!(description, None);
-    }
-
-    #[test]
-    fn rename_description_update_sets_description() {
-        let description = rename_description_for_payload(
-            Some("{\"name\":\"Alpha\",\"description\":\"Old\"}"),
-            &DescriptionUpdate::Set(Some("New".to_string())),
-        );
-
-        assert_eq!(description.as_deref(), Some("New"));
     }
 
     #[test]

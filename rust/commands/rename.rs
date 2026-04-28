@@ -7,8 +7,9 @@ use anyhow::{Context, Result, bail};
 use tracing::info;
 
 use crate::{
-    cli::RenameArgs, memory_client_builder::build_memory_client,
-    shared::memory_metadata::encode_renamed_memory_metadata,
+    cli::RenameArgs,
+    memory_client_builder::build_memory_client,
+    shared::memory_metadata::{DescriptionUpdate, encode_renamed_memory_metadata_with_description},
 };
 
 use super::CommandContext;
@@ -21,8 +22,13 @@ pub async fn handle(args: RenameArgs, ctx: &CommandContext) -> Result<()> {
         .get_metadata()
         .await
         .context("Failed to fetch metadata from memory canister before rename")?;
-    let payload = encode_renamed_memory_metadata(&metadata.name, next_name)
-        .context("Failed to encode memory metadata for rename")?;
+    let description_update = description_update_from_args(&args);
+    let payload = encode_renamed_memory_metadata_with_description(
+        Some(metadata.name.as_str()),
+        next_name,
+        &description_update,
+    )
+    .context("Failed to encode memory metadata for rename")?;
     client.change_name(&payload).await?;
 
     info!(
@@ -47,13 +53,71 @@ fn validate_name(raw: &str) -> Result<&str> {
     Ok(trimmed)
 }
 
+fn description_update_from_args(args: &RenameArgs) -> DescriptionUpdate {
+    if args.clear_description {
+        return DescriptionUpdate::Set(None);
+    }
+    match args.description.as_deref() {
+        Some(description) => DescriptionUpdate::Set(
+            (!description.trim().is_empty()).then(|| description.trim().to_string()),
+        ),
+        None => DescriptionUpdate::Preserve,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validate_name;
+    use super::{description_update_from_args, validate_name};
+    use crate::{cli::RenameArgs, shared::memory_metadata::DescriptionUpdate};
 
     #[test]
     fn validate_name_rejects_blank_values() {
         let error = validate_name("   ").unwrap_err();
         assert_eq!(error.to_string(), "name must not be empty");
+    }
+
+    #[test]
+    fn description_update_preserves_when_description_is_omitted() {
+        let args = RenameArgs {
+            memory_id: "aaaaa-aa".to_string(),
+            name: "Alpha".to_string(),
+            description: None,
+            clear_description: false,
+        };
+
+        assert_eq!(
+            description_update_from_args(&args),
+            DescriptionUpdate::Preserve
+        );
+    }
+
+    #[test]
+    fn description_update_sets_trimmed_description() {
+        let args = RenameArgs {
+            memory_id: "aaaaa-aa".to_string(),
+            name: "Alpha".to_string(),
+            description: Some(" Quarterly goals ".to_string()),
+            clear_description: false,
+        };
+
+        assert_eq!(
+            description_update_from_args(&args),
+            DescriptionUpdate::Set(Some("Quarterly goals".to_string()))
+        );
+    }
+
+    #[test]
+    fn description_update_clears_description() {
+        let args = RenameArgs {
+            memory_id: "aaaaa-aa".to_string(),
+            name: "Alpha".to_string(),
+            description: None,
+            clear_description: true,
+        };
+
+        assert_eq!(
+            description_update_from_args(&args),
+            DescriptionUpdate::Set(None)
+        );
     }
 }

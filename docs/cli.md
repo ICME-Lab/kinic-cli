@@ -230,6 +230,16 @@ For agent-driven usage, prefer:
 cargo run -- --ic --identity alice rename \
   --memory-id MEMORY_CANISTER_ID \
   --name "Renamed demo memory"
+
+cargo run -- --ic --identity alice rename \
+  --memory-id MEMORY_CANISTER_ID \
+  --name "Renamed demo memory" \
+  --description "Updated memory description"
+
+cargo run -- --ic --identity alice rename \
+  --memory-id MEMORY_CANISTER_ID \
+  --name "Renamed demo memory" \
+  --clear-description
 ```
 
 ### Manage config (add user)

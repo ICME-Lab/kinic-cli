@@ -180,9 +180,10 @@ cargo run -- --ic --identity alice insert --memory-id <memory_id> --text "hello"
 Or from a file:
 
 ```bash
-cargo run -- --ic --identity alice insert --memory-id <memory_id> --file-path ./notes.md --tag note
+cargo run -- --ic --identity alice insert --memory-id <memory_id> --file-path ./notes.md
 ```
 
+File inserts auto-derive the tag from the file path when `--tag` is omitted. Use `--tag` only when an explicit tag is needed.
 Exactly one of `--text` or `--file-path` must be supplied.
 
 ### Convert or insert a PDF
@@ -196,8 +197,27 @@ cargo run -- convert-pdf --file-path ./docs/report.pdf
 Insert the converted PDF into a memory:
 
 ```bash
-cargo run -- --ic --identity alice insert-pdf --memory-id <memory_id> --file-path ./docs/report.pdf --tag report
+cargo run -- --ic --identity alice insert-pdf --memory-id <memory_id> --file-path ./docs/report.pdf
 ```
+
+PDF inserts auto-derive the tag from the file path when `--tag` is omitted.
+
+### Rename a memory
+
+Rename while preserving the current description:
+
+```bash
+cargo run -- --ic --identity alice rename --memory-id <memory_id> --name "New memory name"
+```
+
+Update or clear the description:
+
+```bash
+cargo run -- --ic --identity alice rename --memory-id <memory_id> --name "New memory name" --description "Updated description"
+cargo run -- --ic --identity alice rename --memory-id <memory_id> --name "New memory name" --clear-description
+```
+
+`--description` and `--clear-description` conflict. Omit both to preserve the current description.
 
 ### Internet Identity login
 
