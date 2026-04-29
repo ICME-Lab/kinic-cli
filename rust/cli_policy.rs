@@ -75,6 +75,7 @@ pub fn command_policy_for_path(path: &str) -> CommandPolicy {
 
     if path == "capabilities"
         || path == "convert-pdf"
+        || path == "embed"
         || path == "prefs"
         || path.starts_with("prefs.")
     {
@@ -82,6 +83,7 @@ pub fn command_policy_for_path(path: &str) -> CommandPolicy {
             auth_sources: &[],
             conditional_auth: &[],
             output_default: if path == "capabilities"
+                || path == "embed"
                 || path == "prefs"
                 || path.starts_with("prefs.")
             {
@@ -90,6 +92,7 @@ pub fn command_policy_for_path(path: &str) -> CommandPolicy {
                 "text"
             },
             output_supported: if path == "capabilities"
+                || path == "embed"
                 || path == "prefs"
                 || path.starts_with("prefs.")
             {
@@ -134,6 +137,7 @@ pub fn skips_keyring_identity_requirement(command: &Command) -> bool {
         command,
         Command::Login(_)
             | Command::Capabilities(_)
+            | Command::Embed(_)
             | Command::Prefs(_)
             | Command::Tools(_)
             | Command::Tui(_)

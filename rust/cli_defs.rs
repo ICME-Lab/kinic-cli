@@ -90,6 +90,11 @@ pub enum Command {
     )]
     ConvertPdf(ConvertPdfArgs),
     #[command(
+        about = "Generate one embedding with the configured backend. No identity required. Returns JSON.",
+        after_help = "Returns:\n  {\"backend_id\": string, \"dimension\": integer, \"embedding\": number[]}\n\nExample:\n  kinic-cli embed --text \"hello\""
+    )]
+    Embed(EmbedArgs),
+    #[command(
         about = "Search within a memory canister using embeddings. Requires --identity <NAME> or --ii. Returns text output."
     )]
     Search(SearchArgs),
@@ -285,6 +290,16 @@ pub struct ConvertPdfArgs {
         help = "PDF file to convert to markdown"
     )]
     pub file_path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct EmbedArgs {
+    #[arg(
+        long,
+        required = true,
+        help = "Text to embed with the configured backend"
+    )]
+    pub text: String,
 }
 
 #[derive(Args, Debug)]

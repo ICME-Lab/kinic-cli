@@ -142,6 +142,14 @@ fn capabilities_describes_prefs_and_tui_contracts() {
         json!(["verbose", "ic", "identity", "ii", "identity_path"])
     );
 
+    let embed = command_by_name(commands, "embed");
+    assert_eq!(embed["auth"], json!({"required": false, "sources": []}));
+    assert_eq!(
+        embed["output"],
+        json!({"default": "json", "supported": ["json"], "interactive": false})
+    );
+    assert_eq!(embed["global_flags_supported"], json!(["verbose"]));
+
     let tui = command_by_name(commands, "tui");
     assert_eq!(
         tui["auth"],

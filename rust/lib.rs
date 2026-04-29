@@ -31,7 +31,7 @@ use tracing_subscriber::fmt;
 use crate::{
     agent::AgentFactory,
     cli::Cli,
-    commands::{CommandContext, capabilities, prefs, run_command},
+    commands::{CommandContext, capabilities, embed, prefs, run_command},
     tools::mcp,
 };
 
@@ -84,6 +84,7 @@ pub async fn run() -> Result<()> {
     match cli.command {
         cli::Command::Capabilities(args) => capabilities::handle(args),
         cli::Command::Prefs(args) => prefs::handle(args, &cli.global).await,
+        cli::Command::Embed(args) => embed::handle(args).await,
         cli::Command::Tools(args) => match args.command {
             cli::ToolsCommand::Serve(_) => mcp::serve_mcp().await,
         },

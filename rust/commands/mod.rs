@@ -9,6 +9,7 @@ pub mod config;
 pub mod config_confirm;
 pub mod convert_pdf;
 pub mod create;
+pub mod embed;
 pub mod helpers;
 pub mod ii_login;
 pub mod insert;
@@ -43,6 +44,7 @@ pub async fn run_command(command: Command, ctx: CommandContext) -> Result<()> {
         Command::SearchRaw(args) => search_raw::handle(args, &ctx).await,
         Command::TaggedEmbeddings(args) => tagged_embeddings::handle(args, &ctx).await,
         Command::ConvertPdf(args) => convert_pdf::handle(args).await,
+        Command::Embed(_) => unreachable!("embed command is handled before agent setup"),
         Command::Config(args) => config::handle(args, &ctx).await,
         Command::Rename(args) => rename::handle(args, &ctx).await,
         Command::Capabilities(_) => {

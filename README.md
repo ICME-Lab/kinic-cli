@@ -402,6 +402,7 @@ Embedding backend initialization:
 - local option example: `BAAI/bge-m3`
 - local cache dir: `$HOME/.cache/kinic-cli/embeddings`
 - new memories are created with dimension `1024`
+- smoke test: `cargo run -- embed --text "hello"` prints the selected backend and embedding JSON
 
 Shared settings behavior:
 
