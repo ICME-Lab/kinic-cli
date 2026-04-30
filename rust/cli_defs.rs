@@ -205,7 +205,12 @@ pub struct ShowArgs {
 }
 
 #[derive(Args, Debug)]
-#[command(group = ArgGroup::new("insert_input").required(true).args(["text", "file_path"]))]
+#[command(group(
+    ArgGroup::new("insert_input")
+        .required(true)
+        .multiple(false)
+        .args(["text", "file_path"])
+))]
 pub struct InsertArgs {
     #[arg(
         long,
@@ -224,8 +229,11 @@ pub struct InsertArgs {
     )]
     pub file_path: Option<PathBuf>,
 
-    #[arg(long, required = true, help = "Tag metadata stored alongside the text")]
-    pub tag: String,
+    #[arg(
+        long,
+        help = "Tag metadata stored alongside the text (required with --text; auto-derived from --file-path when omitted)"
+    )]
+    pub tag: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -272,8 +280,11 @@ pub struct InsertPdfArgs {
     )]
     pub file_path: PathBuf,
 
-    #[arg(long, required = true, help = "Tag metadata stored alongside the text")]
-    pub tag: String,
+    #[arg(
+        long,
+        help = "Tag metadata stored alongside the text (auto-derived from --file-path when omitted)"
+    )]
+    pub tag: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -554,6 +565,20 @@ pub struct RenameArgs {
 
     #[arg(long, required = true, help = "New memory name")]
     pub name: String,
+
+    #[arg(
+        long,
+        conflicts_with = "clear_description",
+        help = "New memory description. Omit to preserve the current description"
+    )]
+    pub description: Option<String>,
+
+    #[arg(
+        long,
+        conflicts_with = "description",
+        help = "Clear the current memory description"
+    )]
+    pub clear_description: bool,
 }
 
 #[derive(Args, Debug)]

@@ -25,8 +25,9 @@ fn open_rename_memory_uses_active_memory_name() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::OpenRenameMemory { memory_id, current_name }
+        CoreEffect::OpenRenameMemory { memory_id, current_name, current_description }
             if memory_id == "aaaaa-aa" && current_name == "Alpha Memory"
+                && current_description.is_none()
     )));
 }
 
@@ -65,8 +66,9 @@ fn memory_content_open_selected_opens_rename_modal_for_name_row() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::OpenRenameMemory { memory_id, current_name }
+        CoreEffect::OpenRenameMemory { memory_id, current_name, current_description }
             if memory_id == "aaaaa-aa" && current_name == "Alpha Memory"
+                && current_description.is_none()
     )));
 }
 
@@ -95,8 +97,9 @@ fn open_rename_memory_uses_resolved_name_from_metadata_object() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::OpenRenameMemory { memory_id, current_name }
+        CoreEffect::OpenRenameMemory { memory_id, current_name, current_description }
             if memory_id == "aaaaa-aa" && current_name == "tetete"
+                && current_description.as_deref() == Some("ddddd")
     )));
 }
 
@@ -166,6 +169,83 @@ fn rename_memory_submit_rejects_blank_name() {
         effect,
         CoreEffect::RenameFormError(Some(message)) if message == "Memory name is required."
     )));
+}
+
+#[test]
+fn validate_rename_submit_preserves_unedited_description() {
+    let provider = KinicProvider::new(live_config());
+    let state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Beta".to_string(),
+                ..TextInputModalState::default()
+            },
+            memory_id: "aaaaa-aa".to_string(),
+            description: "existing".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    let (_, _, update) = provider
+        .validate_rename_submit(&state)
+        .expect("rename submit should validate");
+
+    assert_eq!(update, bridge::DescriptionUpdate::Preserve);
+}
+
+#[test]
+fn validate_rename_submit_clears_edited_blank_description() {
+    let provider = KinicProvider::new(live_config());
+    let state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Beta".to_string(),
+                ..TextInputModalState::default()
+            },
+            memory_id: "aaaaa-aa".to_string(),
+            description_dirty: true,
+            description: "   ".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    let (_, _, update) = provider
+        .validate_rename_submit(&state)
+        .expect("rename submit should validate");
+
+    assert_eq!(update, bridge::DescriptionUpdate::Set(None));
+}
+
+#[test]
+fn validate_rename_submit_sets_edited_description() {
+    let provider = KinicProvider::new(live_config());
+    let state = CoreState {
+        rename_memory: RenameMemoryModalState {
+            form: TextInputModalState {
+                open: true,
+                value: "Beta".to_string(),
+                ..TextInputModalState::default()
+            },
+            memory_id: "aaaaa-aa".to_string(),
+            description_dirty: true,
+            description: " Quarterly goals ".to_string(),
+            ..RenameMemoryModalState::default()
+        },
+        ..CoreState::default()
+    };
+
+    let (_, _, update) = provider
+        .validate_rename_submit(&state)
+        .expect("rename submit should validate");
+
+    assert_eq!(
+        update,
+        bridge::DescriptionUpdate::Set(Some("Quarterly goals".to_string()))
+    );
 }
 
 #[test]
@@ -239,8 +319,9 @@ fn open_rename_memory_does_not_parse_jsonish_metadata_name() {
 
     assert!(output.effects.iter().any(|effect| matches!(
         effect,
-        CoreEffect::OpenRenameMemory { memory_id, current_name }
+        CoreEffect::OpenRenameMemory { memory_id, current_name, current_description }
             if memory_id == "aaaaa-aa" && current_name == "prefix \"name\":\"fake\""
+                && current_description.is_none()
     )));
 }
 

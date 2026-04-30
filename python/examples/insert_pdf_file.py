@@ -4,8 +4,7 @@ Run with:
     uv run python python/examples/insert_pdf_file.py \
         --identity alice \
         --memory-id MEMORY_CANISTER_ID \
-        --file ./docs/report.pdf \
-        --tag quarterly_report
+        --file ./docs/report.pdf
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--identity", required=True, help="dfx identity name")
     parser.add_argument("--memory-id", help="existing memory canister id; if omitted, a new one is created")
     parser.add_argument("--file", required=True, help="path to the PDF to insert")
-    parser.add_argument("--tag", default="pdf_demo", help="tag to store with the inserted content")
     parser.add_argument("--ic", action="store_true", help="talk to mainnet instead of local replica")
     return parser.parse_args()
 
@@ -39,11 +37,12 @@ def main() -> None:
         memory_id = km.create("PDF demo", "Created via insert_pdf_file example")
         print(f"Created new memory canister: {memory_id}")
 
-    chunks = km.insert_pdf_file(str(memory_id), args.tag, str(pdf_path))
-    print(f"Inserted {chunks} PDF chunks into {memory_id} with tag '{args.tag}'")
+    chunks = km.insert_pdf_file(str(memory_id), str(pdf_path))
+    print(f"Inserted {chunks} PDF chunks into {memory_id}")
 
-    results = km.search(memory_id, args.tag.replace("_", " "))
-    print("Search results for tag terms:")
+    query = pdf_path.stem.replace("_", " ")
+    results = km.search(memory_id, query)
+    print(f"Search results for '{query}':")
     for score, payload in results:
         print(f"- [{score:.4f}] {payload}")
 

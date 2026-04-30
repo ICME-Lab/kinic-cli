@@ -13,7 +13,7 @@ pub async fn handle(args: InsertArgs, ctx: &CommandContext) -> Result<()> {
     let client = build_memory_client(&ctx.agent_factory, &args.memory_id).await?;
     let request = InsertRequest::Normal {
         memory_id: args.memory_id.clone(),
-        tag: args.tag.clone(),
+        tag: args.tag.clone().unwrap_or_default(),
         text: args.text.clone(),
         file_path: args.file_path.clone(),
     };

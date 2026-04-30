@@ -100,8 +100,17 @@ struct ArgumentCapability {
     required: bool,
     input_shape: &'static str,
     value_kind: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    runtime_required_when: Vec<RuntimeRequiredWhen>,
     #[serde(skip_serializing_if = "ArgumentConflicts::is_empty")]
     relations: ArgumentConflicts,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct RuntimeRequiredWhen {
+    argument: &'static str,
+    present: bool,
+    unless_argument: &'static str,
 }
 
 /// Clap-exposed conflicts only (`requires` is not serialized; use `arg_groups` and runtime validation).
@@ -212,8 +221,20 @@ fn public_argument(command: &Command, arg: &Arg, path: &str) -> Option<ArgumentC
         required: arg.is_required_set(),
         input_shape: argument_input_shape(arg),
         value_kind: argument_value_kind(path, arg),
+        runtime_required_when: runtime_required_when(path, name),
         relations: argument_conflicts(command, arg),
     })
+}
+
+fn runtime_required_when(path: &str, name: &str) -> Vec<RuntimeRequiredWhen> {
+    if path == "insert" && name == "tag" {
+        return vec![RuntimeRequiredWhen {
+            argument: "text",
+            present: true,
+            unless_argument: "file_path",
+        }];
+    }
+    Vec::new()
 }
 
 fn argument_input_shape(arg: &Arg) -> &'static str {

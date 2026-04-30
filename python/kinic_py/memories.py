@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import List, Sequence, Tuple
+from typing import List, Sequence, Tuple, overload
 
 from . import _lib as native
 
@@ -21,6 +21,24 @@ class KinicMemories:
         """Deploy a new memory canister."""
         return create_memory(self.identity, name, description, ic=self.ic)
 
+    def rename(
+        self,
+        memory_id: str,
+        name: str,
+        *,
+        description: str | None = None,
+        clear_description: bool = False,
+    ) -> None:
+        """Rename a memory canister and optionally update its description."""
+        return rename_memory(
+            self.identity,
+            memory_id,
+            name,
+            description=description,
+            clear_description=clear_description,
+            ic=self.ic,
+        )
+
     def list(self) -> List[str]:
         """List deployed memories."""
         return list_memories(self.identity, ic=self.ic)
@@ -29,17 +47,77 @@ class KinicMemories:
         """Insert markdown text directly."""
         return insert_markdown(self.identity, memory_id, tag, text, ic=self.ic)
 
-    def insert_markdown_file(self, memory_id: str, tag: str, path: str) -> int:
+    @overload
+    def insert_markdown_file(self, memory_id: str, path: str) -> int: ...
+
+    @overload
+    def insert_markdown_file(self, memory_id: str, tag: str, path: str) -> int: ...
+
+    @overload
+    def insert_markdown_file(
+        self,
+        memory_id: str,
+        path_or_tag: None = None,
+        path: str | None = None,
+        *,
+        tag: str,
+    ) -> int: ...
+
+    def insert_markdown_file(
+        self,
+        memory_id: str,
+        path_or_tag: str | None = None,
+        path: str | None = None,
+        *,
+        tag: str | None = None,
+    ) -> int:
         """Insert markdown loaded from disk."""
-        return insert_markdown_file(self.identity, memory_id, tag, path, ic=self.ic)
+        return insert_markdown_file(
+            self.identity,
+            memory_id,
+            path_or_tag,
+            path,
+            tag=tag,
+            ic=self.ic,
+        )
 
     def insert_raw(self, memory_id: str, tag: str, text: str, embedding: Sequence[float]) -> int:
         """Insert a precomputed embedding with text."""
         return insert_raw(self.identity, memory_id, tag, text, embedding, ic=self.ic)
 
-    def insert_pdf_file(self, memory_id: str, tag: str, path: str) -> int:
+    @overload
+    def insert_pdf_file(self, memory_id: str, path: str) -> int: ...
+
+    @overload
+    def insert_pdf_file(self, memory_id: str, tag: str, path: str) -> int: ...
+
+    @overload
+    def insert_pdf_file(
+        self,
+        memory_id: str,
+        path_or_tag: None = None,
+        path: str | None = None,
+        *,
+        tag: str,
+    ) -> int: ...
+
+    def insert_pdf_file(
+        self,
+        memory_id: str,
+        path_or_tag: str | None = None,
+        path: str | None = None,
+        *,
+        tag: str | None = None,
+    ) -> int:
         """Convert a PDF to markdown and insert it."""
-        return insert_pdf_file(self.identity, memory_id, tag, path, ic=self.ic)
+        return insert_pdf_file(
+            self.identity,
+            memory_id,
+            path_or_tag,
+            path,
+            tag=tag,
+            ic=self.ic,
+        )
 
     def insert_pdf(self, memory_id: str, tag: str, path: str) -> int:
         """Deprecated: use insert_pdf_file instead."""
@@ -51,9 +129,16 @@ class KinicMemories:
         warnings.warn("insert_text is deprecated; use insert_markdown", DeprecationWarning, stacklevel=2)
         return self.insert_markdown(memory_id, tag, text)
 
-    def insert_file(self, memory_id: str, tag: str, path: str) -> int:
+    def insert_file(
+        self,
+        memory_id: str,
+        tag: str,
+        path: str | None = None,
+    ) -> int:
         """Deprecated: use insert_markdown_file instead."""
         warnings.warn("insert_file is deprecated; use insert_markdown_file", DeprecationWarning, stacklevel=2)
+        if path is None:
+            raise ValueError("path must be provided")
         return self.insert_markdown_file(memory_id, tag, path)
 
     def search(self, memory_id: str, query: str) -> ScoreResult:
@@ -117,6 +202,27 @@ def list_memories(identity: str, *, ic: bool | None = None) -> List[str]:
     return native.list_memories(identity, ic=ic)
 
 
+def rename_memory(
+    identity: str,
+    memory_id: str,
+    name: str,
+    *,
+    description: str | None = None,
+    clear_description: bool = False,
+    ic: bool | None = None,
+) -> None:
+    if description is not None and clear_description:
+        raise ValueError("description and clear_description cannot both be set")
+    return native.rename_memory(
+        identity,
+        memory_id,
+        name,
+        description=description,
+        clear_description=clear_description,
+        ic=ic,
+    )
+
+
 def insert_markdown(
     identity: str,
     memory_id: str,
@@ -128,6 +234,17 @@ def insert_markdown(
     return native.insert_memory(identity, memory_id, tag, text=text, ic=ic)
 
 
+@overload
+def insert_markdown_file(
+    identity: str,
+    memory_id: str,
+    path: str,
+    *,
+    ic: bool | None = None,
+) -> int: ...
+
+
+@overload
 def insert_markdown_file(
     identity: str,
     memory_id: str,
@@ -135,8 +252,32 @@ def insert_markdown_file(
     path: str,
     *,
     ic: bool | None = None,
+) -> int: ...
+
+
+@overload
+def insert_markdown_file(
+    identity: str,
+    memory_id: str,
+    path_or_tag: None = None,
+    path: str | None = None,
+    *,
+    tag: str,
+    ic: bool | None = None,
+) -> int: ...
+
+
+def insert_markdown_file(
+    identity: str,
+    memory_id: str,
+    path_or_tag: str | None = None,
+    path: str | None = None,
+    *,
+    tag: str | None = None,
+    ic: bool | None = None,
 ) -> int:
-    return native.insert_memory(identity, memory_id, tag, file_path=path, ic=ic)
+    resolved_tag, resolved_path = _resolve_file_insert_args(path_or_tag, path, tag)
+    return native.insert_memory(identity, memory_id, resolved_tag, file_path=resolved_path, ic=ic)
 
 
 def insert_raw(
@@ -151,6 +292,17 @@ def insert_raw(
     return native.insert_memory_raw(identity, memory_id, tag, text, list(embedding), ic=ic)
 
 
+@overload
+def insert_pdf_file(
+    identity: str,
+    memory_id: str,
+    path: str,
+    *,
+    ic: bool | None = None,
+) -> int: ...
+
+
+@overload
 def insert_pdf_file(
     identity: str,
     memory_id: str,
@@ -158,19 +310,45 @@ def insert_pdf_file(
     path: str,
     *,
     ic: bool | None = None,
+) -> int: ...
+
+
+@overload
+def insert_pdf_file(
+    identity: str,
+    memory_id: str,
+    path_or_tag: None = None,
+    path: str | None = None,
+    *,
+    tag: str,
+    ic: bool | None = None,
+) -> int: ...
+
+
+def insert_pdf_file(
+    identity: str,
+    memory_id: str,
+    path_or_tag: str | None = None,
+    path: str | None = None,
+    *,
+    tag: str | None = None,
+    ic: bool | None = None,
 ) -> int:
-    return native.insert_memory_pdf(identity, memory_id, tag, path, ic=ic)
+    resolved_tag, resolved_path = _resolve_file_insert_args(path_or_tag, path, tag)
+    return native.insert_memory_pdf(identity, memory_id, resolved_tag, resolved_path, ic=ic)
 
 
 def insert_pdf(
     identity: str,
     memory_id: str,
     tag: str,
-    path: str,
+    path: str | None = None,
     *,
     ic: bool | None = None,
 ) -> int:
     warnings.warn("insert_pdf is deprecated; use insert_pdf_file", DeprecationWarning, stacklevel=2)
+    if path is None:
+        raise ValueError("path must be provided")
     return insert_pdf_file(identity, memory_id, tag, path, ic=ic)
 
 
@@ -190,12 +368,32 @@ def insert_file(
     identity: str,
     memory_id: str,
     tag: str,
-    path: str,
+    path: str | None = None,
     *,
     ic: bool | None = None,
 ) -> int:
     warnings.warn("insert_file is deprecated; use insert_markdown_file", DeprecationWarning, stacklevel=2)
+    if path is None:
+        raise ValueError("path must be provided")
     return insert_markdown_file(identity, memory_id, tag, path, ic=ic)
+
+
+def _resolve_file_insert_args(
+    path_or_tag: str | None,
+    path: str | None,
+    tag: str | None,
+) -> tuple[str | None, str]:
+    if path_or_tag is not None and tag is not None:
+        raise ValueError("path_or_tag and tag cannot both be set")
+    if tag is not None:
+        if path is None:
+            raise ValueError("path must be provided when tag is set")
+        return tag, path
+    if path is None:
+        if path_or_tag is None:
+            raise ValueError("path must be provided")
+        return None, path_or_tag
+    return path_or_tag, path
 
 
 def search_memories(

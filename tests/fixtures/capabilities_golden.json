@@ -204,9 +204,16 @@
         },
         {
           "name": "tag",
-          "required": true,
+          "required": false,
           "input_shape": "single_value",
-          "value_kind": "string"
+          "value_kind": "string",
+          "runtime_required_when": [
+            {
+              "argument": "text",
+              "present": true,
+              "unless_argument": "file_path"
+            }
+          ]
         }
       ],
       "arg_groups": [
@@ -311,7 +318,7 @@
         },
         {
           "name": "tag",
-          "required": true,
+          "required": false,
           "input_shape": "single_value",
           "value_kind": "string"
         }
@@ -738,6 +745,28 @@
           "required": true,
           "input_shape": "single_value",
           "value_kind": "string"
+        },
+        {
+          "name": "description",
+          "required": false,
+          "input_shape": "single_value",
+          "value_kind": "string",
+          "relations": {
+            "conflicts": [
+              "clear_description"
+            ]
+          }
+        },
+        {
+          "name": "clear_description",
+          "required": false,
+          "input_shape": "flag",
+          "value_kind": "boolean",
+          "relations": {
+            "conflicts": [
+              "description"
+            ]
+          }
         }
       ]
     },

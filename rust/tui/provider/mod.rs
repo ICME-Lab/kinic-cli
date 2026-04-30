@@ -16,13 +16,13 @@ use crate::{
     create_domain::derive_create_cost,
     embedding::fetch_embedding,
     insert_service::{
-        InsertRequest, parse_embedding_json, validate_insert_request_fields,
-        validate_insert_request_for_submit,
+        InsertRequest, parse_embedding_json, preview_file_insert_tag,
+        validate_insert_request_fields, validate_insert_request_for_submit,
     },
     preferences::{self, UserPreferences},
     shared::{
         cross_memory_search::{collect_searchable_memory_ids, fold_search_batches},
-        memory_metadata::parse_memory_metadata,
+        memory_metadata::{description_update_from_dirty, parse_memory_metadata},
     },
     tui::TuiAuth,
 };
@@ -30,7 +30,7 @@ use kinic_core::{
     amount::{
         KinicAmountParseError, format_e8s_to_kinic_string_u128, parse_required_kinic_amount_to_e8s,
     },
-    prefs_policy,
+    normalize_insert_file_path_input, prefs_policy,
     principal::parse_required_principal,
     tag,
 };
@@ -1508,13 +1508,15 @@ impl KinicProvider {
             history: history.clone(),
             active_memory_context: active_memory_context.clone(),
         });
+        #[cfg(test)]
+        let test_chat_submit_result = take_test_chat_submit_result();
 
         spawn_request_task(
             &mut self.next_chat_request_id,
             &mut self.chat_submit_task,
             move |request_id, tx| {
                 #[cfg(test)]
-                if let Some(result) = take_test_chat_submit_result() {
+                if let Some(result) = test_chat_submit_result {
                     let _ = tx.send(ChatTaskOutput {
                         request_id,
                         history_thread_key: history_thread_key.clone(),
@@ -1701,7 +1703,10 @@ impl KinicProvider {
         content
     }
 
-    fn active_rename_target(&self, state: &CoreState) -> Option<(&MemorySummary, String)> {
+    fn active_rename_target(
+        &self,
+        state: &CoreState,
+    ) -> Option<(&MemorySummary, String, Option<String>)> {
         if self.tab_id != KINIC_MEMORIES_TAB_ID || self.memories_mode != MemoriesMode::Browser {
             return None;
         }
@@ -1713,6 +1718,7 @@ impl KinicProvider {
             (
                 summary,
                 resolved_memory_name(summary.name.as_str(), summary.detail.as_str()),
+                resolved_memory_description(summary.name.as_str(), summary.detail.as_str()),
             )
         })
     }
@@ -2685,7 +2691,12 @@ impl KinicProvider {
         ))
     }
 
-    fn start_rename_submit(&mut self, memory_id: String, next_name: String) -> CoreEffect {
+    fn start_rename_submit(
+        &mut self,
+        memory_id: String,
+        next_name: String,
+        description_update: bridge::DescriptionUpdate,
+    ) -> CoreEffect {
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
         spawn_task(&mut self.rename_submit_task, move |tx| {
@@ -2695,6 +2706,7 @@ impl KinicProvider {
                 auth,
                 memory_id.clone(),
                 next_name.clone(),
+                description_update.clone(),
             ));
             let (stored_name, result) = match result {
                 Ok(output) => (Some(output.stored_name), Ok(())),
@@ -2899,38 +2911,38 @@ impl KinicProvider {
 
     fn build_insert_request(&self, state: &CoreState) -> InsertRequest {
         let memory_id = self.effective_insert_memory_id().unwrap_or_default();
-        let tag = state.insert_tag.trim().to_string();
         let file_path = resolved_insert_file_path(state);
 
         match state.insert_mode {
             InsertMode::File => match file_path {
                 Some(path) if insert_file_path_is_pdf(path.as_path()) => InsertRequest::Pdf {
                     memory_id,
-                    tag,
+                    tag: preview_file_insert_tag("", Some(path.as_path())).unwrap_or_default(),
                     file_path: path,
                 },
                 Some(path) => InsertRequest::Normal {
                     memory_id,
-                    tag,
+                    tag: preview_file_insert_tag("", Some(path.as_path())).unwrap_or_default(),
                     text: None,
                     file_path: Some(path),
                 },
                 None => InsertRequest::Normal {
                     memory_id,
-                    tag,
+                    tag: preview_file_insert_tag(state.insert_tag.as_str(), None)
+                        .unwrap_or_default(),
                     text: None,
                     file_path: None,
                 },
             },
             InsertMode::InlineText => InsertRequest::Normal {
                 memory_id,
-                tag,
+                tag: state.insert_tag.trim().to_string(),
                 text: (!state.insert_text.trim().is_empty()).then(|| state.insert_text.clone()),
                 file_path: None,
             },
             InsertMode::ManualEmbedding => InsertRequest::Raw {
                 memory_id,
-                tag,
+                tag: state.insert_tag.trim().to_string(),
                 text: state.insert_text.clone(),
                 embedding_json: state.insert_embedding.clone(),
             },
@@ -3421,7 +3433,10 @@ impl KinicProvider {
         Ok(memory_id.to_string())
     }
 
-    fn validate_rename_submit(&self, state: &CoreState) -> Result<(String, String), String> {
+    fn validate_rename_submit(
+        &self,
+        state: &CoreState,
+    ) -> Result<(String, String, bridge::DescriptionUpdate), String> {
         let memory_id = state.rename_memory.memory_id.trim();
         if memory_id.is_empty() {
             return Err("Select a memory before renaming.".to_string());
@@ -3433,8 +3448,16 @@ impl KinicProvider {
         if next_name.is_empty() {
             return Err("Memory name is required.".to_string());
         }
+        let description_update = description_update_from_dirty(
+            state.rename_memory.description.as_str(),
+            state.rename_memory.description_dirty,
+        );
 
-        Ok((memory_id.to_string(), next_name.to_string()))
+        Ok((
+            memory_id.to_string(),
+            next_name.to_string(),
+            description_update,
+        ))
     }
 
     fn validate_transfer_submit(&self, state: &CoreState) -> Result<(String, u128, u128), String> {
@@ -4278,23 +4301,6 @@ impl KinicProvider {
     }
 }
 
-fn normalize_insert_file_path_input(path: &str) -> &str {
-    let trimmed = path.trim();
-    if let Some(inner) = trimmed
-        .strip_prefix('\'')
-        .and_then(|value| value.strip_suffix('\''))
-    {
-        return inner;
-    }
-    if let Some(inner) = trimmed
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-    {
-        return inner;
-    }
-    trimmed
-}
-
 fn validate_supported_file_mode_path(path: &Path) -> Result<(), String> {
     if path.as_os_str().is_empty() {
         return Err("File path is required for file insert.".to_string());
@@ -4634,7 +4640,9 @@ impl DataProvider for KinicProvider {
                 };
                 match self.content_selection(state) {
                     Some(MemoryContentSelection::RenameMemory) => {
-                        let Some((summary, current_name)) = self.active_rename_target(state) else {
+                        let Some((summary, current_name, current_description)) =
+                            self.active_rename_target(state)
+                        else {
                             effects.push(CoreEffect::Notify(
                                 "Select a memory before renaming.".to_string(),
                             ));
@@ -4646,6 +4654,7 @@ impl DataProvider for KinicProvider {
                         effects.push(CoreEffect::OpenRenameMemory {
                             memory_id: summary.id.clone(),
                             current_name,
+                            current_description,
                         });
                     }
                     Some(MemoryContentSelection::User(user)) => {
@@ -4817,7 +4826,9 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::OpenRenameMemory => {
-                let Some((summary, current_name)) = self.active_rename_target(state) else {
+                let Some((summary, current_name, current_description)) =
+                    self.active_rename_target(state)
+                else {
                     effects.push(CoreEffect::Notify(
                         "Select a memory before renaming.".to_string(),
                     ));
@@ -4829,6 +4840,7 @@ impl DataProvider for KinicProvider {
                 effects.push(CoreEffect::OpenRenameMemory {
                     memory_id: summary.id.clone(),
                     current_name,
+                    current_description,
                 });
             }
             CoreAction::CloseRenameMemory => {
@@ -4845,8 +4857,12 @@ impl DataProvider for KinicProvider {
                     ));
                 } else {
                     match self.validate_rename_submit(state) {
-                        Ok((memory_id, next_name)) => {
-                            effects.push(self.start_rename_submit(memory_id, next_name));
+                        Ok((memory_id, next_name, next_description)) => {
+                            effects.push(self.start_rename_submit(
+                                memory_id,
+                                next_name,
+                                next_description,
+                            ));
                         }
                         Err(error) => {
                             effects.push(CoreEffect::RenameFormError(Some(error)));
@@ -5287,6 +5303,14 @@ fn resolved_memory_name(name: &str, detail: &str) -> String {
     let detail_name = parse_memory_detail(detail).name;
     let metadata_name = parse_memory_metadata(name).and_then(|metadata| metadata.name);
     display_memory_name(name, detail_name.as_deref().or(metadata_name.as_deref()))
+}
+
+fn resolved_memory_description(name: &str, detail: &str) -> Option<String> {
+    parse_memory_detail(detail).description.or_else(|| {
+        parse_memory_metadata(name)
+            .and_then(|metadata| metadata.description)
+            .map(|description| description.to_string())
+    })
 }
 
 fn format_cycle_amount(value: u64) -> String {

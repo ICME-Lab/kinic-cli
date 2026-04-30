@@ -20,6 +20,11 @@ use super::screens::settings::{
     PickerLineKind, picker_lines, picker_presentation, picker_requires_vertical_centering,
     picker_title,
 };
+use super::screens::{
+    MULTILINE_TEXTAREA_HEIGHT, multiline_cursor_x, multiline_visible_row, visible_multiline_rows,
+};
+
+const RENAME_DESCRIPTION_PLACEHOLDER: &str = "<enter memory description>";
 
 impl<'a> TuiKitUi<'a> {
     pub(super) fn transfer_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
@@ -64,13 +69,42 @@ impl<'a> TuiKitUi<'a> {
     }
 
     pub(super) fn rename_memory_cursor_position_for_area(&self, area: Rect) -> Option<(u16, u16)> {
-        if !self.rename_memory.form.open || self.rename_memory.focus != RenameModalFocus::Name {
+        if !self.rename_memory.form.open {
             return None;
         }
         let rect = rename_memory_area(area)?;
         let inner = bordered_inner_area(rect)?;
-        let x = inner.x + 2 + visible_width(self.rename_memory.form.value.to_string());
-        let y = inner.y + 2;
+        let (value, y) = match self.rename_memory.focus {
+            RenameModalFocus::Name => (self.rename_memory.form.value.as_str(), inner.y + 2),
+            RenameModalFocus::Description => {
+                let (cursor_row, cursor_col) = self.rename_description_cursor.unwrap_or_default();
+                let visible = visible_multiline_rows(
+                    self.rename_memory.description.as_str(),
+                    RENAME_DESCRIPTION_PLACEHOLDER,
+                    MULTILINE_TEXTAREA_HEIGHT,
+                    cursor_row,
+                    inner.width.saturating_sub(2),
+                );
+                let visible_row = multiline_visible_row(
+                    cursor_row,
+                    visible.scroll_row,
+                    MULTILINE_TEXTAREA_HEIGHT,
+                );
+                let x = inner.x
+                    + 2
+                    + multiline_cursor_x(
+                        visible.rows[visible_row as usize].as_str(),
+                        cursor_col,
+                        inner.width.saturating_sub(2),
+                    );
+                return Some((
+                    x.min(inner.right().saturating_sub(1)),
+                    inner.y + 5 + visible_row,
+                ));
+            }
+            RenameModalFocus::Submit => return None,
+        };
+        let x = inner.x + 2 + visible_width(value.to_string());
         Some((x.min(inner.right().saturating_sub(1)), y))
     }
 
@@ -459,6 +493,22 @@ impl<'a> TuiKitUi<'a> {
         } else {
             self.theme.style_normal()
         };
+        let description_style = if self.rename_memory.focus == RenameModalFocus::Description {
+            self.theme.style_accent_bold()
+        } else if self.rename_memory.description.is_empty() {
+            self.theme.style_muted()
+        } else {
+            self.theme.style_normal()
+        };
+        let description_rows = visible_multiline_rows(
+            self.rename_memory.description.as_str(),
+            RENAME_DESCRIPTION_PLACEHOLDER,
+            MULTILINE_TEXTAREA_HEIGHT,
+            self.rename_description_cursor
+                .map(|(row, _)| row)
+                .unwrap_or_default(),
+            overlay_area.width.saturating_sub(4),
+        );
         let submit_style = if self.rename_memory.focus == RenameModalFocus::Submit {
             self.theme.style_accent_bold()
         } else {
@@ -484,6 +534,20 @@ impl<'a> TuiKitUi<'a> {
                 ),
             ]),
             Line::from(""),
+            Line::from(Span::styled("Description", self.theme.style_dim())),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(description_rows.rows[0].clone(), description_style),
+            ]),
+        ];
+        lines.extend(description_rows.rows.iter().skip(1).map(|row| {
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(row.clone(), description_style),
+            ])
+        }));
+        lines.extend([
+            Line::from(""),
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
@@ -500,12 +564,12 @@ impl<'a> TuiKitUi<'a> {
                 match self.rename_memory.form.submit_state {
                     CreateSubmitState::Submitting => "Updating memory name...",
                     CreateSubmitState::Idle | CreateSubmitState::Error => {
-                        "Tab: next field  Shift+Tab: previous field  Enter: action  Esc: close"
+                        "Tab: next field  Shift+Tab: previous field  Enter: newline/action  Esc: close"
                     }
                 },
                 self.theme.style_muted(),
             )),
-        ];
+        ]);
         push_error_line(self, &mut lines, self.rename_memory.form.error.as_deref());
         render_modal_overlay(self, overlay_area, buf, "Rename Memory", lines);
     }
@@ -520,7 +584,7 @@ fn remove_memory_area(area: Rect) -> Option<Rect> {
 }
 
 fn rename_memory_area(area: Rect) -> Option<Rect> {
-    centered_overlay_area(area, 58, 11, 8)
+    centered_overlay_area(area, 64, 18, 15)
 }
 
 fn access_control_area(area: Rect, mode: AccessControlMode) -> Option<Rect> {
@@ -1191,8 +1255,9 @@ mod tests {
     use ratatui::{buffer::Buffer, widgets::Widget};
     use tui_kit_runtime::{
         AccessControlAction, AccessControlModalState, AccessControlMode, CreateSubmitState,
-        PickerContext, PickerItem, SettingsEntry, SettingsSection, SettingsSnapshot,
-        TextInputModalState, TransferModalMode, TransferModalState,
+        PickerContext, PickerItem, RenameMemoryModalState, RenameModalFocus, SettingsEntry,
+        SettingsSection, SettingsSnapshot, TextInputModalState, TransferModalMode,
+        TransferModalState,
     };
 
     fn render_ui(ui: TuiKitUi<'_>, area: Rect) -> String {
@@ -1206,6 +1271,63 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn rename_ui<'a>(
+        theme: &'a Theme,
+        description: &str,
+        cursor: Option<(usize, usize)>,
+    ) -> TuiKitUi<'a> {
+        TuiKitUi::new(theme)
+            .rename_memory_modal(RenameMemoryModalState {
+                form: TextInputModalState {
+                    open: true,
+                    value: "Alpha".to_string(),
+                    ..TextInputModalState::default()
+                },
+                description: description.to_string(),
+                focus: RenameModalFocus::Description,
+                ..RenameMemoryModalState::default()
+            })
+            .rename_description_cursor(cursor)
+    }
+
+    #[test]
+    fn rename_overlay_renders_multiline_description_rows() {
+        let theme = Theme::default();
+        let rendered = render_ui(
+            rename_ui(&theme, "first\nsecond\nthird", Some((1, 3))),
+            Rect::new(0, 0, 100, 30),
+        );
+
+        assert!(rendered.contains("first"));
+        assert!(rendered.contains("second"));
+        assert!(rendered.contains("third"));
+    }
+
+    #[test]
+    fn rename_description_cursor_uses_multiline_row() {
+        let theme = Theme::default();
+        let area = Rect::new(0, 0, 100, 30);
+        let first_row = rename_ui(&theme, "first\nsecond", Some((0, 2)))
+            .rename_memory_cursor_position_for_area(area)
+            .expect("first row cursor should render");
+        let second_row = rename_ui(&theme, "first\nsecond", Some((1, 2)))
+            .rename_memory_cursor_position_for_area(area)
+            .expect("second row cursor should render");
+
+        assert_eq!(second_row.1, first_row.1 + 1);
+    }
+
+    #[test]
+    fn rename_description_cursor_scrolls_to_later_rows() {
+        let theme = Theme::default();
+        let area = Rect::new(0, 0, 100, 30);
+        let cursor = rename_ui(&theme, "one\ntwo\nthree\nfour\nfive\nsix", Some((5, 2)))
+            .rename_memory_cursor_position_for_area(area)
+            .expect("scrolled cursor should render");
+
+        assert_eq!(cursor.1, 16);
     }
 
     #[test]

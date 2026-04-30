@@ -372,7 +372,7 @@ You can tag inserted content such as `notes` or `summary_q1` and manage it later
 
 Python (preferred: `insert_pdf_file`):
 ```python
-num_chunks = km.insert_pdf_file(memory_id, "quarterly_report", "./docs/report.pdf")
+num_chunks = km.insert_pdf_file(memory_id, "./docs/report.pdf")
 print(f"Inserted {num_chunks} PDF chunks")
 ```
 
@@ -473,6 +473,9 @@ Deploy a new memory canister.
 
 **Returns:** Canister principal (memory_id)
 
+#### `rename(memory_id: str, name: str, description: str | None = None, clear_description: bool = False) -> None`
+Rename a memory canister. Omitting description preserves the existing description.
+
 #### `list() -> List[str]`
 List all memory canisters owned by your identity.
 
@@ -481,13 +484,13 @@ Embed and store markdown text with zkML verification.
 
 **Returns:** Number of chunks inserted
 
-#### `insert_markdown_file(memory_id: str, tag: str, path: str) -> int`
-Embed and store markdown from a file.
+#### `insert_markdown_file(memory_id: str, path: str) -> int`
+Embed and store markdown from a file. The tag is derived from the file path unless an explicit tag is supplied as `insert_markdown_file(memory_id, tag, path)` or `tag=..., path=...`.
 
 **Returns:** Number of chunks inserted
 
-#### `insert_pdf_file(memory_id: str, tag: str, path: str) -> int`
-Convert a PDF to markdown and insert it.
+#### `insert_pdf_file(memory_id: str, path: str) -> int`
+Convert a PDF to markdown and insert it. The tag is derived from the file path unless an explicit tag is supplied as `insert_pdf_file(memory_id, tag, path)` or `tag=..., path=...`.
 
 **Returns:** Number of chunks inserted
 
@@ -511,11 +514,14 @@ Trigger `update_instance` via the launcher for the given memory canister.
 
 Stateless alternatives available:
 - `create_memory(identity, name, description, ic=False)`
+- `rename_memory(identity, memory_id, name, description=None, clear_description=False, ic=False)`
 - `list_memories(identity, ic=False)`
 - `insert_markdown(identity, memory_id, tag, text, ic=False)`
+- `insert_markdown_file(identity, memory_id, path, ic=False)`
 - `insert_markdown_file(identity, memory_id, tag, path, ic=False)`
+- `insert_pdf_file(identity, memory_id, path, ic=False)`
 - `insert_pdf_file(identity, memory_id, tag, path, ic=False)`
-- `insert_pdf(identity, memory_id, tag, path, ic=False)`
+- `insert_pdf(identity, memory_id, tag, path, ic=False)` (deprecated)
 - `search_memories(identity, memory_id, query, ic=False)`
 - `ask_ai(identity, memory_id, query, top_k=None, language=None, ic=False)`
 - `get_balance(identity, ic=False)`

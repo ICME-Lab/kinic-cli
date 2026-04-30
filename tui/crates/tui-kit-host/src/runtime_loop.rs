@@ -1,6 +1,7 @@
 #[path = "form_tab_flow.rs"]
 mod form_tab_flow;
 
+use kinic_core::derive_file_tag;
 use ratatui_textarea::{Input as TextAreaInput, Key as TextAreaKey, TextArea};
 use std::{io, time::Duration};
 use tui_kit_render::theme::Theme;
@@ -68,6 +69,7 @@ enum OverlayInputResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActiveTextarea {
     CreateDescription,
+    RenameDescription,
     InsertText,
     ChatInput,
 }
@@ -101,6 +103,7 @@ impl ChatInputState {
 
 struct FormTextareas {
     create_description: TextArea<'static>,
+    rename_description: TextArea<'static>,
     insert_text: TextArea<'static>,
     chat_input: ChatInputState,
     chat_command_selected: usize,
@@ -110,6 +113,7 @@ impl Default for FormTextareas {
     fn default() -> Self {
         Self {
             create_description: textarea_from_text(""),
+            rename_description: textarea_from_text(""),
             insert_text: textarea_from_text(""),
             chat_input: ChatInputState::default(),
             chat_command_selected: 0,
@@ -245,6 +249,11 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .add_memory_modal(state.add_memory.clone())
                     .remove_memory_modal(&state.remove_memory)
                     .rename_memory_modal(state.rename_memory.clone())
+                    .rename_description_cursor(textarea_cursor(
+                        active_textarea(&state),
+                        ActiveTextarea::RenameDescription,
+                        &textareas.rename_description,
+                    ))
                     .transfer_modal(state.transfer_modal.clone())
                     .show_completion(false)
                     .context_details_loading(false)
@@ -605,6 +614,15 @@ fn apply_insert_file_dialog_selection(
     let display_path = path.display().to_string();
     state.insert_file_path_input = display_path.clone();
     state.insert_selected_file_path = Some(path);
+    if let Some(tag) = derive_file_tag(
+        state
+            .insert_selected_file_path
+            .as_ref()
+            .expect("selected file path should exist after assignment"),
+    ) {
+        state.insert_tag = tag;
+        state.insert_tag_is_auto = true;
+    }
     state.insert_focus = tui_kit_runtime::InsertFormFocus::Submit;
     state.insert_error = None;
     if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
@@ -716,6 +734,11 @@ fn build_ui<'a>(
         .add_memory_modal(state.add_memory.clone())
         .remove_memory_modal(&state.remove_memory)
         .rename_memory_modal(state.rename_memory.clone())
+        .rename_description_cursor(textarea_cursor(
+            active_textarea(state),
+            ActiveTextarea::RenameDescription,
+            &textareas.rename_description,
+        ))
         .transfer_modal(state.transfer_modal.clone())
         .show_completion(false)
         .context_details_loading(false)
@@ -779,13 +802,11 @@ fn handle_overlay_input<P: DataProvider>(
     }
 
     if state.rename_memory.form.open {
-        return dispatch_overlay_action(
-            provider,
-            state,
-            provider_render_state,
-            rename_overlay_action(code, modifiers, state),
-            false,
-        );
+        let action = rename_overlay_action(code, modifiers, state);
+        if action.is_none() && active_textarea(state).is_some() {
+            return OverlayInputResult::NotHandled;
+        }
+        return dispatch_overlay_action(provider, state, provider_render_state, action, false);
     }
 
     if state.transfer_modal.open {
@@ -1095,7 +1116,10 @@ fn paste_actions_for_access_control(state: &CoreState, text: &str) -> Option<Vec
     if state.access_control.mode == AccessControlMode::Add
         && state.access_control.focus == AccessControlFocus::Principal
     {
-        return Some(char_input_actions(text, CoreAction::AccessInput));
+        return Some(char_input_actions(
+            &flatten_single_line_paste(text),
+            CoreAction::AccessInput,
+        ));
     }
 
     None
@@ -1120,7 +1144,10 @@ fn paste_actions_for_rename(state: &CoreState, text: &str) -> Option<Vec<CoreAct
     use tui_kit_runtime::RenameModalFocus;
 
     if state.rename_memory.focus == RenameModalFocus::Name {
-        return nonempty_actions(char_input_actions(text, CoreAction::RenameMemoryInput));
+        return nonempty_actions(char_input_actions(
+            &flatten_single_line_paste(text),
+            CoreAction::RenameMemoryInput,
+        ));
     }
 
     None
@@ -1360,6 +1387,7 @@ fn textarea_navigation_action(
 fn textarea_next_field_action(target: ActiveTextarea) -> CoreAction {
     match target {
         ActiveTextarea::CreateDescription => CoreAction::CreateNextField,
+        ActiveTextarea::RenameDescription => CoreAction::RenameMemoryNextField,
         ActiveTextarea::InsertText => CoreAction::InsertNextField,
         ActiveTextarea::ChatInput => CoreAction::FocusNext,
     }
@@ -1368,6 +1396,7 @@ fn textarea_next_field_action(target: ActiveTextarea) -> CoreAction {
 fn textarea_prev_field_action(target: ActiveTextarea) -> CoreAction {
     match target {
         ActiveTextarea::CreateDescription => CoreAction::CreatePrevField,
+        ActiveTextarea::RenameDescription => CoreAction::RenameMemoryPrevField,
         ActiveTextarea::InsertText => CoreAction::InsertPrevField,
         ActiveTextarea::ChatInput => CoreAction::FocusPrev,
     }
@@ -1382,6 +1411,12 @@ fn textarea_is_at_last_row(textarea: &TextArea<'static>) -> bool {
 }
 
 fn active_textarea(state: &CoreState) -> Option<ActiveTextarea> {
+    if state.rename_memory.form.open
+        && state.rename_memory.focus == tui_kit_runtime::RenameModalFocus::Description
+    {
+        return Some(ActiveTextarea::RenameDescription);
+    }
+
     if state.focus != PaneFocus::Form && state.focus != PaneFocus::Extra {
         return None;
     }
@@ -1412,6 +1447,7 @@ fn active_textarea(state: &CoreState) -> Option<ActiveTextarea> {
 fn textarea_mut(textareas: &mut FormTextareas, target: ActiveTextarea) -> &mut TextArea<'static> {
     match target {
         ActiveTextarea::CreateDescription => &mut textareas.create_description,
+        ActiveTextarea::RenameDescription => &mut textareas.rename_description,
         ActiveTextarea::InsertText => &mut textareas.insert_text,
         ActiveTextarea::ChatInput => unreachable!("chat input no longer uses textarea"),
     }
@@ -1421,6 +1457,10 @@ fn sync_form_textareas_from_state(textareas: &mut FormTextareas, state: &CoreSta
     sync_textarea_from_string(
         &mut textareas.create_description,
         state.create_description.as_str(),
+    );
+    sync_textarea_from_string(
+        &mut textareas.rename_description,
+        state.rename_memory.description.as_str(),
     );
     sync_textarea_from_string(&mut textareas.insert_text, state.insert_text.as_str());
     sync_chat_input_from_state(&mut textareas.chat_input, state.chat_input.as_str());
@@ -1486,6 +1526,16 @@ fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
         state.create_error = None;
         if state.create_submit_state == tui_kit_runtime::CreateSubmitState::Error {
             state.create_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+        }
+    }
+
+    let rename_description = textareas.rename_description.lines().join("\n");
+    if state.rename_memory.description != rename_description {
+        state.rename_memory.description = rename_description;
+        state.rename_memory.description_dirty = true;
+        state.rename_memory.form.error = None;
+        if state.rename_memory.form.submit_state == tui_kit_runtime::CreateSubmitState::Error {
+            state.rename_memory.form.submit_state = tui_kit_runtime::CreateSubmitState::Idle;
         }
     }
 
@@ -1808,6 +1858,15 @@ fn rename_overlay_action(
     state: &CoreState,
 ) -> Option<CoreAction> {
     use tui_kit_runtime::RenameModalFocus;
+
+    if state.rename_memory.focus == RenameModalFocus::Description {
+        return match code {
+            crossterm::event::KeyCode::Esc => Some(CoreAction::CloseRenameMemory),
+            crossterm::event::KeyCode::Tab => Some(CoreAction::RenameMemoryNextField),
+            crossterm::event::KeyCode::BackTab => Some(CoreAction::RenameMemoryPrevField),
+            _ => None,
+        };
+    }
 
     focusable_text_overlay_action(
         code,

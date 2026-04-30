@@ -10,6 +10,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use ic_agent::export::Principal;
+use kinic_core::derive_file_tag;
 use serde_json::json;
 
 use crate::{
@@ -113,7 +114,7 @@ pub fn parse_embedding_json(raw: &str) -> Result<Vec<f32>> {
 }
 
 pub fn validate_insert_request_fields(request: &InsertRequest) -> Result<()> {
-    validate_shared_fields(request.memory_id(), request.tag())?;
+    validate_memory_id_required(request.memory_id())?;
 
     match request {
         InsertRequest::Normal {
@@ -123,8 +124,14 @@ pub fn validate_insert_request_fields(request: &InsertRequest) -> Result<()> {
             let has_file_path = file_path
                 .as_ref()
                 .is_some_and(|path| !path.as_os_str().is_empty());
+            if has_inline_text && has_file_path {
+                bail!("Provide either text or file path, not both.");
+            }
             if !has_inline_text && !has_file_path {
                 bail!("Provide text or file path for normal insert.");
+            }
+            if !has_file_path && request.tag().trim().is_empty() {
+                bail!("Tag is required for inline text insert.");
             }
         }
         InsertRequest::Raw {
@@ -132,6 +139,7 @@ pub fn validate_insert_request_fields(request: &InsertRequest) -> Result<()> {
             embedding_json,
             ..
         } => {
+            validate_required_tag(request.tag(), "Tag is required for raw insert.")?;
             if text.trim().is_empty() {
                 bail!("Text is required for raw insert.");
             }
@@ -157,7 +165,7 @@ pub fn validate_insert_request_for_submit(request: &InsertRequest) -> Result<()>
 fn validate_and_transform_insert_request(
     request: &InsertRequest,
 ) -> Result<ValidatedInsertRequest> {
-    validate_shared_fields(request.memory_id(), request.tag())?;
+    validate_insert_request_fields(request)?;
     validate_memory_id(request.memory_id())?;
 
     match request {
@@ -172,6 +180,9 @@ fn validate_and_transform_insert_request(
             if text.is_none() && file_path.is_none() {
                 bail!("Provide text or file path for normal insert.");
             }
+            if text.is_some() && file_path.is_some() {
+                bail!("Provide either text or file path, not both.");
+            }
             if text.is_none() {
                 let path = file_path
                     .as_ref()
@@ -181,7 +192,7 @@ fn validate_and_transform_insert_request(
 
             Ok(ValidatedInsertRequest::Normal {
                 memory_id: memory_id.clone(),
-                tag: tag.clone(),
+                tag: resolved_tag(tag, text.as_deref(), file_path.as_deref())?,
                 text,
                 file_path,
             })
@@ -200,7 +211,7 @@ fn validate_and_transform_insert_request(
             }
             Ok(ValidatedInsertRequest::Raw {
                 memory_id: memory_id.clone(),
-                tag: tag.clone(),
+                tag: validate_required_tag(tag, "Tag is required for raw insert.")?,
                 text: text.clone(),
                 embedding: parse_embedding_json(embedding_json)?,
             })
@@ -217,7 +228,7 @@ fn validate_and_transform_insert_request(
 
             Ok(ValidatedInsertRequest::Pdf {
                 memory_id: memory_id.clone(),
-                tag: tag.clone(),
+                tag: resolved_tag(tag, None, Some(file_path.as_path()))?,
                 file_path: file_path.clone(),
             })
         }
@@ -270,7 +281,12 @@ async fn prepare_chunked_insert(tag: &str, markdown: &str) -> Result<Vec<Prepare
 }
 
 fn load_normal_content(text: Option<&String>, file_path: Option<&PathBuf>) -> Result<String> {
-    if let Some(content) = text.filter(|value| !value.trim().is_empty()) {
+    let inline_text = text.filter(|value| !value.trim().is_empty());
+    if inline_text.is_some() && file_path.is_some() {
+        bail!("Provide either text or file path, not both.");
+    }
+
+    if let Some(content) = inline_text {
         return Ok(content.to_string());
     }
 
@@ -282,11 +298,35 @@ fn load_normal_content(text: Option<&String>, file_path: Option<&PathBuf>) -> Re
     bail!("Provide text or file path for normal insert.")
 }
 
-fn validate_shared_fields(memory_id: &str, tag: &str) -> Result<()> {
-    if memory_id.trim().is_empty() || tag.trim().is_empty() {
-        bail!("Memory ID and tag are required.");
+pub fn preview_file_insert_tag(tag: &str, file_path: Option<&Path>) -> Option<String> {
+    resolved_tag(tag, None, file_path).ok()
+}
+
+fn validate_memory_id_required(memory_id: &str) -> Result<()> {
+    if memory_id.trim().is_empty() {
+        bail!("Memory ID is required.");
     }
     Ok(())
+}
+
+fn validate_required_tag(tag: &str, message: &str) -> Result<String> {
+    let normalized = tag.trim();
+    if normalized.is_empty() {
+        bail!("{message}");
+    }
+    Ok(normalized.to_string())
+}
+
+fn resolved_tag(tag: &str, text: Option<&str>, file_path: Option<&Path>) -> Result<String> {
+    let normalized = tag.trim();
+    if !normalized.is_empty() {
+        return Ok(normalized.to_string());
+    }
+    if text.is_some() {
+        bail!("Tag is required for inline text insert.");
+    }
+    let derived = file_path.and_then(derive_file_tag);
+    derived.ok_or_else(|| anyhow::anyhow!("Tag is required for file insert."))
 }
 
 fn validate_memory_id(memory_id: &str) -> Result<()> {
@@ -402,7 +442,7 @@ mod tests {
     use super::*;
     use std::{
         env, fs,
-        path::PathBuf,
+        path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -426,6 +466,17 @@ mod tests {
         path
     }
 
+    fn write_workspace_markdown_file(relative_path: &str, contents: &str) -> PathBuf {
+        let path = env::current_dir()
+            .expect("workspace current dir should resolve")
+            .join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("workspace test directory should be creatable");
+        }
+        fs::write(&path, contents).expect("workspace markdown file should be writable");
+        path
+    }
+
     #[test]
     fn parse_embedding_json_rejects_empty_arrays() {
         let err = parse_embedding_json("[]").unwrap_err();
@@ -441,14 +492,17 @@ mod tests {
     }
 
     #[test]
-    fn normal_insert_prefers_inline_text() {
-        let content = load_normal_content(
+    fn load_normal_content_rejects_inline_text_and_file_path_together() {
+        let err = load_normal_content(
             Some(&"  inline text  ".to_string()),
             Some(&PathBuf::from("/tmp/unused.md")),
         )
-        .unwrap();
+        .unwrap_err();
 
-        assert_eq!(content, "  inline text  ");
+        assert_eq!(
+            err.to_string(),
+            "Provide either text or file path, not both."
+        );
     }
 
     #[test]
@@ -559,11 +613,40 @@ mod tests {
     fn validate_insert_request_fields_accepts_non_empty_file_path_without_reading_file() {
         validate_insert_request_fields(&InsertRequest::Normal {
             memory_id: "aaaaa-aa".to_string(),
-            tag: "docs".to_string(),
+            tag: String::new(),
             text: Some("   ".to_string()),
             file_path: Some(PathBuf::from("/path/that/does/not/need/to/exist.md")),
         })
         .unwrap();
+    }
+
+    #[test]
+    fn validate_insert_request_fields_rejects_inline_text_and_file_path_together() {
+        let err = validate_insert_request_fields(&InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "docs".to_string(),
+            text: Some("payload".to_string()),
+            file_path: Some(PathBuf::from("/tmp/doc.md")),
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Provide either text or file path, not both."
+        );
+    }
+
+    #[test]
+    fn validate_insert_request_fields_rejects_blank_inline_text_tag() {
+        let err = validate_insert_request_fields(&InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: "   ".to_string(),
+            text: Some("payload".to_string()),
+            file_path: None,
+        })
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), "Tag is required for inline text insert.");
     }
 
     #[test]
@@ -635,14 +718,19 @@ mod tests {
     }
 
     #[test]
-    fn validate_insert_request_for_submit_accepts_inline_text_with_missing_file_path() {
-        validate_insert_request_for_submit(&InsertRequest::Normal {
+    fn validate_insert_request_for_submit_rejects_inline_text_with_file_path() {
+        let err = validate_insert_request_for_submit(&InsertRequest::Normal {
             memory_id: "aaaaa-aa".to_string(),
             tag: "docs".to_string(),
             text: Some("payload".to_string()),
             file_path: Some(PathBuf::from("/path/that/does/not/need/to/exist.md")),
         })
-        .unwrap();
+        .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Provide either text or file path, not both."
+        );
     }
 
     #[test]
@@ -690,6 +778,40 @@ mod tests {
             validated,
             ValidatedInsertRequest::Raw { embedding, .. } if embedding == vec![0.1, 0.2]
         ));
+    }
+
+    #[test]
+    fn validate_insert_request_for_submit_derives_tag_from_file_path() {
+        let path =
+            write_workspace_markdown_file("target/kinic-insert-tests/docs/spec/api.md", "# title");
+        let validated = validate_and_transform_insert_request(&InsertRequest::Normal {
+            memory_id: "aaaaa-aa".to_string(),
+            tag: String::new(),
+            text: Some("   ".to_string()),
+            file_path: Some(path.clone()),
+        })
+        .unwrap();
+
+        assert!(matches!(
+            validated,
+            ValidatedInsertRequest::Normal { tag, .. }
+                if tag.strip_prefix("api-").is_some_and(|suffix| suffix.len() == 16)
+        ));
+        fs::remove_file(path).expect("workspace markdown file should be removable");
+    }
+
+    #[test]
+    fn preview_file_insert_tag_preserves_existing_tag() {
+        let tag = preview_file_insert_tag("docs", Some(Path::new("nested/spec.md")));
+
+        assert_eq!(tag.as_deref(), Some("docs"));
+    }
+
+    #[test]
+    fn preview_file_insert_tag_returns_none_when_tag_and_file_path_are_missing() {
+        let tag = preview_file_insert_tag("", None);
+
+        assert_eq!(tag, None);
     }
 
     #[test]

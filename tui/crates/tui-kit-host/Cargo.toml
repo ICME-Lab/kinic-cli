@@ -20,5 +20,6 @@ ratatui = "0.29"
 ratatui-textarea = "0.8"
 tempfile = "3"
 tracing = "0.1"
+kinic-core = { path = "../../../crates/kinic-core" }
 tui-kit-render = { path = "../tui-kit-render" }
 tui-kit-runtime = { path = "../tui-kit-runtime" }

@@ -4,6 +4,7 @@
 //! Why: keep domain behavior aligned across interfaces without coupling to I/O or UI state.
 
 pub mod amount;
+pub mod file_tag;
 pub mod prefs_policy;
 pub mod principal;
 pub mod tag;
@@ -13,3 +14,4 @@ pub use amount::{editing_kinic_amount_accepts_char, parse_editing_kinic_display_
 pub use amount::{
     format_e8s_to_kinic_string_nat, format_e8s_to_kinic_string_u128, normalize_kinic_display,
 };
+pub use file_tag::{derive_file_tag, normalize_insert_file_path_input};

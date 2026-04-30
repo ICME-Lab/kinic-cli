@@ -2042,6 +2042,7 @@ name = "kinic-core"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -3948,6 +3949,7 @@ version = "0.1.0"
 dependencies = [
  "crossterm 0.28.1",
  "dirs",
+ "kinic-core",
  "ratatui",
  "ratatui-textarea",
  "serde",
