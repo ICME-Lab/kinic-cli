@@ -12,9 +12,10 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::{Focus, TuiKitUi, shared};
 
-use super::{FormRows, submit_button_text};
-
-const INSERT_TEXT_HEIGHT: u16 = 5;
+use super::{
+    FormRows, MULTILINE_TEXTAREA_HEIGHT, multiline_cursor_x, multiline_visible_row,
+    submit_button_text, visible_multiline_rows,
+};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_insert_screen(&self, area: Rect, buf: &mut Buffer) {
@@ -52,14 +53,12 @@ impl<'a> TuiKitUi<'a> {
             let visible = visible_multiline_rows(
                 self.insert_text,
                 text_placeholder(self.insert_mode),
-                INSERT_TEXT_HEIGHT,
+                MULTILINE_TEXTAREA_HEIGHT,
                 cursor_row,
                 layout.form_area.width.saturating_sub(6),
             );
-            let visible_row = cursor_row
-                .saturating_sub(visible.scroll_row)
-                .min(INSERT_TEXT_HEIGHT.saturating_sub(1) as usize)
-                as u16;
+            let visible_row =
+                multiline_visible_row(cursor_row, visible.scroll_row, MULTILINE_TEXTAREA_HEIGHT);
             let x = layout.form_area.x
                 + 3
                 + multiline_cursor_x(
@@ -94,11 +93,6 @@ struct InsertForm<'a> {
     rows: FormRows<InsertFormFocus>,
 }
 
-struct VisibleMultilineRows {
-    rows: Vec<String>,
-    scroll_row: usize,
-}
-
 impl InsertForm<'_> {
     fn focus_row(&self, focus: InsertFormFocus) -> Option<u16> {
         self.rows.focus_row(focus)
@@ -130,15 +124,20 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         memory_id_value(ui),
         max_width,
     );
-    push_field(
-        &mut lines,
-        &mut rows,
-        ui,
-        InsertFormFocus::Tag,
-        ui.ui_config.insert.tag_label.as_str(),
-        display_value(ui.insert_tag, "<tag>"),
-        max_width,
-    );
+    if matches!(
+        ui.insert_mode,
+        InsertMode::InlineText | InsertMode::ManualEmbedding
+    ) {
+        push_field(
+            &mut lines,
+            &mut rows,
+            ui,
+            InsertFormFocus::Tag,
+            ui.ui_config.insert.tag_label.as_str(),
+            display_value(ui.insert_tag, "<tag>"),
+            max_width,
+        );
+    }
     if matches!(
         ui.insert_mode,
         InsertMode::InlineText | InsertMode::ManualEmbedding
@@ -146,7 +145,7 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
         let text_rows = visible_multiline_rows(
             ui.insert_text,
             text_placeholder(ui.insert_mode),
-            INSERT_TEXT_HEIGHT,
+            MULTILINE_TEXTAREA_HEIGHT,
             ui.insert_text_cursor
                 .map(|(row, _)| row)
                 .unwrap_or_default(),
@@ -170,6 +169,12 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             ui.ui_config.insert.file_path_label.as_str(),
             display_value(ui.insert_file_path, "<file path>"),
             max_width,
+        );
+        push_readonly_field(
+            &mut lines,
+            ui,
+            "Auto Tag",
+            display_value(ui.insert_tag, "<auto from file path>"),
         );
     }
     if matches!(ui.insert_mode, InsertMode::ManualEmbedding) {
@@ -209,6 +214,10 @@ fn insert_form_lines<'a>(ui: &'a TuiKitUi<'a>, max_width: u16) -> InsertForm<'a>
             .lines()
             .map(|line| Line::from(Span::styled(line.to_string(), ui.theme.style_muted()))),
     );
+    lines.push(Line::from(Span::styled(
+        tag_help_line(ui.insert_mode),
+        ui.theme.style_muted(),
+    )));
     if let Some(error) = ui.insert_error {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -319,47 +328,6 @@ fn display_value(value: &str, placeholder: &str) -> String {
     }
 }
 
-fn visible_multiline_rows(
-    value: &str,
-    placeholder: &str,
-    height: u16,
-    cursor_row: usize,
-    max_width: u16,
-) -> VisibleMultilineRows {
-    let mut source_rows = if value.is_empty() {
-        vec![placeholder.to_string()]
-    } else {
-        value
-            .split('\n')
-            .map(|row| row.to_string())
-            .collect::<Vec<_>>()
-    };
-    if source_rows.is_empty() {
-        source_rows.push(String::new());
-    }
-    let height_usize = height as usize;
-    let scroll_row = if cursor_row >= height_usize {
-        cursor_row + 1 - height_usize
-    } else {
-        0
-    };
-    let mut rows = source_rows
-        .into_iter()
-        .skip(scroll_row)
-        .take(height_usize)
-        .map(|row| trim_to_width(row.as_str(), max_width))
-        .collect::<Vec<_>>();
-    while rows.len() < height_usize {
-        rows.push(String::new());
-    }
-    VisibleMultilineRows { rows, scroll_row }
-}
-
-fn multiline_cursor_x(line: &str, cursor_col: usize, max_width: u16) -> u16 {
-    let prefix = line.chars().take(cursor_col).collect::<String>();
-    UnicodeWidthStr::width(trim_to_width(prefix.as_str(), max_width).as_str()) as u16
-}
-
 fn memory_id_value(ui: &TuiKitUi<'_>) -> String {
     if let Some(selected_memory) = ui.selected_memory {
         let selected_memory_label = selected_memory.label.trim();
@@ -413,6 +381,15 @@ fn text_placeholder(mode: InsertMode) -> &'static str {
         InsertMode::InlineText => "<inline text>",
         InsertMode::ManualEmbedding => "<payload text stored with embedding>",
         _ => unreachable!("text placeholder is only used for text-capable insert modes"),
+    }
+}
+
+fn tag_help_line(mode: InsertMode) -> &'static str {
+    match mode {
+        InsertMode::File => "File inserts use an auto tag derived from the file path.",
+        InsertMode::InlineText | InsertMode::ManualEmbedding => {
+            "Tag identifies inserted content and is required."
+        }
     }
 }
 
@@ -515,9 +492,38 @@ mod tests {
                 InsertMode::File => false,
             };
             assert_eq!(has_text_placeholder, has_inline_text);
+            assert_eq!(
+                lines.contains("<tag>"),
+                matches!(mode, InsertMode::InlineText | InsertMode::ManualEmbedding)
+            );
             assert_eq!(lines.contains("<file path>"), has_file_path);
             assert_eq!(lines.contains("<json array>"), has_embedding);
         }
+    }
+
+    #[test]
+    fn insert_file_form_shows_readonly_auto_tag_under_file_path() {
+        let theme = Theme::default();
+        let ui = TuiKitUi::new(&theme)
+            .insert_mode(InsertMode::File)
+            .insert_file_path("/tmp/report.pdf")
+            .insert_tag("report-12345678");
+        let rendered = insert_form_lines(&ui, 80)
+            .lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        let file_path_index = rendered
+            .iter()
+            .position(|line| line.contains("/tmp/report.pdf"))
+            .expect("file path should render");
+        let auto_tag_index = rendered
+            .iter()
+            .position(|line| line.contains("Auto Tag"))
+            .expect("auto tag label should render");
+
+        assert!(auto_tag_index > file_path_index);
+        assert!(rendered.iter().any(|line| line.contains("report-12345678")));
     }
 
     #[test]
@@ -547,6 +553,19 @@ mod tests {
             .join("\n");
 
         assert!(rendered.contains("Inline Text"));
+    }
+
+    #[test]
+    fn insert_form_shows_mode_specific_tag_help() {
+        assert!(
+            render_insert_form(InsertMode::InlineText)
+                .contains(tag_help_line(InsertMode::InlineText))
+        );
+        assert!(
+            render_insert_form(InsertMode::ManualEmbedding)
+                .contains(tag_help_line(InsertMode::ManualEmbedding))
+        );
+        assert!(render_insert_form(InsertMode::File).contains(tag_help_line(InsertMode::File)));
     }
 
     #[test]

@@ -365,6 +365,10 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.create_focus = CreateModalFocus::Name;
             }
             CoreEffect::ResetInsertFormForRepeat => {
+                if state.insert_tag_is_auto {
+                    state.insert_tag.clear();
+                }
+                state.insert_tag_is_auto = false;
                 state.insert_text.clear();
                 state.insert_file_path_input.clear();
                 state.insert_selected_file_path = None;
@@ -375,6 +379,7 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             }
             CoreEffect::SetInsertTag(tag) => {
                 state.insert_tag = tag.clone();
+                state.insert_tag_is_auto = false;
                 state.insert_error = None;
             }
             CoreEffect::SetAccessListIndex(index) => {
@@ -493,10 +498,13 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
             CoreEffect::OpenRenameMemory {
                 memory_id,
                 current_name,
+                current_description,
             } => {
                 open_rename_memory_modal(state);
                 state.rename_memory.memory_id = memory_id;
                 state.rename_memory.form.value = current_name;
+                state.rename_memory.description_dirty = false;
+                state.rename_memory.description = current_description.unwrap_or_default();
             }
             CoreEffect::CloseRenameMemory => {
                 close_rename_memory_modal(state);

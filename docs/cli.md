@@ -102,7 +102,7 @@ Minimal illustrative excerpt (not a full copy of the output):
 
 `prefs add-memory` stays local by default, but `prefs add-memory --validate` performs a network call and therefore requires either `--identity <name>` or `--ii`.
 
-For commands with compound input rules, `capabilities` also includes `arg_groups`. Arguments now separate `input_shape` (`flag`, `single_value`, `multi_value`) from `value_kind` (`boolean`, `integer`, `string`, `principal`, `path`, `json_array`) so agents can distinguish presence flags from value-taking arguments.
+For commands with compound input rules, `capabilities` also includes `arg_groups`. Arguments now separate `input_shape` (`flag`, `single_value`, `multi_value`) from `value_kind` (`boolean`, `integer`, `string`, `principal`, `path`, `json_array`) so agents can distinguish presence flags from value-taking arguments. Conditional runtime requirements appear in `runtime_required_when`; for example, `insert.tag` is required when `text` is present unless `file_path` is used.
 
 ```bash
 cargo run -- --ic --identity alice list
@@ -169,7 +169,7 @@ cargo run -- --ic --identity alice insert \
   --tag diary_weekly
 ```
 
-Exactly one of `--text` or `--file-path` must be supplied. The command calls the embedding API’s `/late-chunking` endpoint, then stores each chunk via the memory canister’s `insert` method.
+Exactly one of `--text` or `--file-path` must be supplied. `--tag` is required with `--text`; with `--file-path`, `--tag` is optional and auto-derived from the file path when omitted. The command calls the embedding API’s `/late-chunking` endpoint, then stores each chunk via the memory canister’s `insert` method.
 
 ### Search example
 
@@ -238,6 +238,16 @@ For agent-driven usage, prefer:
 cargo run -- --ic --identity alice rename \
   --memory-id MEMORY_CANISTER_ID \
   --name "Renamed demo memory"
+
+cargo run -- --ic --identity alice rename \
+  --memory-id MEMORY_CANISTER_ID \
+  --name "Renamed demo memory" \
+  --description "Updated memory description"
+
+cargo run -- --ic --identity alice rename \
+  --memory-id MEMORY_CANISTER_ID \
+  --name "Renamed demo memory" \
+  --clear-description
 ```
 
 ### Manage config (add user)

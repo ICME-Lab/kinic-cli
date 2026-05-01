@@ -46,6 +46,7 @@ fn insert_tag_field_uses_selector_instead_of_free_input() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Tag,
         ..CoreState::default()
     };
@@ -94,6 +95,7 @@ fn insert_tag_field_opens_selector_on_enter() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Tag,
         ..CoreState::default()
     };
@@ -170,6 +172,7 @@ fn insert_form_down_moves_to_next_field() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Tag,
         ..CoreState::default()
     };
@@ -177,6 +180,21 @@ fn insert_form_down_moves_to_next_field() {
     let action = form_tab_action_from_key(KeyCode::Down, &mut state);
 
     assert_eq!(action, Some(CoreAction::InsertNextField));
+}
+
+#[test]
+fn file_insert_form_skips_tag_field() {
+    let mut state = CoreState {
+        current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
+        focus: PaneFocus::Form,
+        insert_mode: InsertMode::File,
+        insert_focus: InsertFormFocus::Tag,
+        ..CoreState::default()
+    };
+
+    let action = form_tab_action_from_key(KeyCode::Enter, &mut state);
+
+    assert_eq!(action, None);
 }
 
 #[test]
@@ -227,6 +245,7 @@ fn reset_insert_form_state_clears_insert_fields() {
         saved_default_memory_id: Some("bbbbb-bb".to_string()),
         insert_mode: InsertMode::File,
         insert_tag: "docs".to_string(),
+        insert_tag_is_auto: true,
         insert_file_path_input: "/tmp/doc.pdf".to_string(),
         insert_selected_file_path: Some(std::path::PathBuf::from("/tmp/doc.pdf")),
         insert_submit_state: tui_kit_runtime::CreateSubmitState::Submitting,
@@ -239,6 +258,7 @@ fn reset_insert_form_state_clears_insert_fields() {
 
     assert_eq!(state.insert_mode, InsertMode::File);
     assert_eq!(state.insert_tag, "");
+    assert!(!state.insert_tag_is_auto);
     assert_eq!(state.insert_file_path_input, "");
     assert_eq!(state.insert_selected_file_path, None);
     assert_eq!(state.insert_error, None);
@@ -329,6 +349,7 @@ fn insert_tag_focus_uses_enter_to_move_to_next_field() {
     let mut state = CoreState {
         current_tab_id: KINIC_INSERT_TAB_ID.to_string(),
         focus: PaneFocus::Form,
+        insert_mode: InsertMode::InlineText,
         insert_focus: InsertFormFocus::Tag,
         ..CoreState::default()
     };

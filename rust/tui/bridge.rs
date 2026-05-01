@@ -16,7 +16,7 @@ use crate::{
             visible_memory_users,
         },
         cross_memory_search::SearchHit,
-        memory_metadata::encode_renamed_memory_metadata,
+        memory_metadata::encode_renamed_memory_metadata_with_description,
     },
     tui::TuiAuth,
     tui::settings::session_settings_snapshot,
@@ -26,6 +26,8 @@ use anyhow::{Context, Result};
 use ic_agent::{Agent, export::Principal};
 use kinic_core::amount::format_e8s_to_kinic_string_nat;
 use tui_kit_runtime::{AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview};
+
+pub(crate) use crate::shared::memory_metadata::DescriptionUpdate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySummary {
@@ -477,6 +479,7 @@ pub async fn rename_memory(
     auth: TuiAuth,
     memory_id: String,
     name: String,
+    description_update: DescriptionUpdate,
 ) -> Result<RenameMemorySuccess, RenameMemoryError> {
     let factory = resolve_agent_factory(use_mainnet, &auth)
         .map_err(|error| RenameMemoryError::ResolveAgentFactory(short_error(&error.to_string())))?;
@@ -487,12 +490,23 @@ pub async fn rename_memory(
     let memory = Principal::from_text(&memory_id)
         .map_err(|error| RenameMemoryError::ParseMemoryId(short_error(&error.to_string())))?;
     let client = MemoryClient::new(agent, memory);
-    let metadata = client
-        .get_metadata()
-        .await
-        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
-    let payload = encode_renamed_memory_metadata(&metadata.name, &name)
-        .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
+    let existing_raw = if description_update == DescriptionUpdate::Preserve {
+        Some(
+            client
+                .get_metadata()
+                .await
+                .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?
+                .name,
+        )
+    } else {
+        None
+    };
+    let payload = encode_renamed_memory_metadata_with_description(
+        existing_raw.as_deref(),
+        &name,
+        &description_update,
+    )
+    .map_err(|error| RenameMemoryError::Rename(short_error(&error.to_string())))?;
 
     client
         .change_name(&payload)

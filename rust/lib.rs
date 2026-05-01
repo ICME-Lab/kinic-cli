@@ -457,6 +457,7 @@ fn _lib(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(greet, m)?)?;
     m.add_function(wrap_pyfunction!(create_memory, m)?)?;
     m.add_function(wrap_pyfunction!(list_memories, m)?)?;
+    m.add_function(wrap_pyfunction!(rename_memory, m)?)?;
     m.add_function(wrap_pyfunction!(insert_memory, m)?)?;
     m.add_function(wrap_pyfunction!(insert_memory_raw, m)?)?;
     m.add_function(wrap_pyfunction!(insert_memory_pdf, m)?)?;
@@ -505,11 +506,39 @@ fn list_memories(identity: &str, ic: Option<bool>) -> PyResult<Vec<String>> {
 
 #[cfg(feature = "python-bindings")]
 #[pyfunction]
-#[pyo3(signature = (identity, memory_id, tag, text=None, file_path=None, ic=None))]
+#[pyo3(signature = (identity, memory_id, name, description=None, clear_description=false, ic=None))]
+fn rename_memory(
+    identity: &str,
+    memory_id: &str,
+    name: &str,
+    description: Option<&str>,
+    clear_description: bool,
+    ic: Option<bool>,
+) -> PyResult<()> {
+    if description.is_some() && clear_description {
+        return Err(PyValueError::new_err(
+            "`description` and `clear_description=True` cannot be used together",
+        ));
+    }
+
+    let ic = ic.unwrap_or(false);
+    block_on_py(python::rename_memory(
+        ic,
+        identity.to_string(),
+        memory_id.to_string(),
+        name.to_string(),
+        description.map(ToOwned::to_owned),
+        clear_description,
+    ))
+}
+
+#[cfg(feature = "python-bindings")]
+#[pyfunction]
+#[pyo3(signature = (identity, memory_id, tag=None, text=None, file_path=None, ic=None))]
 fn insert_memory(
     identity: &str,
     memory_id: &str,
-    tag: &str,
+    tag: Option<&str>,
     text: Option<&str>,
     file_path: Option<&str>,
     ic: Option<bool>,
@@ -526,7 +555,7 @@ fn insert_memory(
         ic,
         identity.to_string(),
         memory_id.to_string(),
-        tag.to_string(),
+        tag.map(ToOwned::to_owned),
         text.map(|t| t.to_string()),
         path,
     ))
@@ -560,7 +589,7 @@ fn insert_memory_raw(
 fn insert_memory_pdf(
     identity: &str,
     memory_id: &str,
-    tag: &str,
+    tag: Option<&str>,
     file_path: &str,
     ic: Option<bool>,
 ) -> PyResult<usize> {
@@ -569,7 +598,7 @@ fn insert_memory_pdf(
         ic,
         identity.to_string(),
         memory_id.to_string(),
-        tag.to_string(),
+        tag.map(ToOwned::to_owned),
         PathBuf::from(file_path),
     ))
 }

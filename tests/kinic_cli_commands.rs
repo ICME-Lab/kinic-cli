@@ -45,6 +45,70 @@ fn embed_accepts_text_without_target_memory() {
 }
 
 #[test]
+fn rename_accepts_description_update() {
+    let cli = Cli::try_parse_from([
+        "kinic-cli",
+        "rename",
+        "--memory-id",
+        "aaaaa-aa",
+        "--name",
+        "Renamed",
+        "--description",
+        "Quarterly goals",
+    ])
+    .expect("rename --description should parse");
+
+    match cli.command {
+        Command::Rename(args) => {
+            assert_eq!(args.memory_id, "aaaaa-aa");
+            assert_eq!(args.name, "Renamed");
+            assert_eq!(args.description.as_deref(), Some("Quarterly goals"));
+            assert!(!args.clear_description);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn rename_accepts_clear_description() {
+    let cli = Cli::try_parse_from([
+        "kinic-cli",
+        "rename",
+        "--memory-id",
+        "aaaaa-aa",
+        "--name",
+        "Renamed",
+        "--clear-description",
+    ])
+    .expect("rename --clear-description should parse");
+
+    match cli.command {
+        Command::Rename(args) => {
+            assert_eq!(args.description, None);
+            assert!(args.clear_description);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn rename_rejects_description_and_clear_description_together() {
+    let parsed = Cli::try_parse_from([
+        "kinic-cli",
+        "rename",
+        "--memory-id",
+        "aaaaa-aa",
+        "--name",
+        "Renamed",
+        "--description",
+        "Quarterly goals",
+        "--clear-description",
+    ]);
+
+    assert!(parsed.is_err());
+}
+
+#[test]
 fn config_users_subcommands_parse() {
     let cli = Cli::try_parse_from([
         "kinic-cli",

@@ -6,6 +6,7 @@ from . import _lib as native
 from .memories import (
     KinicMemories,
     create_memory,
+    rename_memory,
     insert_file,
     insert_markdown,
     insert_markdown_file,
@@ -27,6 +28,7 @@ from .memories import (
 __all__ = [
     "KinicMemories",
     "create_memory",
+    "rename_memory",
     "insert_file",
     "insert_markdown",
     "insert_markdown_file",
