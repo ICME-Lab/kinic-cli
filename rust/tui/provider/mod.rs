@@ -943,6 +943,7 @@ enum MemoryContentSelection<'a> {
     RenameMemory,
     User(&'a bridge::MemoryUser),
     AddUser,
+    OpenPublicMemory,
     RemoveManualMemory,
 }
 
@@ -1762,6 +1763,9 @@ impl KinicProvider {
             selections.extend(users.iter().map(MemoryContentSelection::User));
         }
         selections.push(MemoryContentSelection::AddUser);
+        if memory_has_anonymous_reader(summary.users.as_ref()) {
+            selections.push(MemoryContentSelection::OpenPublicMemory);
+        }
         if self.active_memory_is_manual() {
             selections.push(MemoryContentSelection::RemoveManualMemory);
         }
@@ -1822,17 +1826,30 @@ impl KinicProvider {
         content
             .sections
             .retain(|section| section.heading != "Actions");
+        let mut action_lines = Vec::new();
+        if memory_has_anonymous_reader(users) {
+            action_lines.push(marker_line(
+                matches!(
+                    current_selection,
+                    Some(MemoryContentSelection::OpenPublicMemory)
+                ),
+                "Open public memory",
+            ));
+        }
         if self.active_memory_is_manual() {
+            action_lines.push(marker_line(
+                matches!(
+                    current_selection,
+                    Some(MemoryContentSelection::RemoveManualMemory)
+                ),
+                "Remove from list",
+            ));
+        }
+        if !action_lines.is_empty() {
             content.sections.push(tui_kit_model::UiSection {
                 heading: "Actions".to_string(),
                 rows: Vec::new(),
-                body_lines: vec![marker_line(
-                    matches!(
-                        current_selection,
-                        Some(MemoryContentSelection::RemoveManualMemory)
-                    ),
-                    "Remove from list",
-                )],
+                body_lines: action_lines,
             });
         }
     }
@@ -4699,6 +4716,11 @@ impl DataProvider for KinicProvider {
                     Some(MemoryContentSelection::AddUser) | None => {
                         effects.push(CoreEffect::OpenAccessAdd { memory_id });
                     }
+                    Some(MemoryContentSelection::OpenPublicMemory) => {
+                        effects.push(CoreEffect::OpenExternal(format!(
+                            "https://memory.kinic.xyz/m/{memory_id}"
+                        )));
+                    }
                     Some(MemoryContentSelection::RemoveManualMemory) => {
                         effects.push(CoreEffect::OpenRemoveMemory);
                     }
@@ -5228,6 +5250,14 @@ fn render_access_lines(
         "+ Add User",
     ));
     lines
+}
+
+fn memory_has_anonymous_reader(users: Option<&Vec<bridge::MemoryUser>>) -> bool {
+    users.is_some_and(|users| {
+        users.iter().any(|user| {
+            matches!(user.principal_id.as_str(), "anonymous" | "2vxsx-fae") && user.role == "reader"
+        })
+    })
 }
 
 fn short_error(message: &str) -> String {

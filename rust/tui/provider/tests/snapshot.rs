@@ -325,6 +325,132 @@ fn build_snapshot_shows_remove_action_only_for_manual_memory() {
 }
 
 #[test]
+fn build_snapshot_shows_public_action_for_anonymous_reader() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![MemorySummary {
+        users: Some(vec![bridge::MemoryUser {
+            principal_id: "anonymous".to_string(),
+            role: "reader".to_string(),
+        }]),
+        ..running_memory_summary("aaaaa-aa", "first")
+    }];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        memory_content_action_index: 3,
+        ..CoreState::default()
+    });
+
+    let content = snapshot.selected_content.expect("selected content");
+    let actions = content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Actions")
+        .expect("actions section");
+    assert_eq!(actions.body_lines, vec!["> Open public memory".to_string()]);
+}
+
+#[test]
+fn build_snapshot_shows_public_action_for_anonymous_principal_reader() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![MemorySummary {
+        users: Some(vec![bridge::MemoryUser {
+            principal_id: "2vxsx-fae".to_string(),
+            role: "reader".to_string(),
+        }]),
+        ..running_memory_summary("aaaaa-aa", "first")
+    }];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+        memory_content_action_index: 3,
+        ..CoreState::default()
+    });
+
+    let content = snapshot.selected_content.expect("selected content");
+    let actions = content
+        .sections
+        .iter()
+        .find(|section| section.heading == "Actions")
+        .expect("actions section");
+    assert_eq!(actions.body_lines, vec!["> Open public memory".to_string()]);
+}
+
+#[test]
+fn build_snapshot_hides_public_action_without_anonymous_reader() {
+    for users in [
+        None,
+        Some(vec![bridge::MemoryUser {
+            principal_id: "anonymous".to_string(),
+            role: "writer".to_string(),
+        }]),
+        Some(vec![bridge::MemoryUser {
+            principal_id: "2vxsx-fae".to_string(),
+            role: "admin".to_string(),
+        }]),
+        Some(vec![bridge::MemoryUser {
+            principal_id: "user-1".to_string(),
+            role: "reader".to_string(),
+        }]),
+    ] {
+        let mut provider = KinicProvider::new(live_config());
+        provider.memory_summaries = vec![MemorySummary {
+            users,
+            ..running_memory_summary("aaaaa-aa", "first")
+        }];
+        provider.refresh_memory_records_from_summaries();
+        set_memory_selection(&mut provider, "aaaaa-aa");
+
+        let snapshot = provider.build_snapshot(&CoreState {
+            current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+            ..CoreState::default()
+        });
+
+        let content = snapshot.selected_content.expect("selected content");
+        assert!(
+            content
+                .sections
+                .iter()
+                .all(|section| section.heading != "Actions")
+        );
+    }
+}
+
+#[test]
+fn memory_content_open_selected_opens_public_memory_url() {
+    let mut provider = KinicProvider::new(live_config());
+    provider.memory_summaries = vec![MemorySummary {
+        users: Some(vec![bridge::MemoryUser {
+            principal_id: "anonymous".to_string(),
+            role: "reader".to_string(),
+        }]),
+        ..running_memory_summary("aaaaa-aa", "first")
+    }];
+    provider.refresh_memory_records_from_summaries();
+    set_memory_selection(&mut provider, "aaaaa-aa");
+
+    let output = provider
+        .handle_action(
+            &CoreAction::MemoryContentOpenSelected,
+            &CoreState {
+                current_tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                memory_content_action_index: 3,
+                ..CoreState::default()
+            },
+        )
+        .expect("open selected output");
+
+    assert!(output.effects.iter().any(|effect| matches!(
+        effect,
+        CoreEffect::OpenExternal(url) if url == "https://memory.kinic.xyz/m/aaaaa-aa"
+    )));
+}
+
+#[test]
 fn memory_content_open_selected_opens_remove_modal_for_manual_memory_action() {
     let mut provider = KinicProvider::new(live_config());
     provider.user_preferences.manual_memory_ids = vec!["aaaaa-aa".to_string()];
