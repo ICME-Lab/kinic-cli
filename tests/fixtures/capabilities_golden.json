@@ -351,6 +351,32 @@
       ]
     },
     {
+      "name": "embed",
+      "summary": "Generate one embedding with the configured backend. No identity required. Returns JSON.",
+      "auth": {
+        "required": false,
+        "sources": []
+      },
+      "output": {
+        "default": "json",
+        "supported": [
+          "json"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose"
+      ],
+      "arguments": [
+        {
+          "name": "text",
+          "required": true,
+          "input_shape": "single_value",
+          "value_kind": "string"
+        }
+      ]
+    },
+    {
       "name": "search",
       "summary": "Search within a memory canister using embeddings. Requires --identity <NAME> or --ii. Returns text output.",
       "auth": {
@@ -1071,6 +1097,32 @@
               "required": true,
               "input_shape": "single_value",
               "value_kind": "integer"
+            }
+          ]
+        },
+        {
+          "name": "set-embedding-backend",
+          "summary": "Set the embedding backend shared with the TUI. Returns JSON.",
+          "auth": {
+            "required": false,
+            "sources": []
+          },
+          "output": {
+            "default": "json",
+            "supported": [
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose"
+          ],
+          "arguments": [
+            {
+              "name": "model_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
             }
           ]
         }

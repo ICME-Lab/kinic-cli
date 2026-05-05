@@ -5,9 +5,13 @@
 
 use kinic_core::{prefs_policy, principal::normalize_memory_id_text, tag};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::cell::Cell;
 use tui_kit_host::settings::SettingsError;
 #[cfg(not(test))]
 use tui_kit_host::settings::{load_yaml_or_default, save_yaml};
+
+use crate::embedding_config::{API_EMBEDDING_BACKEND_ID, BGEM3_EMBEDDING_BACKEND_ID};
 
 #[cfg(not(test))]
 const APP_NAMESPACE: &str = "kinic";
@@ -16,6 +20,8 @@ const SETTINGS_FILE_NAME: &str = "tui.yaml";
 pub use kinic_core::prefs_policy::{
     DEFAULT_CHAT_MMR_LAMBDA, DEFAULT_CHAT_OVERALL_TOP_K, DEFAULT_CHAT_PER_MEMORY_CAP,
 };
+
+const DEFAULT_EMBEDDING_MODEL_ID: &str = API_EMBEDDING_BACKEND_ID;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 // Missing legacy fields are backfilled with defaults and unknown fields are ignored.
@@ -32,6 +38,8 @@ pub struct UserPreferences {
     pub chat_per_memory_cap: usize,
     #[serde(default = "default_chat_mmr_lambda")]
     pub chat_mmr_lambda: u8,
+    #[serde(default = "default_embedding_model_id")]
+    pub embedding_model_id: String,
 }
 
 impl Default for UserPreferences {
@@ -43,6 +51,7 @@ impl Default for UserPreferences {
             chat_overall_top_k: DEFAULT_CHAT_OVERALL_TOP_K,
             chat_per_memory_cap: DEFAULT_CHAT_PER_MEMORY_CAP,
             chat_mmr_lambda: DEFAULT_CHAT_MMR_LAMBDA,
+            embedding_model_id: default_embedding_model_id(),
         }
     }
 }
@@ -59,8 +68,22 @@ pub fn default_chat_mmr_lambda() -> u8 {
     DEFAULT_CHAT_MMR_LAMBDA
 }
 
+pub fn default_embedding_model_id() -> String {
+    DEFAULT_EMBEDDING_MODEL_ID.to_string()
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TestLoadPreferencesError {
+    NoConfigDir,
+    Yaml,
+}
+
 #[cfg(test)]
 pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
+    if let Some(error) = test_load_error() {
+        return Err(error);
+    }
     Ok(normalize_user_preferences(UserPreferences::default()))
 }
 
@@ -73,6 +96,36 @@ pub fn load_user_preferences() -> Result<UserPreferences, SettingsError> {
 #[cfg(test)]
 pub fn save_user_preferences(_preferences: &UserPreferences) -> Result<(), SettingsError> {
     Ok(())
+}
+
+#[cfg(test)]
+pub fn set_load_user_preferences_error_for_tests(error: Option<TestLoadPreferencesError>) {
+    TEST_LOAD_ERROR.with(|slot| slot.set(test_load_error_code(error)));
+}
+
+#[cfg(test)]
+fn test_load_error() -> Option<SettingsError> {
+    match TEST_LOAD_ERROR.with(Cell::get) {
+        1 => Some(SettingsError::NoConfigDir),
+        2 => Some(SettingsError::Yaml(
+            serde_yaml::from_str::<UserPreferences>(":").unwrap_err(),
+        )),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_LOAD_ERROR: Cell<u8> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+const fn test_load_error_code(error: Option<TestLoadPreferencesError>) -> u8 {
+    match error {
+        Some(TestLoadPreferencesError::NoConfigDir) => 1,
+        Some(TestLoadPreferencesError::Yaml) => 2,
+        None => 0,
+    }
 }
 
 #[cfg(not(test))]
@@ -97,6 +150,7 @@ pub fn normalize_user_preferences(mut preferences: UserPreferences) -> UserPrefe
     preferences.chat_per_memory_cap =
         normalize_chat_per_memory_cap(preferences.chat_per_memory_cap);
     preferences.chat_mmr_lambda = normalize_chat_mmr_lambda(preferences.chat_mmr_lambda);
+    preferences.embedding_model_id = normalize_embedding_model_id(preferences.embedding_model_id);
     preferences
 }
 
@@ -122,6 +176,14 @@ pub fn chat_per_memory_limit_display(value: usize) -> String {
 
 pub fn chat_diversity_display(value: u8) -> String {
     format!("{:.2}", f32::from(value) / 100.0)
+}
+
+pub fn normalize_embedding_model_id(value: String) -> String {
+    match value.trim() {
+        API_EMBEDDING_BACKEND_ID => API_EMBEDDING_BACKEND_ID.to_string(),
+        BGEM3_EMBEDDING_BACKEND_ID => BGEM3_EMBEDDING_BACKEND_ID.to_string(),
+        _ => default_embedding_model_id(),
+    }
 }
 
 fn normalize_default_memory_id(memory_id: Option<String>) -> Option<String> {
@@ -176,6 +238,7 @@ future_setting: true
         assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
         assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
         assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
+        assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);
     }
 
     #[test]
@@ -227,6 +290,33 @@ manual_memory_ids:
         assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
         assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
         assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
+        assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);
+    }
+
+    #[test]
+    fn user_preferences_normalizes_blank_embedding_model_id() {
+        let preferences: UserPreferences = serde_yaml::from_str(
+            r#"
+embedding_model_id: "   "
+"#,
+        )
+        .expect("blank embedding model should deserialize");
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);
+    }
+
+    #[test]
+    fn user_preferences_normalizes_legacy_mxbai_embedding_model_id_to_default() {
+        let preferences: UserPreferences = serde_yaml::from_str(
+            r#"
+embedding_model_id: "mixedbread-ai/mxbai-embed-large-v1"
+"#,
+        )
+        .expect("legacy embedding model should deserialize");
+
+        let normalized = normalize_user_preferences(preferences);
+        assert_eq!(normalized.embedding_model_id, DEFAULT_EMBEDDING_MODEL_ID);
     }
 
     #[test]

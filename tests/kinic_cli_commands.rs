@@ -34,6 +34,17 @@ fn search_accepts_all_scope() {
 }
 
 #[test]
+fn embed_accepts_text_without_target_memory() {
+    let cli =
+        Cli::try_parse_from(["kinic-cli", "embed", "--text", "hello"]).expect("embed should parse");
+
+    match cli.command {
+        Command::Embed(args) => assert_eq!(args.text, "hello"),
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
 fn rename_accepts_description_update() {
     let cli = Cli::try_parse_from([
         "kinic-cli",

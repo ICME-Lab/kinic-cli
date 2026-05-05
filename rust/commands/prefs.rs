@@ -14,10 +14,12 @@ use serde::Serialize;
 
 use crate::{
     cli::{
-        AddMemoryArgs, ChatMmrLambdaArgs, ChatOverallTopKArgs, ChatPerMemoryCapArgs, GlobalOpts,
-        MemoryIdArgs, PrefsArgs, PrefsCommand, SetDefaultMemoryArgs, TagArgs,
+        AddMemoryArgs, ChatMmrLambdaArgs, ChatOverallTopKArgs, ChatPerMemoryCapArgs,
+        EmbeddingBackendArgs, GlobalOpts, MemoryIdArgs, PrefsArgs, PrefsCommand,
+        SetDefaultMemoryArgs, TagArgs,
     },
     clients::memory::MemoryClient,
+    embedding_config::supported_embedding_backends,
     preferences::{self, UserPreferences},
 };
 
@@ -33,6 +35,7 @@ pub async fn handle(args: PrefsArgs, global: &GlobalOpts) -> Result<()> {
         PrefsCommand::SetChatOverallTopK(args) => set_chat_overall_top_k(args),
         PrefsCommand::SetChatPerMemoryCap(args) => set_chat_per_memory_cap(args),
         PrefsCommand::SetChatMmrLambda(args) => set_chat_mmr_lambda(args),
+        PrefsCommand::SetEmbeddingBackend(args) => set_embedding_backend(args),
     }
 }
 
@@ -200,6 +203,18 @@ fn set_chat_mmr_lambda(args: ChatMmrLambdaArgs) -> Result<()> {
     print_json_response(PrefsResponse::updated("chat_mmr_lambda", "set", value))
 }
 
+fn set_embedding_backend(args: EmbeddingBackendArgs) -> Result<()> {
+    let value = validate_embedding_backend(args.model_id.as_str())?;
+    let mut preferences = load_preferences()?;
+    if preferences.embedding_model_id == value {
+        return print_json_response(PrefsResponse::unchanged("embedding_model_id", "set", value));
+    }
+
+    preferences.embedding_model_id = value.clone();
+    save_preferences(&preferences)?;
+    print_json_response(PrefsResponse::updated("embedding_model_id", "set", value))
+}
+
 fn load_preferences() -> Result<UserPreferences> {
     preferences::load_user_preferences().context("Failed to load shared TUI preferences")
 }
@@ -267,6 +282,24 @@ fn validate_chat_mmr_lambda(value: u8) -> Result<u8> {
     }
 }
 
+fn validate_embedding_backend(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if supported_embedding_backends()
+        .iter()
+        .any(|backend| backend.id == trimmed)
+    {
+        return Ok(trimmed.to_string());
+    }
+    bail!(
+        "unsupported embedding backend id: {trimmed}. Supported ids: {}",
+        supported_embedding_backends()
+            .iter()
+            .map(|backend| backend.id)
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
 fn display_options_usize(values: &[usize]) -> String {
     values
         .iter()
@@ -291,6 +324,7 @@ struct ShowPreferences {
     chat_overall_top_k: usize,
     chat_per_memory_cap: usize,
     chat_mmr_lambda: u8,
+    embedding_model_id: String,
 }
 
 impl From<UserPreferences> for ShowPreferences {
@@ -302,6 +336,7 @@ impl From<UserPreferences> for ShowPreferences {
             chat_overall_top_k: value.chat_overall_top_k,
             chat_per_memory_cap: value.chat_per_memory_cap,
             chat_mmr_lambda: value.chat_mmr_lambda,
+            embedding_model_id: value.embedding_model_id,
         }
     }
 }
@@ -407,6 +442,7 @@ mod tests {
             chat_overall_top_k: DEFAULT_CHAT_OVERALL_TOP_K,
             chat_per_memory_cap: DEFAULT_CHAT_PER_MEMORY_CAP,
             chat_mmr_lambda: DEFAULT_CHAT_MMR_LAMBDA,
+            embedding_model_id: "invalid".to_string(),
         };
 
         let normalized = preferences::normalize_user_preferences(preferences);
@@ -423,6 +459,21 @@ mod tests {
         assert_eq!(normalized.chat_overall_top_k, DEFAULT_CHAT_OVERALL_TOP_K);
         assert_eq!(normalized.chat_per_memory_cap, DEFAULT_CHAT_PER_MEMORY_CAP);
         assert_eq!(normalized.chat_mmr_lambda, DEFAULT_CHAT_MMR_LAMBDA);
+        assert_eq!(
+            normalized.embedding_model_id,
+            preferences::default_embedding_model_id()
+        );
+    }
+
+    #[test]
+    fn show_preferences_preserves_bgem3_embedding_model_id() {
+        let serialized = serde_json::to_value(ShowPreferences::from(UserPreferences {
+            embedding_model_id: "BAAI/bge-m3".to_string(),
+            ..UserPreferences::default()
+        }))
+        .expect("show preferences should serialize");
+
+        assert_eq!(serialized["embedding_model_id"], "BAAI/bge-m3");
     }
 
     #[test]
@@ -439,6 +490,10 @@ mod tests {
             DEFAULT_CHAT_PER_MEMORY_CAP
         );
         assert_eq!(serialized["chat_mmr_lambda"], DEFAULT_CHAT_MMR_LAMBDA);
+        assert_eq!(
+            serialized["embedding_model_id"],
+            preferences::default_embedding_model_id()
+        );
     }
 
     #[test]
@@ -481,6 +536,18 @@ mod tests {
             error.to_string(),
             "chat mmr lambda must be one of: 60, 70, 80, 90"
         );
+    }
+
+    #[test]
+    fn validate_embedding_backend_rejects_unknown_values() {
+        let error = validate_embedding_backend("unsupported").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported embedding backend id")
+        );
+        assert!(error.to_string().contains("api"));
+        assert!(error.to_string().contains("BAAI/bge-m3"));
     }
 
     #[test]

@@ -46,6 +46,14 @@ Command-line companion for deploying and operating Kinic “memory” canisters.
    export EMBEDDING_API_ENDPOINT="http://localhost:9000"
    ```
 
+6. **Verify the selected embedding backend**
+
+   Use `embed` to generate one vector without a memory canister or identity:
+
+   ```bash
+   kinic-cli embed --text "hello"
+   ```
+
 ## Running the CLI
 
 Use either `--identity` (dfx identity name stored in the system keychain) or `--ii` (Internet Identity login). Use `--ic` to talk to mainnet; omit it (or leave false) for the local replica. If you are not using `--ii`, `--identity <name>` is required for CLI commands. The examples below assume mainnet unless noted otherwise.

@@ -6,9 +6,12 @@ pub(crate) mod clients;
 mod commands;
 pub(crate) mod create_domain;
 mod embedding;
+mod embedding_config;
 pub(crate) mod identity_store;
 pub(crate) mod insert_service;
 mod ledger;
+mod local_chunking;
+mod local_embedding;
 pub(crate) mod memory_client_builder;
 mod operation_timeout;
 pub(crate) mod preferences;
@@ -28,7 +31,7 @@ use tracing_subscriber::fmt;
 use crate::{
     agent::AgentFactory,
     cli::Cli,
-    commands::{CommandContext, capabilities, prefs, run_command},
+    commands::{CommandContext, capabilities, embed, prefs, run_command},
     tools::mcp,
 };
 
@@ -81,6 +84,7 @@ pub async fn run() -> Result<()> {
     match cli.command {
         cli::Command::Capabilities(args) => capabilities::handle(args),
         cli::Command::Prefs(args) => prefs::handle(args, &cli.global).await,
+        cli::Command::Embed(args) => embed::handle(args).await,
         cli::Command::Tools(args) => match args.command {
             cli::ToolsCommand::Serve(_) => mcp::serve_mcp().await,
         },

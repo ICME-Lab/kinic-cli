@@ -34,3 +34,12 @@ pylate-index/
 #web
 .next/
 node_modules/
+
+# local app artifacts
+apps/kinic-portal/.env.local
+apps/kinic-portal/.dev.vars
+apps/kinic-portal/.cache/
+apps/kinic-portal/.wrangler/
+apps/kinic-portal/tsconfig.tsbuildinfo
+apps/kinic-portal/workers/public-api/.dev.vars
+apps/kinic-portal/workers/public-api/.wrangler/

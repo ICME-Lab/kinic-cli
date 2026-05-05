@@ -13,7 +13,7 @@ use tracing::info;
 use crate::{
     cli::SearchArgs,
     clients::{launcher::LauncherClient, memory::MemoryClient},
-    embedding::fetch_embedding,
+    embedding::{ensure_memory_dim_matches, fetch_embedding},
     shared::cross_memory_search::{
         SearchHit, collect_searchable_memory_ids, fold_search_batches,
         searchable_memory_id_from_state, sort_search_hits,
@@ -142,6 +142,7 @@ pub(crate) async fn search_single_memory_items(
     embedding: Vec<f32>,
 ) -> Result<Vec<SearchHit>> {
     let client = build_memory_client(agent, &memory_id)?;
+    ensure_memory_dim_matches(&client, &memory_id, embedding.len()).await?;
     let mut rows = client
         .search(embedding)
         .await

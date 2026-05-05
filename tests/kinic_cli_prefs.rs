@@ -58,6 +58,7 @@ fn prefs_show_runs_without_identity() {
             "chat_overall_top_k": 8,
             "chat_per_memory_cap": 3,
             "chat_mmr_lambda": 70,
+            "embedding_model_id": "api",
         })
     );
 }
@@ -166,6 +167,7 @@ fn prefs_mutations_update_shared_yaml_and_preserve_chat_fields() {
             "chat_overall_top_k": 10,
             "chat_per_memory_cap": 4,
             "chat_mmr_lambda": 80,
+            "embedding_model_id": "api",
         })
     );
 }
@@ -297,6 +299,106 @@ fn prefs_chat_retrieval_mutations_update_yaml_and_show_output() {
     assert_eq!(parsed["chat_overall_top_k"], json!(10));
     assert_eq!(parsed["chat_per_memory_cap"], json!(4));
     assert_eq!(parsed["chat_mmr_lambda"], json!(80));
+}
+
+#[test]
+fn prefs_set_embedding_backend_updates_yaml_and_show_output() {
+    let config_dir = temp_config_dir("embedding-backend");
+    let kinic_dir = app_config_root(&config_dir).join("kinic");
+    fs::create_dir_all(&kinic_dir).unwrap();
+    fs::write(
+        kinic_dir.join("tui.yaml"),
+        "embedding_model_id: BAAI/bge-m3\n",
+    )
+    .unwrap();
+
+    let output = prefs_command(&config_dir)
+        .args(["prefs", "set-embedding-backend", "--model-id", "api"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("json response should parse");
+    assert_eq!(
+        parsed,
+        json!({
+            "resource": "embedding_model_id",
+            "action": "set",
+            "status": "updated",
+            "value": "api"
+        })
+    );
+
+    let output = prefs_command(&config_dir)
+        .args(["prefs", "set-embedding-backend", "--model-id", "api"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("json response should parse");
+    assert_eq!(
+        parsed,
+        json!({
+            "resource": "embedding_model_id",
+            "action": "set",
+            "status": "unchanged",
+            "value": "api"
+        })
+    );
+
+    let yaml = read_prefs_yaml(&config_dir);
+    assert!(yaml.contains("embedding_model_id: api"));
+
+    let output = prefs_command(&config_dir)
+        .args(["prefs", "show"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("show output should parse");
+    assert_eq!(parsed["embedding_model_id"], json!("api"));
+}
+
+#[test]
+fn prefs_set_embedding_backend_accepts_bgem3() {
+    let config_dir = temp_config_dir("embedding-backend-bgem3");
+
+    let output = prefs_command(&config_dir)
+        .args([
+            "prefs",
+            "set-embedding-backend",
+            "--model-id",
+            "BAAI/bge-m3",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("json response should parse");
+    assert_eq!(
+        parsed,
+        json!({
+            "resource": "embedding_model_id",
+            "action": "set",
+            "status": "updated",
+            "value": "BAAI/bge-m3"
+        })
+    );
+}
+
+#[test]
+fn prefs_set_embedding_backend_rejects_invalid_values() {
+    let config_dir = temp_config_dir("embedding-backend-normalize");
+
+    let output = prefs_command(&config_dir)
+        .args(["prefs", "set-embedding-backend", "--model-id", "bad-model"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unsupported embedding backend id: bad-model"));
+    assert!(stderr.contains("api"));
+    assert!(stderr.contains("BAAI/bge-m3"));
 }
 
 #[test]

@@ -39,6 +39,7 @@ ring = "0.17.14"
 der = "0.7.10"
 pkcs8 = "0.10.2"
 ic-ed25519 = "0.2.0"
+fastembed = { version = "5.13.2", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
 kinic-core = { path = "crates/kinic-core" }
 tui-kit-host = { path = "tui/crates/tui-kit-host" }
 tui-kit-runtime = { path = "tui/crates/tui-kit-runtime" }

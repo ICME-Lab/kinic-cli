@@ -121,6 +121,13 @@ fn capabilities_describes_prefs_and_tui_contracts() {
             .iter()
             .any(|entry| entry["name"] == "set-default-memory")
     );
+    assert!(
+        prefs["subcommands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["name"] == "set-embedding-backend")
+    );
     let prefs_add_memory = prefs["subcommands"]
         .as_array()
         .unwrap()
@@ -143,6 +150,14 @@ fn capabilities_describes_prefs_and_tui_contracts() {
         prefs_add_memory["global_flags_supported"],
         json!(["verbose", "ic", "identity", "ii", "identity_path"])
     );
+
+    let embed = command_by_name(commands, "embed");
+    assert_eq!(embed["auth"], json!({"required": false, "sources": []}));
+    assert_eq!(
+        embed["output"],
+        json!({"default": "json", "supported": ["json"], "interactive": false})
+    );
+    assert_eq!(embed["global_flags_supported"], json!(["verbose"]));
 
     let tui = command_by_name(commands, "tui");
     assert_eq!(
