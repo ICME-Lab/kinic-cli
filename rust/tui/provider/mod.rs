@@ -51,6 +51,8 @@ use tui_kit_runtime::{
     },
 };
 
+const PUBLIC_MEMORY_BASE_URL: &str = "https://memory.kinic.xyz/m";
+
 #[derive(Debug, Clone)]
 pub struct TuiConfig {
     pub auth: TuiAuth,
@@ -1763,7 +1765,7 @@ impl KinicProvider {
             selections.extend(users.iter().map(MemoryContentSelection::User));
         }
         selections.push(MemoryContentSelection::AddUser);
-        if memory_has_anonymous_reader(summary.users.as_ref()) {
+        if memory_has_anonymous_read_access(summary.users.as_ref()) {
             selections.push(MemoryContentSelection::OpenPublicMemory);
         }
         if self.active_memory_is_manual() {
@@ -1827,13 +1829,13 @@ impl KinicProvider {
             .sections
             .retain(|section| section.heading != "Actions");
         let mut action_lines = Vec::new();
-        if memory_has_anonymous_reader(users) {
+        if memory_has_anonymous_read_access(users) {
             action_lines.push(marker_line(
                 matches!(
                     current_selection,
                     Some(MemoryContentSelection::OpenPublicMemory)
                 ),
-                "Open public memory",
+                "Open public memory in browser",
             ));
         }
         if self.active_memory_is_manual() {
@@ -4718,7 +4720,7 @@ impl DataProvider for KinicProvider {
                     }
                     Some(MemoryContentSelection::OpenPublicMemory) => {
                         effects.push(CoreEffect::OpenExternal(format!(
-                            "https://memory.kinic.xyz/m/{memory_id}"
+                            "{PUBLIC_MEMORY_BASE_URL}/{memory_id}"
                         )));
                     }
                     Some(MemoryContentSelection::RemoveManualMemory) => {
@@ -5252,10 +5254,11 @@ fn render_access_lines(
     lines
 }
 
-fn memory_has_anonymous_reader(users: Option<&Vec<bridge::MemoryUser>>) -> bool {
+fn memory_has_anonymous_read_access(users: Option<&Vec<bridge::MemoryUser>>) -> bool {
     users.is_some_and(|users| {
         users.iter().any(|user| {
-            matches!(user.principal_id.as_str(), "anonymous" | "2vxsx-fae") && user.role == "reader"
+            matches!(user.principal_id.as_str(), "anonymous" | "2vxsx-fae")
+                && matches!(user.role.as_str(), "reader" | "writer")
         })
     })
 }

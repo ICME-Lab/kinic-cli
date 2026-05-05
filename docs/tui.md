@@ -164,7 +164,7 @@ The chat panel asks AI against either all searchable memories or one memory from
 - Existing saved chat history is not migrated; the TUI starts from the new thread store file
 - Use `↑` `↓` in the list and `Enter` to open details
 - Move focus to the detail pane and press `Enter` on the selected `Name` row to edit the selected memory name and description
-- For public memories with `anonymous` reader access, move focus to the detail pane and press `Enter` on `Open public memory` to open `https://memory.kinic.xyz/m/<canister-id>`
+- For public memories with `anonymous` reader or writer access, move focus to the detail pane and press `Enter` on `Open public memory in browser` to open `https://memory.kinic.xyz/m/<canister-id>`
 - Move to `+ Add Existing Memory Canister` at the end of the list and press `Enter` to register an existing memory manually
 - In the modal, enter an existing memory canister id and submit it to validate access via `get_users()`
 - For manually added memories, move focus to the detail pane and use `Tab` / `Shift+Tab` to jump between actions, including `Remove from list`
