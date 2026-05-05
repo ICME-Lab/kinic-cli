@@ -387,25 +387,18 @@ fn prefs_set_embedding_backend_accepts_bgem3() {
 }
 
 #[test]
-fn prefs_set_embedding_backend_normalizes_invalid_values_to_api() {
+fn prefs_set_embedding_backend_rejects_invalid_values() {
     let config_dir = temp_config_dir("embedding-backend-normalize");
 
     let output = prefs_command(&config_dir)
         .args(["prefs", "set-embedding-backend", "--model-id", "bad-model"])
         .output()
         .unwrap();
-    assert!(output.status.success());
-    let parsed: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("json response should parse");
-    assert_eq!(
-        parsed,
-        json!({
-            "resource": "embedding_model_id",
-            "action": "set",
-            "status": "unchanged",
-            "value": "api"
-        })
-    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unsupported embedding backend id: bad-model"));
+    assert!(stderr.contains("api"));
+    assert!(stderr.contains("BAAI/bge-m3"));
 }
 
 #[test]

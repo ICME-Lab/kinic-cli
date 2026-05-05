@@ -6,7 +6,6 @@ use std::{env, path::PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use fastembed::{EmbeddingModel, TextInitOptions};
-use tui_kit_host::settings::SettingsError;
 
 use crate::preferences;
 
@@ -118,7 +117,6 @@ fn resolve_embedding_backend_id() -> Result<&'static str> {
 fn load_embedding_preferences() -> Result<crate::preferences::UserPreferences> {
     match preferences::load_user_preferences() {
         Ok(preferences) => Ok(preferences),
-        Err(SettingsError::NoConfigDir) => Ok(preferences::UserPreferences::default()),
         Err(other) => {
             Err(anyhow!(other).context("Failed to load shared embedding backend from tui.yaml"))
         }
@@ -264,29 +262,38 @@ mod tests {
     }
 
     #[test]
-    fn selected_local_embedding_config_defaults_to_api_when_no_config_dir_is_available() {
+    fn selected_local_embedding_config_errors_when_no_config_dir_is_unavailable() {
         let _guard = env_guard();
         preferences::set_load_user_preferences_error_for_tests(Some(
             preferences::TestLoadPreferencesError::NoConfigDir,
         ));
 
-        let config = selected_local_embedding_config().expect("no config dir should fall back");
+        let error =
+            selected_local_embedding_config().expect_err("no config dir should fail explicitly");
 
-        assert_eq!(config, None);
+        assert!(
+            error
+                .to_string()
+                .contains("Failed to load shared embedding backend from tui.yaml")
+        );
         reset_test_preference_error();
     }
 
     #[test]
-    fn selected_embedding_backend_defaults_to_api_when_no_config_dir_is_available() {
+    fn selected_embedding_backend_errors_when_no_config_dir_is_unavailable() {
         let _guard = env_guard();
         preferences::set_load_user_preferences_error_for_tests(Some(
             preferences::TestLoadPreferencesError::NoConfigDir,
         ));
 
-        let backend =
-            selected_embedding_backend_id().expect("no config dir should select api backend");
+        let error =
+            selected_embedding_backend_id().expect_err("no config dir should fail explicitly");
 
-        assert_eq!(backend, API_EMBEDDING_BACKEND_ID);
+        assert!(
+            error
+                .to_string()
+                .contains("Failed to load shared embedding backend from tui.yaml")
+        );
         reset_test_preference_error();
     }
 

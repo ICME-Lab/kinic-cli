@@ -14,7 +14,7 @@ use crate::{
         ask_ai::{AskAiResult, ask_ai_flow},
         create,
     },
-    embedding::fetch_embedding,
+    embedding::{ensure_memory_dim_matches, ensure_vector_dim_matches, fetch_embedding},
     insert_service::{InsertRequest, execute_insert_request},
     memory_client_builder::build_memory_client_from_identity,
     shared::memory_metadata::{
@@ -152,6 +152,8 @@ pub(crate) async fn search_memories(
 ) -> Result<Vec<(f32, String)>> {
     let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
     let embedding = fetch_embedding(&query).await?;
+    let memory_id = client.canister_id().to_text();
+    ensure_memory_dim_matches(&client, &memory_id, embedding.len()).await?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
     Ok(results)
@@ -164,6 +166,12 @@ pub(crate) async fn search_memories_raw(
     embedding: Vec<f32>,
 ) -> Result<Vec<(f32, String)>> {
     let client = build_memory_client_from_identity(use_mainnet, identity, memory_id).await?;
+    let memory_id = client.canister_id().to_text();
+    let expected_dim = client
+        .get_dim()
+        .await
+        .context("Failed to load memory embedding dimension")?;
+    ensure_vector_dim_matches(&memory_id, embedding.len(), expected_dim)?;
     let mut results = client.search(embedding).await?;
     results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
     Ok(results)

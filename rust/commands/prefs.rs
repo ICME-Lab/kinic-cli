@@ -19,7 +19,7 @@ use crate::{
         SetDefaultMemoryArgs, TagArgs,
     },
     clients::memory::MemoryClient,
-    embedding_config::normalize_supported_embedding_backend_id,
+    embedding_config::supported_embedding_backends,
     preferences::{self, UserPreferences},
 };
 
@@ -204,7 +204,7 @@ fn set_chat_mmr_lambda(args: ChatMmrLambdaArgs) -> Result<()> {
 }
 
 fn set_embedding_backend(args: EmbeddingBackendArgs) -> Result<()> {
-    let value = validate_embedding_backend(args.model_id.as_str());
+    let value = validate_embedding_backend(args.model_id.as_str())?;
     let mut preferences = load_preferences()?;
     if preferences.embedding_model_id == value {
         return print_json_response(PrefsResponse::unchanged("embedding_model_id", "set", value));
@@ -282,8 +282,22 @@ fn validate_chat_mmr_lambda(value: u8) -> Result<u8> {
     }
 }
 
-fn validate_embedding_backend(value: &str) -> String {
-    normalize_supported_embedding_backend_id(value).to_string()
+fn validate_embedding_backend(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if supported_embedding_backends()
+        .iter()
+        .any(|backend| backend.id == trimmed)
+    {
+        return Ok(trimmed.to_string());
+    }
+    bail!(
+        "unsupported embedding backend id: {trimmed}. Supported ids: {}",
+        supported_embedding_backends()
+            .iter()
+            .map(|backend| backend.id)
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 }
 
 fn display_options_usize(values: &[usize]) -> String {
@@ -525,11 +539,15 @@ mod tests {
     }
 
     #[test]
-    fn validate_embedding_backend_normalizes_unknown_values_to_api() {
-        assert_eq!(
-            validate_embedding_backend("unsupported"),
-            preferences::default_embedding_model_id()
+    fn validate_embedding_backend_rejects_unknown_values() {
+        let error = validate_embedding_backend("unsupported").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported embedding backend id")
         );
+        assert!(error.to_string().contains("api"));
+        assert!(error.to_string().contains("BAAI/bge-m3"));
     }
 
     #[test]

@@ -10,12 +10,12 @@ use icrc_ledger_types::{
         transfer_from::TransferFromError,
     },
 };
-use serde_json::json;
 use thiserror::Error;
 
 use crate::{
     clients::{LAUNCHER_CANISTER, LEDGER_CANISTER},
     embedding_config::create_memory_dimension_u64,
+    shared::memory_metadata::encode_memory_metadata,
 };
 const APPROVAL_TTL_NS: u64 = 10 * 60 * 1_000_000_000;
 
@@ -128,10 +128,7 @@ impl LauncherClient {
 }
 
 fn encode_deploy_args(name: &str, description: &str) -> Result<Vec<u8>> {
-    let payload = json!({
-        "name": name,
-        "description": description})
-    .to_string();
+    let payload = encode_memory_metadata(name, Some(description))?;
     Ok(candid::encode_args((
         payload,
         create_memory_dimension_u64(),
