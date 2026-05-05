@@ -6,8 +6,9 @@ use crate::ui::search::CompletionCandidate;
 use crate::ui::theme::Theme;
 use tui_kit_runtime::{
     AccessControlModalState, ChatScope, CreateCostState, CreateModalFocus, CreateSubmitState,
-    InsertFormFocus, InsertMode, MemorySelection, PickerState, RemoveMemoryModalState,
-    RenameMemoryModalState, SearchScope, SettingsSnapshot, TextInputModalState, TransferModalState,
+    CreateTargetKind, InsertFormFocus, InsertMode, MemorySelection, PickerState,
+    RemoveMemoryModalState, RenameMemoryModalState, SearchScope, SettingsSnapshot,
+    TextInputModalState, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
@@ -41,6 +42,7 @@ pub struct TuiKitUi<'a> {
     pub(super) show_create_modal: bool,
     pub(super) create_name: &'a str,
     pub(super) create_description: &'a str,
+    pub(super) create_target_kind: CreateTargetKind,
     pub(super) create_description_cursor: Option<(usize, usize)>,
     pub(super) create_submit_state: CreateSubmitState,
     pub(super) create_spinner_frame: usize,
@@ -117,6 +119,7 @@ impl<'a> TuiKitUi<'a> {
             show_create_modal: false,
             create_name: "",
             create_description: "",
+            create_target_kind: CreateTargetKind::Memory,
             create_description_cursor: None,
             create_submit_state: CreateSubmitState::Idle,
             create_spinner_frame: 0,

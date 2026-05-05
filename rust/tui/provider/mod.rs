@@ -47,7 +47,7 @@ use tui_kit_runtime::{
     SessionAccountOverview, SessionSettingsSnapshot, TransferModalMode,
     kinic_tabs::{
         KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
-        KINIC_SETTINGS_TAB_ID,
+        KINIC_SETTINGS_TAB_ID, KINIC_WIKI_TAB_ID,
     },
 };
 
@@ -66,6 +66,7 @@ pub struct KinicRecord {
     pub content_md: String,
     pub searchable_memory_id: Option<String>,
     pub source_memory_id: Option<String>,
+    pub source_wiki_id: Option<String>,
 }
 
 impl KinicRecord {
@@ -84,6 +85,7 @@ impl KinicRecord {
             content_md: content_md.into(),
             searchable_memory_id: None,
             source_memory_id: None,
+            source_wiki_id: None,
         }
     }
 
@@ -94,6 +96,11 @@ impl KinicRecord {
 
     pub fn with_source_memory_id(mut self, memory_id: impl Into<String>) -> Self {
         self.source_memory_id = Some(memory_id.into());
+        self
+    }
+
+    pub fn with_source_wiki_id(mut self, wiki_id: impl Into<String>) -> Self {
+        self.source_wiki_id = Some(wiki_id.into());
         self
     }
 }
@@ -148,6 +155,8 @@ pub struct KinicProvider {
     active_memory: Option<MemorySelection>,
     memory_summaries: Vec<MemorySummary>,
     memory_records: Vec<KinicRecord>,
+    wiki_summaries: Vec<bridge::WikiSummary>,
+    wiki_records: Vec<KinicRecord>,
     result_records: Vec<KinicRecord>,
     memories_mode: MemoriesMode,
     pending_initial_memories: Option<mpsc::Receiver<InitialMemoriesTaskOutput>>,
@@ -187,6 +196,12 @@ pub struct KinicProvider {
     next_memory_detail_request_id: u64,
     pending_memory_detail_memory_id: Option<String>,
     memory_detail_prefetch: MemoryDetailPrefetchState,
+    wiki_children_cache: HashMap<String, WikiChildrenContent>,
+    wiki_children_task: RequestTaskState<WikiChildrenTaskOutput>,
+    next_wiki_children_request_id: u64,
+    pending_wiki_children_wiki_id: Option<String>,
+    wiki_search_task: RequestTaskState<WikiSearchTaskOutput>,
+    next_wiki_search_request_id: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,6 +218,24 @@ struct SearchTaskOutput {
     scope: SearchScope,
     target_memory_ids: Vec<String>,
     result: Result<SearchBatchResult, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WikiChildrenContent {
+    body_lines: Vec<String>,
+    index_preview: Option<Vec<String>>,
+}
+
+struct WikiChildrenTaskOutput {
+    request_id: u64,
+    wiki_id: String,
+    result: Result<WikiChildrenContent, String>,
+}
+
+struct WikiSearchTaskOutput {
+    request_id: u64,
+    wiki_id: String,
+    result: Result<Vec<bridge::WikiSearchHit>, String>,
 }
 
 /// In-flight memory search with explicit cancellation. Kept separate from
@@ -253,7 +286,7 @@ fn fold_live_search_results(
 }
 
 struct InitialMemoriesTaskOutput {
-    result: Result<Vec<MemorySummary>, String>,
+    result: Result<bridge::InstanceSummaries, String>,
 }
 
 struct CreateCostTaskOutput {
@@ -263,7 +296,7 @@ struct CreateCostTaskOutput {
 
 struct CreateSubmitTaskOutput {
     request_id: u64,
-    result: Result<bridge::CreateMemorySuccess, bridge::CreateMemoryError>,
+    result: Result<bridge::CreateInstanceSuccess, bridge::CreateMemoryError>,
 }
 
 struct ChatTaskOutput {
@@ -938,6 +971,46 @@ fn load_memory_details_task_result(
         .map_err(|error| error.to_string())
 }
 
+fn load_wiki_children_content(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    wiki_id: String,
+) -> Result<WikiChildrenContent, String> {
+    let runtime = Runtime::new().expect("failed to create tokio runtime for wiki browser load");
+    let children = runtime
+        .block_on(bridge::list_wiki_root_children(
+            use_mainnet,
+            auth.clone(),
+            wiki_id.clone(),
+        ))
+        .map_err(|error| error.to_string())?;
+    let index = runtime
+        .block_on(bridge::read_wiki_node(
+            use_mainnet,
+            auth,
+            wiki_id,
+            "/Wiki/index.md".to_string(),
+        ))
+        .map_err(|error| error.to_string())?;
+    let body_lines = if children.is_empty() {
+        vec!["No /Wiki children found.".to_string()]
+    } else {
+        children
+            .into_iter()
+            .map(|child| {
+                let marker = if child.has_children { "+" } else { "-" };
+                format!("{marker} {} ({})", child.path, child.kind)
+            })
+            .collect()
+    };
+    let index_preview =
+        index.map(|node| node.content.lines().take(8).map(str::to_string).collect());
+    Ok(WikiChildrenContent {
+        body_lines,
+        index_preview,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MemoryContentSelection<'a> {
     RenameMemory,
@@ -981,6 +1054,8 @@ impl KinicProvider {
             active_memory: None,
             memory_summaries: Vec::new(),
             memory_records: Vec::new(),
+            wiki_summaries: Vec::new(),
+            wiki_records: Vec::new(),
             result_records: Vec::new(),
             memories_mode: MemoriesMode::Browser,
             pending_initial_memories: None,
@@ -1020,6 +1095,12 @@ impl KinicProvider {
             next_memory_detail_request_id: 0,
             pending_memory_detail_memory_id: None,
             memory_detail_prefetch: MemoryDetailPrefetchState::default(),
+            wiki_children_cache: HashMap::new(),
+            wiki_children_task: RequestTaskState::default(),
+            next_wiki_children_request_id: 0,
+            pending_wiki_children_wiki_id: None,
+            wiki_search_task: RequestTaskState::default(),
+            next_wiki_search_request_id: 0,
         }
     }
 
@@ -1046,6 +1127,8 @@ impl KinicProvider {
         self.all = vec![loading_memories_record()];
         self.memory_summaries.clear();
         self.memory_records.clear();
+        self.wiki_summaries.clear();
+        self.wiki_records.clear();
         self.memory_content_summaries.clear();
         self.failed_memory_content_summaries.clear();
         self.memory_summary_tasks.clear();
@@ -1065,7 +1148,7 @@ impl KinicProvider {
             let runtime =
                 Runtime::new().expect("failed to create tokio runtime for initial memories load");
             let result = runtime
-                .block_on(bridge::list_memories(use_mainnet, auth))
+                .block_on(bridge::list_instances(use_mainnet, auth))
                 .map_err(|error| error.to_string());
             let _ = tx.send(InitialMemoriesTaskOutput { result });
         });
@@ -1083,6 +1166,10 @@ impl KinicProvider {
         match self.tab_id.as_str() {
             KINIC_CREATE_TAB_ID => self.start_create_cost_refresh().into_iter().collect(),
             KINIC_INSERT_TAB_ID => Vec::new(),
+            KINIC_WIKI_TAB_ID => self
+                .start_live_memories_load(Some("Refreshing wiki list..."), true)
+                .into_iter()
+                .collect(),
             KINIC_MEMORIES_TAB_ID => self
                 .start_live_memories_load(None, true)
                 .into_iter()
@@ -1093,6 +1180,13 @@ impl KinicProvider {
     }
 
     fn current_records(&self) -> Vec<&KinicRecord> {
+        if self.tab_id == KINIC_WIKI_TAB_ID {
+            if self.result_records.is_empty() {
+                return self.wiki_records.iter().collect();
+            }
+            return self.result_records.iter().collect();
+        }
+
         if self.memories_mode == MemoriesMode::Browser && self.memory_records.is_empty() {
             return self.all.iter().collect();
         }
@@ -1714,8 +1808,73 @@ impl KinicProvider {
         let mut content = adapter::to_content(record, summary_text.as_deref());
         if record.group == "memories" {
             self.apply_access_content(&mut content, state);
+        } else if record.group == "wiki" && self.tab_id == KINIC_WIKI_TAB_ID {
+            self.apply_wiki_children_content(&mut content, record);
         }
         content
+    }
+
+    fn apply_wiki_children_content(
+        &self,
+        content: &mut tui_kit_model::UiItemContent,
+        record: &KinicRecord,
+    ) {
+        let Some(wiki_id) = record.source_wiki_id.as_ref() else {
+            return;
+        };
+        let (body_lines, index_preview) = match self.wiki_children_cache.get(wiki_id.as_str()) {
+            Some(content) => (content.body_lines.clone(), content.index_preview.clone()),
+            None if self.pending_wiki_children_wiki_id.as_deref() == Some(wiki_id.as_str()) => {
+                (vec!["Loading /Wiki children...".to_string()], None)
+            }
+            None => (
+                vec!["Select or refresh this wiki to load /Wiki children.".to_string()],
+                None,
+            ),
+        };
+        content.sections.push(tui_kit_model::UiSection {
+            heading: "/Wiki".to_string(),
+            rows: vec![],
+            body_lines,
+        });
+        if let Some(body_lines) = index_preview {
+            content.sections.push(tui_kit_model::UiSection {
+                heading: "/Wiki/index.md".to_string(),
+                rows: vec![],
+                body_lines,
+            });
+        }
+    }
+
+    fn start_selected_wiki_children_load(&mut self, state: &CoreState) {
+        if self.tab_id != KINIC_WIKI_TAB_ID {
+            return;
+        }
+        let Some(wiki_id) = self.selected_wiki_id(state) else {
+            return;
+        };
+        if self.wiki_children_cache.contains_key(wiki_id.as_str())
+            || self.pending_wiki_children_wiki_id.as_deref() == Some(wiki_id.as_str())
+        {
+            return;
+        }
+
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        self.pending_wiki_children_wiki_id = Some(wiki_id.clone());
+        spawn_request_task(
+            &mut self.next_wiki_children_request_id,
+            &mut self.wiki_children_task,
+            move |request_id, tx| {
+                let requested_wiki_id = wiki_id.clone();
+                let result = load_wiki_children_content(use_mainnet, auth, wiki_id);
+                let _ = tx.send(WikiChildrenTaskOutput {
+                    request_id,
+                    wiki_id: requested_wiki_id,
+                    result,
+                });
+            },
+        );
     }
 
     fn active_rename_target(
@@ -1907,6 +2066,29 @@ impl KinicProvider {
             .map(record_from_memory_summary)
             .collect();
         self.all = self.memory_records.clone();
+    }
+
+    fn refresh_wiki_records_from_summaries(&mut self) {
+        self.wiki_records = self
+            .wiki_summaries
+            .iter()
+            .cloned()
+            .map(record_from_wiki_summary)
+            .collect();
+        let wiki_ids = self
+            .wiki_records
+            .iter()
+            .filter_map(|record| record.source_wiki_id.clone())
+            .collect::<HashSet<_>>();
+        self.wiki_children_cache
+            .retain(|wiki_id, _| wiki_ids.contains(wiki_id));
+    }
+
+    fn apply_instance_summaries(&mut self, instances: bridge::InstanceSummaries) {
+        self.memory_summaries = instances.memories;
+        self.wiki_summaries = instances.wikis;
+        self.refresh_memory_records_from_summaries();
+        self.refresh_wiki_records_from_summaries();
     }
 
     fn normalize_memory_summaries(&mut self) {
@@ -2290,6 +2472,11 @@ impl KinicProvider {
         }
         let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
+        } else if state.current_tab_id == KINIC_WIKI_TAB_ID {
+            let sel = state.selected_index.unwrap_or(0);
+            filtered
+                .get(sel)
+                .map(|record| self.selected_content_for_record(record, state))
         } else if self.memories_mode == MemoriesMode::Browser {
             if self.active_memory.is_none() && self.memory_records.is_empty() {
                 filtered
@@ -2308,6 +2495,9 @@ impl KinicProvider {
         };
         let selected_index = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
+        } else if state.current_tab_id == KINIC_WIKI_TAB_ID {
+            let current = state.selected_index.unwrap_or(0);
+            (!filtered.is_empty()).then_some(current.min(filtered.len().saturating_sub(1)))
         } else if self.is_add_memory_action_selected(state) {
             Some(filtered.len())
         } else if self.memories_mode == MemoriesMode::Browser {
@@ -2638,7 +2828,12 @@ impl KinicProvider {
         None
     }
 
-    fn start_create_submit(&mut self, name: String, description: String) -> CoreEffect {
+    fn start_create_submit(
+        &mut self,
+        kind: tui_kit_runtime::CreateTargetKind,
+        name: String,
+        description: String,
+    ) -> CoreEffect {
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
         spawn_request_task(
@@ -2647,13 +2842,71 @@ impl KinicProvider {
             move |request_id, tx| {
                 let runtime =
                     Runtime::new().expect("failed to create tokio runtime for create submit");
-                let result =
-                    runtime.block_on(bridge::create_memory(use_mainnet, auth, name, description));
+                let bridge_kind = match kind {
+                    tui_kit_runtime::CreateTargetKind::Memory => bridge::CreateTargetKind::Memory,
+                    tui_kit_runtime::CreateTargetKind::Wiki => bridge::CreateTargetKind::Wiki,
+                };
+                let result = runtime.block_on(bridge::create_instance(
+                    use_mainnet,
+                    auth,
+                    bridge_kind,
+                    name,
+                    description,
+                ));
                 let _ = tx.send(CreateSubmitTaskOutput { request_id, result });
             },
         );
 
-        CoreEffect::Notify("Creating memory...".to_string())
+        CoreEffect::Notify(format!("Creating {}...", kind.label().to_lowercase()))
+    }
+
+    fn run_wiki_search(&mut self, state: &CoreState) -> CoreEffect {
+        let query = state.query.trim();
+        if query.is_empty() {
+            self.result_records.clear();
+            return CoreEffect::Notify("Enter a wiki search query.".to_string());
+        }
+        let Some(wiki_id) = self.selected_wiki_id(state) else {
+            return CoreEffect::Notify("Select a running wiki before searching.".to_string());
+        };
+        if self.wiki_search_task.in_flight {
+            return CoreEffect::Notify("Wiki search request already running.".to_string());
+        }
+        let auth = self.config.auth.clone();
+        let use_mainnet = self.config.use_mainnet;
+        let query = query.to_string();
+        spawn_request_task(
+            &mut self.next_wiki_search_request_id,
+            &mut self.wiki_search_task,
+            move |request_id, tx| {
+                let result =
+                    Runtime::new()
+                        .map_err(|error| error.to_string())
+                        .and_then(|runtime| {
+                            runtime
+                                .block_on(bridge::search_wiki_nodes(
+                                    use_mainnet,
+                                    auth,
+                                    wiki_id.clone(),
+                                    query,
+                                ))
+                                .map_err(|error| error.to_string())
+                        });
+                let _ = tx.send(WikiSearchTaskOutput {
+                    request_id,
+                    wiki_id,
+                    result,
+                });
+            },
+        );
+        CoreEffect::Notify("Searching wiki nodes...".to_string())
+    }
+
+    fn selected_wiki_id(&self, state: &CoreState) -> Option<String> {
+        let index = state.selected_index.unwrap_or(0);
+        self.current_records()
+            .get(index)
+            .and_then(|record| record.source_wiki_id.clone())
     }
 
     fn start_insert_submit(&mut self, request: InsertRequest) -> CoreEffect {
@@ -3008,6 +3261,9 @@ impl KinicProvider {
         }
         if self.tab_id == KINIC_SETTINGS_TAB_ID {
             return "Review session details and default memory settings here.".to_string();
+        }
+        if self.tab_id == KINIC_WIKI_TAB_ID {
+            return "Browse wiki canisters and search wiki nodes.".to_string();
         }
         if self.tab_id == KINIC_MARKET_TAB_ID {
             return "Market is not implemented yet.".to_string();
@@ -3841,10 +4097,9 @@ impl KinicProvider {
         self.pending_initial_memories = None;
         self.initial_memories_in_flight = false;
         match output.result {
-            Ok(memories) => {
+            Ok(instances) => {
                 let previous_active_memory = self.active_memory.clone();
-                self.memory_summaries = memories;
-                self.refresh_memory_records_from_summaries();
+                self.apply_instance_summaries(instances);
                 let initial_memory_id = self
                     .preferred_memory_after_refresh
                     .take()
@@ -3892,6 +4147,8 @@ impl KinicProvider {
             Err(error) => {
                 let previous_active_memory = self.active_memory.clone();
                 self.memory_records.clear();
+                self.wiki_records.clear();
+                self.wiki_summaries.clear();
                 self.result_records.clear();
                 self.memories_mode = MemoriesMode::Browser;
                 let notify_message = format_live_load_failure_message(&error);
@@ -4115,11 +4372,10 @@ impl KinicProvider {
         let mut effects = Vec::new();
         match output.result {
             Ok(success) => {
-                if let Some(memories) = success.memories {
-                    self.memory_summaries = memories;
+                if let Some(instances) = success.instances {
+                    self.apply_instance_summaries(instances);
                     self.loaded_memory_details.clear();
                     self.memory_detail_prefetch.reset();
-                    self.refresh_memory_records_from_summaries();
                     if let Some(index) = self.memory_records.iter().position(|r| r.id == success.id)
                     {
                         let record = self.memory_records.remove(index);
@@ -4135,25 +4391,37 @@ impl KinicProvider {
                         }
                     }
                 }
-                self.set_active_memory_by_id(success.id.clone());
-                self.memories_mode = MemoriesMode::Browser;
+                let target_tab = match success.kind {
+                    bridge::CreateTargetKind::Memory => KINIC_MEMORIES_TAB_ID,
+                    bridge::CreateTargetKind::Wiki => KINIC_WIKI_TAB_ID,
+                };
+                if success.kind == bridge::CreateTargetKind::Memory {
+                    self.set_active_memory_by_id(success.id.clone());
+                    self.memories_mode = MemoriesMode::Browser;
+                }
                 self.result_records.clear();
                 self.invalidate_pending_search();
                 self.last_search_state = None;
-                self.start_memory_detail_prefetch_for_records();
-                self.start_active_memory_detail_load();
-                self.start_selected_memory_summary_load(false);
+                if success.kind == bridge::CreateTargetKind::Memory {
+                    self.start_memory_detail_prefetch_for_records();
+                    self.start_active_memory_detail_load();
+                    self.start_selected_memory_summary_load(false);
+                }
                 let _ = self.start_create_cost_refresh();
-                effects.extend(self.set_tab(KINIC_MEMORIES_TAB_ID));
+                effects.extend(self.set_tab(target_tab));
                 effects.push(CoreEffect::SelectFirstListItem);
                 effects.push(CoreEffect::ResetCreateFormAndSetTab {
-                    tab_id: KINIC_MEMORIES_TAB_ID.to_string(),
+                    tab_id: target_tab.to_string(),
                 });
                 effects.push(CoreEffect::FocusPane(PaneFocus::Items));
+                let noun = match success.kind {
+                    bridge::CreateTargetKind::Memory => "memory",
+                    bridge::CreateTargetKind::Wiki => "wiki",
+                };
                 let status = if let Some(warning) = success.refresh_warning {
-                    format!("Created memory {}. {}", success.id, warning)
+                    format!("Created {noun} {}. {}", success.id, warning)
                 } else {
-                    format!("Created memory {}", success.id)
+                    format!("Created {noun} {}", success.id)
                 };
                 effects.push(CoreEffect::Notify(status));
             }
@@ -4198,6 +4466,81 @@ impl KinicProvider {
             .map(CoreEffect::Notify)
             .into_iter()
             .collect();
+
+        Some(self.snapshot_output(state, effects))
+    }
+
+    fn poll_wiki_children_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.wiki_children_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                reset_request_task(&mut self.wiki_children_task);
+                self.pending_wiki_children_wiki_id = None;
+                return Some(self.disconnected_request_output(
+                    state,
+                    CoreEffect::Notify("Wiki browser load failed unexpectedly.".to_string()),
+                ));
+            }
+        };
+
+        let is_current = finish_request_task(&mut self.wiki_children_task, output.request_id);
+        self.pending_wiki_children_wiki_id = None;
+        if !is_current {
+            return Some(self.stale_request_output(state));
+        }
+
+        let effects = match output.result {
+            Ok(content) => {
+                self.wiki_children_cache.insert(output.wiki_id, content);
+                Vec::new()
+            }
+            Err(error) => vec![CoreEffect::Notify(format!(
+                "Wiki browser load failed: {}",
+                short_error(error.as_str())
+            ))],
+        };
+
+        Some(self.snapshot_output(state, effects))
+    }
+
+    fn poll_wiki_search_background(&mut self, state: &CoreState) -> Option<ProviderOutput> {
+        let receiver = self.wiki_search_task.receiver.as_ref()?;
+        let output = match poll_pending_task(receiver) {
+            PendingTaskPoll::Pending => return None,
+            PendingTaskPoll::Ready(output) => output,
+            PendingTaskPoll::Disconnected => {
+                reset_request_task(&mut self.wiki_search_task);
+                return Some(self.disconnected_request_output(
+                    state,
+                    CoreEffect::Notify("Wiki search failed unexpectedly.".to_string()),
+                ));
+            }
+        };
+
+        let is_current = finish_request_task(&mut self.wiki_search_task, output.request_id);
+        if !is_current {
+            return Some(self.stale_request_output(state));
+        }
+
+        let effects = match output.result {
+            Ok(hits) => {
+                self.result_records = hits
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, hit)| record_from_wiki_search_hit(&output.wiki_id, index, hit))
+                    .collect();
+                vec![CoreEffect::Notify(format!(
+                    "Loaded {} wiki search results.",
+                    self.result_records.len()
+                ))]
+            }
+            Err(error) => vec![CoreEffect::Notify(format!(
+                "Wiki search failed: {}",
+                short_error(error.as_str())
+            ))],
+        };
 
         Some(self.snapshot_output(state, effects))
     }
@@ -4339,6 +4682,10 @@ impl KinicProvider {
                 }
                 effects
             }
+            KINIC_WIKI_TAB_ID => {
+                self.result_records.clear();
+                Vec::new()
+            }
             KINIC_MARKET_TAB_ID => {
                 vec![CoreEffect::Notify(
                     "Market is not implemented yet.".to_string(),
@@ -4468,7 +4815,10 @@ impl DataProvider for KinicProvider {
                 }
             }
             CoreAction::SearchSubmit => {
-                if let Some(effect) = self.run_live_search(state.search_scope) {
+                if self.tab_id == KINIC_WIKI_TAB_ID {
+                    effects.push(self.run_wiki_search(state));
+                    self.start_selected_wiki_children_load(state);
+                } else if let Some(effect) = self.run_live_search(state.search_scope) {
                     effects.push(effect);
                 }
             }
@@ -4500,6 +4850,8 @@ impl DataProvider for KinicProvider {
                 effects.extend(self.set_tab(id.0.as_str()));
                 if id.0.as_str() == KINIC_INSERT_TAB_ID {
                     self.start_insert_dim_load();
+                } else if id.0.as_str() == KINIC_WIKI_TAB_ID {
+                    self.start_selected_wiki_children_load(state);
                 }
             }
             CoreAction::ChatSubmit => {
@@ -4566,16 +4918,23 @@ impl DataProvider for KinicProvider {
             CoreAction::CreateSubmit => {
                 let name = state.create_name.trim().to_string();
                 let description = state.create_description.trim().to_string();
-                if name.is_empty() || description.is_empty() {
+                if name.is_empty()
+                    || (state.create_target_kind == tui_kit_runtime::CreateTargetKind::Memory
+                        && description.is_empty())
+                {
                     effects.push(CoreEffect::CreateFormError(Some(
-                        "Name and description are required.".to_string(),
+                        "Name is required. Description is required for memory.".to_string(),
                     )));
                 } else if self.create_submit_task.in_flight {
                     effects.push(CoreEffect::Notify(
                         "Create request already running.".to_string(),
                     ));
                 } else {
-                    effects.push(self.start_create_submit(name, description));
+                    effects.push(self.start_create_submit(
+                        state.create_target_kind,
+                        name,
+                        description,
+                    ));
                 }
             }
             CoreAction::InsertSubmit => {
@@ -5085,6 +5444,7 @@ impl DataProvider for KinicProvider {
             }
             _ => self.build_snapshot(state),
         };
+        self.start_selected_wiki_children_load(state);
         let chat_scope_follows_active_memory = state.chat_scope == ChatScope::Selected
             && !matches!(
                 action,
@@ -5123,6 +5483,8 @@ impl DataProvider for KinicProvider {
             .or_else(|| self.poll_insert_submit_background(state))
             .or_else(|| self.poll_create_cost_background(state))
             .or_else(|| self.poll_session_settings_background(state))
+            .or_else(|| self.poll_wiki_children_background(state))
+            .or_else(|| self.poll_wiki_search_background(state))
             .or_else(|| self.poll_search_background(state))
     }
 }
@@ -5350,6 +5712,51 @@ fn record_from_memory_summary(memory: MemorySummary) -> KinicRecord {
         ),
     )
     .with_searchable_memory_id_option(memory.searchable_memory_id)
+}
+
+fn record_from_wiki_summary(wiki: bridge::WikiSummary) -> KinicRecord {
+    let display_name = match wiki.name.trim() {
+        "" | "unknown" | "Wiki" => format!("Wiki {}", adapter::short_id(wiki.id.as_str())),
+        other => other.to_string(),
+    };
+    let summary = format!("Id: {}\nStatus: {}", wiki.id, wiki.status);
+    let record = KinicRecord::new(
+        wiki.id.clone(),
+        display_name,
+        "wiki",
+        summary,
+        format!(
+            "## Wiki\n\n- Id: `{}`\n- Status: `{}`\n- Name: `{}`\n\n### Browser\nSelect this wiki to browse `/Wiki` children and search wiki nodes.\n\n### Detail\n{}\n",
+            wiki.id, wiki.status, wiki.name, wiki.detail
+        ),
+    );
+    match wiki.searchable_wiki_id {
+        Some(wiki_id) => record.with_source_wiki_id(wiki_id),
+        None => record,
+    }
+}
+
+fn record_from_wiki_search_hit(
+    wiki_id: &str,
+    index: usize,
+    hit: bridge::WikiSearchHit,
+) -> KinicRecord {
+    let snippet = hit
+        .snippet
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("No preview available.");
+    KinicRecord::new(
+        format!("wiki-search:{wiki_id}:{index}"),
+        hit.path.clone(),
+        "wiki",
+        format!("Score: {:.3}", hit.score),
+        format!(
+            "## Wiki Search Hit\n\n- Wiki: `{wiki_id}`\n- Path: `{}`\n- Score: `{:.3}`\n\n### Preview\n{}\n",
+            hit.path, hit.score, snippet
+        ),
+    )
+    .with_source_wiki_id(wiki_id.to_string())
 }
 
 fn display_memory_name(name: &str, detail_name: Option<&str>) -> String {

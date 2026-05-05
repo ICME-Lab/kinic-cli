@@ -88,7 +88,7 @@ struct InsertFieldSpec {
 }
 const CREATE_DESCRIPTOR: FormDescriptor = FormDescriptor {
     kind: FormKind::Create,
-    first_focus: FormFocus::Create(CreateModalFocus::Name),
+    first_focus: FormFocus::Create(CreateModalFocus::Type),
     reset_kind: FormResetKind::Create,
 };
 const INSERT_DESCRIPTOR: FormDescriptor = FormDescriptor {
@@ -96,7 +96,13 @@ const INSERT_DESCRIPTOR: FormDescriptor = FormDescriptor {
     first_focus: FormFocus::Insert(InsertFormFocus::Mode),
     reset_kind: FormResetKind::Insert,
 };
-const CREATE_FIELDS: [FormFieldSpec; 3] = [
+const CREATE_FIELDS: [FormFieldSpec; 4] = [
+    FormFieldSpec {
+        focus: FormFocus::Create(CreateModalFocus::Type),
+        enter_command: FormCommand::NextField,
+        accepts_input: false,
+        supports_horizontal_change: true,
+    },
     FormFieldSpec {
         focus: FormFocus::Create(CreateModalFocus::Name),
         enter_command: FormCommand::NextField,
@@ -237,6 +243,8 @@ pub fn form_command_to_action(kind: FormKind, command: FormCommand) -> Option<Co
         (FormKind::Create, FormCommand::NextField) => Some(CoreAction::CreateNextField),
         (FormKind::Create, FormCommand::PrevField) => Some(CoreAction::CreatePrevField),
         (FormKind::Create, FormCommand::Submit) => Some(CoreAction::CreateSubmit),
+        (FormKind::Create, FormCommand::HorizontalChangePrev) => Some(CoreAction::CreatePrevType),
+        (FormKind::Create, FormCommand::HorizontalChangeNext) => Some(CoreAction::CreateNextType),
         (FormKind::Insert, FormCommand::Input(c)) => Some(CoreAction::InsertInput(c)),
         (FormKind::Insert, FormCommand::Backspace) => Some(CoreAction::InsertBackspace),
         (FormKind::Insert, FormCommand::NextField) => Some(CoreAction::InsertNextField),
@@ -269,6 +277,8 @@ pub fn core_action_to_form_command(action: &CoreAction) -> Option<(FormKind, For
         CoreAction::CreateNextField => Some((FormKind::Create, FormCommand::NextField)),
         CoreAction::CreatePrevField => Some((FormKind::Create, FormCommand::PrevField)),
         CoreAction::CreateSubmit => Some((FormKind::Create, FormCommand::Submit)),
+        CoreAction::CreatePrevType => Some((FormKind::Create, FormCommand::HorizontalChangePrev)),
+        CoreAction::CreateNextType => Some((FormKind::Create, FormCommand::HorizontalChangeNext)),
         _ => None,
     }
 }

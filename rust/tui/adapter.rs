@@ -19,6 +19,7 @@ pub fn to_content(record: &KinicRecord, memory_summary: Option<&str>) -> UiItemC
     match record.group.as_str() {
         "search-result" => search_result_content(record),
         "memories" => memory_content(record, memory_summary),
+        "wiki" => generic_content(record),
         _ => generic_content(record),
     }
 }
@@ -27,6 +28,7 @@ fn summary_kind(record: &KinicRecord) -> UiItemKind {
     match record.group.as_str() {
         "search-result" => UiItemKind::Custom(String::new()),
         "memories" => UiItemKind::Custom("memory".to_string()),
+        "wiki" => UiItemKind::Custom("wiki".to_string()),
         other => UiItemKind::Custom(other.to_string()),
     }
 }

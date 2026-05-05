@@ -62,6 +62,7 @@ pub fn reset_form_state_for_tab(state: &mut CoreState, tab_id: &str) {
 fn reset_create_fields(state: &mut CoreState) {
     state.create_name.clear();
     state.create_description.clear();
+    state.create_target_kind = tui_kit_runtime::CreateTargetKind::Memory;
 }
 
 fn reset_insert_fields(state: &mut CoreState) {

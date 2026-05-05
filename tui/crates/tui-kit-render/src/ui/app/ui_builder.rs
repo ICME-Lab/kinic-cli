@@ -4,9 +4,10 @@ use crate::ui::animation::AnimationState;
 use crate::ui::model::{UiContextNode, UiItemContent, UiItemSummary};
 use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
-    AccessControlModalState, CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus,
-    InsertMode, MemorySelection, PickerState, RemoveMemoryModalState, RenameMemoryModalState,
-    SearchScope, SettingsSnapshot, TextInputModalState, TransferModalState,
+    AccessControlModalState, CreateCostState, CreateModalFocus, CreateSubmitState,
+    CreateTargetKind, InsertFormFocus, InsertMode, MemorySelection, PickerState,
+    RemoveMemoryModalState, RenameMemoryModalState, SearchScope, SettingsSnapshot,
+    TextInputModalState, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -172,6 +173,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn create_description(mut self, value: &'a str) -> Self {
         self.create_description = value;
+        self
+    }
+
+    #[must_use]
+    pub fn create_target_kind(mut self, value: CreateTargetKind) -> Self {
+        self.create_target_kind = value;
         self
     }
 

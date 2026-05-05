@@ -229,3 +229,6 @@ mod rename;
 
 #[path = "tests/chat.rs"]
 mod chat;
+
+#[path = "tests/wiki.rs"]
+mod wiki;

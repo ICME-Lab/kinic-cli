@@ -362,9 +362,9 @@ dependencies = [
 
 [[package]]
 name = "candid"
-version = "0.10.20"
+version = "0.10.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8037a01ec09d6c06883a38bad4f47b8d06158ad360b841e0ae5707c9884dfaf6"
+checksum = "1ba5b4833b63bf7b785fecdd2cc918ed90d988fd974825d5c48e7b407c39ef38"
 dependencies = [
  "anyhow",
  "binread",
@@ -385,9 +385,9 @@ dependencies = [
 
 [[package]]
 name = "candid_derive"
-version = "0.10.20"
+version = "0.10.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb45f4d5eff3805598ee633dd80f8afb306c023249d34b5b7dfdc2080ea1df2e"
+checksum = "7b60664b6324832dfb4863f3b19eb4d58819cd38fba6d3941b101213cea0d9ec"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -2224,6 +2224,7 @@ dependencies = [
  "tui-kit-model",
  "tui-kit-render",
  "tui-kit-runtime",
+ "vfs-types",
 ]
 
 [[package]]
@@ -4653,6 +4654,14 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vfs-types"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "serde",
+]
 
 [[package]]
 name = "walkdir"

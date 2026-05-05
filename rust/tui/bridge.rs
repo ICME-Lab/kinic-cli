@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use super::chat_prompt::ActiveMemoryContext;
 use crate::{
     clients::{
-        launcher::{LauncherClient, State},
+        launcher::{CanisterType, LauncherClient, State, TypedState},
         memory::MemoryClient,
     },
     create_domain::{BalanceDelta, balance_delta, required_balance},
@@ -23,9 +23,14 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
+use candid::{CandidType, Decode, Encode};
 use ic_agent::{Agent, export::Principal};
 use kinic_core::amount::format_e8s_to_kinic_string_nat;
 use tui_kit_runtime::{AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview};
+use vfs_types::{
+    ChildNode, ListChildrenRequest, Node, NodeEntryKind, SearchNodeHit, SearchNodesRequest,
+    SearchPreviewMode,
+};
 
 pub(crate) use crate::shared::memory_metadata::DescriptionUpdate;
 
@@ -43,6 +48,45 @@ pub struct MemorySummary {
     pub cycle_amount: Option<u64>,
     pub users: Option<Vec<MemoryUser>>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiSummary {
+    pub id: String,
+    pub status: String,
+    pub detail: String,
+    pub searchable_wiki_id: Option<String>,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceSummaries {
+    pub memories: Vec<MemorySummary>,
+    pub wikis: Vec<WikiSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiChildNode {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub has_children: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiNode {
+    pub path: String,
+    pub content: String,
+    pub etag: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WikiSearchHit {
+    pub path: String,
+    pub score: f32,
+    pub snippet: Option<String>,
+}
+
+const DEFAULT_WIKI_DATABASE_ID: &str = "default";
 
 pub type SearchResultItem = SearchHit;
 
@@ -89,9 +133,24 @@ pub struct MemoryDetails {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct CreateMemorySuccess {
     pub id: String,
     pub memories: Option<Vec<MemorySummary>>,
+    pub refresh_warning: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateTargetKind {
+    Memory,
+    Wiki,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateInstanceSuccess {
+    pub id: String,
+    pub kind: CreateTargetKind,
+    pub instances: Option<InstanceSummaries>,
     pub refresh_warning: Option<String>,
 }
 
@@ -178,6 +237,7 @@ pub async fn build_search_agent(use_mainnet: bool, auth: TuiAuth) -> Result<Agen
     factory.build().await
 }
 
+#[allow(dead_code)]
 pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<MemorySummary>> {
     let factory = resolve_agent_factory(use_mainnet, &auth)?;
     let agent = factory.build().await?;
@@ -186,6 +246,15 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
+pub async fn list_instances(use_mainnet: bool, auth: TuiAuth) -> Result<InstanceSummaries> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let client = LauncherClient::new(agent);
+    let states = client.list_typed_instances().await?;
+    Ok(instance_summaries_from_typed_states(states))
+}
+
+#[allow(dead_code)]
 pub async fn create_memory(
     use_mainnet: bool,
     auth: TuiAuth,
@@ -245,6 +314,98 @@ pub async fn create_memory(
         memories,
         refresh_warning,
     })
+}
+
+pub async fn create_instance(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    kind: CreateTargetKind,
+    name: String,
+    description: String,
+) -> Result<CreateInstanceSuccess, CreateMemoryError> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)
+        .map_err(|error| CreateMemoryError::Principal(short_error(&error.to_string())))?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| CreateMemoryError::Principal(short_error(&error.to_string())))?;
+    let client = LauncherClient::new(agent.clone());
+    let (balance, price) = tokio::join!(fetch_balance(&agent), client.fetch_deployment_price());
+    let balance =
+        balance.map_err(|error| CreateMemoryError::Balance(short_error(&error.to_string())))?;
+    let price = price.map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
+    let fee = fetch_fee(&agent)
+        .await
+        .map_err(|error| CreateMemoryError::Fee(short_error(&error.to_string())))?;
+    match balance_delta(&price, balance, fee) {
+        BalanceDelta::Surplus(_) => {}
+        BalanceDelta::Shortfall(shortfall) => {
+            let required_total = required_balance(&price, fee);
+            return Err(CreateMemoryError::InsufficientBalance {
+                required_total_kinic: format_e8s_to_kinic_string_nat(&required_total),
+                required_total_base_units: required_total.to_string(),
+                shortfall_kinic: format_e8s_to_kinic_string_nat(&shortfall),
+                shortfall_base_units: shortfall.to_string(),
+            });
+        }
+    }
+    client
+        .approve_launcher(&price, fee)
+        .await
+        .map_err(|error| CreateMemoryError::Approve(short_error(&error.to_string())))?;
+    let id = match kind {
+        CreateTargetKind::Memory => client.deploy_memory(&name, &description).await,
+        CreateTargetKind::Wiki => client.deploy_wiki(&name).await,
+    }
+    .map_err(|error| CreateMemoryError::Deploy(short_error(&error.to_string())))?;
+    let (instances, refresh_warning) = match client.list_typed_instances().await {
+        Ok(states) => (Some(instance_summaries_from_typed_states(states)), None),
+        Err(error) => (
+            None,
+            Some(format!(
+                "Automatic reload failed after create. Press Ctrl-R to refresh. Cause: {}",
+                short_error(&error.to_string())
+            )),
+        ),
+    };
+
+    Ok(CreateInstanceSuccess {
+        id,
+        kind,
+        instances,
+        refresh_warning,
+    })
+}
+
+pub async fn list_wiki_root_children(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    wiki_id: String,
+) -> Result<Vec<WikiChildNode>> {
+    let agent = build_search_agent(use_mainnet, auth).await?;
+    VfsClient::new(agent, wiki_id)?.list_children("/Wiki").await
+}
+
+pub async fn read_wiki_node(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    wiki_id: String,
+    path: String,
+) -> Result<Option<WikiNode>> {
+    let agent = build_search_agent(use_mainnet, auth).await?;
+    VfsClient::new(agent, wiki_id)?.read_node(&path).await
+}
+
+pub async fn search_wiki_nodes(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    wiki_id: String,
+    query: String,
+) -> Result<Vec<WikiSearchHit>> {
+    let agent = build_search_agent(use_mainnet, auth).await?;
+    VfsClient::new(agent, wiki_id)?
+        .search_nodes(&query, "/Wiki", 20)
+        .await
 }
 
 pub async fn load_session_account_overview(
@@ -558,6 +719,65 @@ pub async fn run_insert(
     })
 }
 
+fn instance_summaries_from_typed_states(states: Vec<TypedState>) -> InstanceSummaries {
+    let mut memories = Vec::new();
+    let mut wikis = Vec::new();
+    for typed in states {
+        match typed.canister_type {
+            CanisterType::Memory => memories.push(memory_summary_from_state(typed.state)),
+            CanisterType::Wiki => wikis.push(wiki_summary_from_state(typed.state)),
+        }
+    }
+    InstanceSummaries { memories, wikis }
+}
+
+fn wiki_summary_from_state(state: State) -> WikiSummary {
+    match state {
+        State::Empty(message) => WikiSummary {
+            id: format!("wiki-empty:{message}"),
+            status: "empty".to_string(),
+            detail: message.clone(),
+            searchable_wiki_id: None,
+            name: message,
+        },
+        State::Pending(message) => WikiSummary {
+            id: format!("wiki-pending:{message}"),
+            status: "pending".to_string(),
+            detail: message.clone(),
+            searchable_wiki_id: None,
+            name: message,
+        },
+        State::Creation(message) => WikiSummary {
+            id: format!("wiki-creation:{message}"),
+            status: "creation".to_string(),
+            detail: message.clone(),
+            searchable_wiki_id: None,
+            name: message,
+        },
+        State::Installation(principal, message) => WikiSummary {
+            id: principal.to_text(),
+            status: "installation".to_string(),
+            detail: message.clone(),
+            searchable_wiki_id: Some(principal.to_text()),
+            name: message,
+        },
+        State::SettingUp(principal) => WikiSummary {
+            id: principal.to_text(),
+            status: "setting_up".to_string(),
+            detail: "Launcher is setting up this wiki.".to_string(),
+            searchable_wiki_id: Some(principal.to_text()),
+            name: "unknown".to_string(),
+        },
+        State::Running(principal) => WikiSummary {
+            id: principal.to_text(),
+            status: "running".to_string(),
+            detail: "Wiki is ready for browsing and search.".to_string(),
+            searchable_wiki_id: Some(principal.to_text()),
+            name: "Wiki".to_string(),
+        },
+    }
+}
+
 fn memory_summary_from_state(state: State) -> MemorySummary {
     match state {
         State::Empty(message) => MemorySummary {
@@ -700,6 +920,145 @@ fn role_code(role: AccessControlRole, principal_id: &str) -> Result<u8> {
     Ok(memory_role.code())
 }
 
+#[derive(Clone)]
+struct VfsClient {
+    agent: Agent,
+    canister_id: Principal,
+}
+
+impl VfsClient {
+    fn new(agent: Agent, canister_id: String) -> Result<Self> {
+        Ok(Self {
+            agent,
+            canister_id: Principal::from_text(canister_id)
+                .context("failed to parse wiki canister principal")?,
+        })
+    }
+
+    async fn query<Arg, Out>(&self, method: &str, arg: &Arg) -> Result<Out>
+    where
+        Arg: CandidType,
+        Out: for<'de> candid::Deserialize<'de> + CandidType,
+    {
+        let bytes = self
+            .agent
+            .query(&self.canister_id, method)
+            .with_arg(Encode!(arg).context("failed to encode wiki query args")?)
+            .call()
+            .await
+            .with_context(|| format!("wiki query failed for {method}"))?;
+        Decode!(&bytes, Out).with_context(|| format!("failed to decode wiki response for {method}"))
+    }
+
+    async fn query2<A, B, Out>(&self, method: &str, a: &A, b: &B) -> Result<Out>
+    where
+        A: CandidType,
+        B: CandidType,
+        Out: for<'de> candid::Deserialize<'de> + CandidType,
+    {
+        let bytes = self
+            .agent
+            .query(&self.canister_id, method)
+            .with_arg(Encode!(a, b).context("failed to encode wiki query args")?)
+            .call()
+            .await
+            .with_context(|| format!("wiki query failed for {method}"))?;
+        Decode!(&bytes, Out).with_context(|| format!("failed to decode wiki response for {method}"))
+    }
+
+    async fn list_children(&self, path: &str) -> Result<Vec<WikiChildNode>> {
+        let result: Result<Vec<ChildNode>, String> = self
+            .query(
+                "list_children",
+                &ListChildrenRequest {
+                    database_id: DEFAULT_WIKI_DATABASE_ID.to_string(),
+                    path: path.to_string(),
+                },
+            )
+            .await?;
+        Ok(result
+            .map_err(anyhow::Error::msg)?
+            .into_iter()
+            .map(WikiChildNode::from)
+            .collect())
+    }
+
+    async fn read_node(&self, path: &str) -> Result<Option<WikiNode>> {
+        let result: Result<Option<Node>, String> = self
+            .query2(
+                "read_node",
+                &DEFAULT_WIKI_DATABASE_ID.to_string(),
+                &path.to_string(),
+            )
+            .await?;
+        Ok(result.map_err(anyhow::Error::msg)?.map(WikiNode::from))
+    }
+
+    async fn search_nodes(
+        &self,
+        query_text: &str,
+        prefix: &str,
+        top_k: u32,
+    ) -> Result<Vec<WikiSearchHit>> {
+        let result: Result<Vec<SearchNodeHit>, String> = self
+            .query(
+                "search_nodes",
+                &SearchNodesRequest {
+                    database_id: DEFAULT_WIKI_DATABASE_ID.to_string(),
+                    query_text: query_text.to_string(),
+                    prefix: Some(prefix.to_string()),
+                    top_k,
+                    preview_mode: Some(SearchPreviewMode::ContentStart),
+                },
+            )
+            .await?;
+        Ok(result
+            .map_err(anyhow::Error::msg)?
+            .into_iter()
+            .map(WikiSearchHit::from)
+            .collect())
+    }
+}
+
+impl From<ChildNode> for WikiChildNode {
+    fn from(node: ChildNode) -> Self {
+        Self {
+            path: node.path,
+            name: node.name,
+            kind: match node.kind {
+                NodeEntryKind::File => "file",
+                NodeEntryKind::Source => "source",
+                NodeEntryKind::Directory => "directory",
+            }
+            .to_string(),
+            has_children: node.is_virtual,
+        }
+    }
+}
+
+impl From<Node> for WikiNode {
+    fn from(node: Node) -> Self {
+        Self {
+            path: node.path,
+            content: node.content,
+            etag: node.etag,
+        }
+    }
+}
+
+impl From<SearchNodeHit> for WikiSearchHit {
+    fn from(hit: SearchNodeHit) -> Self {
+        Self {
+            path: hit.path,
+            score: hit.score,
+            snippet: hit
+                .preview
+                .and_then(|preview| preview.excerpt)
+                .or(hit.snippet),
+        }
+    }
+}
+
 fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
@@ -767,6 +1126,62 @@ mod tests {
                 .as_deref()
                 .is_some_and(|message| message.contains("Press Ctrl-R to refresh"))
         );
+    }
+
+    #[test]
+    fn wiki_child_node_from_vfs_types_projects_display_fields() {
+        let child = WikiChildNode::from(ChildNode {
+            path: "/Wiki/index.md".to_string(),
+            name: "index.md".to_string(),
+            kind: NodeEntryKind::File,
+            updated_at: Some(1),
+            etag: Some("abc".to_string()),
+            size_bytes: Some(10),
+            is_virtual: false,
+        });
+
+        assert_eq!(child.path, "/Wiki/index.md");
+        assert_eq!(child.name, "index.md");
+        assert_eq!(child.kind, "file");
+        assert!(!child.has_children);
+    }
+
+    #[test]
+    fn wiki_node_from_vfs_types_keeps_render_payload() {
+        let node = WikiNode::from(Node {
+            path: "/Wiki/index.md".to_string(),
+            kind: vfs_types::NodeKind::File,
+            content: "# Index".to_string(),
+            created_at: 1,
+            updated_at: 2,
+            etag: "etag".to_string(),
+            metadata_json: "{}".to_string(),
+        });
+
+        assert_eq!(node.path, "/Wiki/index.md");
+        assert_eq!(node.content, "# Index");
+        assert_eq!(node.etag, "etag");
+    }
+
+    #[test]
+    fn wiki_search_hit_prefers_preview_excerpt() {
+        let hit = WikiSearchHit::from(SearchNodeHit {
+            path: "/Wiki/index.md".to_string(),
+            kind: vfs_types::NodeKind::File,
+            snippet: Some("fallback".to_string()),
+            preview: Some(vfs_types::SearchPreview {
+                field: vfs_types::SearchPreviewField::Content,
+                match_reason: "content".to_string(),
+                char_offset: 0,
+                excerpt: Some("preview".to_string()),
+            }),
+            score: 0.75,
+            match_reasons: vec!["content".to_string()],
+        });
+
+        assert_eq!(hit.path, "/Wiki/index.md");
+        assert_eq!(hit.score, 0.75);
+        assert_eq!(hit.snippet.as_deref(), Some("preview"));
     }
 
     #[test]
