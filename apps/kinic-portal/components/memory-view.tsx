@@ -200,6 +200,7 @@ export function MemoryView({
                   onClick={() => copyText("share", currentUrl)}
                 />
               </div>
+              {copyError ? <p className="text-sm text-muted-foreground">{copyError}</p> : null}
             </CardContent>
           </Card>
 
@@ -223,8 +224,6 @@ export function MemoryView({
                     Requires the Kinic app in ChatGPT.
                   </p>
                 </div>
-
-                {copyError ? <p className="text-sm text-muted-foreground">{copyError}</p> : null}
               </CardContent>
             </Card>
           ) : null}

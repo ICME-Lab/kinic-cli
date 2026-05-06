@@ -75,6 +75,7 @@ export function verifyDeployContract(
 
   validateAbsoluteOrigin(errors, "KINIC_PORTAL_ORIGIN", portalVars.KINIC_PORTAL_ORIGIN);
   validateAbsoluteOrigin(errors, "KINIC_PUBLIC_API_ORIGIN", portalVars.KINIC_PUBLIC_API_ORIGIN);
+  validateAbsoluteOrigin(errors, "KINIC_REMOTE_MCP_ORIGIN", portalVars.KINIC_REMOTE_MCP_ORIGIN);
 
   return {
     ok: errors.length === 0,

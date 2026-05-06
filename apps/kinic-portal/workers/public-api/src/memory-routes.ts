@@ -17,6 +17,7 @@ import {
   TRANSIENT_QUERY_ERROR as TRANSIENT_PUBLIC_MEMORY_ERROR,
 } from "../../../packages/kinic-share/src/memory-internal";
 import { resolvePublicMemory, toSharedRuntimeEnv } from "./public-memory";
+import { normalizePublicQuery } from "../../shared/public-query";
 
 type AppContext = import("hono").Context<{ Bindings: Env }>;
 
@@ -26,10 +27,11 @@ export async function handleMemoryChat(c: AppContext): Promise<Response> {
   if ("error" in body) {
     return c.json({ error: body.error }, 400);
   }
-  const query = body.query?.trim();
-  if (!query) {
-    return c.json({ error: "query is required" }, 400);
+  const queryResult = normalizePublicQuery(body.query);
+  if (queryResult.kind !== "ready") {
+    return c.json({ error: queryResult.error }, queryResult.status);
   }
+  const { query } = queryResult;
 
   const state = await resolvePublicMemory(c.env, memoryId);
   if (state.kind !== "accessible") {

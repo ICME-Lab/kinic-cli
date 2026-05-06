@@ -101,6 +101,23 @@ describe("remote MCP tool guidance", () => {
     expect(mocks.searchMemory).toHaveBeenCalledWith("agent", "aaaaa-aa", [0.1, 0.2]);
   });
 
+  it("rejects oversized search queries before embedding", async () => {
+    await expect(
+      searchOneMemory({ IC_HOST: "https://ic0.app" }, "aaaaa-aa", "x".repeat(151), 2),
+    ).resolves.toEqual({
+      content: [{ type: "text", text: "query is too long" }],
+      structuredContent: {
+        error: "query is too long",
+        memory_id: "aaaaa-aa",
+        top_k: 2,
+      },
+      isError: true,
+    });
+    expect(mocks.resolvePublicMemorySummary).not.toHaveBeenCalled();
+    expect(mocks.fetchEmbedding).not.toHaveBeenCalled();
+    expect(mocks.searchMemory).not.toHaveBeenCalled();
+  });
+
   it("returns a structured tool error when the requested memory is not found", async () => {
     mocks.resolvePublicMemorySummary.mockResolvedValueOnce({
       kind: "not_found",

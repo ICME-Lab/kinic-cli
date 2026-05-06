@@ -194,7 +194,7 @@ Remote MCP:
 - local development can run without `SUMMARY_CACHE`; summaries still generate, but no persistent cache is written
 - local `portal` and local `public-api` keep separate Miniflare KV state directories, so cross-Worker summary-cache reuse for OGP must be verified against deployed Workers or a shared remote KV
 - Local warm-hit checks for the OGP metadata cache must be performed against the same local `public-api` process because the metadata subset is written and read inside that Worker
-- HTML metadata `og:description` and `twitter:description` still use fixed metadata text; summary cache is only reused by the OGP image Worker path
+- HTML metadata `description`, `og:description`, and `twitter:description` use the cached summary when available; the OGP image Worker path reuses the same summary cache
 - OGP images are served with `Cache-Control: public, max-age=86400`, and memory page metadata appends `?v=<memory.version>` so updated cards bust caches without shortening TTL
 - The dedicated public API Worker also treats `?v=<memory.version>` as a freshness input: if the requested version differs from the current metadata-cache pointer version, it bypasses the warm metadata entry and refreshes from the live public resolver instead of serving stale card data
 

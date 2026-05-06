@@ -170,4 +170,22 @@ describe("MemoryView", () => {
       expect(writeTextMock).toHaveBeenCalledWith("https://portal.example.com/m/m1");
     });
   });
+
+  it("shows share copy failures without the mcp card", async () => {
+    writeTextMock.mockRejectedValueOnce(new Error("blocked"));
+
+    render(
+      <MemoryView
+        memory={memory}
+        mcpEndpoint={null}
+        publicApiOrigin="https://api.example.com"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Copy share URL" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Clipboard unavailable")).toBeTruthy();
+    });
+  });
 });

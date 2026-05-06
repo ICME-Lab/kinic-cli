@@ -118,6 +118,56 @@ describe("verifyDeployContract", () => {
     expect(result.errors).toContain('portal vars.KINIC_PUBLIC_API_ORIGIN must not use a local loopback host but got "http://localhost:8788/"');
   });
 
+  it("fails when portal remote mcp origin is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig({
+        vars: {
+          KINIC_PORTAL_ORIGIN: "https://memory.kinic.xyz",
+          KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz",
+          SUMMARY_CACHE_TTL_SECONDS: "86400",
+        },
+      }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("portal vars.KINIC_REMOTE_MCP_ORIGIN must be set to an absolute non-localhost URL");
+  });
+
+  it("fails when portal remote mcp origin is not absolute", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_REMOTE_MCP_ORIGIN: "/mcp" } }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_REMOTE_MCP_ORIGIN must be an absolute URL but got "/mcp"');
+  });
+
+  it("fails when portal remote mcp origin uses localhost", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_REMOTE_MCP_ORIGIN: "http://localhost:8787" } }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_REMOTE_MCP_ORIGIN must not use a local loopback host but got "http://localhost:8787/"');
+  });
+
+  it("fails when portal remote mcp origin uses ipv4 loopback", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_REMOTE_MCP_ORIGIN: "http://127.0.0.1:8787" } }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_REMOTE_MCP_ORIGIN must not use a local loopback host but got "http://127.0.0.1:8787/"');
+  });
+
   it("fails when portal origin is missing", () => {
     const result = verifyDeployContract(
       portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz", SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
@@ -177,6 +227,7 @@ function portalConfig(overrides: Record<string, unknown> = {}) {
     vars: {
       KINIC_PORTAL_ORIGIN: "https://memory.kinic.xyz",
       KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz",
+      KINIC_REMOTE_MCP_ORIGIN: "https://mcp.kinic.xyz",
       SUMMARY_CACHE_TTL_SECONDS: "86400",
     },
     ...overrides,

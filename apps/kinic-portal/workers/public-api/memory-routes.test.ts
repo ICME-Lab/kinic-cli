@@ -74,6 +74,37 @@ describe("public api memory routes", () => {
       answer: "grounded answer",
     });
   });
+
+  it("rejects oversized chat queries before embedding", async () => {
+    const response = await app.fetch(
+      new Request("https://api.kinic.test/api/public/memories/m1/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: "x".repeat(151), language: "en" }),
+      }),
+      env(),
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ error: "query is too long" });
+    expect(mocks.resolvePublicMemoryDetails).not.toHaveBeenCalled();
+    expect(mocks.fetchEmbedding).not.toHaveBeenCalled();
+  });
+
+  it("keeps empty chat queries as bad requests", async () => {
+    const response = await app.fetch(
+      new Request("https://api.kinic.test/api/public/memories/m1/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: "   ", language: "en" }),
+      }),
+      env(),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "query is required" });
+    expect(mocks.fetchEmbedding).not.toHaveBeenCalled();
+  });
 });
 
 function env(): Env {

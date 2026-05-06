@@ -15,6 +15,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { classifyPublicMemoryRuntimeError, TRANSIENT_PUBLIC_MEMORY_ERROR } from "../../shared/public-memory-runtime";
+import { normalizePublicQuery } from "../../shared/public-query";
 
 export const PUBLIC_MEMORY_HELP_OUTPUT = {
   server: "kinic-remote-mcp",
@@ -200,14 +201,22 @@ export async function searchOneMemory(
   query: string,
   topK: number = DEFAULT_REMOTE_MCP_SEARCH_TOP_K,
 ) {
+  const queryResult = normalizePublicQuery(query);
+  if (queryResult.kind !== "ready") {
+    return toolError(queryResult.error, {
+      error: queryResult.error,
+      memory_id: memoryId,
+      top_k: topK,
+    });
+  }
   const agent = createAnonymousAgent(env);
   const state = await resolvePublicMemorySummary(agent, memoryId);
-  const payload = { memory_id: memoryId, query, top_k: topK };
+  const payload = { memory_id: memoryId, query: queryResult.query, top_k: topK };
   if (state.kind !== "accessible") {
     return toToolError(state, payload);
   }
   try {
-    const embedding = await fetchEmbedding(query, env);
+    const embedding = await fetchEmbedding(queryResult.query, env);
     const items = (await searchMemory(agent, memoryId, embedding)).slice(0, topK);
     return {
       memory_id: memoryId,
