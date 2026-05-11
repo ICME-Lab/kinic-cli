@@ -112,17 +112,15 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
             allows_form: true,
             allows_chat: false,
         },
-        kinic_tabs::TabKind::PlaceholderMarket | kinic_tabs::TabKind::PlaceholderSettings => {
-            TabFocusPolicy {
-                default_focus: PaneFocus::Tabs,
-                allows_search: false,
-                allows_items: false,
-                allows_tabs: true,
-                allows_content: true,
-                allows_form: false,
-                allows_chat: false,
-            }
-        }
+        kinic_tabs::TabKind::PlaceholderSettings => TabFocusPolicy {
+            default_focus: PaneFocus::Tabs,
+            allows_search: false,
+            allows_items: false,
+            allows_tabs: true,
+            allows_content: true,
+            allows_form: false,
+            allows_chat: false,
+        },
     }
 }
 
@@ -134,9 +132,9 @@ pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
     match kinic_tabs::tab_kind(tab_id) {
         kinic_tabs::TabKind::Memories | kinic_tabs::TabKind::Wiki => Some(PaneFocus::Search),
         kinic_tabs::TabKind::InsertForm | kinic_tabs::TabKind::CreateForm => Some(PaneFocus::Form),
-        kinic_tabs::TabKind::PlaceholderMarket
-        | kinic_tabs::TabKind::PlaceholderSettings
-        | kinic_tabs::TabKind::Unknown => Some(PaneFocus::Content),
+        kinic_tabs::TabKind::PlaceholderSettings | kinic_tabs::TabKind::Unknown => {
+            Some(PaneFocus::Content)
+        }
     }
 }
 
@@ -631,6 +629,42 @@ pub struct SettingsSnapshot {
     pub sections: Vec<SettingsSection>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PaneRow {
+    pub label: String,
+    pub detail: String,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PaneSnapshot {
+    pub title: String,
+    pub rows: Vec<PaneRow>,
+    pub empty_message: String,
+    pub loading: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DocumentSnapshot {
+    pub title: String,
+    pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DiagnosticSnapshot {
+    pub rows: Vec<PaneRow>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ThreePaneSnapshot {
+    pub left: PaneSnapshot,
+    pub middle: PaneSnapshot,
+    pub document: DocumentSnapshot,
+    pub diagnostic: Option<DiagnosticSnapshot>,
+    pub middle_mode: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySelection {
     pub id: String,
@@ -647,6 +681,7 @@ pub struct CoreState {
     pub list_items: Vec<UiItemSummary>,
     pub selected_content: Option<UiItemContent>,
     pub selected_context: Option<UiContextNode>,
+    pub three_pane: ThreePaneSnapshot,
     pub total_count: usize,
     pub status_message: Option<String>,
     pub persistent_status_message: Option<String>,
@@ -703,6 +738,7 @@ impl Default for CoreState {
             list_items: Vec::new(),
             selected_content: None,
             selected_context: None,
+            three_pane: ThreePaneSnapshot::default(),
             total_count: 0,
             status_message: None,
             persistent_status_message: None,
@@ -989,6 +1025,7 @@ pub struct ProviderSnapshot {
     pub selected_index: Option<usize>,
     pub selected_content: Option<UiItemContent>,
     pub selected_context: Option<UiContextNode>,
+    pub three_pane: ThreePaneSnapshot,
     pub total_count: usize,
     pub status_message: Option<String>,
     pub selected_memory: Option<MemorySelection>,
@@ -2552,6 +2589,33 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             },
             PaneFocus::Tabs => None,
             PaneFocus::Content => match key {
+                CoreKey::Down if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
+                    Some(CoreAction::MoveNext)
+                }
+                CoreKey::Up if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
+                    Some(CoreAction::MovePrev)
+                }
+                CoreKey::PageDown if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
+                    Some(CoreAction::MovePageDown)
+                }
+                CoreKey::PageUp if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
+                    Some(CoreAction::MovePageUp)
+                }
+                CoreKey::Home | CoreKey::Char('g')
+                    if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID =>
+                {
+                    Some(CoreAction::MoveHome)
+                }
+                CoreKey::End | CoreKey::Char('G')
+                    if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID =>
+                {
+                    Some(CoreAction::MoveEnd)
+                }
+                CoreKey::Enter | CoreKey::Right | CoreKey::Char('l')
+                    if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID =>
+                {
+                    Some(CoreAction::OpenSelected)
+                }
                 CoreKey::Enter if is_settings_content(current_tab_id, PaneFocus::Content) => None,
                 CoreKey::Enter if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
                     Some(CoreAction::MemoryContentOpenSelected)
@@ -2606,6 +2670,7 @@ pub fn apply_snapshot(state: &mut CoreState, snapshot: ProviderSnapshot) -> Prov
     let snapshot_selected_index = snapshot.selected_index;
     state.selected_content = snapshot.selected_content;
     state.selected_context = snapshot.selected_context;
+    state.three_pane = snapshot.three_pane;
     state.total_count = snapshot.total_count;
     if state.persistent_status_message.is_none() {
         state.status_message = snapshot.status_message;
@@ -3222,7 +3287,7 @@ mod tests {
     #[test]
     fn focus_next_stays_visible_on_placeholder_tabs() {
         let mut state = CoreState {
-            current_tab_id: kinic_tabs::KINIC_MARKET_TAB_ID.to_string(),
+            current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
             focus: PaneFocus::Tabs,
             ..CoreState::default()
         };
@@ -3448,7 +3513,7 @@ mod tests {
             action_for_key(
                 CoreKey::Enter,
                 PaneFocus::Tabs,
-                kinic_tabs::KINIC_MARKET_TAB_ID
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
             ),
             Some(CoreAction::FocusContent)
         );
@@ -3460,7 +3525,7 @@ mod tests {
             action_for_key(
                 CoreKey::Tab,
                 PaneFocus::Tabs,
-                kinic_tabs::KINIC_MARKET_TAB_ID
+                kinic_tabs::KINIC_SETTINGS_TAB_ID
             ),
             Some(CoreAction::FocusContent)
         );
@@ -3543,6 +3608,32 @@ mod tests {
             ),
             Some(CoreAction::MemoryContentJumpPrev)
         );
+    }
+
+    #[test]
+    fn wiki_content_keys_move_browser_selection() {
+        let cases = [
+            (CoreKey::Down, CoreAction::MoveNext),
+            (CoreKey::Up, CoreAction::MovePrev),
+            (CoreKey::PageDown, CoreAction::MovePageDown),
+            (CoreKey::PageUp, CoreAction::MovePageUp),
+            (CoreKey::Home, CoreAction::MoveHome),
+            (CoreKey::Char('g'), CoreAction::MoveHome),
+            (CoreKey::End, CoreAction::MoveEnd),
+            (CoreKey::Char('G'), CoreAction::MoveEnd),
+            (CoreKey::Enter, CoreAction::OpenSelected),
+            (CoreKey::Right, CoreAction::OpenSelected),
+            (CoreKey::Char('l'), CoreAction::OpenSelected),
+            (CoreKey::Left, CoreAction::Back),
+            (CoreKey::Char('h'), CoreAction::Back),
+        ];
+
+        for (key, action) in cases {
+            assert_eq!(
+                action_for_key(key, PaneFocus::Content, kinic_tabs::KINIC_WIKI_TAB_ID),
+                Some(action)
+            );
+        }
     }
 
     #[test]

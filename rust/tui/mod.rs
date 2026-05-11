@@ -119,9 +119,6 @@ pub struct TuiLaunchConfig {
     pub wiki_canister_id: Option<String>,
 }
 
-const WIKI_CANISTER_ID_ENV_VAR: &str = "KINIC_WIKI_CANISTER_ID";
-const DEFAULT_WIKI_CANISTER_ID: &str = "xis3j-paaaa-aaaai-axumq-cai";
-
 pub fn run(global: &GlobalOpts) -> Result<()> {
     run_with_config(build_launch_config_from_global(global)?)
 }
@@ -143,13 +140,7 @@ pub fn build_launch_config_from_global(global: &GlobalOpts) -> Result<TuiLaunchC
 }
 
 fn wiki_canister_id_from_env() -> Option<String> {
-    Some(
-        std::env::var(WIKI_CANISTER_ID_ENV_VAR)
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| DEFAULT_WIKI_CANISTER_ID.to_string()),
-    )
+    Some(crate::wiki_bridge::wiki_canister_id_from_env())
 }
 
 pub fn run_with_config(config: TuiLaunchConfig) -> Result<()> {
@@ -227,7 +218,7 @@ mod tests {
         assert!(config.use_mainnet);
         assert_eq!(
             config.wiki_canister_id.as_deref(),
-            Some(DEFAULT_WIKI_CANISTER_ID)
+            Some(crate::wiki_bridge::DEFAULT_WIKI_CANISTER_ID)
         );
     }
 
@@ -261,5 +252,17 @@ mod tests {
         assert_eq!(config.initial_tab_id, kinic_tabs::KINIC_MEMORIES_TAB_ID);
         assert_eq!(config.tab_ids, &kinic_tabs::KINIC_TAB_IDS);
         assert_eq!(config.initial_focus, PaneFocus::Search);
+    }
+
+    #[test]
+    fn ui_config_omits_market_tab() {
+        let config = ui_config::kinic_ui_config();
+        let titles = config
+            .tabs
+            .iter()
+            .map(|tab| tab.title.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(titles, ["Memories", "Insert", "Create", "Wiki", "Settings"]);
     }
 }

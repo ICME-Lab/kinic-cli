@@ -65,6 +65,7 @@ Agent-friendly discovery tips:
 - Start with `kinic-cli --help` for auth mode guidance and top-level entrypoints
 - Start with `kinic-cli capabilities` to get a JSON execution contract for global flags, auth sources, output behavior, major arguments, and arg-group constraints
 - Use `kinic-cli prefs --help` to inspect the JSON contract for shared local preferences
+- Use `kinic-cli wiki --help` to inspect Wiki database, read/search, and write/delete operations against the configured Wiki canister
 - `capabilities` and `prefs` commands return JSON; `list`, `show`, and `search` also support `--json` for agent/script consumption while keeping human-friendly text output by default
 - Keychain failures use stable text prefixes such as `KEYCHAIN_LOOKUP_FAILED`, `KEYCHAIN_ACCESS_DENIED`, `KEYCHAIN_INTERACTION_NOT_ALLOWED`, and `KEYCHAIN_ERROR`; agents should branch on the leading `[KEYCHAIN_*]` code instead of parsing the rest of the sentence
 
@@ -131,6 +132,31 @@ cargo run -- --ic --ii create \
 Notes:
 - Delegations are stored at `~/.config/kinic/identity.json`.
 - The login flow uses a local callback on port `8620`.
+
+### Wiki CLI
+
+`wiki` operates the configured Wiki canister. It uses `xis3j-paaaa-aaaai-axumq-cai` by default and `KINIC_WIKI_CANISTER_ID` can override that target.
+
+```bash
+cargo run -- --ic --identity alice wiki database list
+cargo run -- --ic --identity alice wiki children --database-id DATABASE_ID --path /Wiki
+cargo run -- --ic --identity alice wiki read --database-id DATABASE_ID --path /Wiki/index.md
+cargo run -- --ic --identity alice wiki search --database-id DATABASE_ID "release notes"
+```
+
+Write operations are CLI-only:
+
+```bash
+cargo run -- --ic --identity alice wiki write \
+  --database-id DATABASE_ID \
+  --path /Wiki/new.md \
+  --input ./new.md
+
+cargo run -- --ic --identity alice wiki delete \
+  --database-id DATABASE_ID \
+  --path /Wiki/new.md \
+  --yes
+```
 
 ### Convert PDF to markdown (inspect only)
 

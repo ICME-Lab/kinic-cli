@@ -28,10 +28,7 @@ impl<'a> TuiKitUi<'a> {
 
         let status_line = if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
             self.form_status_line(tab_id)
-        } else if matches!(
-            tab_kind(tab_id),
-            TabKind::PlaceholderMarket | TabKind::PlaceholderSettings
-        ) {
+        } else if matches!(tab_kind(tab_id), TabKind::PlaceholderSettings) {
             self.placeholder_status_line(tab_id)
         } else if self.show_context_panel && self.in_context_items_view {
             self.context_items_status_line()

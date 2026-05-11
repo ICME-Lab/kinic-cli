@@ -1,7 +1,7 @@
 use tui_kit_render::ui::{BrandingText, HeaderText, TabId, TabSpec, UiConfig};
 pub use tui_kit_runtime::kinic_tabs::{
-    KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
-    KINIC_SETTINGS_TAB_ID, KINIC_WIKI_TAB_ID,
+    KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
+    KINIC_WIKI_TAB_ID,
 };
 
 pub fn kinic_ui_config() -> UiConfig {
@@ -45,11 +45,6 @@ pub fn kinic_ui_config() -> UiConfig {
                 id: TabId::new(KINIC_WIKI_TAB_ID),
                 title: "Wiki".to_string(),
                 search_placeholder: "Search wiki nodes...".to_string(),
-            },
-            TabSpec {
-                id: TabId::new(KINIC_MARKET_TAB_ID),
-                title: "Market".to_string(),
-                search_placeholder: "Market is coming soon...".to_string(),
             },
             TabSpec {
                 id: TabId::new(KINIC_SETTINGS_TAB_ID),

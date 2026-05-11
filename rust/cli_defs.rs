@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgGroup, Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 pub fn parse_identity_arg(value: &str) -> Result<String, String> {
     if value.trim().is_empty() {
@@ -154,6 +154,10 @@ pub enum Command {
     )]
     Tools(ToolsArgs),
     #[command(
+        about = "Operate the configured Wiki canister. Requires --identity <NAME> or --ii. Returns text output by default."
+    )]
+    Wiki(WikiArgs),
+    #[command(
         about = "Launch the Kinic terminal UI. Requires global --identity <NAME>. --ii is not supported. Returns an interactive TUI, not JSON.",
         after_help = "Requires:\n  kinic-cli --identity <NAME> tui\n\nReturns:\n  Interactive terminal UI.\n\nExample:\n  kinic-cli --identity alice tui"
     )]
@@ -174,6 +178,180 @@ pub struct CreateArgs {
 
 #[derive(Args, Debug, Default)]
 pub struct TuiArgs {}
+
+#[derive(Args, Debug)]
+pub struct WikiArgs {
+    #[command(subcommand)]
+    pub command: WikiCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WikiCommand {
+    #[command(about = "Manage Wiki databases")]
+    Database(WikiDatabaseArgs),
+    #[command(about = "Read a Wiki node")]
+    Read(WikiReadArgs),
+    #[command(about = "List Wiki children under a path")]
+    Children(WikiChildrenArgs),
+    #[command(about = "Search Wiki nodes")]
+    Search(WikiSearchArgs),
+    #[command(about = "Write a Wiki node from a file")]
+    Write(WikiWriteArgs),
+    #[command(about = "Append file contents to a Wiki node")]
+    Append(WikiAppendArgs),
+    #[command(about = "Replace text in a Wiki node")]
+    Edit(WikiEditArgs),
+    #[command(about = "Delete a Wiki node. Requires --yes.")]
+    Delete(WikiDeleteArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct WikiDatabaseArgs {
+    #[command(subcommand)]
+    pub command: WikiDatabaseCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WikiDatabaseCommand {
+    #[command(about = "List databases visible to the caller")]
+    List(WikiJsonArgs),
+    #[command(about = "Create a new database")]
+    Create(WikiJsonArgs),
+    #[command(about = "Grant database access to a principal")]
+    Grant(WikiDatabaseGrantArgs),
+}
+
+#[derive(Args, Debug, Default)]
+pub struct WikiJsonArgs {
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WikiDatabaseGrantArgs {
+    pub database_id: String,
+    pub principal: String,
+    #[arg(value_enum)]
+    pub role: WikiDatabaseRoleArg,
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WikiDatabaseRoleArg {
+    Owner,
+    Writer,
+    Reader,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WikiNodeKindArg {
+    File,
+    Source,
+}
+
+#[derive(Args, Debug)]
+pub struct WikiReadArgs {
+    #[arg(long, required = true)]
+    pub database_id: String,
+    #[arg(long, required = true)]
+    pub path: String,
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WikiChildrenArgs {
+    #[arg(long, required = true)]
+    pub database_id: String,
+    #[arg(long, default_value = "/Wiki")]
+    pub path: String,
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WikiSearchArgs {
+    #[arg(long, required = true)]
+    pub database_id: String,
+    pub query: String,
+    #[arg(long, default_value = "/Wiki")]
+    pub prefix: String,
+    #[arg(long, default_value_t = 10)]
+    pub top_k: u32,
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WikiWriteArgs {
+    #[arg(long, required = true)]
+    pub database_id: String,
+    #[arg(long, required = true)]
+    pub path: String,
+    #[arg(long, value_name = "PATH", required = true)]
+    pub input: PathBuf,
+    #[arg(long, value_enum, default_value_t = WikiNodeKindArg::File)]
+    pub kind: WikiNodeKindArg,
+    #[arg(long, default_value = "{}")]
+    pub metadata_json: String,
+    #[arg(long)]
+    pub expected_etag: Option<String>,
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WikiAppendArgs {
+    #[arg(long, required = true)]
+    pub database_id: String,
+    #[arg(long, required = true)]
+    pub path: String,
+    #[arg(long, value_name = "PATH", required = true)]
+    pub input: PathBuf,
+    #[arg(long)]
+    pub expected_etag: Option<String>,
+    #[arg(long)]
+    pub separator: Option<String>,
+    #[arg(long, value_enum)]
+    pub kind: Option<WikiNodeKindArg>,
+    #[arg(long)]
+    pub metadata_json: Option<String>,
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WikiEditArgs {
+    #[arg(long, required = true)]
+    pub database_id: String,
+    #[arg(long, required = true)]
+    pub path: String,
+    #[arg(long, required = true)]
+    pub old_text: String,
+    #[arg(long, required = true)]
+    pub new_text: String,
+    #[arg(long)]
+    pub replace_all: bool,
+    #[arg(long)]
+    pub expected_etag: Option<String>,
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WikiDeleteArgs {
+    #[arg(long, required = true)]
+    pub database_id: String,
+    #[arg(long, required = true)]
+    pub path: String,
+    #[arg(long)]
+    pub expected_etag: Option<String>,
+    #[arg(long, help = "Confirm deletion")]
+    pub yes: bool,
+    #[arg(long, help = "Return machine-readable JSON output")]
+    pub json: bool,
+}
 
 #[derive(Args, Debug)]
 pub struct ToolsArgs {

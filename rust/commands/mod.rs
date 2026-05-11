@@ -25,6 +25,7 @@ pub mod show;
 pub mod tagged_embeddings;
 pub mod transfer;
 pub mod update;
+pub mod wiki;
 
 #[derive(Clone)]
 pub struct CommandContext {
@@ -58,6 +59,7 @@ pub async fn run_command(command: Command, ctx: CommandContext) -> Result<()> {
         Command::AskAi(args) => ask_ai::handle(args, &ctx).await,
         Command::Login(args) => ii_login::handle(args, &ctx).await,
         Command::Tools(_) => unreachable!("tools command is handled before agent setup"),
+        Command::Wiki(args) => wiki::handle(args, &ctx).await,
         Command::Tui(_) => unreachable!("TUI command is handled before command dispatch"),
     }
 }

@@ -119,7 +119,7 @@ For the fastest first success, start with `Inline Text`. It avoids file chooser 
 
 ### Step 1: Start the TUI and Learn the Layout
 
-When the TUI starts, it opens on the `Memories` tab. Use `1` to `6` to switch tabs, `Tab` / `Shift+Tab` to move focus, and `?` to open help. In normal list navigation, `q` quits and `Ctrl+R` refreshes the current view.
+When the TUI starts, it opens on the `Memories` tab. Use `1` to `5` to switch tabs, `Tab` / `Shift+Tab` to move focus, and `?` to open help. In normal list navigation, `q` quits and `Ctrl+R` refreshes the current view.
 
 ![Memories tab screenshot](./docs/images/tui-memories.png)
 
@@ -129,8 +129,16 @@ What to understand first:
 - `Insert`: add files, text, or manual embeddings
 - `Create`: create a new memory
 - `Wiki`: browse databases from the configured wiki canister; `KINIC_WIKI_CANISTER_ID` can override the default
-- `Market`: reserved and not implemented yet
 - `Settings`: principal, balance, default memory, saved tags, and retrieval settings
+
+Wiki write/delete and database management are available from the CLI:
+
+```bash
+kinic-cli --ic --identity alice wiki database list
+kinic-cli --ic --identity alice wiki read --database-id DATABASE_ID --path /Wiki/index.md
+kinic-cli --ic --identity alice wiki write --database-id DATABASE_ID --path /Wiki/new.md --input ./new.md
+kinic-cli --ic --identity alice wiki delete --database-id DATABASE_ID --path /Wiki/new.md --yes
+```
 
 ### Step 2: Confirm Identity and Balance
 

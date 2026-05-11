@@ -3,7 +3,7 @@ use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use std::path::PathBuf;
 use tui_kit_render::ui::UiConfig;
 use tui_kit_runtime::kinic_tabs::{
-    KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
+    KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
 };
 use tui_kit_runtime::{
     CoreError, CoreResult, InsertFormFocus, InsertMode, PaneFocus, PickerContext, PickerListMode,
@@ -53,7 +53,7 @@ fn test_runtime_config() -> RuntimeLoopConfig {
             KINIC_MEMORIES_TAB_ID,
             KINIC_CREATE_TAB_ID,
             KINIC_INSERT_TAB_ID,
-            KINIC_MARKET_TAB_ID,
+            KINIC_SETTINGS_TAB_ID,
         ],
         initial_focus: PaneFocus::Form,
         ui_config: test_ui_config,
@@ -122,7 +122,7 @@ fn normalize_focus_resets_insert_tab_to_tabs_and_mode_field() {
 #[test]
 fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
     let mut state = CoreState {
-        current_tab_id: KINIC_MARKET_TAB_ID.to_string(),
+        current_tab_id: KINIC_SETTINGS_TAB_ID.to_string(),
         focus: PaneFocus::Content,
         ..CoreState::default()
     };
@@ -1833,7 +1833,7 @@ fn switch_to_tab_failure_keeps_existing_focus_when_target_tab_allows_it() {
     let mut provider = TestProvider::err("tab failed");
     let mut hooks = NoopRuntimeHooks;
     let mut state = CoreState {
-        current_tab_id: KINIC_MARKET_TAB_ID.to_string(),
+        current_tab_id: KINIC_SETTINGS_TAB_ID.to_string(),
         focus: PaneFocus::Content,
         ..CoreState::default()
     };

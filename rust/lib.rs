@@ -21,6 +21,7 @@ mod python;
 pub(crate) mod shared;
 pub mod tools;
 pub mod tui;
+pub mod wiki_bridge;
 
 use anyhow::{Result, anyhow};
 use clap::{CommandFactory, Parser, error::ErrorKind};

@@ -23,13 +23,14 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
-use candid::{CandidType, Decode, Encode};
+#[cfg(test)]
+use candid::{Decode, Encode};
 use ic_agent::{Agent, export::Principal};
 use kinic_core::amount::format_e8s_to_kinic_string_nat;
-use serde::{Deserialize, Serialize};
 use tui_kit_runtime::{AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview};
 
 pub(crate) use crate::shared::memory_metadata::DescriptionUpdate;
+pub use crate::wiki_bridge::{DatabaseStatus, DatabaseSummary, NodeEntryKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySummary {
@@ -71,115 +72,6 @@ pub struct WikiSearchHit {
     pub path: String,
     pub score: f32,
     pub snippet: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum DatabaseRole {
-    Owner,
-    Writer,
-    Reader,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub enum DatabaseStatus {
-    Hot,
-    Restoring,
-    Archiving,
-    Archived,
-    Deleted,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-pub struct DatabaseSummary {
-    pub database_id: String,
-    pub status: DatabaseStatus,
-    pub role: DatabaseRole,
-    pub logical_size_bytes: u64,
-    pub archived_at_ms: Option<i64>,
-    pub deleted_at_ms: Option<i64>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-struct ListChildrenRequest {
-    database_id: String,
-    path: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-enum NodeEntryKind {
-    File,
-    Source,
-    Directory,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-struct ChildNode {
-    path: String,
-    name: String,
-    kind: NodeEntryKind,
-    updated_at: Option<i64>,
-    etag: Option<String>,
-    size_bytes: Option<u64>,
-    is_virtual: bool,
-    has_children: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-enum NodeKind {
-    File,
-    Source,
-    Directory,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-struct Node {
-    path: String,
-    kind: NodeKind,
-    content: String,
-    created_at: i64,
-    updated_at: i64,
-    etag: String,
-    metadata_json: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-enum SearchPreviewMode {
-    Light,
-    ContentStart,
-    None,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-enum SearchPreviewField {
-    Path,
-    Content,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-struct SearchPreview {
-    field: SearchPreviewField,
-    char_offset: u32,
-    match_reason: String,
-    excerpt: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, CandidType)]
-struct SearchNodeHit {
-    path: String,
-    kind: NodeKind,
-    snippet: Option<String>,
-    preview: Option<SearchPreview>,
-    score: f32,
-    match_reasons: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
-struct SearchNodesRequest {
-    database_id: String,
-    query_text: String,
-    prefix: Option<String>,
-    top_k: u32,
-    preview_mode: Option<SearchPreviewMode>,
 }
 
 pub type SearchResultItem = SearchHit;
@@ -461,15 +353,21 @@ pub async fn create_instance(
     })
 }
 
-pub async fn list_wiki_root_children(
+pub async fn list_wiki_children(
     use_mainnet: bool,
     auth: TuiAuth,
     wiki_id: String,
     database_id: String,
+    path: String,
 ) -> Result<Vec<WikiChildNode>> {
     let agent = build_search_agent(use_mainnet, auth).await?;
-    let client = VfsClient::new(agent, wiki_id)?;
-    client.list_children(&database_id, "/Wiki").await
+    let client = crate::wiki_bridge::WikiClient::new(agent, wiki_id)?;
+    Ok(client
+        .list_children(crate::wiki_bridge::ListChildrenRequest { database_id, path })
+        .await?
+        .into_iter()
+        .map(WikiChildNode::from)
+        .collect())
 }
 
 pub async fn read_wiki_node(
@@ -480,8 +378,11 @@ pub async fn read_wiki_node(
     path: String,
 ) -> Result<Option<WikiNode>> {
     let agent = build_search_agent(use_mainnet, auth).await?;
-    let client = VfsClient::new(agent, wiki_id)?;
-    client.read_node(&database_id, &path).await
+    let client = crate::wiki_bridge::WikiClient::new(agent, wiki_id)?;
+    Ok(client
+        .read_node(&database_id, &path)
+        .await?
+        .map(WikiNode::from))
 }
 
 pub async fn search_wiki_nodes(
@@ -492,8 +393,19 @@ pub async fn search_wiki_nodes(
     query: String,
 ) -> Result<Vec<WikiSearchHit>> {
     let agent = build_search_agent(use_mainnet, auth).await?;
-    let client = VfsClient::new(agent, wiki_id)?;
-    client.search_nodes(&database_id, &query, "/Wiki", 20).await
+    let client = crate::wiki_bridge::WikiClient::new(agent, wiki_id)?;
+    Ok(client
+        .search_nodes(crate::wiki_bridge::SearchNodesRequest {
+            database_id,
+            query_text: query,
+            prefix: Some("/Wiki".to_string()),
+            top_k: 20,
+            preview_mode: Some(crate::wiki_bridge::SearchPreviewMode::ContentStart),
+        })
+        .await?
+        .into_iter()
+        .map(WikiSearchHit::from)
+        .collect())
 }
 
 pub async fn list_wiki_databases(
@@ -502,7 +414,9 @@ pub async fn list_wiki_databases(
     wiki_id: String,
 ) -> Result<Vec<DatabaseSummary>> {
     let agent = build_search_agent(use_mainnet, auth).await?;
-    VfsClient::new(agent, wiki_id)?.list_databases().await
+    crate::wiki_bridge::WikiClient::new(agent, wiki_id)?
+        .list_databases()
+        .await
 }
 
 pub async fn load_session_account_overview(
@@ -969,111 +883,8 @@ fn role_code(role: AccessControlRole, principal_id: &str) -> Result<u8> {
     Ok(memory_role.code())
 }
 
-#[derive(Clone)]
-struct VfsClient {
-    agent: Agent,
-    canister_id: Principal,
-}
-
-impl VfsClient {
-    fn new(agent: Agent, canister_id: String) -> Result<Self> {
-        Ok(Self {
-            agent,
-            canister_id: Principal::from_text(canister_id)
-                .context("failed to parse wiki canister principal")?,
-        })
-    }
-
-    async fn query<Arg, Out>(&self, method: &str, arg: &Arg) -> Result<Out>
-    where
-        Arg: CandidType,
-        Out: for<'de> candid::Deserialize<'de> + CandidType,
-    {
-        let bytes = self
-            .agent
-            .query(&self.canister_id, method)
-            .with_arg(Encode!(arg).context("failed to encode wiki query args")?)
-            .call()
-            .await
-            .with_context(|| format!("wiki query failed for {method}"))?;
-        Decode!(&bytes, Out).with_context(|| format!("failed to decode wiki response for {method}"))
-    }
-
-    async fn query2<A, B, Out>(&self, method: &str, a: &A, b: &B) -> Result<Out>
-    where
-        A: CandidType,
-        B: CandidType,
-        Out: for<'de> candid::Deserialize<'de> + CandidType,
-    {
-        let bytes = self
-            .agent
-            .query(&self.canister_id, method)
-            .with_arg(Encode!(a, b).context("failed to encode wiki query args")?)
-            .call()
-            .await
-            .with_context(|| format!("wiki query failed for {method}"))?;
-        Decode!(&bytes, Out).with_context(|| format!("failed to decode wiki response for {method}"))
-    }
-
-    async fn list_databases(&self) -> Result<Vec<DatabaseSummary>> {
-        let result: Result<Vec<DatabaseSummary>, String> =
-            self.query("list_databases", &()).await?;
-        result.map_err(anyhow::Error::msg)
-    }
-
-    async fn list_children(&self, database_id: &str, path: &str) -> Result<Vec<WikiChildNode>> {
-        let result: Result<Vec<ChildNode>, String> = self
-            .query(
-                "list_children",
-                &ListChildrenRequest {
-                    database_id: database_id.to_string(),
-                    path: path.to_string(),
-                },
-            )
-            .await?;
-        Ok(result
-            .map_err(anyhow::Error::msg)?
-            .into_iter()
-            .map(WikiChildNode::from)
-            .collect())
-    }
-
-    async fn read_node(&self, database_id: &str, path: &str) -> Result<Option<WikiNode>> {
-        let result: Result<Option<Node>, String> = self
-            .query2("read_node", &database_id.to_string(), &path.to_string())
-            .await?;
-        Ok(result.map_err(anyhow::Error::msg)?.map(WikiNode::from))
-    }
-
-    async fn search_nodes(
-        &self,
-        database_id: &str,
-        query_text: &str,
-        prefix: &str,
-        top_k: u32,
-    ) -> Result<Vec<WikiSearchHit>> {
-        let result: Result<Vec<SearchNodeHit>, String> = self
-            .query(
-                "search_nodes",
-                &SearchNodesRequest {
-                    database_id: database_id.to_string(),
-                    query_text: query_text.to_string(),
-                    prefix: Some(prefix.to_string()),
-                    top_k,
-                    preview_mode: Some(SearchPreviewMode::ContentStart),
-                },
-            )
-            .await?;
-        Ok(result
-            .map_err(anyhow::Error::msg)?
-            .into_iter()
-            .map(WikiSearchHit::from)
-            .collect())
-    }
-}
-
-impl From<ChildNode> for WikiChildNode {
-    fn from(node: ChildNode) -> Self {
+impl From<crate::wiki_bridge::ChildNode> for WikiChildNode {
+    fn from(node: crate::wiki_bridge::ChildNode) -> Self {
         Self {
             path: node.path,
             name: node.name,
@@ -1088,8 +899,8 @@ impl From<ChildNode> for WikiChildNode {
     }
 }
 
-impl From<Node> for WikiNode {
-    fn from(node: Node) -> Self {
+impl From<crate::wiki_bridge::Node> for WikiNode {
+    fn from(node: crate::wiki_bridge::Node) -> Self {
         Self {
             path: node.path,
             content: node.content,
@@ -1098,8 +909,8 @@ impl From<Node> for WikiNode {
     }
 }
 
-impl From<SearchNodeHit> for WikiSearchHit {
-    fn from(hit: SearchNodeHit) -> Self {
+impl From<crate::wiki_bridge::SearchNodeHit> for WikiSearchHit {
+    fn from(hit: crate::wiki_bridge::SearchNodeHit) -> Self {
         Self {
             path: hit.path,
             score: hit.score,
@@ -1121,6 +932,9 @@ fn format_insert_execute_error(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wiki_bridge::{
+        ChildNode, DatabaseRole, Node, NodeKind, SearchNodeHit, SearchPreview, SearchPreviewField,
+    };
     use candid::Nat;
     use ic_agent::identity::AnonymousIdentity;
     use std::sync::Arc;

@@ -75,13 +75,12 @@ If you want to try File mode, either install `yazi` first or type the file path 
 
 ## Layout
 
-The TUI has six tabs.
+The TUI has five tabs.
 
 - `Memories`: list, search, and details
 - `Insert`: add data
 - `Create`: create a new memory
 - `Wiki`: browse databases from the configured wiki canister; `KINIC_WIKI_CANISTER_ID` can override the default
-- `Market`: reserved for future use and currently not implemented
 - `Settings`: view and change current connection info and saved settings
 
 The `Memories` tab opens first when the TUI starts.
@@ -309,7 +308,6 @@ The main saved values are:
 
 - `--identity` is required
 - `--ii` is not supported yet
-- The `Market` tab is not implemented yet
 - `pdftotext` is required for PDF insertion
 - There is no dedicated copy shortcut for Principal ID
 - Local use requires a prepared local replica and supporting canisters

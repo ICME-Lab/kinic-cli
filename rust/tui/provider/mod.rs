@@ -41,13 +41,14 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tui_kit_runtime::{
     AccessControlAction, AccessControlMode, AccessControlRole, ChatScope, CoreAction, CoreEffect,
-    CoreResult, CoreState, CreateCostState, DataProvider, FILE_MODE_ALLOWED_EXTENSIONS, InsertMode,
-    LoadedCreateCost, MemorySelection, PaneFocus, PickerConfirmKind, PickerContext, PickerItem,
-    PickerItemKind, PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SearchScope,
-    SessionAccountOverview, SessionSettingsSnapshot, TransferModalMode,
+    CoreResult, CoreState, CreateCostState, DataProvider, DiagnosticSnapshot, DocumentSnapshot,
+    FILE_MODE_ALLOWED_EXTENSIONS, InsertMode, LoadedCreateCost, MemorySelection, PaneFocus,
+    PaneRow, PaneSnapshot, PickerConfirmKind, PickerContext, PickerItem, PickerItemKind,
+    PickerListMode, PickerState, ProviderOutput, ProviderSnapshot, SearchScope,
+    SessionAccountOverview, SessionSettingsSnapshot, ThreePaneSnapshot, TransferModalMode,
     kinic_tabs::{
-        KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
-        KINIC_SETTINGS_TAB_ID, KINIC_WIKI_TAB_ID,
+        KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
+        KINIC_WIKI_TAB_ID,
     },
 };
 
@@ -165,6 +166,7 @@ pub struct KinicProvider {
     memory_records: Vec<KinicRecord>,
     wiki_databases: Vec<bridge::DatabaseSummary>,
     wiki_records: Vec<KinicRecord>,
+    wiki_load_error: Option<String>,
     result_records: Vec<KinicRecord>,
     memories_mode: MemoriesMode,
     pending_initial_memories: Option<mpsc::Receiver<InitialMemoriesTaskOutput>>,
@@ -208,6 +210,9 @@ pub struct KinicProvider {
     wiki_children_task: RequestTaskState<WikiChildrenTaskOutput>,
     next_wiki_children_request_id: u64,
     pending_wiki_children_database_id: Option<String>,
+    pending_wiki_children_path: Option<String>,
+    wiki_current_path: String,
+    selected_wiki_browser_index: usize,
     wiki_search_task: RequestTaskState<WikiSearchTaskOutput>,
     next_wiki_search_request_id: u64,
     wiki_databases_task: RequestTaskState<WikiDatabasesTaskOutput>,
@@ -232,13 +237,31 @@ struct SearchTaskOutput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WikiChildrenContent {
+    entries: Vec<WikiBrowserEntry>,
     body_lines: Vec<String>,
     index_preview: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WikiBrowserEntry {
+    path: String,
+    name: String,
+    kind: WikiBrowserEntryKind,
+    size_bytes: Option<u64>,
+    has_children: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WikiBrowserEntryKind {
+    Directory,
+    File,
+    Source,
 }
 
 struct WikiChildrenTaskOutput {
     request_id: u64,
     database_id: String,
+    path: String,
     result: Result<WikiChildrenContent, String>,
 }
 
@@ -992,42 +1015,130 @@ fn load_wiki_children_content(
     auth: TuiAuth,
     wiki_id: String,
     database_id: String,
+    path: String,
 ) -> Result<WikiChildrenContent, String> {
     let runtime = Runtime::new().expect("failed to create tokio runtime for wiki browser load");
-    let children = runtime
-        .block_on(bridge::list_wiki_root_children(
+    if path != "/"
+        && let Some(node) = runtime
+            .block_on(bridge::read_wiki_node(
+                use_mainnet,
+                auth.clone(),
+                wiki_id.clone(),
+                database_id.clone(),
+                path.clone(),
+            ))
+            .map_err(|error| error.to_string())?
+    {
+        let preview = node.content.lines().map(str::to_string).collect();
+        return Ok(WikiChildrenContent {
+            entries: Vec::new(),
+            body_lines: Vec::new(),
+            index_preview: Some(preview),
+        });
+    }
+
+    let entries = if path == "/" {
+        wiki_root_entries()
+    } else {
+        let children = runtime
+            .block_on(bridge::list_wiki_children(
+                use_mainnet,
+                auth.clone(),
+                wiki_id.clone(),
+                database_id.clone(),
+                path.clone(),
+            ))
+            .map_err(|error| error.to_string())?;
+        children.into_iter().map(WikiBrowserEntry::from).collect()
+    };
+    let index = runtime
+        .block_on(bridge::read_wiki_node(
             use_mainnet,
             auth.clone(),
             wiki_id.clone(),
             database_id.clone(),
-        ))
-        .map_err(|error| error.to_string())?;
-    let index = runtime
-        .block_on(bridge::read_wiki_node(
-            use_mainnet,
-            auth,
-            wiki_id,
-            database_id,
             "/Wiki/index.md".to_string(),
         ))
         .map_err(|error| error.to_string())?;
-    let body_lines = if children.is_empty() {
-        vec!["No /Wiki children found.".to_string()]
+    let body_lines = if entries.is_empty() {
+        vec!["No /Wiki or /Sources children found.".to_string()]
     } else {
-        children
-            .into_iter()
-            .map(|child| {
-                let marker = if child.has_children { "+" } else { "-" };
-                format!("{marker} {} ({})", child.path, child.kind)
-            })
-            .collect()
+        entries.iter().map(wiki_entry_line).collect()
     };
     let index_preview =
         index.map(|node| node.content.lines().take(8).map(str::to_string).collect());
     Ok(WikiChildrenContent {
+        entries,
         body_lines,
         index_preview,
     })
+}
+
+fn wiki_entry_line(entry: &WikiBrowserEntry) -> String {
+    let marker = if entry.has_children { "+" } else { "-" };
+    format!(
+        "{marker} {} ({})",
+        entry.path,
+        wiki_entry_kind_label(entry.kind)
+    )
+}
+
+fn wiki_root_entries() -> Vec<WikiBrowserEntry> {
+    ["/Wiki", "/Sources"]
+        .into_iter()
+        .map(|path| WikiBrowserEntry {
+            path: path.to_string(),
+            name: path.trim_start_matches('/').to_string(),
+            kind: WikiBrowserEntryKind::Directory,
+            size_bytes: None,
+            has_children: true,
+        })
+        .collect()
+}
+
+fn wiki_entry_kind_label(kind: WikiBrowserEntryKind) -> &'static str {
+    match kind {
+        WikiBrowserEntryKind::Directory => "directory",
+        WikiBrowserEntryKind::File => "file",
+        WikiBrowserEntryKind::Source => "source",
+    }
+}
+
+impl From<bridge::WikiChildNode> for WikiBrowserEntry {
+    fn from(child: bridge::WikiChildNode) -> Self {
+        Self {
+            path: child.path,
+            name: child.name,
+            kind: match child.kind.as_str() {
+                "source" => WikiBrowserEntryKind::Source,
+                "directory" => WikiBrowserEntryKind::Directory,
+                _ => WikiBrowserEntryKind::File,
+            },
+            size_bytes: None,
+            has_children: child.has_children,
+        }
+    }
+}
+
+fn wiki_children_cache_key(database_id: &str, path: &str) -> String {
+    format!("{database_id}\n{path}")
+}
+
+fn wiki_parent_path(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    if trimmed == "/Wiki" || trimmed == "/Sources" || trimmed.is_empty() {
+        return "/".to_string();
+    }
+    trimmed
+        .rsplit_once('/')
+        .map(|(parent, _)| {
+            if parent.is_empty() {
+                "/".to_string()
+            } else {
+                parent.to_string()
+            }
+        })
+        .unwrap_or_else(|| "/".to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1075,6 +1186,7 @@ impl KinicProvider {
             memory_records: Vec::new(),
             wiki_databases: Vec::new(),
             wiki_records: Vec::new(),
+            wiki_load_error: None,
             result_records: Vec::new(),
             memories_mode: MemoriesMode::Browser,
             pending_initial_memories: None,
@@ -1118,6 +1230,9 @@ impl KinicProvider {
             wiki_children_task: RequestTaskState::default(),
             next_wiki_children_request_id: 0,
             pending_wiki_children_database_id: None,
+            pending_wiki_children_path: None,
+            wiki_current_path: "/".to_string(),
+            selected_wiki_browser_index: 0,
             wiki_search_task: RequestTaskState::default(),
             next_wiki_search_request_id: 0,
             wiki_databases_task: RequestTaskState::default(),
@@ -1143,6 +1258,7 @@ impl KinicProvider {
             self.query.clear();
         }
         self.result_records.clear();
+        self.wiki_load_error = None;
         self.invalidate_pending_search();
 
         self.all = vec![loading_memories_record()];
@@ -1203,10 +1319,14 @@ impl KinicProvider {
         reset_request_task(&mut self.wiki_children_task);
         reset_request_task(&mut self.wiki_search_task);
         self.pending_wiki_children_database_id = None;
+        self.pending_wiki_children_path = None;
+        self.wiki_current_path = "/".to_string();
+        self.selected_wiki_browser_index = 0;
 
         let Some(wiki_canister_id) = self.config.wiki_canister_id.clone() else {
             self.wiki_databases.clear();
             self.wiki_records = vec![wiki_not_configured_record()];
+            self.wiki_load_error = Some("Wiki canister is not configured.".to_string());
             self.wiki_children_cache.clear();
             return CoreEffect::Notify("Wiki canister is not configured.".to_string());
         };
@@ -1250,6 +1370,297 @@ impl KinicProvider {
         };
 
         base.iter().collect()
+    }
+
+    fn build_wiki_three_pane_snapshot(&self, state: &CoreState) -> ThreePaneSnapshot {
+        if self.tab_id != KINIC_WIKI_TAB_ID {
+            return ThreePaneSnapshot::default();
+        }
+        let selected_index = state.selected_index.unwrap_or(0);
+        let database_rows = self
+            .wiki_records
+            .iter()
+            .enumerate()
+            .map(|(index, record)| {
+                let database = self.wiki_databases.iter().find(|database| {
+                    Some(database.database_id.as_str()) == record.source_wiki_database_id.as_deref()
+                });
+                let status = database
+                    .map(|database| format!("{:?}", database.status))
+                    .unwrap_or_else(|| "-".to_string());
+                let role = database
+                    .map(|database| format!("{:?}", database.role))
+                    .unwrap_or_else(|| "-".to_string());
+                let size = database
+                    .map(|database| database.logical_size_bytes.to_string())
+                    .unwrap_or_else(|| "0".to_string());
+                PaneRow {
+                    label: record.title.clone(),
+                    detail: format!("{status} {role} {size} bytes"),
+                    selected: index == selected_index,
+                }
+            })
+            .collect::<Vec<_>>();
+        let document_lines = self.wiki_document_lines(selected_index);
+        ThreePaneSnapshot {
+            left: PaneSnapshot {
+                title: "Databases".to_string(),
+                rows: database_rows,
+                empty_message: "No databases".to_string(),
+                loading: self.wiki_databases_task.in_flight,
+            },
+            middle: PaneSnapshot {
+                title: "Browser".to_string(),
+                rows: self.wiki_browser_rows(selected_index),
+                empty_message: "Select a database or run search.".to_string(),
+                loading: self.wiki_children_task.in_flight || self.wiki_search_task.in_flight,
+            },
+            document: DocumentSnapshot {
+                title: if self.result_records.is_empty() {
+                    self.wiki_current_path.clone()
+                } else {
+                    self.result_records
+                        .get(self.selected_wiki_browser_index)
+                        .map(|record| record.title.clone())
+                        .unwrap_or_else(|| "Wiki search".to_string())
+                },
+                lines: document_lines,
+            },
+            diagnostic: self.wiki_diagnostic(),
+            middle_mode: if self.result_records.is_empty() {
+                "browse".to_string()
+            } else {
+                "search".to_string()
+            },
+        }
+    }
+
+    fn wiki_browser_rows(&self, selected_index: usize) -> Vec<PaneRow> {
+        if !self.result_records.is_empty() {
+            return self
+                .result_records
+                .iter()
+                .enumerate()
+                .map(|(index, record)| PaneRow {
+                    label: record.title.clone(),
+                    detail: record.summary.clone(),
+                    selected: index == self.selected_wiki_browser_index,
+                })
+                .collect();
+        }
+        let Some(record) = self.wiki_records.get(selected_index) else {
+            return Vec::new();
+        };
+        let Some(database_id) = record.source_wiki_database_id.as_deref() else {
+            return Vec::new();
+        };
+        match self
+            .wiki_children_cache
+            .get(wiki_children_cache_key(database_id, self.wiki_current_path.as_str()).as_str())
+            .or_else(|| self.wiki_children_cache.get(database_id))
+        {
+            Some(content) => content
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| PaneRow {
+                    label: entry.path.clone(),
+                    detail: match entry.size_bytes {
+                        Some(size) => {
+                            format!("{} {} bytes", wiki_entry_kind_label(entry.kind), size)
+                        }
+                        None => wiki_entry_kind_label(entry.kind).to_string(),
+                    },
+                    selected: index == self.selected_wiki_browser_index,
+                })
+                .collect(),
+            None if self.pending_wiki_children_database_id.as_deref() == Some(database_id) => {
+                vec![PaneRow {
+                    label: "Loading /Wiki and /Sources...".to_string(),
+                    detail: database_id.to_string(),
+                    selected: false,
+                }]
+            }
+            None => vec![
+                PaneRow {
+                    label: "/Wiki".to_string(),
+                    detail: "directory".to_string(),
+                    selected: false,
+                },
+                PaneRow {
+                    label: "/Sources".to_string(),
+                    detail: "directory".to_string(),
+                    selected: false,
+                },
+            ],
+        }
+    }
+
+    fn wiki_document_lines(&self, selected_index: usize) -> Vec<String> {
+        if self.result_records.is_empty()
+            && let Some(database_id) = self
+                .wiki_records
+                .get(selected_index)
+                .and_then(|record| record.source_wiki_database_id.as_deref())
+            && let Some(content) = self
+                .wiki_children_cache
+                .get(wiki_children_cache_key(database_id, self.wiki_current_path.as_str()).as_str())
+            && let Some(lines) = &content.index_preview
+        {
+            return lines.clone();
+        }
+        let records = self.current_records();
+        let Some(record) = records.get(selected_index) else {
+            return vec!["No wiki database selected.".to_string()];
+        };
+        let content = self.selected_content_for_record(record, &CoreState::default());
+        let mut lines = Vec::new();
+        if !content.definition.trim().is_empty() {
+            lines.extend(content.definition.lines().map(str::to_string));
+        }
+        for section in content.sections {
+            lines.push(String::new());
+            lines.push(format!("## {}", section.heading));
+            lines.extend(section.body_lines);
+        }
+        lines
+    }
+
+    fn wiki_diagnostic(&self) -> Option<DiagnosticSnapshot> {
+        let error = self.wiki_load_error.as_ref()?;
+        let principal = match self.session_overview.session.principal_id.trim() {
+            "" | "unavailable" => None,
+            value => Some(value.to_string()),
+        };
+        let mut rows = vec![
+            PaneRow {
+                label: "canister".to_string(),
+                detail: self
+                    .config
+                    .wiki_canister_id
+                    .clone()
+                    .unwrap_or_else(|| "not configured".to_string()),
+                selected: false,
+            },
+            PaneRow {
+                label: "network".to_string(),
+                detail: self.network_label().to_string(),
+                selected: false,
+            },
+            PaneRow {
+                label: "auth".to_string(),
+                detail: self.config.auth.identity_label().to_string(),
+                selected: false,
+            },
+        ];
+        if let Some(principal) = principal {
+            rows.push(PaneRow {
+                label: "principal".to_string(),
+                detail: principal,
+                selected: false,
+            });
+        }
+        Some(DiagnosticSnapshot {
+            rows,
+            message: short_error(error.as_str()),
+        })
+    }
+
+    fn navigate_wiki_browser(&mut self, state: &CoreState, action: &CoreAction) {
+        let len = if self.result_records.is_empty() {
+            self.current_wiki_entries(state).len()
+        } else {
+            self.result_records.len()
+        };
+        if len == 0 {
+            self.selected_wiki_browser_index = 0;
+            return;
+        }
+        let last = len.saturating_sub(1);
+        self.selected_wiki_browser_index = match action {
+            CoreAction::MoveNext => (self.selected_wiki_browser_index + 1).min(last),
+            CoreAction::MovePrev => self.selected_wiki_browser_index.saturating_sub(1),
+            CoreAction::MoveHome => 0,
+            CoreAction::MoveEnd => last,
+            CoreAction::MovePageDown => (self.selected_wiki_browser_index + 10).min(last),
+            CoreAction::MovePageUp => self.selected_wiki_browser_index.saturating_sub(10),
+            _ => self.selected_wiki_browser_index.min(last),
+        };
+    }
+
+    fn current_wiki_entries(&self, state: &CoreState) -> Vec<WikiBrowserEntry> {
+        let selected_index = state.selected_index.unwrap_or(0);
+        let Some(database_id) = self
+            .wiki_records
+            .get(selected_index)
+            .and_then(|record| record.source_wiki_database_id.as_deref())
+        else {
+            return Vec::new();
+        };
+        self.wiki_children_cache
+            .get(wiki_children_cache_key(database_id, self.wiki_current_path.as_str()).as_str())
+            .map(|content| content.entries.clone())
+            .unwrap_or_default()
+    }
+
+    fn open_selected_wiki_browser_entry(&mut self, state: &CoreState) -> Vec<CoreEffect> {
+        if !self.result_records.is_empty() {
+            let Some(record) = self.result_records.get(self.selected_wiki_browser_index) else {
+                return vec![CoreEffect::Notify(
+                    "Select a wiki search result.".to_string(),
+                )];
+            };
+            let title = record.title.clone();
+            if let Some(database_id) = record.source_wiki_database_id.clone() {
+                self.wiki_current_path = title.clone();
+                self.wiki_children_cache.remove(
+                    wiki_children_cache_key(database_id.as_str(), self.wiki_current_path.as_str())
+                        .as_str(),
+                );
+                self.start_selected_wiki_children_load(state);
+                return vec![CoreEffect::Notify(format!("Loading wiki node {title}"))];
+            }
+            return Vec::new();
+        }
+
+        let entries = self.current_wiki_entries(state);
+        let Some(entry) = entries.get(self.selected_wiki_browser_index) else {
+            self.start_selected_wiki_children_load(state);
+            return Vec::new();
+        };
+        self.wiki_current_path = entry.path.clone();
+        self.selected_wiki_browser_index = 0;
+        self.start_selected_wiki_children_load(state);
+        match entry.kind {
+            WikiBrowserEntryKind::Directory => {
+                vec![CoreEffect::Notify(format!("Opened {}", entry.path))]
+            }
+            WikiBrowserEntryKind::File | WikiBrowserEntryKind::Source => {
+                vec![CoreEffect::Notify(format!(
+                    "Loading wiki node {}",
+                    entry.path
+                ))]
+            }
+        }
+    }
+
+    fn back_wiki_browser(&mut self) -> Vec<CoreEffect> {
+        if !self.result_records.is_empty() {
+            self.result_records.clear();
+            self.selected_wiki_browser_index = 0;
+            return vec![CoreEffect::Notify(
+                "Closed wiki search results.".to_string(),
+            )];
+        }
+        if self.wiki_current_path == "/" {
+            return Vec::new();
+        }
+        self.wiki_current_path = wiki_parent_path(self.wiki_current_path.as_str());
+        self.selected_wiki_browser_index = 0;
+        vec![CoreEffect::Notify(format!(
+            "Opened {}",
+            self.wiki_current_path
+        ))]
     }
 
     fn visible_memory_records(&self) -> Vec<&KinicRecord> {
@@ -1908,8 +2319,11 @@ impl KinicProvider {
         let Some((wiki_id, database_id)) = self.selected_wiki_target(state) else {
             return;
         };
-        if self.wiki_children_cache.contains_key(database_id.as_str())
-            || self.pending_wiki_children_database_id.as_deref() == Some(database_id.as_str())
+        let path = self.wiki_current_path.clone();
+        let cache_key = wiki_children_cache_key(database_id.as_str(), path.as_str());
+        if self.wiki_children_cache.contains_key(cache_key.as_str())
+            || (self.pending_wiki_children_database_id.as_deref() == Some(database_id.as_str())
+                && self.pending_wiki_children_path.as_deref() == Some(path.as_str()))
         {
             return;
         }
@@ -1917,15 +2331,19 @@ impl KinicProvider {
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
         self.pending_wiki_children_database_id = Some(database_id.clone());
+        self.pending_wiki_children_path = Some(path.clone());
         spawn_request_task(
             &mut self.next_wiki_children_request_id,
             &mut self.wiki_children_task,
             move |request_id, tx| {
                 let requested_database_id = database_id.clone();
-                let result = load_wiki_children_content(use_mainnet, auth, wiki_id, database_id);
+                let requested_path = path.clone();
+                let result =
+                    load_wiki_children_content(use_mainnet, auth, wiki_id, database_id, path);
                 let _ = tx.send(WikiChildrenTaskOutput {
                     request_id,
                     database_id: requested_database_id,
+                    path: requested_path,
                     result,
                 });
             },
@@ -2145,8 +2563,12 @@ impl KinicProvider {
             .iter()
             .filter_map(|record| record.source_wiki_database_id.clone())
             .collect::<HashSet<_>>();
-        self.wiki_children_cache
-            .retain(|database_id, _| database_ids.contains(database_id));
+        self.wiki_children_cache.retain(|cache_key, _| {
+            cache_key
+                .split_once('\n')
+                .map(|(database_id, _)| database_ids.contains(database_id))
+                .unwrap_or_else(|| database_ids.contains(cache_key))
+        });
     }
 
     fn apply_instance_summaries(&mut self, instances: bridge::InstanceSummaries) {
@@ -2578,6 +3000,7 @@ impl KinicProvider {
             selected_index,
             selected_content,
             selected_context: None,
+            three_pane: self.build_wiki_three_pane_snapshot(state),
             total_count: filtered.len(),
             status_message: Some(self.status_message(state, filtered.len())),
             selected_memory: self.active_memory.clone(),
@@ -2928,6 +3351,7 @@ impl KinicProvider {
         let auth = self.config.auth.clone();
         let use_mainnet = self.config.use_mainnet;
         let query = query.to_string();
+        self.selected_wiki_browser_index = 0;
         spawn_request_task(
             &mut self.next_wiki_search_request_id,
             &mut self.wiki_search_task,
@@ -3322,9 +3746,6 @@ impl KinicProvider {
         }
         if self.tab_id == KINIC_WIKI_TAB_ID {
             return "Browse wiki databases and search wiki nodes.".to_string();
-        }
-        if self.tab_id == KINIC_MARKET_TAB_ID {
-            return "Market is not implemented yet.".to_string();
         }
         let base = match self.memories_mode {
             MemoriesMode::Browser => self.browser_status_message(state),
@@ -4525,6 +4946,7 @@ impl KinicProvider {
             PendingTaskPoll::Disconnected => {
                 reset_request_task(&mut self.wiki_children_task);
                 self.pending_wiki_children_database_id = None;
+                self.pending_wiki_children_path = None;
                 return Some(self.disconnected_request_output(
                     state,
                     CoreEffect::Notify("Wiki browser load failed unexpectedly.".to_string()),
@@ -4534,13 +4956,17 @@ impl KinicProvider {
 
         let is_current = finish_request_task(&mut self.wiki_children_task, output.request_id);
         self.pending_wiki_children_database_id = None;
+        self.pending_wiki_children_path = None;
         if !is_current {
             return Some(self.stale_request_output(state));
         }
 
         let effects = match output.result {
             Ok(content) => {
-                self.wiki_children_cache.insert(output.database_id, content);
+                self.wiki_children_cache.insert(
+                    wiki_children_cache_key(output.database_id.as_str(), output.path.as_str()),
+                    content,
+                );
                 Vec::new()
             }
             Err(error) => vec![CoreEffect::Notify(format!(
@@ -4559,9 +4985,8 @@ impl KinicProvider {
             PendingTaskPoll::Ready(output) => output,
             PendingTaskPoll::Disconnected => {
                 reset_request_task(&mut self.wiki_databases_task);
-                self.wiki_records = vec![load_error_record(
-                    "Wiki databases load failed unexpectedly.".to_string(),
-                )];
+                self.wiki_records.clear();
+                self.wiki_load_error = Some("Wiki databases load failed unexpectedly.".to_string());
                 return Some(self.disconnected_request_output(
                     state,
                     CoreEffect::Notify("Wiki databases load failed unexpectedly.".to_string()),
@@ -4576,6 +5001,7 @@ impl KinicProvider {
 
         let effects = match output.result {
             Ok(databases) => {
+                self.wiki_load_error = None;
                 self.wiki_databases = databases;
                 self.refresh_wiki_records_from_databases();
                 if self.wiki_records.is_empty() {
@@ -4592,7 +5018,8 @@ impl KinicProvider {
             }
             Err(error) => {
                 self.wiki_databases.clear();
-                self.wiki_records = vec![load_error_record(error.clone())];
+                self.wiki_records.clear();
+                self.wiki_load_error = Some(error.clone());
                 vec![CoreEffect::Notify(format!(
                     "Wiki databases load failed: {}",
                     short_error(error.as_str())
@@ -4791,11 +5218,6 @@ impl KinicProvider {
                 self.result_records.clear();
                 vec![self.start_wiki_databases_load()]
             }
-            KINIC_MARKET_TAB_ID => {
-                vec![CoreEffect::Notify(
-                    "Market is not implemented yet.".to_string(),
-                )]
-            }
             KINIC_SETTINGS_TAB_ID => self.start_session_settings_refresh().into_iter().collect(),
             _ => vec![CoreEffect::Notify(format!("Switched kinic tab: {tab_id}"))],
         }
@@ -4945,11 +5367,31 @@ impl DataProvider for KinicProvider {
             CoreAction::MovePageUp if self.should_handle_memory_navigation(state) => {
                 self.navigate_active_memory(state, action)
             }
+            CoreAction::MoveNext
+            | CoreAction::MovePrev
+            | CoreAction::MoveHome
+            | CoreAction::MoveEnd
+            | CoreAction::MovePageDown
+            | CoreAction::MovePageUp
+                if self.tab_id == KINIC_WIKI_TAB_ID && state.focus == PaneFocus::Content =>
+            {
+                self.navigate_wiki_browser(state, action);
+            }
             CoreAction::OpenSelected => {
-                if self.is_add_memory_action_selected(state) {
+                if self.tab_id == KINIC_WIKI_TAB_ID && state.focus == PaneFocus::Content {
+                    effects.extend(self.open_selected_wiki_browser_entry(state));
+                } else if self.tab_id == KINIC_WIKI_TAB_ID {
+                    self.wiki_current_path = "/".to_string();
+                    self.selected_wiki_browser_index = 0;
+                    self.start_selected_wiki_children_load(state);
+                    effects.push(CoreEffect::FocusPane(PaneFocus::Content));
+                } else if self.is_add_memory_action_selected(state) {
                     effects.push(CoreEffect::OpenAddMemory);
                     effects.push(CoreEffect::FocusPane(PaneFocus::Items));
                 }
+            }
+            CoreAction::Back if self.tab_id == KINIC_WIKI_TAB_ID => {
+                effects.extend(self.back_wiki_browser());
             }
             CoreAction::SetTab(id) => {
                 effects.extend(self.set_tab(id.0.as_str()));

@@ -4,15 +4,13 @@ pub const KINIC_MEMORIES_TAB_ID: &str = "kinic-memories";
 pub const KINIC_INSERT_TAB_ID: &str = "kinic-insert";
 pub const KINIC_CREATE_TAB_ID: &str = "kinic-create";
 pub const KINIC_WIKI_TAB_ID: &str = "kinic-wiki";
-pub const KINIC_MARKET_TAB_ID: &str = "kinic-market";
 pub const KINIC_SETTINGS_TAB_ID: &str = "kinic-settings";
 
-pub const KINIC_TAB_IDS: [&str; 6] = [
+pub const KINIC_TAB_IDS: [&str; 5] = [
     KINIC_MEMORIES_TAB_ID,
     KINIC_INSERT_TAB_ID,
     KINIC_CREATE_TAB_ID,
     KINIC_WIKI_TAB_ID,
-    KINIC_MARKET_TAB_ID,
     KINIC_SETTINGS_TAB_ID,
 ];
 
@@ -22,7 +20,6 @@ pub enum TabKind {
     InsertForm,
     CreateForm,
     Wiki,
-    PlaceholderMarket,
     PlaceholderSettings,
     Unknown,
 }
@@ -33,7 +30,6 @@ pub fn tab_kind(tab_id: &str) -> TabKind {
         KINIC_INSERT_TAB_ID => TabKind::InsertForm,
         KINIC_CREATE_TAB_ID => TabKind::CreateForm,
         KINIC_WIKI_TAB_ID => TabKind::Wiki,
-        KINIC_MARKET_TAB_ID => TabKind::PlaceholderMarket,
         KINIC_SETTINGS_TAB_ID => TabKind::PlaceholderSettings,
         _ => TabKind::Unknown,
     }
@@ -59,10 +55,6 @@ pub fn is_kinic_wiki_tab(tab_id: &str) -> bool {
     matches!(tab_kind(tab_id), TabKind::Wiki)
 }
 
-pub fn is_kinic_market_tab(tab_id: &str) -> bool {
-    matches!(tab_kind(tab_id), TabKind::PlaceholderMarket)
-}
-
 pub fn is_kinic_settings_tab(tab_id: &str) -> bool {
     matches!(tab_kind(tab_id), TabKind::PlaceholderSettings)
 }
@@ -77,7 +69,6 @@ mod tests {
         assert_eq!(tab_kind(KINIC_INSERT_TAB_ID), TabKind::InsertForm);
         assert_eq!(tab_kind(KINIC_CREATE_TAB_ID), TabKind::CreateForm);
         assert_eq!(tab_kind(KINIC_WIKI_TAB_ID), TabKind::Wiki);
-        assert_eq!(tab_kind(KINIC_MARKET_TAB_ID), TabKind::PlaceholderMarket);
         assert_eq!(
             tab_kind(KINIC_SETTINGS_TAB_ID),
             TabKind::PlaceholderSettings
@@ -89,7 +80,6 @@ mod tests {
         assert!(is_form_tab(KINIC_CREATE_TAB_ID));
         assert!(is_form_tab(KINIC_INSERT_TAB_ID));
         assert!(is_kinic_memories_tab(KINIC_MEMORIES_TAB_ID));
-        assert!(is_kinic_market_tab(KINIC_MARKET_TAB_ID));
         assert!(is_kinic_settings_tab(KINIC_SETTINGS_TAB_ID));
         assert!(!is_form_tab(KINIC_MEMORIES_TAB_ID));
     }
