@@ -116,7 +116,11 @@ impl TuiAuth {
 pub struct TuiLaunchConfig {
     pub auth: TuiAuth,
     pub use_mainnet: bool,
+    pub wiki_canister_id: Option<String>,
 }
+
+const WIKI_CANISTER_ID_ENV_VAR: &str = "KINIC_WIKI_CANISTER_ID";
+const DEFAULT_WIKI_CANISTER_ID: &str = "xis3j-paaaa-aaaai-axumq-cai";
 
 pub fn run(global: &GlobalOpts) -> Result<()> {
     run_with_config(build_launch_config_from_global(global)?)
@@ -126,6 +130,7 @@ pub fn build_launch_config(identity: String, use_mainnet: bool) -> Result<TuiLau
     Ok(TuiLaunchConfig {
         auth: resolve_auth(identity)?,
         use_mainnet,
+        wiki_canister_id: wiki_canister_id_from_env(),
     })
 }
 
@@ -133,13 +138,25 @@ pub fn build_launch_config_from_global(global: &GlobalOpts) -> Result<TuiLaunchC
     Ok(TuiLaunchConfig {
         auth: resolve_auth(resolve_tui_identity(global)?)?,
         use_mainnet: global.ic,
+        wiki_canister_id: wiki_canister_id_from_env(),
     })
+}
+
+fn wiki_canister_id_from_env() -> Option<String> {
+    Some(
+        std::env::var(WIKI_CANISTER_ID_ENV_VAR)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| DEFAULT_WIKI_CANISTER_ID.to_string()),
+    )
 }
 
 pub fn run_with_config(config: TuiLaunchConfig) -> Result<()> {
     let mut provider = provider::KinicProvider::new(TuiConfig {
         auth: config.auth,
         use_mainnet: config.use_mainnet,
+        wiki_canister_id: config.wiki_canister_id,
     });
     let mut hooks = KinicRuntimeHooks;
 
@@ -208,6 +225,10 @@ mod tests {
 
         assert!(matches!(config.auth, TuiAuth::DeferredIdentity { .. }));
         assert!(config.use_mainnet);
+        assert_eq!(
+            config.wiki_canister_id.as_deref(),
+            Some(DEFAULT_WIKI_CANISTER_ID)
+        );
     }
 
     #[test]

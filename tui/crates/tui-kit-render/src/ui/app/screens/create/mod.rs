@@ -146,13 +146,11 @@ impl CreateFormLines<'_> {
 }
 
 fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> CreateFormLines<'a> {
-    let type_style = create_field_style(ui, CreateModalFocus::Type);
     let name_style = create_field_style(ui, CreateModalFocus::Name);
     let description_style = create_field_style(ui, CreateModalFocus::Description);
     let submit_style = create_field_style(ui, CreateModalFocus::Submit);
     let close_hint = create_close_hint(ui);
     let submit_text = create_submit_text(ui);
-    let type_hint = next_entry_hint(ui, CreateModalFocus::Type);
     let name_hint = next_entry_hint(ui, CreateModalFocus::Name);
     let description_hint = next_entry_hint(ui, CreateModalFocus::Description);
     let submit_hint = next_entry_hint(ui, CreateModalFocus::Submit);
@@ -178,19 +176,6 @@ fn create_form_lines<'a>(ui: &'a TuiKitUi<'a>, layout: CreateScreenLayout) -> Cr
     let mut lines = Vec::with_capacity(if ui.create_error.is_some() { 20 } else { 18 });
     let mut rows = FormRows::default();
 
-    let type_value = format!("< {} >", ui.create_target_kind.label());
-    rows.push_labeled_row(
-        &mut lines,
-        Line::from(Span::styled("Type", ui.theme.style_dim())),
-        CreateModalFocus::Type,
-        Line::from(vec![
-            create_input_indent(),
-            Span::styled(type_value.clone(), type_style),
-            type_hint,
-        ]),
-        type_value.as_str(),
-    );
-    lines.push(Line::from(""));
     rows.push_labeled_row(
         &mut lines,
         Line::from(Span::styled(
@@ -460,14 +445,10 @@ fn display_create_value<'a>(value: &'a str, placeholder: &'a str) -> &'a str {
 }
 
 fn create_submit_text(ui: &TuiKitUi<'_>) -> String {
-    let idle_label = match ui.create_target_kind {
-        tui_kit_runtime::CreateTargetKind::Memory => ui.ui_config.create.submit_label.as_str(),
-        tui_kit_runtime::CreateTargetKind::Wiki => "Create Wiki",
-    };
     submit_button_text(
         &ui.create_submit_state,
         ui.create_spinner_frame,
-        idle_label,
+        ui.ui_config.create.submit_label.as_str(),
         ui.ui_config.create.submit_pending_label.as_str(),
     )
 }
@@ -492,7 +473,7 @@ fn fit_single_line(value: &str, max_width: u16, keep_end: bool) -> String {
     }
 }
 fn first_create_focus() -> CreateModalFocus {
-    CreateModalFocus::Type
+    CreateModalFocus::Name
 }
 fn take_prefix_by_width(value: &str, max_width: u16) -> String {
     let mut width = 0;

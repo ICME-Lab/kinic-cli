@@ -212,7 +212,6 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .show_create_modal(false)
                     .create_name(&state.create_name)
                     .create_description(&state.create_description)
-                    .create_target_kind(state.create_target_kind)
                     .create_description_cursor(textarea_cursor(
                         active_textarea(&state),
                         ActiveTextarea::CreateDescription,
@@ -698,7 +697,6 @@ fn build_ui<'a>(
         .show_create_modal(false)
         .create_name(&state.create_name)
         .create_description(&state.create_description)
-        .create_target_kind(state.create_target_kind)
         .create_description_cursor(textarea_cursor(
             active_textarea(state),
             ActiveTextarea::CreateDescription,

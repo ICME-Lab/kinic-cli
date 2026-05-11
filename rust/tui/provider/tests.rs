@@ -24,6 +24,7 @@ fn live_config() -> TuiConfig {
     TuiConfig {
         auth: TuiAuth::resolved_for_tests(),
         use_mainnet: false,
+        wiki_canister_id: None,
     }
 }
 

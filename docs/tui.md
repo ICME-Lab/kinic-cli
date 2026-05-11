@@ -75,15 +75,17 @@ If you want to try File mode, either install `yazi` first or type the file path 
 
 ## Layout
 
-The TUI has five tabs.
+The TUI has six tabs.
 
 - `Memories`: list, search, and details
 - `Insert`: add data
 - `Create`: create a new memory
+- `Wiki`: browse databases from the configured wiki canister; `KINIC_WIKI_CANISTER_ID` can override the default
 - `Market`: reserved for future use and currently not implemented
 - `Settings`: view and change current connection info and saved settings
 
 The `Memories` tab opens first when the TUI starts.
+By default, the Wiki tab uses `xis3j-paaaa-aaaai-axumq-cai`.
 The local preferences shown in `Settings`, including the default memory, saved tags, and manually tracked memories, can also be managed from the CLI with `kinic-cli prefs ...`.
 
 ## Basic Controls

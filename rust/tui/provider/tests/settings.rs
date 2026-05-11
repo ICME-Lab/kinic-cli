@@ -272,7 +272,6 @@ fn poll_background_keeps_create_success_and_default_memory_when_reload_fails() {
         request_id: 5,
         result: Ok(bridge::CreateInstanceSuccess {
             id: "aaaaa-aa".to_string(),
-            kind: bridge::CreateTargetKind::Memory,
             instances: None,
             refresh_warning: Some(
                 "Automatic reload failed after create. Press F5 to refresh. Cause: boom"

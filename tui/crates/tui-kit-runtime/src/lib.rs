@@ -143,37 +143,9 @@ pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CreateModalFocus {
     #[default]
-    Type,
     Name,
     Description,
     Submit,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CreateTargetKind {
-    #[default]
-    Memory,
-    Wiki,
-}
-
-impl CreateTargetKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Memory => "Memory",
-            Self::Wiki => "Wiki",
-        }
-    }
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::Memory => Self::Wiki,
-            Self::Wiki => Self::Memory,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        self.next()
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -687,7 +659,6 @@ pub struct CoreState {
     pub chat_scope_label: Option<String>,
     pub create_name: String,
     pub create_description: String,
-    pub create_target_kind: CreateTargetKind,
     pub create_submit_state: CreateSubmitState,
     pub create_spinner_frame: usize,
     pub create_error: Option<String>,
@@ -744,7 +715,6 @@ impl Default for CoreState {
             chat_scope_label: None,
             create_name: String::new(),
             create_description: String::new(),
-            create_target_kind: CreateTargetKind::default(),
             create_submit_state: CreateSubmitState::default(),
             create_spinner_frame: 0,
             create_error: None,
@@ -868,8 +838,6 @@ pub enum CoreAction {
     CreateBackspace,
     CreateNextField,
     CreatePrevField,
-    CreatePrevType,
-    CreateNextType,
     CreateRefresh,
     RefreshCurrentView,
     CreateSubmit,
@@ -1443,7 +1411,6 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         },
         CoreAction::CreateInput(c) => {
             match state.create_focus {
-                CreateModalFocus::Type => {}
                 CreateModalFocus::Name => state.create_name.push(*c),
                 CreateModalFocus::Description => state.create_description.push(*c),
                 CreateModalFocus::Submit => {}
@@ -1454,7 +1421,6 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::CreateBackspace => match state.create_focus {
-            CreateModalFocus::Type => {}
             CreateModalFocus::Name => {
                 state.create_name.pop();
             }
@@ -1465,31 +1431,17 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
         },
         CoreAction::CreateNextField => {
             state.create_focus = match state.create_focus {
-                CreateModalFocus::Type => CreateModalFocus::Name,
                 CreateModalFocus::Name => CreateModalFocus::Description,
                 CreateModalFocus::Description => CreateModalFocus::Submit,
-                CreateModalFocus::Submit => CreateModalFocus::Type,
+                CreateModalFocus::Submit => CreateModalFocus::Name,
             };
         }
         CoreAction::CreatePrevField => {
             state.create_focus = match state.create_focus {
-                CreateModalFocus::Type => CreateModalFocus::Submit,
-                CreateModalFocus::Name => CreateModalFocus::Type,
+                CreateModalFocus::Name => CreateModalFocus::Submit,
                 CreateModalFocus::Description => CreateModalFocus::Name,
                 CreateModalFocus::Submit => CreateModalFocus::Description,
             };
-        }
-        CoreAction::CreatePrevType => {
-            if state.create_focus == CreateModalFocus::Type {
-                state.create_target_kind = state.create_target_kind.prev();
-                state.create_error = None;
-            }
-        }
-        CoreAction::CreateNextType => {
-            if state.create_focus == CreateModalFocus::Type {
-                state.create_target_kind = state.create_target_kind.next();
-                state.create_error = None;
-            }
         }
         CoreAction::CreateRefresh => {
             state.create_cost_state = CreateCostState::Loading;
@@ -1611,7 +1563,7 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             state.focus = PaneFocus::Form;
             match kinic_tabs::tab_kind(state.current_tab_id.as_str()) {
                 kinic_tabs::TabKind::CreateForm => {
-                    state.create_focus = CreateModalFocus::Type;
+                    state.create_focus = CreateModalFocus::Name;
                 }
                 kinic_tabs::TabKind::InsertForm => {
                     state.insert_focus = InsertFormFocus::Mode;
@@ -1935,7 +1887,6 @@ fn start_insert_submit(state: &mut CoreState) {
 
 fn apply_create_text_input(state: &mut CoreState, c: char) {
     match state.create_focus {
-        CreateModalFocus::Type => {}
         CreateModalFocus::Name => state.create_name.push(c),
         CreateModalFocus::Description => state.create_description.push(c),
         CreateModalFocus::Submit => {}
@@ -1945,7 +1896,6 @@ fn apply_create_text_input(state: &mut CoreState, c: char) {
 
 fn apply_create_backspace(state: &mut CoreState) {
     match state.create_focus {
-        CreateModalFocus::Type => {}
         CreateModalFocus::Name => {
             state.create_name.pop();
         }
@@ -1971,17 +1921,15 @@ fn start_create_submit(state: &mut CoreState) {
 
 fn next_create_focus(focus: CreateModalFocus) -> CreateModalFocus {
     match focus {
-        CreateModalFocus::Type => CreateModalFocus::Name,
         CreateModalFocus::Name => CreateModalFocus::Description,
         CreateModalFocus::Description => CreateModalFocus::Submit,
-        CreateModalFocus::Submit => CreateModalFocus::Type,
+        CreateModalFocus::Submit => CreateModalFocus::Name,
     }
 }
 
 fn prev_create_focus(focus: CreateModalFocus) -> CreateModalFocus {
     match focus {
-        CreateModalFocus::Type => CreateModalFocus::Submit,
-        CreateModalFocus::Name => CreateModalFocus::Type,
+        CreateModalFocus::Name => CreateModalFocus::Submit,
         CreateModalFocus::Description => CreateModalFocus::Name,
         CreateModalFocus::Submit => CreateModalFocus::Description,
     }

@@ -45,7 +45,6 @@ tui-kit-host = { path = "tui/crates/tui-kit-host" }
 tui-kit-runtime = { path = "tui/crates/tui-kit-runtime" }
 tui-kit-model = { path = "tui/crates/tui-kit-model" }
 tui-kit-render = { path = "tui/crates/tui-kit-render" }
-vfs-types = { path = "../llm-wiki/crates/vfs_types" }
 
 [dev-dependencies]
 serde_yaml = "0.9"

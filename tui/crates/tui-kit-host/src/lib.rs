@@ -362,8 +362,7 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 state.create_submit_state = CreateSubmitState::Idle;
                 state.create_spinner_frame = 0;
                 state.create_error = None;
-                state.create_target_kind = tui_kit_runtime::CreateTargetKind::Memory;
-                state.create_focus = CreateModalFocus::Type;
+                state.create_focus = CreateModalFocus::Name;
             }
             CoreEffect::ResetInsertFormForRepeat => {
                 if state.insert_tag_is_auto {

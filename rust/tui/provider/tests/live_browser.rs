@@ -27,7 +27,6 @@ fn poll_initial_memories_background_applies_loaded_memories_and_prefers_saved_de
                 running_memory_summary("aaaaa-aa", "first"),
                 running_memory_summary("bbbbb-bb", "second"),
             ],
-            wikis: vec![],
         }),
     })
     .unwrap();
@@ -57,7 +56,6 @@ fn poll_initial_memories_background_prefetches_active_memory_too() {
                 running_memory_summary("aaaaa-aa", "first"),
                 running_memory_summary("bbbbb-bb", "second"),
             ],
-            wikis: vec![],
         }),
     })
     .unwrap();
@@ -134,7 +132,6 @@ fn poll_initial_memories_background_falls_back_to_first_when_default_missing() {
                 running_memory_summary("aaaaa-aa", "first"),
                 running_memory_summary("bbbbb-bb", "second"),
             ],
-            wikis: vec![],
         }),
     })
     .unwrap();

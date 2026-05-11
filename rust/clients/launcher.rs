@@ -97,21 +97,6 @@ impl LauncherClient {
         Ok(result?)
     }
 
-    pub async fn deploy_wiki(&self, name: &str) -> Result<String> {
-        let payload = encode_deploy_canister_args(name, CanisterType::Wiki, None)?;
-        let response = self
-            .agent
-            .update(&self.launcher_id, "deploy_canister")
-            .with_arg(payload)
-            .call_and_wait()
-            .await
-            .context("Failed to call deploy_canister")?;
-
-        let result = Decode!(&response, std::result::Result<String, DeployInstanceError>)
-            .context("Failed to decode deploy_canister response")?;
-        Ok(result?)
-    }
-
     pub async fn list_memories(&self) -> Result<Vec<State>> {
         let response = self
             .agent
@@ -164,14 +149,6 @@ fn encode_deploy_args(name: &str, description: &str) -> Result<Vec<u8>> {
         payload,
         create_memory_dimension_u64(),
     ))?)
-}
-
-fn encode_deploy_canister_args(
-    name: &str,
-    canister_type: CanisterType,
-    dim: Option<u64>,
-) -> Result<Vec<u8>> {
-    Ok(candid::encode_args((name.to_string(), canister_type, dim))?)
 }
 
 fn encode_update_instance_args(instance_pid_str: &str) -> Result<Vec<u8>> {
@@ -252,14 +229,5 @@ mod tests {
         .unwrap();
         let decoded = Decode!(&bytes, Vec<TypedState>).unwrap();
         assert_eq!(decoded[0].canister_type, CanisterType::Wiki);
-    }
-
-    #[test]
-    fn deploy_wiki_args_encode_as_text_type_and_no_dim() {
-        let bytes = encode_deploy_canister_args("Project Wiki", CanisterType::Wiki, None).unwrap();
-        let decoded = Decode!(&bytes, String, CanisterType, Option<u64>).unwrap();
-        assert_eq!(decoded.0, "Project Wiki");
-        assert_eq!(decoded.1, CanisterType::Wiki);
-        assert_eq!(decoded.2, None);
     }
 }
