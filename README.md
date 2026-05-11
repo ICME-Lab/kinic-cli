@@ -131,6 +131,8 @@ What to understand first:
 - `Wiki`: browse databases from the configured wiki canister; `KINIC_WIKI_CANISTER_ID` can override the default
 - `Settings`: principal, balance, default memory, saved tags, and retrieval settings
 
+For local deploys, `scripts/setup.sh` deploys the bundled Wiki wasm at the default Wiki canister id.
+
 Wiki write/delete and database management are available from the CLI:
 
 ```bash

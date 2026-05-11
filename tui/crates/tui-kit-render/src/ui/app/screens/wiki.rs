@@ -7,38 +7,52 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Widget, Wrap},
 };
-use tui_kit_runtime::{PaneRow, ThreePaneSnapshot};
+use tui_kit_runtime::{PaneRow, ThreePaneMode, ThreePaneSnapshot};
 
+use super::spinner_frame;
 use crate::ui::app::{Focus, TuiKitUi, shared};
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_wiki_screen(&self, area: Rect, buf: &mut Buffer) {
         let body = shared::layout::body_rect_for_area_with_tabs(area, !self.tab_specs.is_empty());
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(30),
-                Constraint::Length(36),
-                Constraint::Min(24),
-            ])
-            .split(body);
         let default_snapshot = ThreePaneSnapshot::default();
         let snapshot = self.three_pane.unwrap_or(&default_snapshot);
+        match snapshot.mode {
+            ThreePaneMode::List => {
+                self.render_wiki_databases(body, buf, snapshot);
+                return;
+            }
+            ThreePaneMode::Diagnostic => {
+                self.render_wiki_diagnostic(body, buf, snapshot);
+                return;
+            }
+            _ => {}
+        }
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(38), Constraint::Min(36)])
+            .split(body);
 
-        self.render_wiki_databases(chunks[0], buf, snapshot);
-        self.render_wiki_browser(chunks[1], buf, snapshot);
-        self.render_wiki_document(chunks[2], buf, snapshot);
+        self.render_wiki_browser(chunks[0], buf, snapshot);
+        self.render_wiki_document(chunks[1], buf, snapshot);
     }
 
     fn render_wiki_databases(&self, area: Rect, buf: &mut Buffer, snapshot: &ThreePaneSnapshot) {
         let title = if snapshot.left.loading {
-            " Databases (loading) "
+            format!(
+                " Databases | {} Loading... ",
+                spinner_frame(self.insert_spinner_frame)
+            )
         } else {
-            " Databases "
+            " Databases ".to_string()
         };
         let items = if snapshot.left.rows.is_empty() {
             vec![ListItem::new(Line::from(Span::styled(
-                format!("  {}", snapshot.left.empty_message),
+                if snapshot.left.loading {
+                    format!("  {} Loading...", spinner_frame(self.insert_spinner_frame))
+                } else {
+                    format!("  {}", snapshot.left.empty_message)
+                },
                 self.theme.style_dim(),
             )))]
         } else {
@@ -51,11 +65,13 @@ impl<'a> TuiKitUi<'a> {
         };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(if self.focus == Focus::Items {
-                self.theme.style_border_focused()
-            } else {
-                self.theme.style_border()
-            })
+            .border_style(
+                if self.focus == Focus::Items || self.focus == Focus::Content {
+                    self.theme.style_border_focused()
+                } else {
+                    self.theme.style_border()
+                },
+            )
             .style(Style::default().bg(self.theme.bg_panel))
             .title(title);
         List::new(items).block(block).render(area, buf);
@@ -81,20 +97,24 @@ impl<'a> TuiKitUi<'a> {
     }
 
     fn render_wiki_browser(&self, area: Rect, buf: &mut Buffer, snapshot: &ThreePaneSnapshot) {
-        let title = if snapshot.middle_mode == "search" {
-            " Browser (search) "
+        let path = selected_browser_path(snapshot);
+        let title = if snapshot.middle.loading {
+            format!(
+                " Browser | {} Loading... ",
+                spinner_frame(self.insert_spinner_frame)
+            )
+        } else if snapshot.mode == ThreePaneMode::Search {
+            " Browser (search) ".to_string()
         } else {
-            " Browser "
+            format!(" Browser | {path} ")
         };
-        let rows = if let Some(diagnostic) = &snapshot.diagnostic {
+        let rows = if snapshot.middle.rows.is_empty() {
             vec![PaneRow {
-                label: "list_databases failed".to_string(),
-                detail: diagnostic.message.clone(),
-                selected: false,
-            }]
-        } else if snapshot.middle.rows.is_empty() {
-            vec![PaneRow {
-                label: "No entries".to_string(),
+                label: if snapshot.middle.loading {
+                    format!("{} Loading...", spinner_frame(self.insert_spinner_frame))
+                } else {
+                    "No entries".to_string()
+                },
                 detail: snapshot.middle.empty_message.clone(),
                 selected: false,
             }]
@@ -104,19 +124,21 @@ impl<'a> TuiKitUi<'a> {
         let items = rows
             .iter()
             .map(|row| {
-                let marker = if row.selected { "▸" } else { " " };
+                let marker = if row.selected { ">" } else { " " };
+                let icon = wiki_browser_icon(row.detail.as_str());
                 let style = if row.selected {
-                    self.theme.style_normal().add_modifier(Modifier::BOLD)
+                    self.theme.style_selected()
                 } else {
                     self.theme.style_dim()
                 };
                 ListItem::new(vec![
                     Line::from(vec![
                         Span::styled(format!("{marker} "), self.theme.style_accent()),
+                        Span::styled(format!("{icon} "), style),
                         Span::styled(row.label.clone(), style),
                     ]),
                     Line::from(Span::styled(
-                        format!("  {}", row.detail),
+                        format!("    {}", row.detail),
                         self.theme.style_muted(),
                     )),
                 ])
@@ -128,6 +150,31 @@ impl<'a> TuiKitUi<'a> {
             .style(Style::default().bg(self.theme.bg_panel))
             .title(title);
         List::new(items).block(block).render(area, buf);
+    }
+
+    fn render_wiki_diagnostic(&self, area: Rect, buf: &mut Buffer, snapshot: &ThreePaneSnapshot) {
+        let mut lines = Vec::new();
+        if let Some(diagnostic) = &snapshot.diagnostic {
+            for row in &diagnostic.rows {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{}: ", row.label), self.theme.style_muted()),
+                    Span::raw(row.detail.clone()),
+                ]));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(diagnostic.message.clone()));
+        } else {
+            lines.push(Line::from("No diagnostics."));
+        }
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(self.theme.style_border_focused())
+            .style(Style::default().bg(self.theme.bg_panel))
+            .title(" Wiki diagnostics ");
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
     }
 
     fn render_wiki_document(&self, area: Rect, buf: &mut Buffer, snapshot: &ThreePaneSnapshot) {
@@ -170,12 +217,35 @@ impl<'a> TuiKitUi<'a> {
     }
 }
 
+fn selected_browser_path(snapshot: &ThreePaneSnapshot) -> String {
+    snapshot
+        .document
+        .title
+        .split_once(' ')
+        .map(|(_, path)| path)
+        .filter(|path| path.starts_with('/'))
+        .unwrap_or("/")
+        .to_string()
+}
+
+fn wiki_browser_icon(detail: &str) -> &'static str {
+    if detail.starts_with("directory") {
+        "[D]"
+    } else if detail.starts_with("source") {
+        "[S]"
+    } else if detail.starts_with("file") {
+        "[F]"
+    } else {
+        "[ ]"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
     use tui_kit_runtime::{
-        DiagnosticSnapshot, DocumentSnapshot, PaneRow, PaneSnapshot, ThreePaneSnapshot,
-        kinic_tabs::KINIC_WIKI_TAB_ID,
+        DiagnosticSnapshot, DocumentSnapshot, PaneRow, PaneSnapshot, ThreePaneMode,
+        ThreePaneSnapshot, kinic_tabs::KINIC_WIKI_TAB_ID,
     };
 
     use crate::ui::{app::TabId, theme::Theme};
@@ -191,29 +261,25 @@ mod tests {
     }
 
     #[test]
-    fn wiki_screen_renders_dedicated_panes() {
+    fn wiki_screen_renders_database_list_mode_as_single_pane() {
         let theme = Theme::default();
         let snapshot = ThreePaneSnapshot {
             left: PaneSnapshot {
-                rows: vec![PaneRow {
-                    label: "db-a".to_string(),
-                    detail: "Hot Owner 42 bytes".to_string(),
-                    selected: true,
-                }],
+                rows: vec![
+                    PaneRow {
+                        label: "db-a".to_string(),
+                        detail: "Hot Owner 42 bytes".to_string(),
+                        selected: false,
+                    },
+                    PaneRow {
+                        label: "+ Create database".to_string(),
+                        detail: "create new database".to_string(),
+                        selected: true,
+                    },
+                ],
                 ..PaneSnapshot::default()
             },
-            middle: PaneSnapshot {
-                rows: vec![PaneRow {
-                    label: "/Wiki/index.md".to_string(),
-                    detail: "file".to_string(),
-                    selected: false,
-                }],
-                ..PaneSnapshot::default()
-            },
-            document: DocumentSnapshot {
-                title: "/Wiki/index.md".to_string(),
-                lines: vec!["hello wiki".to_string()],
-            },
+            mode: ThreePaneMode::List,
             ..ThreePaneSnapshot::default()
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 110, 30));
@@ -223,11 +289,95 @@ mod tests {
             .render(Rect::new(0, 0, 110, 30), &mut buf);
         let text = rendered(&buf);
         assert!(text.contains("Databases"));
+        assert!(text.contains("db-a"));
+        assert!(text.contains("+ Create database"));
+        assert!(text.contains("create new database"));
+        assert!(!text.contains("Browser"));
+        assert!(!text.contains("Document"));
+    }
+
+    #[test]
+    fn wiki_screen_renders_browser_mode_as_two_panes() {
+        let theme = Theme::default();
+        let snapshot = ThreePaneSnapshot {
+            middle: PaneSnapshot {
+                rows: vec![PaneRow {
+                    label: "/Wiki/index.md".to_string(),
+                    detail: "file".to_string(),
+                    selected: true,
+                }],
+                ..PaneSnapshot::default()
+            },
+            document: DocumentSnapshot {
+                title: "db-a /Wiki/index.md".to_string(),
+                lines: vec!["hello wiki".to_string()],
+            },
+            mode: ThreePaneMode::Browse,
+            ..ThreePaneSnapshot::default()
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 110, 30));
+        TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new(KINIC_WIKI_TAB_ID))
+            .three_pane_snapshot(&snapshot)
+            .render(Rect::new(0, 0, 110, 30), &mut buf);
+        let text = rendered(&buf);
         assert!(text.contains("Browser"));
         assert!(text.contains("Document"));
-        assert!(text.contains("db-a"));
         assert!(text.contains("/Wiki/index.md"));
         assert!(text.contains("hello wiki"));
+        assert!(!text.contains("Databases"));
+    }
+
+    #[test]
+    fn wiki_screen_renders_database_loading_spinner() {
+        let theme = Theme::default();
+        let snapshot = ThreePaneSnapshot {
+            left: PaneSnapshot {
+                empty_message: "No databases".to_string(),
+                loading: true,
+                ..PaneSnapshot::default()
+            },
+            mode: ThreePaneMode::List,
+            ..ThreePaneSnapshot::default()
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 110, 30));
+        TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new(KINIC_WIKI_TAB_ID))
+            .insert_spinner_frame(1)
+            .three_pane_snapshot(&snapshot)
+            .render(Rect::new(0, 0, 110, 30), &mut buf);
+        let text = rendered(&buf);
+        assert!(text.contains("Databases"));
+        assert!(text.contains("Loading"));
+        assert!(text.contains("/"));
+    }
+
+    #[test]
+    fn wiki_screen_renders_browser_loading_spinner() {
+        let theme = Theme::default();
+        let snapshot = ThreePaneSnapshot {
+            middle: PaneSnapshot {
+                empty_message: "Loading /Wiki".to_string(),
+                loading: true,
+                ..PaneSnapshot::default()
+            },
+            document: DocumentSnapshot {
+                title: "db-a /".to_string(),
+                lines: Vec::new(),
+            },
+            mode: ThreePaneMode::Browse,
+            ..ThreePaneSnapshot::default()
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 110, 30));
+        TuiKitUi::new(&theme)
+            .current_tab_id(TabId::new(KINIC_WIKI_TAB_ID))
+            .insert_spinner_frame(1)
+            .three_pane_snapshot(&snapshot)
+            .render(Rect::new(0, 0, 110, 30), &mut buf);
+        let text = rendered(&buf);
+        assert!(text.contains("Browser"));
+        assert!(text.contains("Loading"));
+        assert!(text.contains("/"));
     }
 
     #[test]
@@ -249,6 +399,7 @@ mod tests {
                 ],
                 message: "wiki query failed for list_databases".to_string(),
             }),
+            mode: ThreePaneMode::Diagnostic,
             ..ThreePaneSnapshot::default()
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 110, 30));
@@ -257,7 +408,8 @@ mod tests {
             .three_pane_snapshot(&snapshot)
             .render(Rect::new(0, 0, 110, 30), &mut buf);
         let text = rendered(&buf);
-        assert!(text.contains("list_databases failed"));
+        assert!(text.contains("Wiki diagnostics"));
+        assert!(text.contains("wiki query failed for list_databases"));
         assert!(text.contains("aaaaa-aa"));
         assert!(text.contains("2vxsx-fae"));
     }

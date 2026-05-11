@@ -51,7 +51,7 @@ fn submit_button_text(
     }
 }
 
-fn spinner_frame(frame: usize) -> &'static str {
+pub(crate) fn spinner_frame(frame: usize) -> &'static str {
     const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
     FRAMES[frame % FRAMES.len()]
 }

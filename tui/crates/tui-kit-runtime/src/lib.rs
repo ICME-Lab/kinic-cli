@@ -656,13 +656,22 @@ pub struct DiagnosticSnapshot {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThreePaneMode {
+    #[default]
+    List,
+    Browse,
+    Search,
+    Diagnostic,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ThreePaneSnapshot {
     pub left: PaneSnapshot,
     pub middle: PaneSnapshot,
     pub document: DocumentSnapshot,
     pub diagnostic: Option<DiagnosticSnapshot>,
-    pub middle_mode: String,
+    pub mode: ThreePaneMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -961,6 +970,8 @@ pub enum CoreEffect {
     InsertFormError(Option<String>),
     /// Select the first row in the list (no-op when empty).
     SelectFirstListItem,
+    /// Select a specific row in the list (clamped by the host after snapshots apply).
+    SelectListItem(usize),
     /// Move keyboard focus to a pane.
     FocusPane(PaneFocus),
     /// Clear create form fields and switch the active tab (e.g. after successful create).
@@ -1062,6 +1073,7 @@ pub enum CoreKey {
     Slash,
     Tab,
     BackTab,
+    Esc,
     Backspace,
     Enter,
     Down,
@@ -2576,6 +2588,9 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
                 _ => None,
             },
             PaneFocus::Items => match key {
+                CoreKey::Esc if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
+                    Some(CoreAction::Back)
+                }
                 CoreKey::Down => Some(CoreAction::MoveNext),
                 CoreKey::Up => Some(CoreAction::MovePrev),
                 CoreKey::PageDown => Some(CoreAction::MovePageDown),
@@ -2589,6 +2604,9 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             },
             PaneFocus::Tabs => None,
             PaneFocus::Content => match key {
+                CoreKey::Esc if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
+                    Some(CoreAction::Back)
+                }
                 CoreKey::Down if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
                     Some(CoreAction::MoveNext)
                 }
@@ -2626,7 +2644,11 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
                 CoreKey::Up if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
                     Some(CoreAction::MemoryContentMovePrev)
                 }
-                CoreKey::Left | CoreKey::Char('h') => Some(CoreAction::Back),
+                CoreKey::Left | CoreKey::Char('h')
+                    if current_tab_id != kinic_tabs::KINIC_WIKI_TAB_ID =>
+                {
+                    Some(CoreAction::Back)
+                }
                 _ if is_settings_content(current_tab_id, PaneFocus::Content) => {
                     settings_content_action_for_key(key)
                 }
@@ -3624,8 +3646,7 @@ mod tests {
             (CoreKey::Enter, CoreAction::OpenSelected),
             (CoreKey::Right, CoreAction::OpenSelected),
             (CoreKey::Char('l'), CoreAction::OpenSelected),
-            (CoreKey::Left, CoreAction::Back),
-            (CoreKey::Char('h'), CoreAction::Back),
+            (CoreKey::Esc, CoreAction::Back),
         ];
 
         for (key, action) in cases {
@@ -3634,6 +3655,28 @@ mod tests {
                 Some(action)
             );
         }
+    }
+
+    #[test]
+    fn wiki_content_left_and_h_do_not_go_back() {
+        for key in [CoreKey::Left, CoreKey::Char('h')] {
+            assert_eq!(
+                action_for_key(key, PaneFocus::Content, kinic_tabs::KINIC_WIKI_TAB_ID),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn wiki_items_esc_goes_back() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Esc,
+                PaneFocus::Items,
+                kinic_tabs::KINIC_WIKI_TAB_ID
+            ),
+            Some(CoreAction::Back)
+        );
     }
 
     #[test]

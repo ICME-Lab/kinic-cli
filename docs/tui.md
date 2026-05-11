@@ -85,6 +85,7 @@ The TUI has five tabs.
 
 The `Memories` tab opens first when the TUI starts.
 By default, the Wiki tab uses `xis3j-paaaa-aaaai-axumq-cai`.
+For local deploys, `scripts/setup.sh` deploys the bundled Wiki wasm at that same canister id.
 The local preferences shown in `Settings`, including the default memory, saved tags, and manually tracked memories, can also be managed from the CLI with `kinic-cli prefs ...`.
 
 ## Basic Controls

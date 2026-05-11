@@ -419,6 +419,17 @@ pub async fn list_wiki_databases(
         .await
 }
 
+pub async fn create_wiki_database(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    wiki_id: String,
+) -> Result<String> {
+    let agent = build_search_agent(use_mainnet, auth).await?;
+    crate::wiki_bridge::WikiClient::new(agent, wiki_id)?
+        .create_database()
+        .await
+}
+
 pub async fn load_session_account_overview(
     use_mainnet: bool,
     auth: TuiAuth,

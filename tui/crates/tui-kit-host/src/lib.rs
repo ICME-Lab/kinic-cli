@@ -57,6 +57,7 @@ pub fn key_to_core_key(code: KeyCode) -> Option<CoreKey> {
         KeyCode::Char(c) => Some(CoreKey::Char(c)),
         KeyCode::Tab => Some(CoreKey::Tab),
         KeyCode::BackTab => Some(CoreKey::BackTab),
+        KeyCode::Esc => Some(CoreKey::Esc),
         KeyCode::Backspace => Some(CoreKey::Backspace),
         KeyCode::Enter => Some(CoreKey::Enter),
         KeyCode::Down => Some(CoreKey::Down),
@@ -189,6 +190,10 @@ pub fn global_command_for_key(
     if code == KeyCode::Esc {
         let tab_specific = if focus == PaneFocus::Form && focus_policy.allows_form {
             HostGlobalCommand::BackFromFormToTabs
+        } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_WIKI_TAB_ID
+            && matches!(focus, PaneFocus::Items | PaneFocus::Content)
+        {
+            HostGlobalCommand::None
         } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
             && focus == PaneFocus::Content
         {
@@ -339,6 +344,13 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                     None
                 } else {
                     Some(0)
+                };
+            }
+            CoreEffect::SelectListItem(index) => {
+                state.selected_index = if state.list_items.is_empty() {
+                    None
+                } else {
+                    Some(index.min(state.list_items.len().saturating_sub(1)))
                 };
             }
             CoreEffect::FocusPane(pane) => {

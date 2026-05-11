@@ -136,6 +136,7 @@ Notes:
 ### Wiki CLI
 
 `wiki` operates the configured Wiki canister. It uses `xis3j-paaaa-aaaai-axumq-cai` by default and `KINIC_WIKI_CANISTER_ID` can override that target.
+For local deploys, `scripts/setup.sh` deploys the bundled Wiki wasm at that same canister id.
 
 ```bash
 cargo run -- --ic --identity alice wiki database list

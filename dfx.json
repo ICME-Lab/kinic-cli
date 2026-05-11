@@ -15,6 +15,11 @@
             "type": "custom",
             "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
             "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz"
+        },
+        "wiki": {
+            "type": "custom",
+            "candid": "wasm/wiki/vfs.did",
+            "wasm": "wasm/wiki/vfs_canister_nowasi.wasm"
         }
     },
     "defaults": {
