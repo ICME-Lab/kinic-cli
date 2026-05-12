@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "wrangler deploy --dry-run",
+    "build": "wrangler deploy --dry-run --config wrangler.jsonc",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --config wrangler.jsonc",
     "test": "vitest run --config vitest.config.ts",

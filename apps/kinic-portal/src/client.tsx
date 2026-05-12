@@ -2,7 +2,7 @@
 // What: hydrates the Worker-rendered HTML using the same route tree as the server.
 // Why: public detail, summary, and chat still run as client fetches after the initial HTML response.
 
-import { hydrateRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import "./globals.css";
 import { App } from "./app";
@@ -14,9 +14,14 @@ if (!rootElement) {
   throw new Error("portal root element missing");
 }
 
-hydrateRoot(
-  rootElement,
+const app = (
   <BrowserRouter>
     <App config={readRuntimeConfig()} />
-  </BrowserRouter>,
+  </BrowserRouter>
 );
+
+if (rootElement.hasChildNodes()) {
+  hydrateRoot(rootElement, app);
+} else {
+  createRoot(rootElement).render(app);
+}

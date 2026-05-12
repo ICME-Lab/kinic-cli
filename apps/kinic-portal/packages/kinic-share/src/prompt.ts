@@ -7,6 +7,9 @@ const MAX_RESULTS = 5;
 const MAX_HITS_PER_DOC = 6;
 const MAX_HIT_LEN = 600;
 const SUMMARY_QUERY = "overview summary main topics purpose contents";
+export const DEFAULT_PROMPT_LANGUAGE = "en";
+const SUPPORTED_PROMPT_LANGUAGES = new Set(["en", "ja", "ko", "zh", "es", "fr", "de", "it", "pt", "ru"]);
+const MAX_PROMPT_LANGUAGE_LENGTH = 16;
 
 export type PromptSearchHit = {
   score: number;
@@ -152,13 +155,28 @@ export function escapeXml(input: string): string {
     .replaceAll("'", "&apos;");
 }
 
+export function normalizePromptLanguage(value: string | null | undefined): string {
+  const candidate = value
+    ?.split(",", 1)[0]
+    ?.split(";", 1)[0]
+    ?.trim()
+    ?.toLowerCase()
+    ?.replaceAll("_", "-")
+    ?.replace(/[^a-z0-9-]/g, "");
+  const baseLanguage = candidate?.split("-", 1)[0];
+  if (!baseLanguage || baseLanguage.length > MAX_PROMPT_LANGUAGE_LENGTH) {
+    return DEFAULT_PROMPT_LANGUAGE;
+  }
+  return SUPPORTED_PROMPT_LANGUAGES.has(baseLanguage) ? baseLanguage : DEFAULT_PROMPT_LANGUAGE;
+}
+
 function clip(value: string, max: number): string {
   const chars = Array.from(value);
   return chars.length > max ? `${chars.slice(0, max).join("")}...` : value;
 }
 
 function promptLanguageInstruction(language: string): string {
-  switch (language.split(/[-_]/, 1)[0]?.toLowerCase()) {
+  switch (normalizePromptLanguage(language)) {
     case "ja":
       return "Japanese";
     case "ko":

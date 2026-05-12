@@ -20,7 +20,7 @@ import { normalizePublicQuery } from "../../shared/public-query";
 export const PUBLIC_MEMORY_HELP_OUTPUT = {
   server: "kinic-remote-mcp",
   mode: "anonymous read-only",
-  available_tools: ["public_memory_show", "public_memory_search"],
+  available_tools: ["public_memory_help", "public_memory_show", "public_memory_search"],
   rules: [
     "Pass memory_id on every public_memory_show and public_memory_search call.",
     "public_memory_search.query searches the stored contents of the selected memory.",

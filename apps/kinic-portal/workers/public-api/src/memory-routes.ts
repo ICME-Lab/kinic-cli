@@ -10,12 +10,13 @@ import {
   createAnonymousAgent,
   extractAnswer,
   fetchEmbedding,
+  normalizePromptLanguage,
   searchMemory,
 } from "@kinic/kinic-share";
 import {
   classifyPublicMemoryRuntimeError,
   TRANSIENT_QUERY_ERROR as TRANSIENT_PUBLIC_MEMORY_ERROR,
-} from "../../../packages/kinic-share/src/memory-internal";
+} from "@kinic/kinic-share/memory-internal";
 import { resolvePublicMemory, toSharedRuntimeEnv } from "./public-memory";
 import { normalizePublicQuery } from "../../shared/public-query";
 
@@ -42,7 +43,7 @@ export async function handleMemoryChat(c: AppContext): Promise<Response> {
   try {
     const embedding = await fetchEmbedding(query, runtimeEnv);
     const hits = (await searchMemory(createAnonymousAgent(runtimeEnv), memoryId, embedding)).slice(0, PUBLIC_MEMORY_CHAT_TOP_K);
-    const prompt = buildAskAiPrompt(query, hits, body.language?.trim() || "en");
+    const prompt = buildAskAiPrompt(query, hits, normalizePromptLanguage(body.language));
     const rawResponse = await callChatApi(prompt, runtimeEnv);
     return c.json({
       memory_id: memoryId,

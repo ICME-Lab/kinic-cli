@@ -130,7 +130,7 @@ function parseMemoryShowResponse(value: Record<string, unknown>): MemoryShowResp
     || typeof value.dim !== "number"
     || !Array.isArray(value.owners)
     || typeof value.stable_memory_size !== "number"
-    || typeof value.cycle_amount !== "number"
+    || typeof value.cycle_amount !== "string"
   ) {
     return null;
   }

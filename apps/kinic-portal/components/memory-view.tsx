@@ -6,6 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 import {
   buildChatGptMemoryPrompt,
   buildChatGptPromptUrl,
+  normalizePromptLanguage,
   type MemoryShowResponse,
 } from "@kinic/kinic-share";
 import { Check, Copy } from "lucide-react";
@@ -55,7 +56,7 @@ export function MemoryView({
 
   useEffect(() => {
     setCurrentUrl(window.location.href);
-    setLanguage(window.navigator.language || "en");
+    setLanguage(normalizePromptLanguage(window.navigator.language));
   }, []);
 
   function submit() {

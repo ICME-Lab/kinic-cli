@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./memory-internal": "./src/memory-internal.ts"
+  },
+  "types": "./src/index.ts",
   "scripts": {
     "test": "vitest run"
   },

@@ -48,7 +48,7 @@ describe("portal worker", () => {
         dim: 1536,
         owners: ["user"],
         stable_memory_size: 10,
-        cycle_amount: 20,
+        cycle_amount: "20",
       },
     });
     mocks.resolvePublicSummary.mockResolvedValue({
@@ -210,7 +210,7 @@ describe("portal worker", () => {
       dim: 1536,
       owners: ["user"],
       stable_memory_size: 10,
-      cycle_amount: 20,
+      cycle_amount: "20",
     });
     expect(mocks.renderPortalDocument).not.toHaveBeenCalled();
   });

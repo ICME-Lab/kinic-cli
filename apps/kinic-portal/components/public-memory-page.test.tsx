@@ -62,7 +62,7 @@ describe("PublicMemoryPage", () => {
         dim: 1536,
         owners: ["user"],
         stable_memory_size: 10,
-        cycle_amount: 20,
+        cycle_amount: "20",
       }),
     );
 
@@ -153,7 +153,7 @@ describe("PublicMemoryPage", () => {
           dim: 1536,
           owners: ["user"],
           stable_memory_size: 10,
-          cycle_amount: 20,
+          cycle_amount: "20",
         }),
       )
       .mockResolvedValueOnce(
@@ -165,7 +165,7 @@ describe("PublicMemoryPage", () => {
           dim: 1536,
           owners: ["user"],
           stable_memory_size: 11,
-          cycle_amount: 21,
+          cycle_amount: "21",
         }),
       );
 
@@ -211,7 +211,7 @@ describe("PublicMemoryPage", () => {
         dim: 1536,
         owners: ["user"],
         stable_memory_size: 11,
-        cycle_amount: 21,
+        cycle_amount: "21",
       }),
     );
 
@@ -229,5 +229,31 @@ describe("PublicMemoryPage", () => {
 
     expect(screen.queryByText("Anonymous access is blocked.")).toBeNull();
     await screen.findByText("draft:m2");
+  });
+
+  it("rejects memory detail responses with numeric cycle amounts", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        memory_id: "m1",
+        name: "Skill Store",
+        description: "Shared notes",
+        version: "0.2.5",
+        dim: 1536,
+        owners: ["user"],
+        stable_memory_size: 10,
+        cycle_amount: 20,
+      }),
+    );
+
+    render(
+      <PublicMemoryPage
+        memoryId="m1"
+        initialState={null}
+        publicApiOrigin="https://api.kinic.test"
+        mcpEndpoint={null}
+      />,
+    );
+
+    await screen.findByText("Temporary network error");
   });
 });

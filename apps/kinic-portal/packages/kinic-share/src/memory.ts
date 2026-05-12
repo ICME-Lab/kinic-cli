@@ -27,7 +27,7 @@ export type MemoryShowResponse = {
   dim: number;
   owners: string[];
   stable_memory_size: number;
-  cycle_amount: number;
+  cycle_amount: string;
 };
 
 type MemorySummaryResponse = { memory_id: string; name: string; description: string | null; version: string };
@@ -64,7 +64,7 @@ async function getMemoryDetails(agent: HttpAgent, memoryId: string): Promise<Mem
     dim: Number(dim),
     owners: metadata.owners,
     stable_memory_size: metadata.stable_memory_size,
-    cycle_amount: Number(metadata.cycle_amount),
+    cycle_amount: metadata.cycle_amount.toString(),
   };
 }
 
@@ -106,10 +106,10 @@ export async function fetchEmbedding(text: string, env: SharedRuntimeEnv): Promi
     throw new Error(`embedding request failed with status ${response.status}`);
   }
   const payload = parseRecord(await response.json());
-  if (!payload || !Array.isArray(payload.embedding)) {
+  if (!payload || !Array.isArray(payload.embedding) || !payload.embedding.every(isFiniteNumber)) {
     throw new Error("Invalid embedding response.");
   }
-  return payload.embedding.filter((value): value is number => typeof value === "number");
+  return payload.embedding;
 }
 
 export async function callChatApi(prompt: string, env: SharedRuntimeEnv): Promise<string> {
@@ -129,6 +129,10 @@ function createMemoryActor(agent: HttpAgent, memoryId: string): MemoryActor {
 
 function parseRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value)) : null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 async function resolvePublicMemoryState<T>(memoryId: string, checkAccess: () => Promise<AnonymousAccessResult>, loadMemory: () => Promise<T>): Promise<PublicMemoryState<T>> {

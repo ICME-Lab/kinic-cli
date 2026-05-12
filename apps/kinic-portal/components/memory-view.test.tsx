@@ -24,7 +24,7 @@ const memory = {
   dim: 1536,
   owners: ["user"],
   stable_memory_size: 10,
-  cycle_amount: 20,
+  cycle_amount: "20",
 };
 
 describe("MemoryView", () => {
@@ -81,7 +81,7 @@ describe("MemoryView", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/api/public/memories/m1/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: "What is here?", language: "en-US" }),
+      body: JSON.stringify({ query: "What is here?", language: "en" }),
     });
   });
 

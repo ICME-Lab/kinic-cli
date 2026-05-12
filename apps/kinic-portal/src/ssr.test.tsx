@@ -20,7 +20,7 @@ describe("renderPortalDocument", () => {
         dim: 1536,
         owners: ["user"],
         stable_memory_size: 10,
-        cycle_amount: 20,
+        cycle_amount: "20",
       },
     }, "Cached summary text");
 
@@ -51,7 +51,7 @@ describe("renderPortalDocument", () => {
         dim: 1536,
         owners: ["user"],
         stable_memory_size: 10,
-        cycle_amount: 20,
+        cycle_amount: "20",
       },
     }, "Cached summary text");
 
@@ -75,7 +75,7 @@ describe("renderPortalDocument", () => {
         dim: 1536,
         owners: ["user"],
         stable_memory_size: 10,
-        cycle_amount: 20,
+        cycle_amount: "20",
       },
     });
 

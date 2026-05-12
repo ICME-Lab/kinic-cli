@@ -48,7 +48,7 @@ describe("public api memory routes", () => {
         dim: 1536,
         owners: ["user"],
         stable_memory_size: 10,
-        cycle_amount: 20,
+        cycle_amount: "20",
       },
     });
     mocks.fetchEmbedding.mockResolvedValueOnce([0.1, 0.2]);
@@ -61,7 +61,7 @@ describe("public api memory routes", () => {
       new Request("https://api.kinic.test/api/public/memories/m1/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query: "hello", language: "en" }),
+        body: JSON.stringify({ query: "hello", language: "en-US" }),
       }),
       env(),
     );
@@ -73,6 +73,7 @@ describe("public api memory routes", () => {
       context_count: 1,
       answer: "grounded answer",
     });
+    expect(mocks.buildAskAiPrompt).toHaveBeenCalledWith("hello", [{ score: 0.9, payload: "chunk one" }], "en");
   });
 
   it("rejects oversized chat queries before embedding", async () => {

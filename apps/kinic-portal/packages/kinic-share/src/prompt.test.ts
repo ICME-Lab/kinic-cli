@@ -9,6 +9,7 @@ import {
   buildMemorySummaryPrompt,
   buildMemorySummarySearchQuery,
   extractAnswer,
+  normalizePromptLanguage,
 } from "./prompt";
 
 describe("prompt helpers", () => {
@@ -89,5 +90,13 @@ describe("prompt helpers", () => {
     expect(prompt).toContain("Answer in English");
     expect(prompt).toContain("Return only the final summary text");
     expect(prompt).not.toContain("<thinking>");
+  });
+
+  it("normalizes prompt languages to supported base codes", () => {
+    expect(normalizePromptLanguage("en-US")).toBe("en");
+    expect(normalizePromptLanguage("ja_JP")).toBe("ja");
+    expect(normalizePromptLanguage(" fr-CA,fr;q=0.9")).toBe("fr");
+    expect(normalizePromptLanguage("nl-NL")).toBe("en");
+    expect(normalizePromptLanguage("")).toBe("en");
   });
 });
