@@ -339,6 +339,34 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 };
                 state.insert_error = message.clone();
             }
+            CoreEffect::ResetContentScroll => {
+                state.content_scroll_reset_epoch = state.content_scroll_reset_epoch.wrapping_add(1);
+            }
+            CoreEffect::OpenWikiEditor {
+                path,
+                content,
+                etag,
+                metadata_json,
+            } => {
+                state.wiki_editor.open(path, content, etag, metadata_json);
+                state.focus = PaneFocus::Content;
+            }
+            CoreEffect::WikiEditorSaving => {
+                state.wiki_editor.begin_save();
+            }
+            CoreEffect::WikiEditorSaved {
+                path,
+                content,
+                etag,
+                metadata_json,
+            } => {
+                state.wiki_editor.open(path, content, etag, metadata_json);
+                state.wiki_editor.close();
+                state.focus = PaneFocus::Items;
+            }
+            CoreEffect::WikiEditorError(message) => {
+                state.wiki_editor.apply_error(message);
+            }
             CoreEffect::SelectFirstListItem => {
                 state.selected_index = if state.list_items.is_empty() {
                     None

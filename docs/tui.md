@@ -93,7 +93,7 @@ The local preferences shown in `Settings`, including the default memory, saved t
 - `1` to `5`: switch tabs
 - `Tab`: move focus forward within the screen
 - `Shift+Tab`: move focus backward
-- `/`: focus the search field
+- `/`: focus the `Memories` search field
 - `↑` `↓`: move through lists and form fields
 - `Enter`: open, confirm, or submit the current item
 - `Esc`: go back one step, return to the list, or close the picker
@@ -105,6 +105,14 @@ The local preferences shown in `Settings`, including the default memory, saved t
 - `Shift+S`: toggle the settings overlay (session info and saved settings)
 
 The status bar at the bottom also shows the keys available in the current context.
+
+In the `Wiki` tab, `Tab` and `Shift+Tab` switch between the Browser pane and the Document pane.
+Wiki databases are grouped under `Private / Shared` and `Public`.
+Database rows show `Public` when `anonymous` has access, `Private` for owned databases without anonymous access, and `Shared` for non-public databases shared with the current identity.
+Public database reads use an anonymous agent so identities without direct membership can still browse anonymous-readable databases.
+When Browser is focused, `↑` `↓` moves the selected database or wiki node, `Enter` opens it, and `e` edits a loaded `/Wiki/*.md` file.
+When Document is focused, `↑` `↓`, `PageUp`, `PageDown`, `Home`, and `End` scroll the document.
+In Wiki edit mode, `Ctrl+S` saves, `Tab` moves to the footer `Save` / `Cancel` controls, and `Esc` exits or asks to discard dirty changes.
 
 `?` and `q` are intended for normal list and tab navigation, not while typing in a search field or form, and not while the chat input is focused.
 `Shift+C` (toggle chat on `Memories`) follows the same focus rules.

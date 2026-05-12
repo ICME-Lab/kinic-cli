@@ -326,6 +326,18 @@ impl<'a> TuiKitUi<'a> {
     }
 
     #[must_use]
+    pub fn wiki_editor(mut self, value: tui_kit_runtime::WikiEditorState) -> Self {
+        self.wiki_editor = value;
+        self
+    }
+
+    #[must_use]
+    pub fn wiki_editor_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.wiki_editor_cursor = value;
+        self
+    }
+
+    #[must_use]
     pub fn access_control_modal(mut self, value: AccessControlModalState) -> Self {
         self.access_control = value;
         self

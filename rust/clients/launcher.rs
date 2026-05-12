@@ -110,19 +110,6 @@ impl LauncherClient {
         Ok(result)
     }
 
-    pub async fn list_typed_instances(&self) -> Result<Vec<TypedState>> {
-        let response = self
-            .agent
-            .query(&self.launcher_id, "list_typed_instance")
-            .call()
-            .await
-            .context("Failed to call list_typed_instance")?;
-
-        let result =
-            Decode!(&response, Vec<TypedState>).context("Failed to decode typed instance list")?;
-        Ok(result)
-    }
-
     pub async fn update_instance(&self, instance_pid_str: &str) -> Result<()> {
         let payload = encode_update_instance_args(instance_pid_str)?;
         let response = self
@@ -200,34 +187,4 @@ pub enum State {
     Installation(Principal, String),
     SettingUp(Principal),
     Running(Principal),
-}
-
-#[derive(CandidType, candid::Deserialize, Clone, Debug, PartialEq, Eq)]
-pub enum CanisterType {
-    Memory,
-    Wiki,
-}
-
-#[derive(CandidType, candid::Deserialize, Clone, Debug)]
-pub struct TypedState {
-    pub state: State,
-    pub canister_type: CanisterType,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use candid::Encode;
-
-    #[test]
-    fn typed_state_decodes_wiki_running_shape() {
-        let principal = Principal::from_text("aaaaa-aa").unwrap();
-        let bytes = Encode!(&vec![TypedState {
-            state: State::Running(principal),
-            canister_type: CanisterType::Wiki,
-        }])
-        .unwrap();
-        let decoded = Decode!(&bytes, Vec<TypedState>).unwrap();
-        assert_eq!(decoded[0].canister_type, CanisterType::Wiki);
-    }
 }

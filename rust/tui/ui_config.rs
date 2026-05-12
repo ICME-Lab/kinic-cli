@@ -44,7 +44,7 @@ pub fn kinic_ui_config() -> UiConfig {
             TabSpec {
                 id: TabId::new(KINIC_WIKI_TAB_ID),
                 title: "Wiki".to_string(),
-                search_placeholder: "Search wiki nodes...".to_string(),
+                search_placeholder: "Browse wiki databases...".to_string(),
             },
             TabSpec {
                 id: TabId::new(KINIC_SETTINGS_TAB_ID),

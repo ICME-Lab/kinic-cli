@@ -71,6 +71,7 @@ enum ActiveTextarea {
     CreateDescription,
     RenameDescription,
     InsertText,
+    WikiDocument,
     ChatInput,
 }
 
@@ -105,6 +106,7 @@ struct FormTextareas {
     create_description: TextArea<'static>,
     rename_description: TextArea<'static>,
     insert_text: TextArea<'static>,
+    wiki_document: TextArea<'static>,
     chat_input: ChatInputState,
     chat_command_selected: usize,
 }
@@ -115,6 +117,7 @@ impl Default for FormTextareas {
             create_description: textarea_from_text(""),
             rename_description: textarea_from_text(""),
             insert_text: textarea_from_text(""),
+            wiki_document: textarea_from_text(""),
             chat_input: ChatInputState::default(),
             chat_command_selected: 0,
         }
@@ -154,6 +157,7 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
         let mut animation = AnimationState::new();
         let mut last_selected_index: Option<usize> = None;
         let mut last_tab_id = state.current_tab_id.clone();
+        let mut last_scroll_reset_epoch = state.content_scroll_reset_epoch;
         let mut list_scroll_offset: usize = 0;
         let mut textareas = FormTextareas::default();
         let mut provider_render_state = ProviderRenderState::default();
@@ -165,6 +169,10 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
 
         loop {
             hooks.on_tick(provider, &mut state);
+            if state.content_scroll_reset_epoch != last_scroll_reset_epoch {
+                inspector_scroll = 0;
+                last_scroll_reset_epoch = state.content_scroll_reset_epoch;
+            }
             animation.update();
             sync_form_textareas_from_state(&mut textareas, &state);
 
@@ -246,6 +254,12 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     .insert_spinner_frame(state.insert_spinner_frame)
                     .insert_error(state.insert_error.as_deref())
                     .insert_focus(state.insert_focus)
+                    .wiki_editor(state.wiki_editor.clone())
+                    .wiki_editor_cursor(textarea_cursor(
+                        active_textarea(&state),
+                        ActiveTextarea::WikiDocument,
+                        &textareas.wiki_document,
+                    ))
                     .access_control_modal(state.access_control.clone())
                     .add_memory_modal(state.add_memory.clone())
                     .remove_memory_modal(&state.remove_memory)
@@ -356,6 +370,18 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                 &mut textareas,
                 &input,
             )? {
+                continue;
+            }
+
+            if let Some(action) = wiki_editor_key_action(&state, &input) {
+                match dispatch_action_with_persistent_clear(provider, &mut state, &action) {
+                    Ok((effects, next_render_state)) => {
+                        provider_render_state = next_render_state;
+                        hooks.on_effects(provider, &mut state, &effects);
+                        execute_effects_to_status(&mut state, effects);
+                    }
+                    Err(e) => state.status_message = Some(dispatch_error_message(&e)),
+                }
                 continue;
             }
 
@@ -732,6 +758,12 @@ fn build_ui<'a>(
         .insert_spinner_frame(state.insert_spinner_frame)
         .insert_error(state.insert_error.as_deref())
         .insert_focus(state.insert_focus)
+        .wiki_editor(state.wiki_editor.clone())
+        .wiki_editor_cursor(textarea_cursor(
+            active_textarea(state),
+            ActiveTextarea::WikiDocument,
+            &textareas.wiki_document,
+        ))
         .access_control_modal(state.access_control.clone())
         .add_memory_modal(state.add_memory.clone())
         .remove_memory_modal(&state.remove_memory)
@@ -884,6 +916,15 @@ fn handle_textarea_input<P: DataProvider, H: RuntimeLoopHooks<P>>(
     let Some(target) = active_textarea(state) else {
         return Ok(false);
     };
+    if let Some(action) = wiki_editor_textarea_action(state, input) {
+        match dispatch_with_effects(provider, state, hooks, provider_render_state, &action) {
+            Ok(()) => return Ok(true),
+            Err(error) => {
+                state.status_message = Some(error);
+                return Ok(true);
+            }
+        }
+    }
     let textarea = textarea_mut(textareas, target);
     let HostInputEvent::Key {
         key_event, code, ..
@@ -982,6 +1023,70 @@ fn handle_chat_input_event<P: DataProvider, H: RuntimeLoopHooks<P>>(
             }
             Ok(Some(false))
         }
+    }
+}
+
+fn wiki_editor_textarea_action(state: &CoreState, input: &HostInputEvent) -> Option<CoreAction> {
+    if active_textarea(state) != Some(ActiveTextarea::WikiDocument) {
+        return None;
+    }
+    let HostInputEvent::Key {
+        code, modifiers, ..
+    } = input
+    else {
+        return None;
+    };
+    match (*code, *modifiers) {
+        (crossterm::event::KeyCode::Char('s'), modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            Some(CoreAction::SaveWikiEditor)
+        }
+        (crossterm::event::KeyCode::Esc, _) => Some(CoreAction::CancelWikiEditor),
+        _ => None,
+    }
+}
+
+fn wiki_editor_key_action(state: &CoreState, input: &HostInputEvent) -> Option<CoreAction> {
+    if state.current_tab_id != tui_kit_runtime::kinic_tabs::KINIC_WIKI_TAB_ID
+        || state.focus != PaneFocus::Content
+        || !state.wiki_editor.open
+    {
+        return None;
+    }
+    let HostInputEvent::Key {
+        code, modifiers, ..
+    } = input
+    else {
+        return None;
+    };
+    if state.wiki_editor.discard_confirm {
+        return match code {
+            crossterm::event::KeyCode::Enter => Some(CoreAction::ConfirmDiscardWikiEditor),
+            crossterm::event::KeyCode::Esc => Some(CoreAction::AbortDiscardWikiEditor),
+            _ => None,
+        };
+    }
+    match (*code, *modifiers) {
+        (crossterm::event::KeyCode::Char('s'), modifiers)
+            if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            Some(CoreAction::SaveWikiEditor)
+        }
+        (crossterm::event::KeyCode::Tab, _) => Some(CoreAction::WikiEditorNextField),
+        (crossterm::event::KeyCode::BackTab, _) => Some(CoreAction::WikiEditorPrevField),
+        (crossterm::event::KeyCode::Esc, _) => Some(CoreAction::CancelWikiEditor),
+        (crossterm::event::KeyCode::Enter, _)
+            if state.wiki_editor.footer_focus == tui_kit_runtime::WikiEditorFooterFocus::Save =>
+        {
+            Some(CoreAction::SaveWikiEditor)
+        }
+        (crossterm::event::KeyCode::Enter, _)
+            if state.wiki_editor.footer_focus == tui_kit_runtime::WikiEditorFooterFocus::Cancel =>
+        {
+            Some(CoreAction::CancelWikiEditor)
+        }
+        _ => None,
     }
 }
 
@@ -1391,6 +1496,7 @@ fn textarea_next_field_action(target: ActiveTextarea) -> CoreAction {
         ActiveTextarea::CreateDescription => CoreAction::CreateNextField,
         ActiveTextarea::RenameDescription => CoreAction::RenameMemoryNextField,
         ActiveTextarea::InsertText => CoreAction::InsertNextField,
+        ActiveTextarea::WikiDocument => CoreAction::WikiEditorNextField,
         ActiveTextarea::ChatInput => CoreAction::FocusNext,
     }
 }
@@ -1400,6 +1506,7 @@ fn textarea_prev_field_action(target: ActiveTextarea) -> CoreAction {
         ActiveTextarea::CreateDescription => CoreAction::CreatePrevField,
         ActiveTextarea::RenameDescription => CoreAction::RenameMemoryPrevField,
         ActiveTextarea::InsertText => CoreAction::InsertPrevField,
+        ActiveTextarea::WikiDocument => CoreAction::WikiEditorPrevField,
         ActiveTextarea::ChatInput => CoreAction::FocusPrev,
     }
 }
@@ -1417,6 +1524,15 @@ fn active_textarea(state: &CoreState) -> Option<ActiveTextarea> {
         && state.rename_memory.focus == tui_kit_runtime::RenameModalFocus::Description
     {
         return Some(ActiveTextarea::RenameDescription);
+    }
+
+    if state.current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_WIKI_TAB_ID
+        && state.focus == PaneFocus::Content
+        && state.wiki_editor.open
+        && state.wiki_editor.footer_focus == tui_kit_runtime::WikiEditorFooterFocus::Body
+        && !state.wiki_editor.discard_confirm
+    {
+        return Some(ActiveTextarea::WikiDocument);
     }
 
     if state.focus != PaneFocus::Form && state.focus != PaneFocus::Extra {
@@ -1451,6 +1567,7 @@ fn textarea_mut(textareas: &mut FormTextareas, target: ActiveTextarea) -> &mut T
         ActiveTextarea::CreateDescription => &mut textareas.create_description,
         ActiveTextarea::RenameDescription => &mut textareas.rename_description,
         ActiveTextarea::InsertText => &mut textareas.insert_text,
+        ActiveTextarea::WikiDocument => &mut textareas.wiki_document,
         ActiveTextarea::ChatInput => unreachable!("chat input no longer uses textarea"),
     }
 }
@@ -1465,6 +1582,10 @@ fn sync_form_textareas_from_state(textareas: &mut FormTextareas, state: &CoreSta
         state.rename_memory.description.as_str(),
     );
     sync_textarea_from_string(&mut textareas.insert_text, state.insert_text.as_str());
+    sync_textarea_from_string(
+        &mut textareas.wiki_document,
+        state.wiki_editor.draft_content.as_str(),
+    );
     sync_chat_input_from_state(&mut textareas.chat_input, state.chat_input.as_str());
 }
 
@@ -1547,6 +1668,18 @@ fn sync_state_from_textareas(state: &mut CoreState, textareas: &FormTextareas) {
         state.insert_error = None;
         if state.insert_submit_state == tui_kit_runtime::CreateSubmitState::Error {
             state.insert_submit_state = tui_kit_runtime::CreateSubmitState::Idle;
+        }
+    }
+
+    let wiki_document = textareas.wiki_document.lines().join("\n");
+    if state.wiki_editor.open && state.wiki_editor.draft_content != wiki_document {
+        state.wiki_editor.draft_content = wiki_document;
+        state.wiki_editor.dirty =
+            state.wiki_editor.draft_content != state.wiki_editor.original_content;
+        state.wiki_editor.error = None;
+        state.wiki_editor.discard_confirm = false;
+        if state.wiki_editor.submit_state == tui_kit_runtime::CreateSubmitState::Error {
+            state.wiki_editor.submit_state = tui_kit_runtime::CreateSubmitState::Idle;
         }
     }
 
@@ -2041,6 +2174,14 @@ fn keep_selection_visible_scroll(
 
 fn apply_content_scroll_action(action: &CoreAction, inspector_scroll: &mut usize) -> bool {
     match action {
+        CoreAction::ScrollContentLineDown => {
+            *inspector_scroll = inspector_scroll.saturating_add(1);
+            true
+        }
+        CoreAction::ScrollContentLineUp => {
+            *inspector_scroll = inspector_scroll.saturating_sub(1);
+            true
+        }
         CoreAction::ScrollContentPageDown => {
             *inspector_scroll = inspector_scroll.saturating_add(10);
             true

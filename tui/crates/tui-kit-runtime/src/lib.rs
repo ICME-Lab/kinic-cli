@@ -95,8 +95,8 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
             allows_chat: true,
         },
         kinic_tabs::TabKind::Wiki => TabFocusPolicy {
-            default_focus: PaneFocus::Search,
-            allows_search: true,
+            default_focus: PaneFocus::Items,
+            allows_search: false,
             allows_items: true,
             allows_tabs: true,
             allows_content: true,
@@ -130,7 +130,8 @@ fn chat_supported_for_tab(tab_id: &str) -> bool {
 
 pub fn tab_entry_focus(tab_id: &str) -> Option<PaneFocus> {
     match kinic_tabs::tab_kind(tab_id) {
-        kinic_tabs::TabKind::Memories | kinic_tabs::TabKind::Wiki => Some(PaneFocus::Search),
+        kinic_tabs::TabKind::Memories => Some(PaneFocus::Search),
+        kinic_tabs::TabKind::Wiki => Some(PaneFocus::Items),
         kinic_tabs::TabKind::InsertForm | kinic_tabs::TabKind::CreateForm => Some(PaneFocus::Form),
         kinic_tabs::TabKind::PlaceholderSettings | kinic_tabs::TabKind::Unknown => {
             Some(PaneFocus::Content)
@@ -232,6 +233,82 @@ pub enum RenameModalFocus {
     Name,
     Description,
     Submit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WikiEditorFooterFocus {
+    #[default]
+    Body,
+    Save,
+    Cancel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiEditorState {
+    pub open: bool,
+    pub path: String,
+    pub original_content: String,
+    pub draft_content: String,
+    pub etag: String,
+    pub metadata_json: String,
+    pub dirty: bool,
+    pub submit_state: CreateSubmitState,
+    pub error: Option<String>,
+    pub discard_confirm: bool,
+    pub footer_focus: WikiEditorFooterFocus,
+}
+
+impl Default for WikiEditorState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            path: String::new(),
+            original_content: String::new(),
+            draft_content: String::new(),
+            etag: String::new(),
+            metadata_json: "{}".to_string(),
+            dirty: false,
+            submit_state: CreateSubmitState::Idle,
+            error: None,
+            discard_confirm: false,
+            footer_focus: WikiEditorFooterFocus::Body,
+        }
+    }
+}
+
+impl WikiEditorState {
+    pub fn open(&mut self, path: String, content: String, etag: String, metadata_json: String) {
+        self.open = true;
+        self.path = path;
+        self.original_content = content.clone();
+        self.draft_content = content;
+        self.etag = etag;
+        self.metadata_json = metadata_json;
+        self.dirty = false;
+        self.submit_state = CreateSubmitState::Idle;
+        self.error = None;
+        self.discard_confirm = false;
+        self.footer_focus = WikiEditorFooterFocus::Body;
+    }
+
+    pub fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn begin_save(&mut self) {
+        self.submit_state = CreateSubmitState::Submitting;
+        self.error = None;
+        self.discard_confirm = false;
+    }
+
+    pub fn apply_error(&mut self, message: Option<String>) {
+        self.submit_state = if message.is_some() {
+            CreateSubmitState::Error
+        } else {
+            CreateSubmitState::Idle
+        };
+        self.error = message;
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -692,6 +769,7 @@ pub struct CoreState {
     pub selected_context: Option<UiContextNode>,
     pub three_pane: ThreePaneSnapshot,
     pub total_count: usize,
+    pub content_scroll_reset_epoch: u64,
     pub status_message: Option<String>,
     pub persistent_status_message: Option<String>,
     pub chat_open: bool,
@@ -728,6 +806,7 @@ pub struct CoreState {
     pub insert_spinner_frame: usize,
     pub insert_error: Option<String>,
     pub insert_focus: InsertFormFocus,
+    pub wiki_editor: WikiEditorState,
     pub access_list_index: usize,
     pub memory_content_action_index: usize,
     pub access_control: AccessControlModalState,
@@ -749,6 +828,7 @@ impl Default for CoreState {
             selected_context: None,
             three_pane: ThreePaneSnapshot::default(),
             total_count: 0,
+            content_scroll_reset_epoch: 0,
             status_message: None,
             persistent_status_message: None,
             chat_open: false,
@@ -785,6 +865,7 @@ impl Default for CoreState {
             insert_spinner_frame: 0,
             insert_error: None,
             insert_focus: InsertFormFocus::default(),
+            wiki_editor: WikiEditorState::default(),
             access_list_index: 0,
             memory_content_action_index: 0,
             access_control: AccessControlModalState::default(),
@@ -805,6 +886,8 @@ pub enum CoreAction {
     MovePageUp,
     MoveHome,
     MoveEnd,
+    ScrollContentLineDown,
+    ScrollContentLineUp,
     ScrollContentPageDown,
     ScrollContentPageUp,
     ScrollContentHome,
@@ -894,6 +977,13 @@ pub enum CoreAction {
     InsertPrevMode,
     InsertNextMode,
     InsertSubmit,
+    OpenWikiEditor,
+    SaveWikiEditor,
+    CancelWikiEditor,
+    ConfirmDiscardWikiEditor,
+    AbortDiscardWikiEditor,
+    WikiEditorNextField,
+    WikiEditorPrevField,
     Submit,
     Cancel,
     ChatInput(char),
@@ -968,6 +1058,21 @@ pub enum CoreEffect {
     CreateFormError(Option<String>),
     /// Validation or async error for the insert form (clears submitting state).
     InsertFormError(Option<String>),
+    ResetContentScroll,
+    OpenWikiEditor {
+        path: String,
+        content: String,
+        etag: String,
+        metadata_json: String,
+    },
+    WikiEditorSaving,
+    WikiEditorSaved {
+        path: String,
+        content: String,
+        etag: String,
+        metadata_json: String,
+    },
+    WikiEditorError(Option<String>),
     /// Select the first row in the list (no-op when empty).
     SelectFirstListItem,
     /// Select a specific row in the list (clamped by the host after snapshots apply).
@@ -1496,6 +1601,43 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             state.create_cost_state = CreateCostState::Loading;
             state.create_spinner_frame = 0;
         }
+        CoreAction::WikiEditorNextField => {
+            if state.wiki_editor.submit_state == CreateSubmitState::Submitting {
+                return;
+            }
+            state.wiki_editor.footer_focus = next_wiki_editor_focus(state.wiki_editor.footer_focus);
+            state.wiki_editor.error = None;
+            state.wiki_editor.discard_confirm = false;
+        }
+        CoreAction::WikiEditorPrevField => {
+            if state.wiki_editor.submit_state == CreateSubmitState::Submitting {
+                return;
+            }
+            state.wiki_editor.footer_focus = prev_wiki_editor_focus(state.wiki_editor.footer_focus);
+            state.wiki_editor.error = None;
+            state.wiki_editor.discard_confirm = false;
+        }
+        CoreAction::CancelWikiEditor => {
+            if state.wiki_editor.submit_state == CreateSubmitState::Submitting {
+                return;
+            }
+            if state.wiki_editor.dirty {
+                state.wiki_editor.discard_confirm = true;
+            } else {
+                state.wiki_editor.close();
+                state.focus = PaneFocus::Items;
+            }
+        }
+        CoreAction::ConfirmDiscardWikiEditor => {
+            if state.wiki_editor.submit_state != CreateSubmitState::Submitting {
+                state.wiki_editor.close();
+                state.focus = PaneFocus::Items;
+            }
+        }
+        CoreAction::AbortDiscardWikiEditor => {
+            state.wiki_editor.discard_confirm = false;
+        }
+        CoreAction::OpenWikiEditor | CoreAction::SaveWikiEditor => {}
         CoreAction::SetQuery(q) => {
             state.query = q.clone();
             state.selected_index = Some(0);
@@ -1535,93 +1677,150 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             close_remove_memory_modal(state);
             close_rename_memory_modal(state);
             close_transfer_modal(state);
+            state.wiki_editor.close();
         }
         CoreAction::SelectTabIndex(index) => {
             state.current_tab_id = format!("tab-{}", index + 1);
             state.selected_index = Some(0);
         }
         CoreAction::FocusNext => {
-            state.focus = match state.focus {
-                PaneFocus::Search => PaneFocus::Items,
-                PaneFocus::Items => {
-                    if memories_chat_replaces_content(state) {
-                        PaneFocus::Extra
-                    } else {
-                        PaneFocus::Content
-                    }
+            let next_focus = if state.current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID {
+                match state.focus {
+                    PaneFocus::Tabs => PaneFocus::Items,
+                    PaneFocus::Items => PaneFocus::Content,
+                    PaneFocus::Content => PaneFocus::Tabs,
+                    _ => tab_entry_focus(state.current_tab_id.as_str()).unwrap_or(PaneFocus::Items),
                 }
-                PaneFocus::Content => {
-                    if state.chat_open {
-                        PaneFocus::Extra
-                    } else if has_tabs {
-                        PaneFocus::Tabs
-                    } else {
-                        PaneFocus::Search
+            } else {
+                match state.focus {
+                    PaneFocus::Search => PaneFocus::Items,
+                    PaneFocus::Items => {
+                        if memories_chat_replaces_content(state) {
+                            PaneFocus::Extra
+                        } else {
+                            PaneFocus::Content
+                        }
                     }
-                }
-                PaneFocus::Form => PaneFocus::Tabs,
-                PaneFocus::Extra => {
-                    if has_tabs {
-                        PaneFocus::Tabs
-                    } else {
-                        PaneFocus::Search
+                    PaneFocus::Content => {
+                        if state.chat_open {
+                            PaneFocus::Extra
+                        } else if has_tabs {
+                            PaneFocus::Tabs
+                        } else {
+                            PaneFocus::Search
+                        }
                     }
+                    PaneFocus::Form => PaneFocus::Tabs,
+                    PaneFocus::Extra => {
+                        if has_tabs {
+                            PaneFocus::Tabs
+                        } else {
+                            PaneFocus::Search
+                        }
+                    }
+                    PaneFocus::Tabs => PaneFocus::Search,
                 }
-                PaneFocus::Tabs => PaneFocus::Search,
             };
+            if is_focus_allowed_for_policy(
+                tab_focus_policy(state.current_tab_id.as_str()),
+                next_focus,
+            ) {
+                state.focus = next_focus;
+            }
         }
         CoreAction::FocusPrev => {
-            state.focus = match state.focus {
-                PaneFocus::Search => {
-                    if has_tabs {
-                        PaneFocus::Tabs
-                    } else if state.chat_open {
-                        PaneFocus::Extra
-                    } else {
-                        PaneFocus::Content
-                    }
+            let next_focus = if state.current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID {
+                match state.focus {
+                    PaneFocus::Tabs => PaneFocus::Content,
+                    PaneFocus::Content => PaneFocus::Items,
+                    PaneFocus::Items => PaneFocus::Tabs,
+                    _ => PaneFocus::Tabs,
                 }
-                PaneFocus::Items => PaneFocus::Search,
-                PaneFocus::Content => PaneFocus::Items,
-                PaneFocus::Form => PaneFocus::Tabs,
-                PaneFocus::Extra => {
-                    if memories_chat_replaces_content(state) {
-                        PaneFocus::Items
-                    } else {
-                        PaneFocus::Content
+            } else {
+                match state.focus {
+                    PaneFocus::Search => {
+                        if has_tabs {
+                            PaneFocus::Tabs
+                        } else if state.chat_open {
+                            PaneFocus::Extra
+                        } else {
+                            PaneFocus::Content
+                        }
                     }
-                }
-                PaneFocus::Tabs => {
-                    if state.chat_open {
-                        PaneFocus::Extra
-                    } else {
-                        PaneFocus::Content
+                    PaneFocus::Items => PaneFocus::Search,
+                    PaneFocus::Content => PaneFocus::Items,
+                    PaneFocus::Form => PaneFocus::Tabs,
+                    PaneFocus::Extra => {
+                        if memories_chat_replaces_content(state) {
+                            PaneFocus::Items
+                        } else {
+                            PaneFocus::Content
+                        }
+                    }
+                    PaneFocus::Tabs => {
+                        if state.chat_open {
+                            PaneFocus::Extra
+                        } else {
+                            PaneFocus::Content
+                        }
                     }
                 }
             };
+            if is_focus_allowed_for_policy(
+                tab_focus_policy(state.current_tab_id.as_str()),
+                next_focus,
+            ) {
+                state.focus = next_focus;
+            }
         }
-        CoreAction::FocusSearch => state.focus = PaneFocus::Search,
-        CoreAction::FocusItems => state.focus = PaneFocus::Items,
+        CoreAction::FocusSearch => {
+            if is_focus_allowed_for_policy(
+                tab_focus_policy(state.current_tab_id.as_str()),
+                PaneFocus::Search,
+            ) {
+                state.focus = PaneFocus::Search;
+            }
+        }
+        CoreAction::FocusItems => {
+            if is_focus_allowed_for_policy(
+                tab_focus_policy(state.current_tab_id.as_str()),
+                PaneFocus::Items,
+            ) {
+                state.focus = PaneFocus::Items;
+            }
+        }
         CoreAction::FocusContent => {
-            state.focus = PaneFocus::Content;
-            if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
-                state.memory_content_action_index = 0;
+            if is_focus_allowed_for_policy(
+                tab_focus_policy(state.current_tab_id.as_str()),
+                PaneFocus::Content,
+            ) {
+                state.focus = PaneFocus::Content;
+                if state.current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID {
+                    state.memory_content_action_index = 0;
+                }
             }
         }
         CoreAction::FocusForm => {
-            state.focus = PaneFocus::Form;
-            match kinic_tabs::tab_kind(state.current_tab_id.as_str()) {
-                kinic_tabs::TabKind::CreateForm => {
-                    state.create_focus = CreateModalFocus::Name;
+            if is_focus_allowed_for_policy(
+                tab_focus_policy(state.current_tab_id.as_str()),
+                PaneFocus::Form,
+            ) {
+                state.focus = PaneFocus::Form;
+                match kinic_tabs::tab_kind(state.current_tab_id.as_str()) {
+                    kinic_tabs::TabKind::CreateForm => {
+                        state.create_focus = CreateModalFocus::Name;
+                    }
+                    kinic_tabs::TabKind::InsertForm => {
+                        state.insert_focus = InsertFormFocus::Mode;
+                    }
+                    _ => {}
                 }
-                kinic_tabs::TabKind::InsertForm => {
-                    state.insert_focus = InsertFormFocus::Mode;
-                }
-                _ => {}
             }
         }
         CoreAction::OpenSelected => {
-            if memories_chat_replaces_content(state) {
+            if state.current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID {
+                state.focus = PaneFocus::Items;
+            } else if memories_chat_replaces_content(state) {
                 state.focus = PaneFocus::Extra;
             } else {
                 state.focus = PaneFocus::Content;
@@ -1633,11 +1832,17 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::Back => {
-            state.focus = if state.focus == PaneFocus::Extra {
+            let next_focus = if state.focus == PaneFocus::Extra {
                 PaneFocus::Content
             } else {
                 PaneFocus::Items
             };
+            if is_focus_allowed_for_policy(
+                tab_focus_policy(state.current_tab_id.as_str()),
+                next_focus,
+            ) {
+                state.focus = next_focus;
+            }
         }
         CoreAction::ToggleChat => {
             if !chat_supported_for_tab(state.current_tab_id.as_str()) {
@@ -1981,6 +2186,22 @@ fn prev_create_focus(focus: CreateModalFocus) -> CreateModalFocus {
         CreateModalFocus::Name => CreateModalFocus::Submit,
         CreateModalFocus::Description => CreateModalFocus::Name,
         CreateModalFocus::Submit => CreateModalFocus::Description,
+    }
+}
+
+fn next_wiki_editor_focus(focus: WikiEditorFooterFocus) -> WikiEditorFooterFocus {
+    match focus {
+        WikiEditorFooterFocus::Body => WikiEditorFooterFocus::Save,
+        WikiEditorFooterFocus::Save => WikiEditorFooterFocus::Cancel,
+        WikiEditorFooterFocus::Cancel => WikiEditorFooterFocus::Body,
+    }
+}
+
+fn prev_wiki_editor_focus(focus: WikiEditorFooterFocus) -> WikiEditorFooterFocus {
+    match focus {
+        WikiEditorFooterFocus::Body => WikiEditorFooterFocus::Cancel,
+        WikiEditorFooterFocus::Save => WikiEditorFooterFocus::Body,
+        WikiEditorFooterFocus::Cancel => WikiEditorFooterFocus::Save,
     }
 }
 
@@ -2566,7 +2787,9 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
     }
 
     match key {
-        CoreKey::Slash => Some(CoreAction::FocusSearch),
+        CoreKey::Slash if tab_focus_policy(current_tab_id).allows_search => {
+            Some(CoreAction::FocusSearch)
+        }
         CoreKey::Tab => Some(CoreAction::FocusNext),
         CoreKey::BackTab => Some(CoreAction::FocusPrev),
         CoreKey::Char(c) if c.is_ascii_digit() && c != '0' => {
@@ -2591,6 +2814,9 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
                 CoreKey::Esc if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
                     Some(CoreAction::Back)
                 }
+                CoreKey::Char('e') if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
+                    Some(CoreAction::OpenWikiEditor)
+                }
                 CoreKey::Down => Some(CoreAction::MoveNext),
                 CoreKey::Up => Some(CoreAction::MovePrev),
                 CoreKey::PageDown => Some(CoreAction::MovePageDown),
@@ -2605,34 +2831,34 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
             PaneFocus::Tabs => None,
             PaneFocus::Content => match key {
                 CoreKey::Esc if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
-                    Some(CoreAction::Back)
+                    Some(CoreAction::FocusItems)
                 }
                 CoreKey::Down if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
-                    Some(CoreAction::MoveNext)
+                    Some(CoreAction::ScrollContentLineDown)
                 }
                 CoreKey::Up if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
-                    Some(CoreAction::MovePrev)
+                    Some(CoreAction::ScrollContentLineUp)
                 }
                 CoreKey::PageDown if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
-                    Some(CoreAction::MovePageDown)
+                    Some(CoreAction::ScrollContentPageDown)
                 }
                 CoreKey::PageUp if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID => {
-                    Some(CoreAction::MovePageUp)
+                    Some(CoreAction::ScrollContentPageUp)
                 }
                 CoreKey::Home | CoreKey::Char('g')
                     if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID =>
                 {
-                    Some(CoreAction::MoveHome)
+                    Some(CoreAction::ScrollContentHome)
                 }
                 CoreKey::End | CoreKey::Char('G')
                     if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID =>
                 {
-                    Some(CoreAction::MoveEnd)
+                    Some(CoreAction::ScrollContentEnd)
                 }
-                CoreKey::Enter | CoreKey::Right | CoreKey::Char('l')
+                CoreKey::Left | CoreKey::Char('h')
                     if current_tab_id == kinic_tabs::KINIC_WIKI_TAB_ID =>
                 {
-                    Some(CoreAction::OpenSelected)
+                    Some(CoreAction::FocusItems)
                 }
                 CoreKey::Enter if is_settings_content(current_tab_id, PaneFocus::Content) => None,
                 CoreKey::Enter if current_tab_id == kinic_tabs::KINIC_MEMORIES_TAB_ID => {
@@ -3285,6 +3511,19 @@ mod tests {
     }
 
     #[test]
+    fn open_selected_keeps_focus_on_wiki_browser() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::OpenSelected);
+
+        assert_eq!(state.focus, PaneFocus::Items);
+    }
+
+    #[test]
     fn test_dispatch_action_applies_provider_snapshot() {
         struct DispatchTestProvider;
 
@@ -3356,6 +3595,18 @@ mod tests {
     }
 
     #[test]
+    fn focus_search_is_blocked_on_wiki_tab() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            focus: PaneFocus::Content,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusSearch);
+        assert_eq!(state.focus, PaneFocus::Content);
+    }
+
+    #[test]
     fn focus_next_stays_visible_on_placeholder_tabs() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_SETTINGS_TAB_ID.to_string(),
@@ -3364,6 +3615,30 @@ mod tests {
         };
 
         apply_core_action(&mut state, &CoreAction::FocusNext);
+        assert_eq!(state.focus, PaneFocus::Tabs);
+    }
+
+    #[test]
+    fn focus_next_enters_browser_on_wiki() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            focus: PaneFocus::Tabs,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusNext);
+        assert_eq!(state.focus, PaneFocus::Items);
+    }
+
+    #[test]
+    fn focus_prev_returns_from_browser_to_tabs_on_wiki() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            focus: PaneFocus::Items,
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::FocusPrev);
         assert_eq!(state.focus, PaneFocus::Tabs);
     }
 
@@ -3535,6 +3810,50 @@ mod tests {
     }
 
     #[test]
+    fn tabs_enter_targets_browser_on_wiki() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Enter,
+                PaneFocus::Tabs,
+                kinic_tabs::KINIC_WIKI_TAB_ID
+            ),
+            Some(CoreAction::FocusItems)
+        );
+    }
+
+    #[test]
+    fn tabs_tab_targets_browser_on_wiki() {
+        assert_eq!(
+            action_for_key(CoreKey::Tab, PaneFocus::Tabs, kinic_tabs::KINIC_WIKI_TAB_ID),
+            Some(CoreAction::FocusItems)
+        );
+    }
+
+    #[test]
+    fn slash_does_not_target_hidden_search_on_wiki() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Slash,
+                PaneFocus::Content,
+                kinic_tabs::KINIC_WIKI_TAB_ID
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn wiki_browser_e_opens_editor_action() {
+        assert_eq!(
+            action_for_key(
+                CoreKey::Char('e'),
+                PaneFocus::Items,
+                kinic_tabs::KINIC_WIKI_TAB_ID
+            ),
+            Some(CoreAction::OpenWikiEditor)
+        );
+    }
+
+    #[test]
     fn tabs_jk_no_longer_switch_tabs() {
         assert_eq!(
             action_for_key(
@@ -3682,7 +4001,7 @@ mod tests {
     }
 
     #[test]
-    fn wiki_content_keys_move_browser_selection() {
+    fn wiki_items_keys_move_browser_selection() {
         let cases = [
             (CoreKey::Down, CoreAction::MoveNext),
             (CoreKey::Up, CoreAction::MovePrev),
@@ -3700,6 +4019,27 @@ mod tests {
 
         for (key, action) in cases {
             assert_eq!(
+                action_for_key(key, PaneFocus::Items, kinic_tabs::KINIC_WIKI_TAB_ID),
+                Some(action)
+            );
+        }
+    }
+
+    #[test]
+    fn wiki_content_keys_scroll_document() {
+        let cases = [
+            (CoreKey::Down, CoreAction::ScrollContentLineDown),
+            (CoreKey::Up, CoreAction::ScrollContentLineUp),
+            (CoreKey::PageDown, CoreAction::ScrollContentPageDown),
+            (CoreKey::PageUp, CoreAction::ScrollContentPageUp),
+            (CoreKey::Home, CoreAction::ScrollContentHome),
+            (CoreKey::Char('g'), CoreAction::ScrollContentHome),
+            (CoreKey::End, CoreAction::ScrollContentEnd),
+            (CoreKey::Char('G'), CoreAction::ScrollContentEnd),
+        ];
+
+        for (key, action) in cases {
+            assert_eq!(
                 action_for_key(key, PaneFocus::Content, kinic_tabs::KINIC_WIKI_TAB_ID),
                 Some(action)
             );
@@ -3707,11 +4047,11 @@ mod tests {
     }
 
     #[test]
-    fn wiki_content_left_and_h_do_not_go_back() {
-        for key in [CoreKey::Left, CoreKey::Char('h')] {
+    fn wiki_content_left_h_and_escape_return_to_browser() {
+        for key in [CoreKey::Left, CoreKey::Char('h'), CoreKey::Esc] {
             assert_eq!(
                 action_for_key(key, PaneFocus::Content, kinic_tabs::KINIC_WIKI_TAB_ID),
-                None
+                Some(CoreAction::FocusItems)
             );
         }
     }

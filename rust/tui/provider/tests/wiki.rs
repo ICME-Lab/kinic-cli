@@ -11,6 +11,17 @@ fn wiki_database(database_id: &str, status: bridge::DatabaseStatus) -> bridge::D
     }
 }
 
+fn cached_wiki_file(content: &str) -> WikiChildrenContent {
+    WikiChildrenContent {
+        entries: Vec::new(),
+        body_lines: Vec::new(),
+        index_preview: Some(content.lines().map(str::to_string).collect()),
+        node_content: Some(content.to_string()),
+        node_etag: Some("etag-1".to_string()),
+        node_metadata_json: Some("{\"title\":\"Index\"}".to_string()),
+    }
+}
+
 #[test]
 fn wiki_not_configured_record_is_not_queryable() {
     let record = wiki_not_configured_record();
@@ -76,14 +87,92 @@ fn wiki_three_pane_exposes_database_rows_separately_from_memory_items() {
         ..CoreState::default()
     });
 
-    assert_eq!(snapshot.three_pane.left.rows.len(), 2);
-    assert_eq!(snapshot.three_pane.left.rows[0].label, "db-a");
-    assert!(snapshot.three_pane.left.rows[0].selected);
-    assert_eq!(snapshot.three_pane.left.rows[1].label, "+ Create database");
+    assert_eq!(snapshot.three_pane.left.rows.len(), 3);
+    assert_eq!(snapshot.three_pane.left.rows[0].label, "Private / Shared");
+    assert!(!snapshot.three_pane.left.rows[0].selected);
+    assert_eq!(snapshot.three_pane.left.rows[1].label, "db-a");
+    assert!(snapshot.three_pane.left.rows[1].selected);
+    assert_eq!(snapshot.three_pane.left.rows[2].label, "+ Create database");
     assert_eq!(snapshot.three_pane.mode, ThreePaneMode::List);
     assert_eq!(snapshot.items.len(), 2);
     assert_eq!(snapshot.items[1].id, WIKI_CREATE_DATABASE_ACTION_ID);
     assert_eq!(snapshot.total_count, 1);
+}
+
+#[test]
+fn wiki_database_records_group_private_shared_before_public() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    let mut shared = wiki_database("db-shared", bridge::DatabaseStatus::Hot);
+    shared.role = crate::wiki_bridge::DatabaseRole::Reader;
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_databases = vec![
+        wiki_database("db-private", bridge::DatabaseStatus::Hot),
+        wiki_database("db-public", bridge::DatabaseStatus::Hot),
+        shared,
+    ];
+    provider.wiki_database_anonymous_access.insert(
+        "db-public".to_string(),
+        crate::wiki_bridge::DatabaseRole::Reader,
+    );
+    provider.refresh_wiki_records_from_databases();
+
+    assert_eq!(
+        provider
+            .wiki_records
+            .iter()
+            .map(|record| record.title.as_str())
+            .collect::<Vec<_>>(),
+        vec!["db-private", "db-shared", "db-public"]
+    );
+}
+
+#[test]
+fn wiki_database_list_renders_visibility_sections() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    let mut shared = wiki_database("db-shared", bridge::DatabaseStatus::Hot);
+    shared.role = crate::wiki_bridge::DatabaseRole::Reader;
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_databases = vec![
+        wiki_database("db-private", bridge::DatabaseStatus::Hot),
+        wiki_database("db-public", bridge::DatabaseStatus::Hot),
+        shared,
+    ];
+    provider.wiki_database_anonymous_access.insert(
+        "db-public".to_string(),
+        crate::wiki_bridge::DatabaseRole::Reader,
+    );
+    provider.refresh_wiki_records_from_databases();
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        selected_index: Some(0),
+        ..CoreState::default()
+    });
+
+    let rows = snapshot
+        .three_pane
+        .left
+        .rows
+        .iter()
+        .map(|row| (row.label.as_str(), row.detail.as_str(), row.selected))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        vec![
+            ("Private / Shared", "", false),
+            ("db-private", "Hot Private Owner 42 bytes", true),
+            ("db-shared", "Hot Shared Reader 42 bytes", false),
+            ("Public", "", false),
+            ("db-public", "Hot Public Owner 42 bytes", false),
+            ("+ Create database", "create new database", false),
+        ]
+    );
 }
 
 #[test]
@@ -101,13 +190,13 @@ fn wiki_database_list_includes_create_database_action_row() {
         ..CoreState::default()
     });
 
-    assert_eq!(snapshot.three_pane.left.rows.len(), 2);
-    assert_eq!(snapshot.three_pane.left.rows[1].label, "+ Create database");
+    assert_eq!(snapshot.three_pane.left.rows.len(), 3);
+    assert_eq!(snapshot.three_pane.left.rows[2].label, "+ Create database");
     assert_eq!(
-        snapshot.three_pane.left.rows[1].detail,
+        snapshot.three_pane.left.rows[2].detail,
         "create new database"
     );
-    assert!(snapshot.three_pane.left.rows[1].selected);
+    assert!(snapshot.three_pane.left.rows[2].selected);
     assert_eq!(snapshot.items.len(), 2);
     assert_eq!(snapshot.items[1].id, WIKI_CREATE_DATABASE_ACTION_ID);
     assert_eq!(snapshot.items[1].name, "+ Create database");
@@ -117,6 +206,71 @@ fn wiki_database_list_includes_create_database_action_row() {
     );
     assert_eq!(snapshot.selected_index, Some(1));
     assert_eq!(snapshot.total_count, 1);
+}
+
+#[test]
+fn wiki_database_section_rows_are_not_selectable() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_databases = vec![
+        wiki_database("db-private", bridge::DatabaseStatus::Hot),
+        wiki_database("db-public", bridge::DatabaseStatus::Hot),
+    ];
+    provider.wiki_database_anonymous_access.insert(
+        "db-public".to_string(),
+        crate::wiki_bridge::DatabaseRole::Reader,
+    );
+    provider.refresh_wiki_records_from_databases();
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        selected_index: Some(1),
+        ..CoreState::default()
+    });
+
+    assert!(!snapshot.three_pane.left.rows[0].selected);
+    assert!(!snapshot.three_pane.left.rows[2].selected);
+    assert_eq!(snapshot.three_pane.left.rows[3].label, "db-public");
+    assert!(snapshot.three_pane.left.rows[3].selected);
+}
+
+#[test]
+fn wiki_database_create_action_index_unchanged_with_sections() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_databases = vec![
+        wiki_database("db-private", bridge::DatabaseStatus::Hot),
+        wiki_database("db-public", bridge::DatabaseStatus::Hot),
+    ];
+    provider.wiki_database_anonymous_access.insert(
+        "db-public".to_string(),
+        crate::wiki_bridge::DatabaseRole::Reader,
+    );
+    provider.refresh_wiki_records_from_databases();
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        selected_index: Some(provider.wiki_records.len()),
+        ..CoreState::default()
+    });
+
+    assert_eq!(snapshot.items.len(), 3);
+    assert_eq!(snapshot.items[2].id, WIKI_CREATE_DATABASE_ACTION_ID);
+    assert_eq!(
+        snapshot
+            .three_pane
+            .left
+            .rows
+            .last()
+            .map(|row| (row.label.as_str(), row.selected)),
+        Some(("+ Create database", true))
+    );
 }
 
 #[test]
@@ -226,7 +380,40 @@ fn wiki_database_list_enter_drills_into_browser() {
     assert!(
         effects
             .iter()
-            .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Content)))
+            .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Items)))
+    );
+}
+
+#[test]
+fn wiki_browser_document_stays_empty_before_file_open() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_current_path = "/".to_string();
+    provider.wiki_records = vec![record_from_wiki_database(
+        "aaaaa-aa",
+        wiki_database("db-a", bridge::DatabaseStatus::Hot),
+    )];
+
+    let snapshot = provider.build_snapshot(&CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        selected_index: Some(0),
+        ..CoreState::default()
+    });
+
+    assert!(snapshot.three_pane.document.title.is_empty());
+    assert!(snapshot.three_pane.document.lines.is_empty());
+    assert!(
+        !snapshot
+            .three_pane
+            .document
+            .lines
+            .iter()
+            .any(|line| line.contains("kinic::wiki"))
     );
 }
 
@@ -248,6 +435,9 @@ fn wiki_database_list_enter_uses_database_even_when_focus_is_content() {
             entries: wiki_root_entries(),
             body_lines: Vec::new(),
             index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     let state = CoreState {
@@ -274,7 +464,7 @@ fn wiki_database_list_enter_uses_database_even_when_focus_is_content() {
         output
             .effects
             .iter()
-            .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Content)))
+            .any(|effect| matches!(effect, CoreEffect::FocusPane(PaneFocus::Items)))
     );
 }
 
@@ -510,6 +700,9 @@ fn wiki_browser_enter_on_directory_updates_current_path() {
             }],
             body_lines: vec!["+ /Wiki (directory)".to_string()],
             index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     provider.wiki_children_cache.insert(
@@ -518,6 +711,9 @@ fn wiki_browser_enter_on_directory_updates_current_path() {
             entries: Vec::new(),
             body_lines: Vec::new(),
             index_preview: Some(vec!["cached wiki".to_string()]),
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
 
@@ -529,6 +725,7 @@ fn wiki_browser_enter_on_directory_updates_current_path() {
     });
 
     assert_eq!(provider.wiki_current_path, "/Wiki");
+    assert!(provider.wiki_children_task.in_flight);
     assert!(effects.iter().any(|effect| {
         matches!(effect, CoreEffect::Notify(message) if message.contains("Opened /Wiki"))
     }));
@@ -565,6 +762,9 @@ fn wiki_browser_can_move_to_sources_and_enter_directory() {
                 "+ /Sources (directory)".to_string(),
             ],
             index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     provider.wiki_children_cache.insert(
@@ -573,6 +773,9 @@ fn wiki_browser_can_move_to_sources_and_enter_directory() {
             entries: Vec::new(),
             body_lines: Vec::new(),
             index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     let state = CoreState {
@@ -624,6 +827,9 @@ fn wiki_browser_enter_on_file_keeps_directory_list_visible() {
             ],
             body_lines: Vec::new(),
             index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     provider.wiki_children_cache.insert(
@@ -632,6 +838,9 @@ fn wiki_browser_enter_on_file_keeps_directory_list_visible() {
             entries: Vec::new(),
             body_lines: Vec::new(),
             index_preview: Some(vec!["preview b".to_string()]),
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
@@ -653,7 +862,392 @@ fn wiki_browser_enter_on_file_keeps_directory_list_visible() {
     assert_eq!(provider.wiki_preview_path.as_deref(), Some("/Wiki/b.md"));
     assert_eq!(rows.len(), 2);
     assert!(rows[1].selected);
+    assert_eq!(rows[1].label, "b.md");
+    assert!(provider.wiki_children_task.in_flight);
     assert_eq!(snapshot.three_pane.document.lines, vec!["preview b"]);
+}
+
+#[test]
+fn wiki_browser_renders_cached_tree_and_keeps_document_on_directory_open() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_records = vec![record_from_wiki_database(
+        "aaaaa-aa",
+        wiki_database("db-a", bridge::DatabaseStatus::Hot),
+    )];
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/"),
+        WikiChildrenContent {
+            entries: wiki_root_entries(),
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki"),
+        WikiChildrenContent {
+            entries: vec![
+                WikiBrowserEntry {
+                    path: "/Wiki/a.md".to_string(),
+                    name: "a.md".to_string(),
+                    kind: WikiBrowserEntryKind::File,
+                    size_bytes: None,
+                    has_children: false,
+                },
+                WikiBrowserEntry {
+                    path: "/Wiki/b.md".to_string(),
+                    name: "b.md".to_string(),
+                    kind: WikiBrowserEntryKind::File,
+                    size_bytes: None,
+                    has_children: false,
+                },
+            ],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki/b.md"),
+        WikiChildrenContent {
+            entries: Vec::new(),
+            body_lines: Vec::new(),
+            index_preview: Some(vec!["preview b".to_string()]),
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_preview_path = Some("/Wiki/b.md".to_string());
+    let state = CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    provider.open_selected_wiki_browser_entry(&state);
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(provider.wiki_current_path, "/Wiki");
+    assert_eq!(provider.wiki_preview_path.as_deref(), Some("/Wiki/b.md"));
+    assert_eq!(
+        snapshot
+            .three_pane
+            .middle
+            .rows
+            .iter()
+            .map(|row| row.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Wiki", "  a.md", "  b.md", "Sources"]
+    );
+    assert_eq!(snapshot.three_pane.document.title, "b.md");
+    assert_eq!(snapshot.three_pane.document.lines, vec!["preview b"]);
+}
+
+#[test]
+fn wiki_browser_keeps_previously_opened_directories_expanded() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_records = vec![record_from_wiki_database(
+        "aaaaa-aa",
+        wiki_database("db-a", bridge::DatabaseStatus::Hot),
+    )];
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/"),
+        WikiChildrenContent {
+            entries: wiki_root_entries(),
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Wiki/a.md".to_string(),
+                name: "a.md".to_string(),
+                kind: WikiBrowserEntryKind::File,
+                size_bytes: None,
+                has_children: false,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Sources"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Sources/s.md".to_string(),
+                name: "s.md".to_string(),
+                kind: WikiBrowserEntryKind::Source,
+                size_bytes: None,
+                has_children: false,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    let state = CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    provider.open_selected_wiki_browser_entry(&state);
+    provider.selected_wiki_browser_index = 2;
+    provider.open_selected_wiki_browser_entry(&state);
+    let rows = provider.wiki_browser_rows(0);
+
+    assert!(provider.wiki_expanded_paths.contains("/Wiki"));
+    assert!(provider.wiki_expanded_paths.contains("/Sources"));
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Wiki", "  a.md", "Sources", "  s.md"]
+    );
+}
+
+#[test]
+fn wiki_editor_opens_only_cached_markdown_files() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_records = vec![record_from_wiki_database(
+        "aaaaa-aa",
+        wiki_database("db-a", bridge::DatabaseStatus::Hot),
+    )];
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Wiki/index.md".to_string(),
+                name: "index.md".to_string(),
+                kind: WikiBrowserEntryKind::File,
+                size_bytes: Some(7),
+                has_children: false,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki/index.md"),
+        cached_wiki_file("# Index\nbody"),
+    );
+
+    let effects = provider.open_wiki_editor(&CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Items,
+        selected_index: Some(0),
+        ..CoreState::default()
+    });
+
+    assert!(effects.iter().any(|effect| {
+        matches!(
+            effect,
+            CoreEffect::OpenWikiEditor {
+                path,
+                content,
+                etag,
+                metadata_json,
+            } if path == "/Wiki/index.md"
+                && content == "# Index\nbody"
+                && etag == "etag-1"
+                && metadata_json == "{\"title\":\"Index\"}"
+        )
+    }));
+}
+
+#[test]
+fn wiki_editor_rejects_source_nodes() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_records = vec![record_from_wiki_database(
+        "aaaaa-aa",
+        wiki_database("db-a", bridge::DatabaseStatus::Hot),
+    )];
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Sources/page.md".to_string(),
+                name: "page.md".to_string(),
+                kind: WikiBrowserEntryKind::Source,
+                size_bytes: Some(7),
+                has_children: false,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+
+    let effects = provider.open_wiki_editor(&CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Items,
+        selected_index: Some(0),
+        ..CoreState::default()
+    });
+
+    assert!(effects.iter().any(|effect| {
+        matches!(effect, CoreEffect::Notify(message) if message == "Only /Wiki/*.md files are editable.")
+    }));
+}
+
+#[test]
+fn wiki_browser_enter_on_expanded_directory_closes_it() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_records = vec![record_from_wiki_database(
+        "aaaaa-aa",
+        wiki_database("db-a", bridge::DatabaseStatus::Hot),
+    )];
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/"),
+        WikiChildrenContent {
+            entries: wiki_root_entries(),
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Wiki/a.md".to_string(),
+                name: "a.md".to_string(),
+                kind: WikiBrowserEntryKind::File,
+                size_bytes: None,
+                has_children: false,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_current_path = "/Wiki".to_string();
+    provider.wiki_expanded_paths = HashSet::from(["/Wiki".to_string()]);
+    let state = CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    let effects = provider.open_selected_wiki_browser_entry(&state);
+    let rows = provider.wiki_browser_rows(0);
+
+    assert!(!provider.wiki_expanded_paths.contains("/Wiki"));
+    assert_eq!(provider.wiki_current_path, "/");
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Wiki", "Sources"]
+    );
+    assert!(effects.iter().any(|effect| {
+        matches!(effect, CoreEffect::Notify(message) if message == "Closed /Wiki")
+    }));
+}
+
+#[test]
+fn wiki_search_open_shows_cached_node_while_refreshing_content() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.selected_wiki_browser_index = 0;
+    provider.result_records = vec![record_from_wiki_search_hit(
+        "aaaaa-aa",
+        "db-a",
+        0,
+        bridge::WikiSearchHit {
+            path: "/Wiki/a.md".to_string(),
+            score: 1.0,
+            snippet: None,
+        },
+    )];
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki/a.md"),
+        WikiChildrenContent {
+            entries: Vec::new(),
+            body_lines: Vec::new(),
+            index_preview: Some(vec!["cached a".to_string()]),
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    let state = CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    let effects = provider.open_selected_wiki_browser_entry(&state);
+    let snapshot = provider.build_snapshot(&state);
+
+    assert_eq!(provider.wiki_current_path, "/Wiki/a.md");
+    assert!(provider.wiki_children_task.in_flight);
+    assert_eq!(snapshot.three_pane.document.lines, vec!["cached a"]);
+    assert!(effects.iter().any(|effect| {
+        matches!(effect, CoreEffect::Notify(message) if message == "Opened /Wiki/a.md")
+    }));
 }
 
 #[test]
@@ -765,6 +1359,9 @@ fn wiki_content_render_uses_database_cache_without_starting_query() {
             }],
             body_lines: vec!["- /Wiki/index.md (file)".to_string()],
             index_preview: Some(vec!["cached preview".to_string()]),
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     let record = record_from_wiki_database(
@@ -861,6 +1458,8 @@ fn wiki_reload_restores_database_browser_state_when_database_remains() {
         database_id: Some("db-b".to_string()),
         view_mode: WikiViewMode::DatabaseBrowser,
         current_path: "/Wiki/docs".to_string(),
+        preview_path: Some("/Wiki/docs/a.md".to_string()),
+        expanded_paths: HashSet::from(["/Wiki".to_string(), "/Wiki/docs".to_string()]),
         browser_index: 3,
         had_search_results: false,
     }));
@@ -868,6 +1467,12 @@ fn wiki_reload_restores_database_browser_state_when_database_remains() {
     assert_eq!(provider.wiki_view_mode, WikiViewMode::DatabaseBrowser);
     assert_eq!(provider.active_wiki_database_id.as_deref(), Some("db-b"));
     assert_eq!(provider.wiki_current_path, "/Wiki/docs");
+    assert_eq!(
+        provider.wiki_preview_path.as_deref(),
+        Some("/Wiki/docs/a.md")
+    );
+    assert!(provider.wiki_expanded_paths.contains("/Wiki"));
+    assert!(provider.wiki_expanded_paths.contains("/Wiki/docs"));
     assert_eq!(provider.selected_wiki_browser_index, 3);
 }
 
@@ -881,6 +1486,8 @@ fn wiki_refresh_starts_reload_without_clearing_current_browser_state() {
     provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
     provider.active_wiki_database_id = Some("db-a".to_string());
     provider.wiki_current_path = "/Wiki/docs".to_string();
+    provider.wiki_preview_path = Some("/Wiki/docs/a.md".to_string());
+    provider.wiki_expanded_paths = HashSet::from(["/Wiki".to_string(), "/Wiki/docs".to_string()]);
     provider.selected_wiki_browser_index = 1;
     provider.wiki_records = vec![record_from_wiki_database(
         "aaaaa-aa",
@@ -908,6 +1515,23 @@ fn wiki_refresh_starts_reload_without_clearing_current_browser_state() {
             .and_then(|reload| reload.database_id.as_deref()),
         Some("db-a")
     );
+    assert_eq!(
+        provider
+            .pending_wiki_reload
+            .as_ref()
+            .and_then(|reload| reload.preview_path.as_deref()),
+        Some("/Wiki/docs/a.md")
+    );
+    assert_eq!(
+        provider
+            .pending_wiki_reload
+            .as_ref()
+            .map(|reload| reload.expanded_paths.clone()),
+        Some(HashSet::from([
+            "/Wiki".to_string(),
+            "/Wiki/docs".to_string()
+        ]))
+    );
 }
 
 #[test]
@@ -923,6 +1547,8 @@ fn wiki_reload_returns_to_database_list_when_selected_database_disappears() {
         database_id: Some("db-missing".to_string()),
         view_mode: WikiViewMode::DatabaseBrowser,
         current_path: "/Wiki/docs".to_string(),
+        preview_path: Some("/Wiki/docs/a.md".to_string()),
+        expanded_paths: HashSet::from(["/Wiki".to_string()]),
         browser_index: 3,
         had_search_results: true,
     }));
@@ -953,6 +1579,9 @@ fn wiki_browser_items_focus_enter_opens_browser_entry() {
             entries: wiki_root_entries(),
             body_lines: Vec::new(),
             index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     provider.wiki_children_cache.insert(
@@ -961,6 +1590,9 @@ fn wiki_browser_items_focus_enter_opens_browser_entry() {
             entries: Vec::new(),
             body_lines: Vec::new(),
             index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     let state = CoreState {
@@ -1004,6 +1636,9 @@ fn wiki_browser_navigation_restores_database_list_selection() {
             entries: wiki_root_entries(),
             body_lines: Vec::new(),
             index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
         },
     );
     let state = CoreState {

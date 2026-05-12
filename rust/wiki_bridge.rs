@@ -41,6 +41,14 @@ pub struct DatabaseSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
+pub struct DatabaseMember {
+    pub database_id: String,
+    pub principal: String,
+    pub role: DatabaseRole,
+    pub created_at_ms: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct ListChildrenRequest {
     pub database_id: String,
     pub path: String,
@@ -270,6 +278,13 @@ impl WikiClient {
         result.map_err(anyhow::Error::msg)
     }
 
+    pub async fn list_database_members(&self, database_id: &str) -> Result<Vec<DatabaseMember>> {
+        let result: Result<Vec<DatabaseMember>, String> = self
+            .query("list_database_members", &database_id.to_string())
+            .await?;
+        result.map_err(anyhow::Error::msg)
+    }
+
     pub async fn create_database(&self) -> Result<String> {
         let result: Result<String, String> = self.update("create_database", &()).await?;
         result.map_err(anyhow::Error::msg)
@@ -350,6 +365,21 @@ mod tests {
             .expect("database list should decode");
 
         assert_eq!(decoded.unwrap()[0].database_id, "default");
+    }
+
+    #[test]
+    fn database_member_decodes_list_database_members_shape() {
+        let bytes = Encode!(&Ok::<_, String>(vec![DatabaseMember {
+            database_id: "default".to_string(),
+            principal: "2vxsx-fae".to_string(),
+            role: DatabaseRole::Reader,
+            created_at_ms: 1,
+        }]))
+        .expect("database members should encode");
+        let decoded = Decode!(&bytes, Result<Vec<DatabaseMember>, String>)
+            .expect("database members should decode");
+
+        assert_eq!(decoded.unwrap()[0].principal, "2vxsx-fae");
     }
 
     #[test]

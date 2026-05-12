@@ -172,6 +172,7 @@ impl RuntimeLoopHooks<provider::KinicProvider> for KinicRuntimeHooks {
         if state.create_submit_state == CreateSubmitState::Submitting
             || matches!(state.create_cost_state, CreateCostState::Loading)
             || state.insert_submit_state == CreateSubmitState::Submitting
+            || state.wiki_editor.submit_state == CreateSubmitState::Submitting
         {
             state.create_spinner_frame = state.create_spinner_frame.wrapping_add(1);
             state.insert_spinner_frame = state.insert_spinner_frame.wrapping_add(1);

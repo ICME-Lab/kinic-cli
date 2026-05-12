@@ -132,6 +132,7 @@ What to understand first:
 - `Settings`: principal, balance, default memory, saved tags, and retrieval settings
 
 For local deploys, `scripts/setup.sh` deploys the bundled Wiki wasm at the default Wiki canister id.
+The TUI groups Wiki databases under `Private / Shared` and `Public`, marks rows based on anonymous access and the current identity's role, and reads public databases with an anonymous agent.
 
 Wiki write/delete and database management are available from the CLI:
 
