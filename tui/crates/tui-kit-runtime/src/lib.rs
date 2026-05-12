@@ -96,7 +96,7 @@ pub fn tab_focus_policy(tab_id: &str) -> TabFocusPolicy {
         },
         kinic_tabs::TabKind::Wiki => TabFocusPolicy {
             default_focus: PaneFocus::Items,
-            allows_search: false,
+            allows_search: true,
             allows_items: true,
             allows_tabs: true,
             allows_content: true,
@@ -1661,6 +1661,13 @@ pub fn apply_core_action(state: &mut CoreState, action: &CoreAction) {
             }
         }
         CoreAction::SetTab(tab_id) => {
+            if state.wiki_editor.submit_state == CreateSubmitState::Submitting {
+                return;
+            }
+            if state.wiki_editor.open && state.wiki_editor.dirty {
+                state.wiki_editor.discard_confirm = true;
+                return;
+            }
             state.current_tab_id = tab_id.0.clone();
             if !chat_supported_for_tab(state.current_tab_id.as_str()) {
                 state.chat_open = false;
@@ -3583,6 +3590,69 @@ mod tests {
     }
 
     #[test]
+    fn set_tab_prompts_before_discarding_dirty_wiki_editor() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            selected_index: Some(2),
+            ..CoreState::default()
+        };
+        state.wiki_editor.open = true;
+        state.wiki_editor.dirty = true;
+
+        apply_core_action(
+            &mut state,
+            &CoreAction::SetTab(CoreTabId::new(kinic_tabs::KINIC_MEMORIES_TAB_ID)),
+        );
+
+        assert_eq!(state.current_tab_id, kinic_tabs::KINIC_WIKI_TAB_ID);
+        assert_eq!(state.selected_index, Some(2));
+        assert!(state.wiki_editor.open);
+        assert!(state.wiki_editor.dirty);
+        assert!(state.wiki_editor.discard_confirm);
+    }
+
+    #[test]
+    fn set_tab_closes_clean_wiki_editor() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            ..CoreState::default()
+        };
+        state.wiki_editor.open = true;
+
+        apply_core_action(
+            &mut state,
+            &CoreAction::SetTab(CoreTabId::new(kinic_tabs::KINIC_MEMORIES_TAB_ID)),
+        );
+
+        assert_eq!(state.current_tab_id, kinic_tabs::KINIC_MEMORIES_TAB_ID);
+        assert!(!state.wiki_editor.open);
+    }
+
+    #[test]
+    fn set_tab_is_blocked_while_wiki_editor_is_submitting() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            selected_index: Some(3),
+            ..CoreState::default()
+        };
+        state.wiki_editor.open = true;
+        state.wiki_editor.submit_state = CreateSubmitState::Submitting;
+
+        apply_core_action(
+            &mut state,
+            &CoreAction::SetTab(CoreTabId::new(kinic_tabs::KINIC_MEMORIES_TAB_ID)),
+        );
+
+        assert_eq!(state.current_tab_id, kinic_tabs::KINIC_WIKI_TAB_ID);
+        assert_eq!(state.selected_index, Some(3));
+        assert!(state.wiki_editor.open);
+        assert_eq!(
+            state.wiki_editor.submit_state,
+            CreateSubmitState::Submitting
+        );
+    }
+
+    #[test]
     fn focus_search_is_blocked_on_create_tab() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_CREATE_TAB_ID.to_string(),
@@ -3595,7 +3665,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_search_is_blocked_on_wiki_tab() {
+    fn focus_search_is_allowed_on_wiki_tab() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
             focus: PaneFocus::Content,
@@ -3603,7 +3673,7 @@ mod tests {
         };
 
         apply_core_action(&mut state, &CoreAction::FocusSearch);
-        assert_eq!(state.focus, PaneFocus::Content);
+        assert_eq!(state.focus, PaneFocus::Search);
     }
 
     #[test]
@@ -3830,14 +3900,14 @@ mod tests {
     }
 
     #[test]
-    fn slash_does_not_target_hidden_search_on_wiki() {
+    fn slash_targets_search_on_wiki() {
         assert_eq!(
             action_for_key(
                 CoreKey::Slash,
                 PaneFocus::Content,
                 kinic_tabs::KINIC_WIKI_TAB_ID
             ),
-            None
+            Some(CoreAction::FocusSearch)
         );
     }
 
