@@ -64,6 +64,16 @@ export function resolvePortalMetadata(
     });
   }
 
+  if (pathname === "/cli-login") {
+    return buildMemoryUnavailableMetadata(pathname, {
+      portalOrigin: config.portalOrigin,
+      publicApiOrigin: config.publicApiOrigin,
+      title: "Terminal Login | Kinic",
+      description: "Authorize icp-cli with the same Internet Identity origin as the Kinic portal.",
+      status: 200,
+    });
+  }
+
   const memoryId = matchMemoryId(pathname);
   if (memoryId) {
     return resolveMemoryRouteMetadata(pathname, memoryId, config, memoryState, memorySummary);

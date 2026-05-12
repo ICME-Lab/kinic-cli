@@ -337,17 +337,18 @@ dfx canister --ic call 73mez-iiaaa-aaaaq-aaasq-cai icrc1_balance_of '(record {ow
 
 Or purchase them from MEXC or swap at https://app.icpswap.com/ .
 
-#### 3. Internet Identity Flow (`--ii`, CLI only)
+#### 3. Internet Identity Flow (`icp-cli`, recommended)
 
 If you prefer browser login instead of a Keychain-backed dfx identity:
 
 ```bash
-cargo run -- --ii login
-cargo run -- --ii list
+icp identity link ii <name> --host https://memory.kinic.xyz
+cargo run -- --ic --identity <name> list
 ```
 
-Delegations are stored at `~/.config/kinic/identity.json` with a default TTL of 6 hours.
-The login flow uses a local callback on port `8620`.
+Requires `icp-cli` 0.2.4 or newer. When the delegation expires, refresh it with `icp identity login <name>`.
+
+Legacy `kinic-cli --ii login` still works for CLI-only use, but it derives from the locally hosted login origin and stores delegations at `~/.config/kinic/identity.json`.
 
 #### 4. Deploy and Use Memory from Python
 

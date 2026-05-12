@@ -103,17 +103,33 @@ cargo run -- --ic --identity alice create \
   --description "Mainnet memory"
 ```
 
-### Internet Identity flow (--ii)
+### Internet Identity flow with icp-cli
 
-First, open the browser login flow and store a delegation (default TTL: 6 hours):
+Install `icp-cli` 0.2.4 or newer, then link an Internet Identity to a local identity on the Kinic portal origin:
 
 ```bash
-cargo run -- login
+icp identity link ii alice --host https://memory.kinic.xyz
 ```
 
-Then run commands with `--ii`:
+Use the linked identity like any other `--identity` value:
 
 ```bash
+cargo run -- --ic --identity alice list
+cargo run -- --ic --identity alice create \
+  --name "Demo memory" \
+  --description "Mainnet memory"
+```
+
+Refresh an expired delegation with:
+
+```bash
+icp identity login alice
+```
+
+Legacy `--ii` flow:
+
+```bash
+cargo run -- --ii login
 cargo run -- --ic --ii list
 cargo run -- --ic --ii create \
   --name "Demo memory" \
@@ -121,8 +137,8 @@ cargo run -- --ic --ii create \
 ```
 
 Notes:
-- Delegations are stored at `~/.config/kinic/identity.json`.
-- The login flow uses a local callback on port `8620`.
+- The recommended path is `icp identity link ii ... --host https://memory.kinic.xyz`, because the principal derives from the Kinic portal origin.
+- Legacy `--ii` stores delegations at `~/.config/kinic/identity.json` with a local callback on port `8620`.
 
 ### Convert PDF to markdown (inspect only)
 

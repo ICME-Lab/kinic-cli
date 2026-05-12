@@ -71,6 +71,45 @@ describe("portal worker", () => {
     expect(mocks.renderPortalDocument).toHaveBeenCalledOnce();
   });
 
+  it("serves the icp-cli login discovery path", async () => {
+    const response = await worker.fetch(
+      new Request("https://portal.kinic.test/.well-known/ic-cli-login"),
+      env(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await response.text()).toBe("/cli-login");
+    expect(mocks.renderPortalDocument).not.toHaveBeenCalled();
+  });
+
+  it("adds CSP for localhost cli callbacks on documents", async () => {
+    const response = await worker.fetch(
+      new Request("https://portal.kinic.test/cli-login"),
+      env(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Security-Policy")).toContain("http://127.0.0.1:*");
+    expect(response.headers.get("Content-Security-Policy")).toContain("https://id.ai");
+  });
+
+  it("adds runtime API and MCP origins to document CSP", async () => {
+    const response = await worker.fetch(
+      new Request("https://portal.preview.test/m/m1"),
+      env({
+        KINIC_PUBLIC_API_ORIGIN: "https://api.preview.test",
+        KINIC_REMOTE_MCP_ORIGIN: "https://mcp.preview.test/mcp",
+      }),
+    );
+    const csp = response.headers.get("Content-Security-Policy");
+
+    expect(csp).toContain("img-src 'self' data: https://api.preview.test");
+    expect(csp).toContain("connect-src");
+    expect(csp).toContain("https://api.preview.test");
+    expect(csp).toContain("https://mcp.preview.test");
+  });
+
   it("skips full SSR for HEAD requests", async () => {
     const response = await worker.fetch(
       new Request("https://portal.kinic.test/m/m1", { method: "HEAD" }),
@@ -336,12 +375,13 @@ describe("portal worker", () => {
   });
 });
 
-function env(): Env {
+function env(overrides: Partial<Env> = {}): Env {
   return {
     ASSETS: { fetch: vi.fn() } as never,
     IC_HOST: "https://ic0.app",
     EMBEDDING_API_ENDPOINT: "https://api.kinic.test",
     KINIC_PORTAL_ORIGIN: "https://portal.kinic.test",
     KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.test",
+    ...overrides,
   };
 }

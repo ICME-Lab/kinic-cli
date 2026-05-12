@@ -4,6 +4,7 @@
 
 import { Route, Routes } from "react-router";
 import type { PortalRuntimeConfig } from "./runtime-config";
+import { CliLoginPage } from "./routes/cli-login-page";
 import { HomePage } from "./routes/home-page";
 import { MemoryPage } from "./routes/memory-page";
 import { NotFoundPage } from "./routes/not-found-page";
@@ -12,6 +13,7 @@ export function App({ config }: { config: PortalRuntimeConfig }) {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route path="/cli-login" element={<CliLoginPage />} />
       <Route path="/m/:memoryId" element={<MemoryPage config={config} />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

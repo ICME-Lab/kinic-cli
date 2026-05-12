@@ -7,10 +7,13 @@ import { resolvePublicSummary } from "../workers/shared/public-memory-summary-ru
 import { resolveSummaryLanguage } from "../workers/public-api/src/public-summary";
 import { buildSummaryCacheKey, getSummaryCache, readSummaryCache } from "../workers/public-api/src/summary-cache";
 import { buildRuntimeConfig } from "./runtime-config";
+import type { PortalRuntimeConfig } from "./runtime-config";
 import { PORTAL_SCRIPT_PATH, PORTAL_STYLE_PATH, renderPortalDocument, resolvePortalMetadata } from "./ssr";
 
 const DETAIL_ROUTE = /^\/api\/public\/memories\/([^/]+)$/;
 const SUMMARY_ROUTE = /^\/api\/public\/memories\/([^/]+)\/summary$/;
+const CLI_LOGIN_DISCOVERY_PATH = "/.well-known/ic-cli-login";
+const CLI_LOGIN_PATH = "/cli-login";
 const OGP_SUMMARY_LANGUAGE = "en";
 
 export default {
@@ -20,6 +23,10 @@ export default {
 
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("method not allowed", { status: 405 });
+    }
+
+    if (pathname === CLI_LOGIN_DISCOVERY_PATH) {
+      return textResponse(request.method, CLI_LOGIN_PATH, 200);
     }
 
     const detailMatch = pathname.match(DETAIL_ROUTE);
@@ -40,11 +47,11 @@ export default {
     const memorySummary = await resolveMemoryRouteSummary(env, memoryState);
     if (request.method === "HEAD") {
       const metadata = resolvePortalMetadata(pathname, config, memoryState, memorySummary);
-      return documentResponse(null, metadata.status);
+      return documentResponse(null, metadata.status, config);
     }
 
     const document = renderPortalDocument(pathname, config, memoryState, memorySummary);
-    return documentResponse(document.html, document.status);
+    return documentResponse(document.html, document.status, config);
   },
 };
 
@@ -107,13 +114,61 @@ async function handleMemorySummary(method: "GET" | "HEAD", request: Request, env
   }
 }
 
-function documentResponse(body: string | null, status: number): Response {
+function documentResponse(body: string | null, status: number, config: PortalRuntimeConfig): Response {
   return new Response(body, {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=0, must-revalidate",
+      "Content-Security-Policy": buildDocumentCsp(config),
       Link: `<${PORTAL_STYLE_PATH}>; rel=preload; as=style, <${PORTAL_SCRIPT_PATH}>; rel=modulepreload; as=script`,
+    },
+  });
+}
+
+function buildDocumentCsp(config: PortalRuntimeConfig): string {
+  const publicApiOrigin = safeOrigin(config.publicApiOrigin);
+  const mcpOrigin = config.mcpEndpoint ? safeOrigin(config.mcpEndpoint) : null;
+  const imageSources = ["'self'", "data:", publicApiOrigin].filter(Boolean);
+  const connectSources = [
+    "'self'",
+    "https://id.ai",
+    "https://ic0.app",
+    "https://icp-api.io",
+    publicApiOrigin,
+    mcpOrigin,
+    "http://127.0.0.1:*",
+    "http://[::1]:*",
+  ].filter(Boolean);
+
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    `img-src ${imageSources.join(" ")}`,
+    `connect-src ${connectSources.join(" ")}`,
+    "font-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+  ].join("; ");
+}
+
+function safeOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function textResponse(method: "GET" | "HEAD", body: string, status: number): Response {
+  return new Response(method === "HEAD" ? null : body, {
+    status,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
     },
   });
 }
