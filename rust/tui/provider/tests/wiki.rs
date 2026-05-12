@@ -11,6 +11,15 @@ fn wiki_database(database_id: &str, status: bridge::DatabaseStatus) -> bridge::D
     }
 }
 
+fn wiki_database_with_role(
+    database_id: &str,
+    role: crate::wiki_bridge::DatabaseRole,
+) -> bridge::DatabaseSummary {
+    let mut database = wiki_database(database_id, bridge::DatabaseStatus::Hot);
+    database.role = role;
+    database
+}
+
 fn cached_wiki_file(content: &str) -> WikiChildrenContent {
     WikiChildrenContent {
         entries: Vec::new(),
@@ -270,6 +279,58 @@ fn wiki_database_create_action_index_unchanged_with_sections() {
             .last()
             .map(|row| (row.label.as_str(), row.selected)),
         Some(("+ Create database", true))
+    );
+}
+
+#[test]
+fn wiki_refresh_clears_cache_when_public_visibility_changes() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.wiki_database_anonymous_access.insert(
+        "db-public-to-private".to_string(),
+        crate::wiki_bridge::DatabaseRole::Reader,
+    );
+    let previous_public_ids = provider
+        .wiki_database_anonymous_access
+        .keys()
+        .cloned()
+        .collect::<HashSet<_>>();
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-private-to-public", "/"),
+        cached_wiki_file("stale public"),
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-public-to-private", "/"),
+        cached_wiki_file("stale private"),
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-unchanged", "/"),
+        cached_wiki_file("fresh"),
+    );
+    provider.wiki_database_anonymous_access.clear();
+    provider.wiki_database_anonymous_access.insert(
+        "db-private-to-public".to_string(),
+        crate::wiki_bridge::DatabaseRole::Reader,
+    );
+
+    provider.clear_wiki_cache_for_visibility_changes(&previous_public_ids);
+
+    assert!(
+        provider
+            .wiki_cached_children_content("db-private-to-public", "/")
+            .is_none()
+    );
+    assert!(
+        provider
+            .wiki_cached_children_content("db-public-to-private", "/")
+            .is_none()
+    );
+    assert!(
+        provider
+            .wiki_cached_children_content("db-unchanged", "/")
+            .is_some()
     );
 }
 
@@ -597,6 +658,7 @@ fn wiki_browser_back_at_root_returns_to_database_list() {
     provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
     provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
     provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_databases = vec![wiki_database("db-a", bridge::DatabaseStatus::Hot)];
     provider.wiki_records = vec![record_from_wiki_database(
         "aaaaa-aa",
         wiki_database("db-a", bridge::DatabaseStatus::Hot),
@@ -876,6 +938,7 @@ fn wiki_browser_renders_cached_tree_and_keeps_document_on_directory_open() {
     provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
     provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
     provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_databases = vec![wiki_database("db-a", bridge::DatabaseStatus::Hot)];
     provider.wiki_records = vec![record_from_wiki_database(
         "aaaaa-aa",
         wiki_database("db-a", bridge::DatabaseStatus::Hot),
@@ -1044,6 +1107,7 @@ fn wiki_editor_opens_only_cached_markdown_files() {
     provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
     provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
     provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_databases = vec![wiki_database("db-a", bridge::DatabaseStatus::Hot)];
     provider.wiki_records = vec![record_from_wiki_database(
         "aaaaa-aa",
         wiki_database("db-a", bridge::DatabaseStatus::Hot),
@@ -1094,6 +1158,84 @@ fn wiki_editor_opens_only_cached_markdown_files() {
 }
 
 #[test]
+fn wiki_editor_rejects_reader_database() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    let database = wiki_database_with_role("db-a", crate::wiki_bridge::DatabaseRole::Reader);
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_databases = vec![database.clone()];
+    provider.wiki_records = vec![record_from_wiki_database("aaaaa-aa", database)];
+
+    let effects = provider.open_wiki_editor(&CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Items,
+        selected_index: Some(0),
+        ..CoreState::default()
+    });
+
+    assert!(effects.iter().any(|effect| {
+        matches!(effect, CoreEffect::Notify(message) if message == "Selected wiki database is read-only.")
+    }));
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::OpenWikiEditor { .. }))
+    );
+}
+
+#[test]
+fn wiki_editor_allows_writer_database() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    let database = wiki_database_with_role("db-a", crate::wiki_bridge::DatabaseRole::Writer);
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_databases = vec![database.clone()];
+    provider.wiki_records = vec![record_from_wiki_database("aaaaa-aa", database)];
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Wiki/index.md".to_string(),
+                name: "index.md".to_string(),
+                kind: WikiBrowserEntryKind::File,
+                size_bytes: Some(7),
+                has_children: false,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki/index.md"),
+        cached_wiki_file("# Index\nbody"),
+    );
+
+    let effects = provider.open_wiki_editor(&CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Items,
+        selected_index: Some(0),
+        ..CoreState::default()
+    });
+
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, CoreEffect::OpenWikiEditor { .. }))
+    );
+}
+
+#[test]
 fn wiki_editor_rejects_source_nodes() {
     let mut provider = KinicProvider::new(TuiConfig {
         wiki_canister_id: Some("aaaaa-aa".to_string()),
@@ -1102,6 +1244,7 @@ fn wiki_editor_rejects_source_nodes() {
     provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
     provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
     provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_databases = vec![wiki_database("db-a", bridge::DatabaseStatus::Hot)];
     provider.wiki_records = vec![record_from_wiki_database(
         "aaaaa-aa",
         wiki_database("db-a", bridge::DatabaseStatus::Hot),

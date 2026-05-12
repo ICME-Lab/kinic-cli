@@ -487,15 +487,13 @@ pub async fn list_wiki_databases(
     let mut databases = client.list_databases().await?;
     let mut anonymous_access = HashMap::new();
     for database in &databases {
-        let members = client
-            .list_database_members(database.database_id.as_str())
-            .await?;
-        if let Some(member) = members
-            .into_iter()
-            .find(|member| matches!(member.principal.as_str(), "anonymous" | "2vxsx-fae"))
-        {
-            anonymous_access.insert(database.database_id.clone(), member.role);
-        }
+        apply_database_member_lookup(
+            &mut anonymous_access,
+            database.database_id.as_str(),
+            client
+                .list_database_members(database.database_id.as_str())
+                .await,
+        );
     }
     let anonymous_agent =
         crate::agent::AgentFactory::new_with_identity(use_mainnet, AnonymousIdentity {})
@@ -512,6 +510,29 @@ pub async fn list_wiki_databases(
         databases,
         anonymous_access,
     })
+}
+
+fn apply_database_member_lookup(
+    anonymous_access: &mut HashMap<String, DatabaseRole>,
+    database_id: &str,
+    members_result: Result<Vec<crate::wiki_bridge::DatabaseMember>>,
+) {
+    if let Ok(members) = members_result {
+        apply_anonymous_member_access(anonymous_access, database_id, members);
+    }
+}
+
+fn apply_anonymous_member_access(
+    anonymous_access: &mut HashMap<String, DatabaseRole>,
+    database_id: &str,
+    members: Vec<crate::wiki_bridge::DatabaseMember>,
+) {
+    if let Some(member) = members
+        .into_iter()
+        .find(|member| matches!(member.principal.as_str(), "anonymous" | "2vxsx-fae"))
+    {
+        anonymous_access.insert(database_id.to_string(), member.role);
+    }
 }
 
 fn merge_anonymous_wiki_databases(
@@ -1053,7 +1074,8 @@ fn format_insert_execute_error(message: &str) -> String {
 mod tests {
     use super::*;
     use crate::wiki_bridge::{
-        ChildNode, DatabaseRole, Node, NodeKind, SearchNodeHit, SearchPreview, SearchPreviewField,
+        ChildNode, DatabaseMember, DatabaseRole, Node, NodeKind, SearchNodeHit, SearchPreview,
+        SearchPreviewField,
     };
     use candid::Nat;
     use ic_agent::identity::AnonymousIdentity;
@@ -1159,6 +1181,32 @@ mod tests {
         assert_eq!(databases.len(), 2);
         assert_eq!(databases[1].database_id, "public");
         assert_eq!(anonymous_access.get("public"), Some(&DatabaseRole::Reader));
+    }
+
+    #[test]
+    fn list_wiki_databases_ignores_member_lookup_failure() {
+        let mut anonymous_access = HashMap::new();
+
+        apply_database_member_lookup(
+            &mut anonymous_access,
+            "db-a",
+            Err(anyhow::anyhow!("members denied")),
+        );
+
+        assert!(anonymous_access.is_empty());
+
+        apply_database_member_lookup(
+            &mut anonymous_access,
+            "db-a",
+            Ok(vec![DatabaseMember {
+                database_id: "db-a".to_string(),
+                principal: "anonymous".to_string(),
+                role: DatabaseRole::Reader,
+                created_at_ms: 1,
+            }]),
+        );
+
+        assert_eq!(anonymous_access.get("db-a"), Some(&DatabaseRole::Reader));
     }
 
     #[test]

@@ -110,6 +110,7 @@ In the `Wiki` tab, `Tab` and `Shift+Tab` switch between the Browser pane and the
 Wiki databases are grouped under `Private / Shared` and `Public`.
 Database rows show `Public` when `anonymous` has access, `Private` for owned databases without anonymous access, and `Shared` for non-public databases shared with the current identity.
 Public database reads use an anonymous agent so identities without direct membership can still browse anonymous-readable databases.
+Wiki edit opens only for databases where the current identity is `Owner` or `Writer`.
 When Browser is focused, `↑` `↓` moves the selected database or wiki node, `Enter` opens it, and `e` edits a loaded `/Wiki/*.md` file.
 When Document is focused, `↑` `↓`, `PageUp`, `PageDown`, `Home`, and `End` scroll the document.
 In Wiki edit mode, `Ctrl+S` saves, `Tab` moves to the footer `Save` / `Cancel` controls, and `Esc` exits or asks to discard dirty changes.

@@ -1781,6 +1781,18 @@ impl KinicProvider {
             .contains_key(database_id)
     }
 
+    fn wiki_database_can_write(&self, database_id: &str) -> bool {
+        self.wiki_databases
+            .iter()
+            .find(|database| database.database_id == database_id)
+            .is_some_and(|database| {
+                matches!(
+                    database.role,
+                    bridge::DatabaseRole::Owner | bridge::DatabaseRole::Writer
+                )
+            })
+    }
+
     fn wiki_snapshot_mode(&self) -> WikiViewMode {
         if self.wiki_load_error.is_some() {
             WikiViewMode::Diagnostic
@@ -2140,6 +2152,11 @@ impl KinicProvider {
                 "Select a wiki database first.".to_string(),
             )];
         };
+        if !self.wiki_database_can_write(database_id.as_str()) {
+            return vec![CoreEffect::Notify(
+                "Selected wiki database is read-only.".to_string(),
+            )];
+        }
         let Some(entry) = self.selected_wiki_browser_entry(state) else {
             self.start_selected_wiki_children_load(state);
             return vec![CoreEffect::Notify(
@@ -3249,6 +3266,27 @@ impl KinicProvider {
                 .split_once('\n')
                 .map(|(database_id, _)| database_ids.contains(database_id))
                 .unwrap_or_else(|| database_ids.contains(cache_key))
+        });
+    }
+
+    fn clear_wiki_cache_for_visibility_changes(&mut self, previous_public_ids: &HashSet<String>) {
+        let current_public_ids = self
+            .wiki_database_anonymous_access
+            .keys()
+            .cloned()
+            .collect::<HashSet<_>>();
+        let changed_database_ids = previous_public_ids
+            .symmetric_difference(&current_public_ids)
+            .cloned()
+            .collect::<HashSet<_>>();
+        if changed_database_ids.is_empty() {
+            return;
+        }
+        self.wiki_children_cache.retain(|cache_key, _| {
+            cache_key
+                .split_once('\n')
+                .map(|(database_id, _)| !changed_database_ids.contains(database_id))
+                .unwrap_or_else(|| !changed_database_ids.contains(cache_key))
         });
     }
 
@@ -5751,8 +5789,14 @@ impl KinicProvider {
             Ok(databases) => {
                 let reload_state = self.pending_wiki_reload.take();
                 self.wiki_load_error = None;
+                let previous_public_ids = self
+                    .wiki_database_anonymous_access
+                    .keys()
+                    .cloned()
+                    .collect::<HashSet<_>>();
                 self.wiki_database_anonymous_access = databases.anonymous_access;
                 self.wiki_databases = databases.databases;
+                self.clear_wiki_cache_for_visibility_changes(&previous_public_ids);
                 self.refresh_wiki_records_from_databases();
                 self.restore_wiki_reload_state(reload_state);
                 if self.wiki_view_mode == WikiViewMode::DatabaseBrowser {
