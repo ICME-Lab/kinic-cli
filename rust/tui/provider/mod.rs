@@ -142,6 +142,7 @@ struct SaveTagOutcome {
 const MAX_CONCURRENT_MEMORY_SEARCHES: usize = 10;
 const MAX_CONCURRENT_MEMORY_DETAIL_PREFETCHES: usize = 4;
 const ADD_MEMORY_ACTION_ID: &str = "kinic-action-add-memory";
+const WIKI_CREATE_DATABASE_ACTION_ID: &str = "wiki-create-database-action";
 const ALL_MEMORIES_CHAT_THREAD_KEY: &str = "all-memories";
 #[cfg_attr(test, allow(dead_code))]
 const MEMORY_SUMMARY_QUERY: &str = "Summarize the contents of this memory concisely. Explain the main topics, what kinds of information it contains, and what the memory appears to be for, in 3 to 5 sentences.";
@@ -1575,9 +1576,14 @@ impl KinicProvider {
     }
 
     fn is_wiki_create_database_action_selected(&self, state: &CoreState) -> bool {
-        self.tab_id == KINIC_WIKI_TAB_ID
-            && self.wiki_snapshot_mode() == WikiViewMode::DatabaseList
+        self.should_show_wiki_create_database_action(state)
             && state.selected_index == Some(self.wiki_records.len())
+    }
+
+    fn should_show_wiki_create_database_action(&self, state: &CoreState) -> bool {
+        state.current_tab_id == KINIC_WIKI_TAB_ID
+            && self.tab_id == KINIC_WIKI_TAB_ID
+            && self.wiki_snapshot_mode() == WikiViewMode::DatabaseList
     }
 
     fn wiki_three_pane_mode(&self, mode: WikiViewMode) -> ThreePaneMode {
@@ -3223,6 +3229,9 @@ impl KinicProvider {
             .collect::<Vec<_>>();
         if self.should_show_add_memory_action(state) {
             items.push(adapter::to_summary(&add_memory_action_record()));
+        }
+        if self.should_show_wiki_create_database_action(state) {
+            items.push(adapter::to_summary(&wiki_create_database_action_record()));
         }
         let selected_content = if state.current_tab_id == KINIC_SETTINGS_TAB_ID {
             None
@@ -6430,6 +6439,16 @@ fn add_memory_action_record() -> KinicRecord {
         "action",
         "Add an existing memory canister to this local list.",
         "## Add Existing Memory Canister\n\nOpen this action to register an existing memory canister by id.\n",
+    )
+}
+
+fn wiki_create_database_action_record() -> KinicRecord {
+    KinicRecord::new(
+        WIKI_CREATE_DATABASE_ACTION_ID,
+        "+ Create database",
+        "wiki",
+        "create new database",
+        "## Create database\n\nCreate a new Wiki database.\n",
     )
 }
 

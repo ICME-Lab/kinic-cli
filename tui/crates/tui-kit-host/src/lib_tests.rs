@@ -161,6 +161,20 @@ mod effect_application {
         assert_eq!(state.selected_index, Some(1));
     }
 
+    #[test]
+    fn select_list_item_effect_can_select_wiki_create_action_row() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+            list_items: vec![test_item("db-a"), test_item("wiki-create-database-action")],
+            selected_index: Some(0),
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::SelectListItem(1)]);
+
+        assert_eq!(state.selected_index, Some(1));
+    }
+
     fn test_item(id: &str) -> UiItemSummary {
         UiItemSummary {
             id: id.to_string(),

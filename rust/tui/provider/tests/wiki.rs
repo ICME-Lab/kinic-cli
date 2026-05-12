@@ -81,7 +81,9 @@ fn wiki_three_pane_exposes_database_rows_separately_from_memory_items() {
     assert!(snapshot.three_pane.left.rows[0].selected);
     assert_eq!(snapshot.three_pane.left.rows[1].label, "+ Create database");
     assert_eq!(snapshot.three_pane.mode, ThreePaneMode::List);
-    assert_eq!(snapshot.items.len(), 1);
+    assert_eq!(snapshot.items.len(), 2);
+    assert_eq!(snapshot.items[1].id, WIKI_CREATE_DATABASE_ACTION_ID);
+    assert_eq!(snapshot.total_count, 1);
 }
 
 #[test]
@@ -106,6 +108,15 @@ fn wiki_database_list_includes_create_database_action_row() {
         "create new database"
     );
     assert!(snapshot.three_pane.left.rows[1].selected);
+    assert_eq!(snapshot.items.len(), 2);
+    assert_eq!(snapshot.items[1].id, WIKI_CREATE_DATABASE_ACTION_ID);
+    assert_eq!(snapshot.items[1].name, "+ Create database");
+    assert_eq!(
+        snapshot.items[1].subtitle.as_deref(),
+        Some("create new database")
+    );
+    assert_eq!(snapshot.selected_index, Some(1));
+    assert_eq!(snapshot.total_count, 1);
 }
 
 #[test]

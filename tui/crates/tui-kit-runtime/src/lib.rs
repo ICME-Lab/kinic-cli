@@ -3192,6 +3192,55 @@ mod tests {
     }
 
     #[test]
+    fn wiki_database_list_move_next_reaches_create_action_row() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            list_items: vec![runtime_test_item("db-a"), runtime_test_item("wiki-create")],
+            selected_index: Some(0),
+            ..CoreState::default()
+        };
+
+        apply_core_action(&mut state, &CoreAction::MoveNext);
+
+        assert_eq!(state.selected_index, Some(1));
+    }
+
+    #[test]
+    fn apply_snapshot_preserves_wiki_create_action_selection() {
+        let mut state = CoreState {
+            current_tab_id: kinic_tabs::KINIC_WIKI_TAB_ID.to_string(),
+            selected_index: Some(0),
+            ..CoreState::default()
+        };
+        let snapshot = ProviderSnapshot {
+            items: vec![runtime_test_item("db-a"), runtime_test_item("wiki-create")],
+            selected_index: Some(1),
+            selected_content: None,
+            total_count: 1,
+            ..ProviderSnapshot::default()
+        };
+
+        apply_snapshot(&mut state, snapshot);
+
+        assert_eq!(state.selected_index, Some(1));
+        assert_eq!(state.selected_content, None);
+        assert_eq!(state.total_count, 1);
+    }
+
+    fn runtime_test_item(id: &str) -> UiItemSummary {
+        UiItemSummary {
+            id: id.to_string(),
+            name: id.to_string(),
+            leading_marker: None,
+            kind: tui_kit_model::UiItemKind::Custom("x".to_string()),
+            visibility: tui_kit_model::UiVisibility::Private,
+            qualified_name: None,
+            subtitle: None,
+            tags: vec![],
+        }
+    }
+
+    #[test]
     fn focus_content_resets_memory_content_action_index_on_memories_tab() {
         let mut state = CoreState {
             current_tab_id: kinic_tabs::KINIC_MEMORIES_TAB_ID.to_string(),
