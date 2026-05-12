@@ -261,18 +261,18 @@ fn build_ui_renders_rename_overlay_contents() {
     let textareas = FormTextareas::default();
     let animation = AnimationState::new();
     let provider_render_state = ProviderRenderState::default();
-    let ui = build_ui(
-        &theme,
-        &cfg,
-        &state,
-        &provider_render_state,
-        &textareas,
-        0,
-        0,
-        false,
-        false,
-        &animation,
-    );
+    let ui = build_ui(BuildUiArgs {
+        theme: &theme,
+        cfg: &cfg,
+        state: &state,
+        provider_render_state: &provider_render_state,
+        textareas: &textareas,
+        list_scroll_offset: 0,
+        inspector_scroll: 0,
+        show_help: false,
+        show_settings: false,
+        animation: &animation,
+    });
     let area = Rect::new(0, 0, 100, 30);
     let mut buf = Buffer::empty(area);
     Widget::render(ui, area, &mut buf);
@@ -1109,8 +1109,10 @@ fn chat_textarea_crlf_paste_normalizes_widget_and_state_to_single_line() {
 #[test]
 fn chat_textarea_sync_state_preserves_trailing_space() {
     let mut state = CoreState::default();
-    let mut textareas = FormTextareas::default();
-    textareas.chat_input = chat_input_from_text("hello ");
+    let textareas = FormTextareas {
+        chat_input: chat_input_from_text("hello "),
+        ..FormTextareas::default()
+    };
 
     sync_state_from_textareas(&mut state, &textareas);
 
@@ -1129,8 +1131,10 @@ fn chat_textarea_display_value_preserves_trailing_space() {
 
 #[test]
 fn chat_textarea_sync_from_state_preserves_equivalent_trailing_space_in_widget() {
-    let mut textareas = FormTextareas::default();
-    textareas.chat_input = chat_input_from_text("hello ");
+    let mut textareas = FormTextareas {
+        chat_input: chat_input_from_text("hello "),
+        ..FormTextareas::default()
+    };
     let state = CoreState {
         chat_input: "hello ".to_string(),
         ..CoreState::default()
@@ -1143,8 +1147,10 @@ fn chat_textarea_sync_from_state_preserves_equivalent_trailing_space_in_widget()
 
 #[test]
 fn chat_textarea_sync_from_state_keeps_cursor_when_text_is_unchanged() {
-    let mut textareas = FormTextareas::default();
-    textareas.chat_input = chat_input_from_text("hello ");
+    let mut textareas = FormTextareas {
+        chat_input: chat_input_from_text("hello "),
+        ..FormTextareas::default()
+    };
     textareas.chat_input.input(textarea_input_from_key_event(
         crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Left,
@@ -1446,18 +1452,18 @@ fn build_ui_places_chat_cursor_after_trailing_space() {
     sync_form_textareas_from_state(&mut textareas, &state);
     let provider_render_state = ProviderRenderState::default();
 
-    let ui = build_ui(
-        &theme,
-        &cfg,
-        &state,
-        &provider_render_state,
-        &textareas,
-        0,
-        0,
-        false,
-        false,
-        &animation,
-    );
+    let ui = build_ui(BuildUiArgs {
+        theme: &theme,
+        cfg: &cfg,
+        state: &state,
+        provider_render_state: &provider_render_state,
+        textareas: &textareas,
+        list_scroll_offset: 0,
+        inspector_scroll: 0,
+        show_help: false,
+        show_settings: false,
+        animation: &animation,
+    });
     let cursor = ui.cursor_position_for_area(Rect::new(0, 0, 120, 40));
 
     assert!(cursor.is_some());
@@ -1658,8 +1664,10 @@ fn chat_submit_uses_selected_slash_command_candidate() {
         chat_scope: tui_kit_runtime::ChatScope::Selected,
         ..CoreState::default()
     };
-    let mut textareas = FormTextareas::default();
-    textareas.chat_command_selected = 1;
+    let mut textareas = FormTextareas {
+        chat_command_selected: 1,
+        ..FormTextareas::default()
+    };
 
     let handled = handle_chat_submit_or_command(
         &mut provider,
@@ -1937,18 +1945,19 @@ fn build_ui_forwards_insert_validation_fields_to_render_tree() {
     };
     let textareas = FormTextareas::default();
 
-    let ui = build_ui(
-        &theme,
-        &test_runtime_config(),
-        &state,
-        &provider_render_state,
-        &textareas,
-        0,
-        0,
-        false,
-        false,
-        &animation,
-    );
+    let cfg = test_runtime_config();
+    let ui = build_ui(BuildUiArgs {
+        theme: &theme,
+        cfg: &cfg,
+        state: &state,
+        provider_render_state: &provider_render_state,
+        textareas: &textareas,
+        list_scroll_offset: 0,
+        inspector_scroll: 0,
+        show_help: false,
+        show_settings: false,
+        animation: &animation,
+    });
     let area = Rect::new(0, 0, 120, 40);
     let mut buf = Buffer::empty(area);
     ui.render(area, &mut buf);

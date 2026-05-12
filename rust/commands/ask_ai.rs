@@ -77,7 +77,7 @@ pub async fn ask_ai_flow(
         prompt,
         response: llm_response,
         context_count: results.len(),
-        top_k_used: limit.min(results.len()),
+        top_k_used: effective_top_k_used(limit, results.len()),
     })
 }
 
@@ -167,6 +167,10 @@ fn build_prompt(
         .collect();
 
     ask_ai_prompt(&clipped_query, &docs, language)
+}
+
+fn effective_top_k_used(limit: usize, result_count: usize) -> usize {
+    limit.min(result_count).min(MAX_RESULTS)
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -273,7 +277,7 @@ Summarize the main points concisely, taking into account their relevance to the 
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchHit, SearchResult, ask_ai_prompt, extract_answer};
+    use super::{SearchHit, SearchResult, ask_ai_prompt, effective_top_k_used, extract_answer};
 
     #[test]
     fn extract_answer_is_unicode_safe() {
@@ -309,5 +313,12 @@ mod tests {
         let prompt = ask_ai_prompt("summary", &[], "ja-JP");
 
         assert!(prompt.contains("Answer in 日本語 (Japanese) in <answer> tag."));
+    }
+
+    #[test]
+    fn effective_top_k_used_matches_prompt_result_cap() {
+        assert_eq!(effective_top_k_used(100, 10), 5);
+        assert_eq!(effective_top_k_used(3, 10), 3);
+        assert_eq!(effective_top_k_used(3, 2), 2);
     }
 }
