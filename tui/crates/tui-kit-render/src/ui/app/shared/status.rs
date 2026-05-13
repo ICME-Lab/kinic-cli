@@ -384,7 +384,7 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(" │ ", self.theme.style_dim()),
                 Span::styled("↑/↓", self.theme.style_accent()),
                 Span::styled(" choose ", self.theme.style_muted()),
-                Span::styled("Enter/→", self.theme.style_accent()),
+                Span::styled("Enter", self.theme.style_accent()),
                 Span::styled(" open ", self.theme.style_muted()),
                 Span::styled("e", self.theme.style_accent()),
                 Span::styled(" edit ", self.theme.style_muted()),

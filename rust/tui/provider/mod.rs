@@ -305,6 +305,12 @@ struct WikiChildrenTaskOutput {
     result: Result<WikiChildrenContent, String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WikiChildrenLoadMode {
+    Directory,
+    Node,
+}
+
 struct WikiSearchTaskOutput {
     request_id: u64,
     wiki_id: String,
@@ -1077,9 +1083,11 @@ fn load_wiki_children_content(
     wiki_id: String,
     database_id: String,
     path: String,
+    mode: WikiChildrenLoadMode,
 ) -> Result<WikiChildrenContent, String> {
     let runtime = Runtime::new().expect("failed to create tokio runtime for wiki browser load");
-    if path != "/"
+    if mode == WikiChildrenLoadMode::Node
+        && path != "/"
         && let Some(node) = runtime
             .block_on(bridge::read_wiki_node(
                 use_mainnet,
@@ -1117,23 +1125,26 @@ fn load_wiki_children_content(
             .map_err(|error| error.to_string())?;
         children.into_iter().map(WikiBrowserEntry::from).collect()
     };
-    let index = runtime
-        .block_on(bridge::read_wiki_node(
-            use_mainnet,
-            auth.clone(),
-            read_as_anonymous,
-            wiki_id.clone(),
-            database_id.clone(),
-            "/Wiki/index.md".to_string(),
-        ))
-        .map_err(|error| error.to_string())?;
     let body_lines = if entries.is_empty() {
         vec!["No /Wiki or /Sources children found.".to_string()]
     } else {
         entries.iter().map(wiki_entry_line).collect()
     };
-    let index_preview =
-        index.map(|node| node.content.lines().take(8).map(str::to_string).collect());
+    let index_preview = if path == "/" {
+        runtime
+            .block_on(bridge::read_wiki_node(
+                use_mainnet,
+                auth.clone(),
+                read_as_anonymous,
+                wiki_id.clone(),
+                database_id.clone(),
+                "/Wiki/index.md".to_string(),
+            ))
+            .map_err(|error| error.to_string())?
+            .map(|node| node.content.lines().take(8).map(str::to_string).collect())
+    } else {
+        None
+    };
     Ok(WikiChildrenContent {
         entries,
         body_lines,
@@ -2129,6 +2140,16 @@ impl KinicProvider {
             .collect()
     }
 
+    fn select_wiki_browser_path(&mut self, state: &CoreState, path: &str) {
+        if let Some(index) = self
+            .current_wiki_entries(state)
+            .iter()
+            .position(|entry| entry.path == path)
+        {
+            self.selected_wiki_browser_index = index;
+        }
+    }
+
     fn selected_wiki_browser_entry(&self, state: &CoreState) -> Option<WikiBrowserEntry> {
         if !self.result_records.is_empty() {
             return None;
@@ -2170,14 +2191,14 @@ impl KinicProvider {
         }
         let Some(content) = self.wiki_cached_children_content(database_id.as_str(), &entry.path)
         else {
-            self.start_wiki_children_load(state, entry.path.clone());
+            self.start_wiki_node_load(state, entry.path.clone());
             return vec![CoreEffect::Notify(format!(
                 "Loading wiki node {}",
                 entry.path
             ))];
         };
         let Some(etag) = content.node_etag.clone() else {
-            self.start_wiki_children_load(state, entry.path.clone());
+            self.start_wiki_node_load(state, entry.path.clone());
             return vec![CoreEffect::Notify(format!(
                 "Loading wiki node {}",
                 entry.path
@@ -2214,7 +2235,7 @@ impl KinicProvider {
                         self.wiki_current_path.as_str(),
                     )
                     .is_some();
-                self.refresh_wiki_children_load(state, self.wiki_current_path.clone());
+                self.refresh_wiki_node_load(state, self.wiki_current_path.clone());
                 return vec![CoreEffect::Notify(if cached {
                     format!("Opened {title}")
                 } else {
@@ -2231,6 +2252,7 @@ impl KinicProvider {
         };
         match entry.kind {
             WikiBrowserEntryKind::Directory => {
+                let entry_path = entry.path.clone();
                 let closed = if self.wiki_expanded_paths.contains(entry.path.as_str()) {
                     self.wiki_expanded_paths
                         .retain(|path| !wiki_path_contains(entry.path.as_str(), path.as_str()));
@@ -2243,12 +2265,12 @@ impl KinicProvider {
                     self.wiki_current_path = entry.path.clone();
                     false
                 };
-                self.selected_wiki_browser_index = 0;
                 if closed {
                     self.start_selected_wiki_children_load(state);
                 } else {
-                    self.refresh_wiki_children_load(state, self.wiki_current_path.clone());
+                    self.start_wiki_directory_children_load(state, self.wiki_current_path.clone());
                 }
+                self.select_wiki_browser_path(state, entry_path.as_str());
                 vec![CoreEffect::Notify(if closed {
                     format!("Closed {}", entry.path)
                 } else {
@@ -2268,7 +2290,7 @@ impl KinicProvider {
                         self.wiki_cached_children_content(database_id, entry.path.as_str())
                     })
                     .is_some();
-                self.refresh_wiki_children_load(state, entry.path.clone());
+                self.refresh_wiki_node_load(state, entry.path.clone());
                 vec![CoreEffect::Notify(if cached {
                     format!("Opened {}", entry.path)
                 } else {
@@ -2958,15 +2980,43 @@ impl KinicProvider {
     }
 
     fn start_selected_wiki_children_load(&mut self, state: &CoreState) {
-        self.start_wiki_children_load(state, self.wiki_current_path.clone());
+        self.start_wiki_directory_children_load(state, self.wiki_current_path.clone());
     }
 
-    fn start_wiki_children_load(&mut self, state: &CoreState, path: String) {
-        self.start_wiki_children_load_with_cache_policy(state, path, false);
+    fn start_wiki_node_load(&mut self, state: &CoreState, path: String) {
+        self.start_wiki_children_load_with_cache_policy(
+            state,
+            path,
+            false,
+            WikiChildrenLoadMode::Node,
+        );
     }
 
-    fn refresh_wiki_children_load(&mut self, state: &CoreState, path: String) {
-        self.start_wiki_children_load_with_cache_policy(state, path, true);
+    fn start_wiki_directory_children_load(&mut self, state: &CoreState, path: String) {
+        self.start_wiki_children_load_with_cache_policy(
+            state,
+            path,
+            false,
+            WikiChildrenLoadMode::Directory,
+        );
+    }
+
+    fn refresh_wiki_node_load(&mut self, state: &CoreState, path: String) {
+        self.start_wiki_children_load_with_cache_policy(
+            state,
+            path,
+            true,
+            WikiChildrenLoadMode::Node,
+        );
+    }
+
+    fn refresh_wiki_directory_children_load(&mut self, state: &CoreState, path: String) {
+        self.start_wiki_children_load_with_cache_policy(
+            state,
+            path,
+            true,
+            WikiChildrenLoadMode::Directory,
+        );
     }
 
     fn start_wiki_children_load_with_cache_policy(
@@ -2974,6 +3024,7 @@ impl KinicProvider {
         state: &CoreState,
         path: String,
         refresh_cached: bool,
+        mode: WikiChildrenLoadMode,
     ) {
         if self.tab_id != KINIC_WIKI_TAB_ID {
             return;
@@ -3009,6 +3060,7 @@ impl KinicProvider {
                     wiki_id,
                     database_id,
                     path,
+                    mode,
                 );
                 let _ = tx.send(WikiChildrenTaskOutput {
                     request_id,
@@ -5800,11 +5852,14 @@ impl KinicProvider {
                 self.refresh_wiki_records_from_databases();
                 self.restore_wiki_reload_state(reload_state);
                 if self.wiki_view_mode == WikiViewMode::DatabaseBrowser {
-                    let path = self
-                        .wiki_preview_path
-                        .clone()
-                        .unwrap_or_else(|| self.wiki_current_path.clone());
-                    self.refresh_wiki_children_load(state, path);
+                    if let Some(path) = self.wiki_preview_path.clone() {
+                        self.refresh_wiki_node_load(state, path);
+                    } else {
+                        self.refresh_wiki_directory_children_load(
+                            state,
+                            self.wiki_current_path.clone(),
+                        );
+                    }
                 }
                 if self.wiki_records.is_empty() {
                     vec![CoreEffect::Notify("No wiki databases found.".to_string())]

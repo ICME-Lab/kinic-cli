@@ -2830,9 +2830,7 @@ pub fn action_for_key(key: CoreKey, focus: PaneFocus, current_tab_id: &str) -> O
                 CoreKey::PageUp => Some(CoreAction::MovePageUp),
                 CoreKey::Home | CoreKey::Char('g') => Some(CoreAction::MoveHome),
                 CoreKey::End | CoreKey::Char('G') => Some(CoreAction::MoveEnd),
-                CoreKey::Enter | CoreKey::Right | CoreKey::Char('l') => {
-                    Some(CoreAction::OpenSelected)
-                }
+                CoreKey::Enter | CoreKey::Char('l') => Some(CoreAction::OpenSelected),
                 _ => None,
             },
             PaneFocus::Tabs => None,
@@ -4082,7 +4080,6 @@ mod tests {
             (CoreKey::End, CoreAction::MoveEnd),
             (CoreKey::Char('G'), CoreAction::MoveEnd),
             (CoreKey::Enter, CoreAction::OpenSelected),
-            (CoreKey::Right, CoreAction::OpenSelected),
             (CoreKey::Char('l'), CoreAction::OpenSelected),
             (CoreKey::Esc, CoreAction::Back),
         ];
@@ -4091,6 +4088,13 @@ mod tests {
             assert_eq!(
                 action_for_key(key, PaneFocus::Items, kinic_tabs::KINIC_WIKI_TAB_ID),
                 Some(action)
+            );
+        }
+
+        for key in [CoreKey::Left, CoreKey::Right] {
+            assert_eq!(
+                action_for_key(key, PaneFocus::Items, kinic_tabs::KINIC_WIKI_TAB_ID),
+                None
             );
         }
     }

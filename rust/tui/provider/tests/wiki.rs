@@ -787,7 +787,7 @@ fn wiki_browser_enter_on_directory_updates_current_path() {
     });
 
     assert_eq!(provider.wiki_current_path, "/Wiki");
-    assert!(provider.wiki_children_task.in_flight);
+    assert!(!provider.wiki_children_task.in_flight);
     assert!(effects.iter().any(|effect| {
         matches!(effect, CoreEffect::Notify(message) if message.contains("Opened /Wiki"))
     }));
@@ -850,7 +850,7 @@ fn wiki_browser_can_move_to_sources_and_enter_directory() {
     provider.navigate_wiki_browser(&state, &CoreAction::MoveNext);
     let effects = provider.open_selected_wiki_browser_entry(&state);
 
-    assert_eq!(provider.selected_wiki_browser_index, 0);
+    assert_eq!(provider.selected_wiki_browser_index, 1);
     assert_eq!(provider.wiki_current_path, "/Sources");
     assert!(effects.iter().any(|effect| {
         matches!(effect, CoreEffect::Notify(message) if message.contains("Opened /Sources"))
@@ -1096,6 +1096,102 @@ fn wiki_browser_keeps_previously_opened_directories_expanded() {
             .collect::<Vec<_>>(),
         vec!["Wiki", "  a.md", "Sources", "  s.md"]
     );
+}
+
+#[test]
+fn wiki_browser_keeps_cursor_on_nested_directory_after_open() {
+    let mut provider = KinicProvider::new(TuiConfig {
+        wiki_canister_id: Some("aaaaa-aa".to_string()),
+        ..live_config()
+    });
+    provider.tab_id = KINIC_WIKI_TAB_ID.to_string();
+    provider.wiki_view_mode = WikiViewMode::DatabaseBrowser;
+    provider.active_wiki_database_id = Some("db-a".to_string());
+    provider.wiki_records = vec![record_from_wiki_database(
+        "aaaaa-aa",
+        wiki_database("db-a", bridge::DatabaseStatus::Hot),
+    )];
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/"),
+        WikiChildrenContent {
+            entries: wiki_root_entries(),
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Wiki/skills".to_string(),
+                name: "skills".to_string(),
+                kind: WikiBrowserEntryKind::Directory,
+                size_bytes: None,
+                has_children: true,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki/skills"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Wiki/skills/ckbtc".to_string(),
+                name: "ckbtc".to_string(),
+                kind: WikiBrowserEntryKind::Directory,
+                size_bytes: None,
+                has_children: true,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_children_cache.insert(
+        wiki_children_cache_key("db-a", "/Wiki/skills/ckbtc"),
+        WikiChildrenContent {
+            entries: vec![WikiBrowserEntry {
+                path: "/Wiki/skills/ckbtc/SKILL.md".to_string(),
+                name: "SKILL.md".to_string(),
+                kind: WikiBrowserEntryKind::File,
+                size_bytes: None,
+                has_children: false,
+            }],
+            body_lines: Vec::new(),
+            index_preview: None,
+            node_content: None,
+            node_etag: None,
+            node_metadata_json: None,
+        },
+    );
+    provider.wiki_expanded_paths = HashSet::from(["/Wiki".to_string(), "/Wiki/skills".to_string()]);
+    provider.wiki_current_path = "/Wiki/skills".to_string();
+    provider.selected_wiki_browser_index = 2;
+    let state = CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        selected_index: Some(0),
+        ..CoreState::default()
+    };
+
+    provider.open_selected_wiki_browser_entry(&state);
+    let rows = provider.wiki_browser_rows(0);
+
+    assert_eq!(provider.wiki_current_path, "/Wiki/skills/ckbtc");
+    assert_eq!(provider.selected_wiki_browser_index, 2);
+    assert!(!provider.wiki_children_task.in_flight);
+    assert_eq!(rows[2].label, "    ckbtc");
+    assert!(rows[2].selected);
+    assert_eq!(rows[3].label, "      SKILL.md");
 }
 
 #[test]
