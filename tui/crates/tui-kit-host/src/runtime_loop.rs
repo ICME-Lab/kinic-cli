@@ -592,10 +592,13 @@ pub fn run_provider_app_with_hooks<P: DataProvider, H: RuntimeLoopHooks<P>>(
                     }
                     continue;
                 }
+                let previous_tab_id = state.current_tab_id.clone();
                 match dispatch_action_with_persistent_clear(provider, &mut state, &action) {
                     Ok((effects, next_render_state)) => {
                         provider_render_state = next_render_state;
-                        if matches!(&action, CoreAction::SetTab(_)) {
+                        if matches!(&action, CoreAction::SetTab(_))
+                            && state.current_tab_id != previous_tab_id
+                        {
                             normalize_focus_after_set_tab(&mut state);
                         }
                         hooks.on_effects(provider, &mut state, &effects);
@@ -2027,11 +2030,13 @@ fn open_form_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
         && state.current_tab_id != tab_id
         && matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm);
     match dispatch_tab_with_rollback(provider, state, hooks, provider_render_state, tab_id) {
-        Ok(()) => {
-            if should_reset_form_state {
+        Ok(tab_changed) => {
+            if tab_changed && should_reset_form_state {
                 reset_form_state_for_tab(state, tab_id);
             }
-            normalize_focus_after_set_tab(state);
+            if tab_changed {
+                normalize_focus_after_set_tab(state);
+            }
         }
         Err(error) => state.status_message = Some(error),
     }
@@ -2116,8 +2121,9 @@ fn switch_to_tab<P: DataProvider, H: RuntimeLoopHooks<P>>(
     provider_render_state: &mut ProviderRenderState,
     tab_id: &str,
 ) -> Result<(), String> {
-    dispatch_tab_with_rollback(provider, state, hooks, provider_render_state, tab_id)?;
-    normalize_focus_after_set_tab(state);
+    if dispatch_tab_with_rollback(provider, state, hooks, provider_render_state, tab_id)? {
+        normalize_focus_after_set_tab(state);
+    }
     Ok(())
 }
 
@@ -2127,9 +2133,10 @@ fn dispatch_tab_with_rollback<P: DataProvider, H: RuntimeLoopHooks<P>>(
     hooks: &mut H,
     provider_render_state: &mut ProviderRenderState,
     tab_id: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let previous_state = state.clone();
     let previous_render_state = provider_render_state.clone();
+    let previous_tab_id = state.current_tab_id.clone();
     match dispatch_with_effects(
         provider,
         state,
@@ -2137,7 +2144,7 @@ fn dispatch_tab_with_rollback<P: DataProvider, H: RuntimeLoopHooks<P>>(
         provider_render_state,
         &CoreAction::SetTab(tab_id.into()),
     ) {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok(state.current_tab_id != previous_tab_id),
         Err(error) => {
             *state = previous_state;
             *provider_render_state = previous_render_state;

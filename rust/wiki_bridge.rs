@@ -77,7 +77,6 @@ pub struct ChildNode {
 pub enum NodeKind {
     File,
     Source,
-    Directory,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, CandidType)]
@@ -209,6 +208,20 @@ impl WikiClient {
         })
     }
 
+    async fn query0<Out>(&self, method: &str) -> Result<Out>
+    where
+        Out: for<'de> candid::Deserialize<'de> + CandidType,
+    {
+        let bytes = self
+            .agent
+            .query(&self.canister_id, method)
+            .with_arg(Encode!().context("failed to encode wiki query args")?)
+            .call()
+            .await
+            .with_context(|| format!("wiki query failed for {method}"))?;
+        Decode!(&bytes, Out).with_context(|| format!("failed to decode wiki response for {method}"))
+    }
+
     async fn query<Arg, Out>(&self, method: &str, arg: &Arg) -> Result<Out>
     where
         Arg: CandidType,
@@ -237,6 +250,20 @@ impl WikiClient {
             .call()
             .await
             .with_context(|| format!("wiki query failed for {method}"))?;
+        Decode!(&bytes, Out).with_context(|| format!("failed to decode wiki response for {method}"))
+    }
+
+    async fn update0<Out>(&self, method: &str) -> Result<Out>
+    where
+        Out: for<'de> candid::Deserialize<'de> + CandidType,
+    {
+        let bytes = self
+            .agent
+            .update(&self.canister_id, method)
+            .with_arg(Encode!().context("failed to encode wiki update args")?)
+            .call_and_wait()
+            .await
+            .with_context(|| format!("wiki update failed for {method}"))?;
         Decode!(&bytes, Out).with_context(|| format!("failed to decode wiki response for {method}"))
     }
 
@@ -273,8 +300,7 @@ impl WikiClient {
     }
 
     pub async fn list_databases(&self) -> Result<Vec<DatabaseSummary>> {
-        let result: Result<Vec<DatabaseSummary>, String> =
-            self.query("list_databases", &()).await?;
+        let result: Result<Vec<DatabaseSummary>, String> = self.query0("list_databases").await?;
         result.map_err(anyhow::Error::msg)
     }
 
@@ -286,7 +312,7 @@ impl WikiClient {
     }
 
     pub async fn create_database(&self) -> Result<String> {
-        let result: Result<String, String> = self.update("create_database", &()).await?;
+        let result: Result<String, String> = self.update0("create_database").await?;
         result.map_err(anyhow::Error::msg)
     }
 
@@ -365,6 +391,16 @@ mod tests {
             .expect("database list should decode");
 
         assert_eq!(decoded.unwrap()[0].database_id, "default");
+    }
+
+    #[test]
+    fn no_arg_methods_encode_empty_candid_args() {
+        let no_args = Encode!().expect("empty args should encode");
+        let empty_tuple_args = candid::encode_args(()).expect("empty tuple args should encode");
+        let unit_value_arg = Encode!(&()).expect("unit value arg should encode");
+
+        assert_eq!(no_args, empty_tuple_args);
+        assert_ne!(unit_value_arg, empty_tuple_args);
     }
 
     #[test]

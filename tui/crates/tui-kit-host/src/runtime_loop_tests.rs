@@ -197,6 +197,28 @@ fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
 }
 
 #[test]
+fn blocked_dirty_wiki_tab_switch_keeps_editor_focus() {
+    let mut state = wiki_editor_state();
+    state.wiki_editor.dirty = true;
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut provider_render_state = ProviderRenderState::default();
+
+    switch_to_tab(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut provider_render_state,
+        KINIC_MEMORIES_TAB_ID,
+    )
+    .expect("blocked tab switch should not fail provider dispatch");
+
+    assert_eq!(state.current_tab_id, KINIC_WIKI_TAB_ID);
+    assert_eq!(state.focus, PaneFocus::Content);
+    assert!(state.wiki_editor.discard_confirm);
+}
+
+#[test]
 fn picker_overlay_action_maps_generic_picker_keys() {
     assert_eq!(
         picker_overlay_action(

@@ -484,9 +484,10 @@ pub async fn list_wiki_databases(
     let agent = build_search_agent(use_mainnet, auth).await?;
     let wiki_id_for_anonymous = wiki_id.clone();
     let client = crate::wiki_bridge::WikiClient::new(agent, wiki_id)?;
-    let mut databases = client.list_databases().await?;
     let mut anonymous_access = HashMap::new();
-    for database in &databases {
+    let authenticated_databases = client.list_databases().await;
+    let mut databases = authenticated_databases.unwrap_or_default();
+    for database in databases.iter() {
         apply_database_member_lookup(
             &mut anonymous_access,
             database.database_id.as_str(),
