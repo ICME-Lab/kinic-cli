@@ -47,11 +47,12 @@ export default {
     const memorySummary = await resolveMemoryRouteSummary(env, memoryState);
     if (request.method === "HEAD") {
       const metadata = resolvePortalMetadata(pathname, config, memoryState, memorySummary);
-      return documentResponse(null, metadata.status, config);
+      return documentResponse(pathname, null, metadata.status, config, generateScriptNonce());
     }
 
-    const document = renderPortalDocument(pathname, config, memoryState, memorySummary);
-    return documentResponse(document.html, document.status, config);
+    const scriptNonce = generateScriptNonce();
+    const document = renderPortalDocument(pathname, config, memoryState, memorySummary, scriptNonce);
+    return documentResponse(pathname, document.html, document.status, config, scriptNonce);
   },
 };
 
@@ -114,36 +115,42 @@ async function handleMemorySummary(method: "GET" | "HEAD", request: Request, env
   }
 }
 
-function documentResponse(body: string | null, status: number, config: PortalRuntimeConfig): Response {
+function documentResponse(
+  pathname: string,
+  body: string | null,
+  status: number,
+  config: PortalRuntimeConfig,
+  scriptNonce: string,
+): Response {
   return new Response(body, {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=0, must-revalidate",
-      "Content-Security-Policy": buildDocumentCsp(config),
+      "Content-Security-Policy": buildDocumentCsp(pathname, config, scriptNonce),
       Link: `<${PORTAL_STYLE_PATH}>; rel=preload; as=style, <${PORTAL_SCRIPT_PATH}>; rel=modulepreload; as=script`,
     },
   });
 }
 
-function buildDocumentCsp(config: PortalRuntimeConfig): string {
+function buildDocumentCsp(pathname: string, config: PortalRuntimeConfig, scriptNonce: string): string {
   const publicApiOrigin = safeOrigin(config.publicApiOrigin);
   const mcpOrigin = config.mcpEndpoint ? safeOrigin(config.mcpEndpoint) : null;
   const imageSources = ["'self'", "data:", publicApiOrigin].filter(Boolean);
   const connectSources = [
     "'self'",
-    "https://id.ai",
     "https://ic0.app",
     "https://icp-api.io",
     publicApiOrigin,
     mcpOrigin,
-    "http://127.0.0.1:*",
-    "http://[::1]:*",
   ].filter(Boolean);
+  if (pathname === CLI_LOGIN_PATH) {
+    connectSources.push("https://id.ai", "http://127.0.0.1:*", "http://[::1]:*");
+  }
 
   return [
     "default-src 'self'",
-    "script-src 'self'",
+    `script-src 'self' 'nonce-${scriptNonce}'`,
     "style-src 'self' 'unsafe-inline'",
     `img-src ${imageSources.join(" ")}`,
     `connect-src ${connectSources.join(" ")}`,
@@ -153,6 +160,12 @@ function buildDocumentCsp(config: PortalRuntimeConfig): string {
     "frame-ancestors 'none'",
     "object-src 'none'",
   ].join("; ");
+}
+
+function generateScriptNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function safeOrigin(value: string): string | null {

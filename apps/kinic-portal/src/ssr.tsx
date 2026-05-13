@@ -23,6 +23,7 @@ export function renderPortalDocument(
   config: PortalRuntimeConfig,
   memoryState?: PublicMemoryState,
   memorySummary?: string | null,
+  scriptNonce?: string,
 ): { html: string; status: number } {
   const metadata = resolvePortalMetadata(pathname, config, memoryState, memorySummary);
   const documentConfig = attachInitialMemoryState(pathname, config, memoryState);
@@ -42,13 +43,20 @@ export function renderPortalDocument(
       "</head>",
       '<body class="font-sans antialiased">',
       `<div id="root">${appHtml}</div>`,
-      `<script>window.__KINIC_PORTAL_CONFIG__=${serializeForScript(documentConfig)};</script>`,
+      `<script${renderNonceAttribute(scriptNonce)}>window.__KINIC_PORTAL_CONFIG__=${serializeForScript(documentConfig)};</script>`,
       `<script type="module" src="${PORTAL_SCRIPT_PATH}"></script>`,
       "</body>",
       "</html>",
     ].join(""),
     status: metadata.status,
   };
+}
+
+function renderNonceAttribute(scriptNonce: string | undefined): string {
+  if (!scriptNonce) {
+    return "";
+  }
+  return ` nonce="${escapeHtml(scriptNonce)}"`;
 }
 
 export function resolvePortalMetadata(

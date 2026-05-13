@@ -5,6 +5,7 @@
 
 use std::{
     collections::HashMap,
+    ffi::OsString,
     fs,
     io::Cursor,
     path::{Path, PathBuf},
@@ -105,12 +106,20 @@ pub(crate) fn read_internet_identity_metadata(
         Ok(payload) => payload,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("Failed to read icp-cli identity list at {}", list_path.display()));
+            return Err(error).with_context(|| {
+                format!(
+                    "Failed to read icp-cli identity list at {}",
+                    list_path.display()
+                )
+            });
         }
     };
-    let list: IdentityList = serde_json::from_str(&payload)
-        .with_context(|| format!("Failed to parse icp-cli identity list at {}", list_path.display()))?;
+    let list: IdentityList = serde_json::from_str(&payload).with_context(|| {
+        format!(
+            "Failed to parse icp-cli identity list at {}",
+            list_path.display()
+        )
+    })?;
     let Some(identity) = list.identities.into_iter().find_map(|(name, identity)| {
         if name == identity_name {
             Some(identity)
@@ -141,7 +150,10 @@ pub(crate) fn ensure_keyring_storage(identity_name: &str, identity: &IcpCliIdent
     Ok(())
 }
 
-pub(crate) fn ensure_kinic_portal_host(identity_name: &str, identity: &IcpCliIdentity) -> Result<()> {
+pub(crate) fn ensure_kinic_portal_host(
+    identity_name: &str,
+    identity: &IcpCliIdentity,
+) -> Result<()> {
     let host = identity
         .host
         .as_deref()
@@ -149,7 +161,10 @@ pub(crate) fn ensure_kinic_portal_host(identity_name: &str, identity: &IcpCliIde
     let origin = normalize_host_origin(host)
         .ok_or_else(|| kinic_portal_host_error(identity_name, "invalid host"))?;
     if origin != KINIC_PORTAL_ORIGIN {
-        return Err(kinic_portal_host_error(identity_name, &format!("host `{origin}`")));
+        return Err(kinic_portal_host_error(
+            identity_name,
+            &format!("host `{origin}`"),
+        ));
     }
     Ok(())
 }
@@ -177,16 +192,21 @@ fn normalize_host_origin(host: &str) -> Option<String> {
 }
 
 fn read_delegation_chain(path: &Path) -> Result<ParsedDelegationChain> {
-    let payload = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read icp-cli delegation file at {}", path.display()))?;
+    let payload = fs::read_to_string(path).with_context(|| {
+        format!(
+            "Failed to read icp-cli delegation file at {}",
+            path.display()
+        )
+    })?;
     parse_delegation_chain_json(&payload)
 }
 
-fn parse_delegation_chain_json(payload: &str) -> Result<ParsedDelegationChain> {
+pub(crate) fn parse_delegation_chain_json(payload: &str) -> Result<ParsedDelegationChain> {
     let chain: HexDelegationChain =
         serde_json::from_str(payload).context("Failed to parse icp-cli delegation chain")?;
     let public_key = decode_hex_key("delegation publicKey", &chain.public_key)?;
-    let public_key = normalize_spki_key(&public_key).context("Unsupported II user public key format")?;
+    let public_key =
+        normalize_spki_key(&public_key).context("Unsupported II user public key format")?;
     let delegations = chain
         .delegations
         .into_iter()
@@ -248,7 +268,9 @@ fn new_delegated_identity(
     match delegated {
         Ok(identity) => Ok(identity),
         Err(DelegationError::UnknownAlgorithm) => {
-            warn!("icp-cli delegation chain uses an unknown algorithm; skipping local verification.");
+            warn!(
+                "icp-cli delegation chain uses an unknown algorithm; skipping local verification."
+            );
             let session_identity = parse_session_identity(session_pem)?;
             Ok(DelegatedIdentity::new_unchecked(
                 public_key,
@@ -265,7 +287,10 @@ fn parse_session_identity(session_pem: &str) -> Result<BasicIdentity> {
         .context("Failed to parse icp-cli session key")
 }
 
-pub(crate) fn ensure_chain_not_expired(identity_name: &str, delegations: &[SignedDelegation]) -> Result<()> {
+pub(crate) fn ensure_chain_not_expired(
+    identity_name: &str,
+    delegations: &[SignedDelegation],
+) -> Result<()> {
     let expiration = delegations
         .iter()
         .map(|entry| entry.delegation.expiration)
@@ -294,29 +319,48 @@ fn default_identity_dir() -> Result<Option<PathBuf>> {
     let Some(home) = std::env::var_os("HOME") else {
         return Ok(None);
     };
-    #[cfg(target_os = "macos")]
-    {
-        return Ok(Some(
-            PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("org.dfinity.icp-cli")
-                .join("identity"),
-        ));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(Some(
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("org.dfinity.icp-cli")
-                .join("identity"),
-        ))
-    }
+    Ok(Some(resolve_default_identity_dir(
+        home,
+        std::env::var_os("XDG_DATA_HOME"),
+    )))
 }
 
-struct ParsedDelegationChain {
-    public_key: Vec<u8>,
-    delegations: Vec<SignedDelegation>,
+pub(crate) fn resolve_default_identity_dir(
+    home: OsString,
+    xdg_data_home: Option<OsString>,
+) -> PathBuf {
+    platform_identity_dir(home, xdg_data_home)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_identity_dir(home: OsString, xdg_data_home: Option<OsString>) -> PathBuf {
+    let _ = xdg_data_home;
+    PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("org.dfinity.icp-cli")
+        .join("identity")
+}
+
+#[cfg(target_os = "linux")]
+fn platform_identity_dir(home: OsString, xdg_data_home: Option<OsString>) -> PathBuf {
+    let data_home = xdg_data_home
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(home).join(".local").join("share"));
+    data_home.join("org.dfinity.icp-cli").join("identity")
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
+fn platform_identity_dir(home: OsString, xdg_data_home: Option<OsString>) -> PathBuf {
+    let _ = xdg_data_home;
+    PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("org.dfinity.icp-cli")
+        .join("identity")
+}
+
+pub(crate) struct ParsedDelegationChain {
+    pub(crate) public_key: Vec<u8>,
+    pub(crate) delegations: Vec<SignedDelegation>,
 }

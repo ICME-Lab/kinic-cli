@@ -26,6 +26,16 @@ export type CliLoginParseResult =
 
 type LoginState = "ready" | "signing-in" | "sending" | "finished" | "error";
 
+export type CliLoginAuthClient = Pick<AuthClient, "getIdentity" | "login" | "logout">;
+
+type CliLoginFlowOptions = {
+  createAuthClient?: () => Promise<CliLoginAuthClient>;
+  loginClient?: (authClient: CliLoginAuthClient) => Promise<void>;
+  createDelegation?: (authClient: CliLoginAuthClient, publicKey: string) => Promise<unknown>;
+  fetchCallback?: typeof fetch;
+  afterLogin?: () => void;
+};
+
 export function CliLoginPage() {
   const loginRequest = useMemo(() => parseCliLoginHash(readHash()), []);
   const [state, setState] = useState<LoginState>("ready");
@@ -38,21 +48,9 @@ export function CliLoginPage() {
     setError(null);
     setState("signing-in");
     try {
-      const authClient = await AuthClient.create({ keyType: "Ed25519" });
-      await login(authClient);
-      setState("sending");
-      const { params } = loginRequest;
-      const delegation = await createCliDelegation(authClient, params.publicKey);
-      const response = await fetch(params.callback, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(delegation),
-        redirect: "error",
+      await sendCliLoginDelegation(loginRequest.params, {
+        afterLogin: () => setState("sending"),
       });
-      if (!response.ok) {
-        throw new Error(`Callback failed: ${response.status} ${response.statusText}`);
-      }
-      await authClient.logout();
       setState("finished");
       window.setTimeout(() => window.close(), 2000);
     } catch (cause) {
@@ -132,6 +130,33 @@ export function CliLoginPage() {
   );
 }
 
+export async function sendCliLoginDelegation(
+  params: CliLoginParams,
+  options: CliLoginFlowOptions = {},
+): Promise<void> {
+  const createAuthClient = options.createAuthClient || (() => AuthClient.create({ keyType: "Ed25519" }));
+  const loginClient = options.loginClient || login;
+  const createDelegation = options.createDelegation || createCliDelegation;
+  const fetchCallback = options.fetchCallback || fetch;
+  const authClient = await createAuthClient();
+  try {
+    await loginClient(authClient);
+    options.afterLogin?.();
+    const delegation = await createDelegation(authClient, params.publicKey);
+    const response = await fetchCallback(params.callback, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(delegation),
+      redirect: "error",
+    });
+    if (!response.ok) {
+      throw new Error(`Callback failed: ${response.status} ${response.statusText}`);
+    }
+  } finally {
+    await authClient.logout().catch(() => undefined);
+  }
+}
+
 export function parseCliLoginHash(hash: string): CliLoginParseResult {
   const normalized = hash.startsWith("#") ? hash.slice(1) : hash;
   if (!normalized) {
@@ -165,7 +190,7 @@ export function isAllowedLocalCallback(value: string): boolean {
     && (url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "[::1]");
 }
 
-async function login(authClient: AuthClient): Promise<void> {
+async function login(authClient: CliLoginAuthClient): Promise<void> {
   return new Promise((resolve, reject) => {
     authClient.login({
       identityProvider: IDENTITY_PROVIDER,
@@ -176,7 +201,7 @@ async function login(authClient: AuthClient): Promise<void> {
   });
 }
 
-async function createCliDelegation(authClient: AuthClient, publicKey: string) {
+async function createCliDelegation(authClient: CliLoginAuthClient, publicKey: string) {
   const identity = authClient.getIdentity();
   if (!(identity instanceof DelegationIdentity)) {
     throw new Error("Expected a delegated Internet Identity session.");

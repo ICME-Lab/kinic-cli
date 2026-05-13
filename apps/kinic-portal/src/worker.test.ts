@@ -27,7 +27,10 @@ import worker from "./worker";
 describe("portal worker", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.renderPortalDocument.mockReturnValue({ html: "<html>ok</html>", status: 200 });
+    mocks.renderPortalDocument.mockImplementation((...args: unknown[]) => {
+      const scriptNonce = args[4];
+      return { html: `<html data-nonce="${scriptNonce}">ok</html>`, status: 200 };
+    });
     mocks.resolvePortalMetadata.mockReturnValue({
       title: "Kinic Portal",
       description: "desc",
@@ -66,7 +69,7 @@ describe("portal worker", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe("<html>ok</html>");
+    expect(await response.text()).toMatch(/^<html data-nonce="[0-9a-f]{32}">ok<\/html>$/);
     expect(mocks.resolvePublicMemory).toHaveBeenCalledWith({ IC_HOST: "https://ic0.app" }, "m1");
     expect(mocks.renderPortalDocument).toHaveBeenCalledOnce();
   });
@@ -83,7 +86,28 @@ describe("portal worker", () => {
     expect(mocks.renderPortalDocument).not.toHaveBeenCalled();
   });
 
-  it("adds CSP for localhost cli callbacks on documents", async () => {
+  it("adds CSP nonce matching the rendered document", async () => {
+    const response = await worker.fetch(
+      new Request("https://portal.kinic.test/m/m1"),
+      env(),
+    );
+
+    const html = await response.text();
+    const csp = response.headers.get("Content-Security-Policy") || "";
+    const htmlNonce = html.match(/data-nonce="([0-9a-f]{32})"/)?.[1];
+
+    expect(htmlNonce).toBeDefined();
+    expect(csp).toContain(`script-src 'self' 'nonce-${htmlNonce}'`);
+    expect(mocks.renderPortalDocument).toHaveBeenCalledWith(
+      "/m/m1",
+      expect.anything(),
+      expect.anything(),
+      null,
+      htmlNonce,
+    );
+  });
+
+  it("adds CSP for localhost cli callbacks on cli login documents", async () => {
     const response = await worker.fetch(
       new Request("https://portal.kinic.test/cli-login"),
       env(),
@@ -92,6 +116,18 @@ describe("portal worker", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Security-Policy")).toContain("http://127.0.0.1:*");
     expect(response.headers.get("Content-Security-Policy")).toContain("https://id.ai");
+  });
+
+  it("omits loopback CSP sources from non-cli documents", async () => {
+    const response = await worker.fetch(
+      new Request("https://portal.kinic.test/m/m1"),
+      env(),
+    );
+
+    const csp = response.headers.get("Content-Security-Policy") || "";
+    expect(csp).not.toContain("http://127.0.0.1:*");
+    expect(csp).not.toContain("http://[::1]:*");
+    expect(csp).not.toContain("https://id.ai");
   });
 
   it("adds runtime API and MCP origins to document CSP", async () => {
