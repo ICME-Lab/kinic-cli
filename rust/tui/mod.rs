@@ -116,6 +116,7 @@ impl TuiAuth {
 pub struct TuiLaunchConfig {
     pub auth: TuiAuth,
     pub use_mainnet: bool,
+    pub wiki_canister_id: Option<String>,
 }
 
 pub fn run(global: &GlobalOpts) -> Result<()> {
@@ -126,6 +127,7 @@ pub fn build_launch_config(identity: String, use_mainnet: bool) -> Result<TuiLau
     Ok(TuiLaunchConfig {
         auth: resolve_auth(identity)?,
         use_mainnet,
+        wiki_canister_id: wiki_canister_id_from_env(),
     })
 }
 
@@ -133,13 +135,19 @@ pub fn build_launch_config_from_global(global: &GlobalOpts) -> Result<TuiLaunchC
     Ok(TuiLaunchConfig {
         auth: resolve_auth(resolve_tui_identity(global)?)?,
         use_mainnet: global.ic,
+        wiki_canister_id: wiki_canister_id_from_env(),
     })
+}
+
+fn wiki_canister_id_from_env() -> Option<String> {
+    Some(crate::wiki_bridge::wiki_canister_id_from_env())
 }
 
 pub fn run_with_config(config: TuiLaunchConfig) -> Result<()> {
     let mut provider = provider::KinicProvider::new(TuiConfig {
         auth: config.auth,
         use_mainnet: config.use_mainnet,
+        wiki_canister_id: config.wiki_canister_id,
     });
     let mut hooks = KinicRuntimeHooks;
 
@@ -164,6 +172,7 @@ impl RuntimeLoopHooks<provider::KinicProvider> for KinicRuntimeHooks {
         if state.create_submit_state == CreateSubmitState::Submitting
             || matches!(state.create_cost_state, CreateCostState::Loading)
             || state.insert_submit_state == CreateSubmitState::Submitting
+            || state.wiki_editor.submit_state == CreateSubmitState::Submitting
         {
             state.create_spinner_frame = state.create_spinner_frame.wrapping_add(1);
             state.insert_spinner_frame = state.insert_spinner_frame.wrapping_add(1);
@@ -208,6 +217,10 @@ mod tests {
 
         assert!(matches!(config.auth, TuiAuth::DeferredIdentity { .. }));
         assert!(config.use_mainnet);
+        assert_eq!(
+            config.wiki_canister_id.as_deref(),
+            Some(crate::wiki_bridge::DEFAULT_WIKI_CANISTER_ID)
+        );
     }
 
     #[test]
@@ -240,5 +253,17 @@ mod tests {
         assert_eq!(config.initial_tab_id, kinic_tabs::KINIC_MEMORIES_TAB_ID);
         assert_eq!(config.tab_ids, &kinic_tabs::KINIC_TAB_IDS);
         assert_eq!(config.initial_focus, PaneFocus::Search);
+    }
+
+    #[test]
+    fn ui_config_omits_market_tab() {
+        let config = ui_config::kinic_ui_config();
+        let titles = config
+            .tabs
+            .iter()
+            .map(|tab| tab.title.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(titles, ["Memories", "Insert", "Create", "Wiki", "Settings"]);
     }
 }

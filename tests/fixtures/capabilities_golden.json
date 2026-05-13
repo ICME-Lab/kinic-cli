@@ -1381,6 +1381,611 @@
       ]
     },
     {
+      "name": "wiki",
+      "summary": "Operate the configured Wiki canister. Requires --identity <NAME> or --ii. Returns text output by default.",
+      "auth": {
+        "required": true,
+        "sources": [
+          "global_identity",
+          "global_ii"
+        ]
+      },
+      "output": {
+        "default": "text",
+        "supported": [
+          "text",
+          "json"
+        ],
+        "interactive": false
+      },
+      "global_flags_supported": [
+        "verbose",
+        "ic",
+        "identity",
+        "ii",
+        "identity_path"
+      ],
+      "arguments": [],
+      "subcommands": [
+        {
+          "name": "database",
+          "summary": "Manage Wiki databases",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text",
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [],
+          "subcommands": [
+            {
+              "name": "list",
+              "summary": "List databases visible to the caller",
+              "auth": {
+                "required": true,
+                "sources": [
+                  "global_identity",
+                  "global_ii"
+                ]
+              },
+              "output": {
+                "default": "text",
+                "supported": [
+                  "text",
+                  "json"
+                ],
+                "interactive": false
+              },
+              "global_flags_supported": [
+                "verbose",
+                "ic",
+                "identity",
+                "ii",
+                "identity_path"
+              ],
+              "arguments": [
+                {
+                  "name": "json",
+                  "required": false,
+                  "input_shape": "flag",
+                  "value_kind": "boolean"
+                }
+              ]
+            },
+            {
+              "name": "create",
+              "summary": "Create a new database",
+              "auth": {
+                "required": true,
+                "sources": [
+                  "global_identity",
+                  "global_ii"
+                ]
+              },
+              "output": {
+                "default": "text",
+                "supported": [
+                  "text",
+                  "json"
+                ],
+                "interactive": false
+              },
+              "global_flags_supported": [
+                "verbose",
+                "ic",
+                "identity",
+                "ii",
+                "identity_path"
+              ],
+              "arguments": [
+                {
+                  "name": "json",
+                  "required": false,
+                  "input_shape": "flag",
+                  "value_kind": "boolean"
+                }
+              ]
+            },
+            {
+              "name": "grant",
+              "summary": "Grant database access to a principal",
+              "auth": {
+                "required": true,
+                "sources": [
+                  "global_identity",
+                  "global_ii"
+                ]
+              },
+              "output": {
+                "default": "text",
+                "supported": [
+                  "text",
+                  "json"
+                ],
+                "interactive": false
+              },
+              "global_flags_supported": [
+                "verbose",
+                "ic",
+                "identity",
+                "ii",
+                "identity_path"
+              ],
+              "arguments": [
+                {
+                  "name": "json",
+                  "required": false,
+                  "input_shape": "flag",
+                  "value_kind": "boolean"
+                }
+              ],
+              "arg_groups": [
+                {
+                  "id": "WikiDatabaseGrantArgs",
+                  "required": false,
+                  "multiple": true,
+                  "members": [
+                    "database_id",
+                    "principal",
+                    "role",
+                    "json"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "read",
+          "summary": "Read a Wiki node",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text",
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [
+            {
+              "name": "database_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "path",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "json",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            }
+          ]
+        },
+        {
+          "name": "children",
+          "summary": "List Wiki children under a path",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text",
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [
+            {
+              "name": "database_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "path",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "json",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            }
+          ]
+        },
+        {
+          "name": "search",
+          "summary": "Search Wiki nodes",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text",
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [
+            {
+              "name": "database_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "prefix",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "top_k",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "integer"
+            },
+            {
+              "name": "json",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            }
+          ],
+          "arg_groups": [
+            {
+              "id": "WikiSearchArgs",
+              "required": false,
+              "multiple": true,
+              "members": [
+                "database_id",
+                "query",
+                "prefix",
+                "top_k",
+                "json"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "write",
+          "summary": "Write a Wiki node from a file",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text",
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [
+            {
+              "name": "database_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "path",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "input",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "kind",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "metadata_json",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "expected_etag",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "json",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            }
+          ]
+        },
+        {
+          "name": "append",
+          "summary": "Append file contents to a Wiki node",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text",
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [
+            {
+              "name": "database_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "path",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "input",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "expected_etag",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "separator",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "kind",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "metadata_json",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "json",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            }
+          ]
+        },
+        {
+          "name": "edit",
+          "summary": "Replace text in a Wiki node",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text",
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [
+            {
+              "name": "database_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "path",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "old_text",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "new_text",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "replace_all",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            },
+            {
+              "name": "expected_etag",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "json",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "summary": "Delete a Wiki node. Requires --yes.",
+          "auth": {
+            "required": true,
+            "sources": [
+              "global_identity",
+              "global_ii"
+            ]
+          },
+          "output": {
+            "default": "text",
+            "supported": [
+              "text",
+              "json"
+            ],
+            "interactive": false
+          },
+          "global_flags_supported": [
+            "verbose",
+            "ic",
+            "identity",
+            "ii",
+            "identity_path"
+          ],
+          "arguments": [
+            {
+              "name": "database_id",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "path",
+              "required": true,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "expected_etag",
+              "required": false,
+              "input_shape": "single_value",
+              "value_kind": "string"
+            },
+            {
+              "name": "yes",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            },
+            {
+              "name": "json",
+              "required": false,
+              "input_shape": "flag",
+              "value_kind": "boolean"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "tui",
       "summary": "Launch the Kinic terminal UI. Requires global --identity <NAME>. --ii is not supported. Returns an interactive TUI, not JSON.",
       "auth": {

@@ -22,10 +22,12 @@ fn poll_initial_memories_background_applies_loaded_memories_and_prefers_saved_de
     provider.pending_initial_memories = Some(rx);
     provider.initial_memories_in_flight = true;
     tx.send(InitialMemoriesTaskOutput {
-        result: Ok(vec![
-            running_memory_summary("aaaaa-aa", "first"),
-            running_memory_summary("bbbbb-bb", "second"),
-        ]),
+        result: Ok(bridge::InstanceSummaries {
+            memories: vec![
+                running_memory_summary("aaaaa-aa", "first"),
+                running_memory_summary("bbbbb-bb", "second"),
+            ],
+        }),
     })
     .unwrap();
 
@@ -49,10 +51,12 @@ fn poll_initial_memories_background_prefetches_active_memory_too() {
     push_test_memory_detail_result("aaaaa-aa", Ok(memory_details("Alpha loaded")));
     push_test_memory_detail_result("bbbbb-bb", Ok(memory_details("Beta loaded")));
     tx.send(InitialMemoriesTaskOutput {
-        result: Ok(vec![
-            running_memory_summary("aaaaa-aa", "first"),
-            running_memory_summary("bbbbb-bb", "second"),
-        ]),
+        result: Ok(bridge::InstanceSummaries {
+            memories: vec![
+                running_memory_summary("aaaaa-aa", "first"),
+                running_memory_summary("bbbbb-bb", "second"),
+            ],
+        }),
     })
     .unwrap();
 
@@ -123,10 +127,12 @@ fn poll_initial_memories_background_falls_back_to_first_when_default_missing() {
     provider.pending_initial_memories = Some(rx);
     provider.initial_memories_in_flight = true;
     tx.send(InitialMemoriesTaskOutput {
-        result: Ok(vec![
-            running_memory_summary("aaaaa-aa", "first"),
-            running_memory_summary("bbbbb-bb", "second"),
-        ]),
+        result: Ok(bridge::InstanceSummaries {
+            memories: vec![
+                running_memory_summary("aaaaa-aa", "first"),
+                running_memory_summary("bbbbb-bb", "second"),
+            ],
+        }),
     })
     .unwrap();
 

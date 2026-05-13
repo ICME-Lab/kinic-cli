@@ -53,6 +53,7 @@ dfx identity use "${USER_NAME}"
 
 dfx deploy internet_identity --specified-id rdmx6-jaaaa-aaaaa-aaadq-cai
 dfx deploy launcher --specified-id xfug4-5qaaa-aaaak-afowa-cai --argument='(variant {minor})'
+dfx deploy wiki --specified-id xis3j-paaaa-aaaai-axumq-cai
 # dfx canister call launcher change_key_id '("test_key_1")'
 dfx ledger fabricate-cycles --cycles 100T --canister $(dfx canister id launcher)
 

@@ -1,6 +1,7 @@
 use super::*;
+use tui_kit_render::{UiItemKind, UiItemSummary, UiVisibility};
 use tui_kit_runtime::kinic_tabs::{
-    KINIC_CREATE_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
+    KINIC_CREATE_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID, KINIC_WIKI_TAB_ID,
 };
 use tui_kit_runtime::{CoreState, ProviderSnapshot, TransferModalState, apply_snapshot};
 
@@ -145,6 +146,46 @@ mod effect_application {
         execute_effects_to_status(&mut state, vec![CoreEffect::FocusPane(PaneFocus::Items)]);
 
         assert_eq!(state.focus, PaneFocus::Form);
+    }
+
+    #[test]
+    fn select_list_item_effect_clamps_to_visible_items() {
+        let mut state = CoreState {
+            list_items: vec![test_item("a"), test_item("b")],
+            selected_index: Some(0),
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::SelectListItem(3)]);
+
+        assert_eq!(state.selected_index, Some(1));
+    }
+
+    #[test]
+    fn select_list_item_effect_can_select_wiki_create_action_row() {
+        let mut state = CoreState {
+            current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+            list_items: vec![test_item("db-a"), test_item("wiki-create-database-action")],
+            selected_index: Some(0),
+            ..CoreState::default()
+        };
+
+        execute_effects_to_status(&mut state, vec![CoreEffect::SelectListItem(1)]);
+
+        assert_eq!(state.selected_index, Some(1));
+    }
+
+    fn test_item(id: &str) -> UiItemSummary {
+        UiItemSummary {
+            id: id.to_string(),
+            name: id.to_string(),
+            leading_marker: None,
+            kind: UiItemKind::Custom("test".to_string()),
+            visibility: UiVisibility::Private,
+            qualified_name: None,
+            subtitle: None,
+            tags: Vec::new(),
+        }
     }
 
     #[test]
@@ -417,14 +458,15 @@ mod global_commands {
             ),
             (
                 PaneFocus::Content,
-                KINIC_MARKET_TAB_ID,
+                KINIC_SETTINGS_TAB_ID,
                 HostGlobalCommand::BackToTabs,
             ),
             (
                 PaneFocus::Content,
-                KINIC_SETTINGS_TAB_ID,
-                HostGlobalCommand::BackToTabs,
+                KINIC_WIKI_TAB_ID,
+                HostGlobalCommand::None,
             ),
+            (PaneFocus::Items, KINIC_WIKI_TAB_ID, HostGlobalCommand::None),
         ];
 
         for (focus, tab_id, expected) in cases {

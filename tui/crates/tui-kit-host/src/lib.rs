@@ -57,6 +57,7 @@ pub fn key_to_core_key(code: KeyCode) -> Option<CoreKey> {
         KeyCode::Char(c) => Some(CoreKey::Char(c)),
         KeyCode::Tab => Some(CoreKey::Tab),
         KeyCode::BackTab => Some(CoreKey::BackTab),
+        KeyCode::Esc => Some(CoreKey::Esc),
         KeyCode::Backspace => Some(CoreKey::Backspace),
         KeyCode::Enter => Some(CoreKey::Enter),
         KeyCode::Down => Some(CoreKey::Down),
@@ -189,6 +190,10 @@ pub fn global_command_for_key(
     if code == KeyCode::Esc {
         let tab_specific = if focus == PaneFocus::Form && focus_policy.allows_form {
             HostGlobalCommand::BackFromFormToTabs
+        } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_WIKI_TAB_ID
+            && matches!(focus, PaneFocus::Items | PaneFocus::Content)
+        {
+            HostGlobalCommand::None
         } else if current_tab_id == tui_kit_runtime::kinic_tabs::KINIC_MEMORIES_TAB_ID
             && focus == PaneFocus::Content
         {
@@ -334,11 +339,46 @@ pub fn execute_effects_to_status(state: &mut CoreState, effects: Vec<CoreEffect>
                 };
                 state.insert_error = message.clone();
             }
+            CoreEffect::ResetContentScroll => {
+                state.content_scroll_reset_epoch = state.content_scroll_reset_epoch.wrapping_add(1);
+            }
+            CoreEffect::OpenWikiEditor {
+                path,
+                content,
+                etag,
+                metadata_json,
+            } => {
+                state.wiki_editor.open(path, content, etag, metadata_json);
+                state.focus = PaneFocus::Content;
+            }
+            CoreEffect::WikiEditorSaving => {
+                state.wiki_editor.begin_save();
+            }
+            CoreEffect::WikiEditorSaved {
+                path,
+                content,
+                etag,
+                metadata_json,
+            } => {
+                state.wiki_editor.open(path, content, etag, metadata_json);
+                state.wiki_editor.close();
+                state.focus = PaneFocus::Items;
+            }
+            CoreEffect::WikiEditorError(message) => {
+                state.wiki_editor.apply_error(message);
+            }
             CoreEffect::SelectFirstListItem => {
                 state.selected_index = if state.list_items.is_empty() {
                     None
                 } else {
                     Some(0)
+                };
+            }
+            CoreEffect::SelectListItem(index) => {
+                state.selected_index = if state.list_items.is_empty() {
+                    None
+                } else {
+                    Some(index.min(state.list_items.len().saturating_sub(1)))
                 };
             }
             CoreEffect::FocusPane(pane) => {

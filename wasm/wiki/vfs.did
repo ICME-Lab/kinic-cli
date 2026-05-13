@@ -1,0 +1,347 @@
+type AppendNodeRequest = record {
+  content : text;
+  separator : opt text;
+  kind : opt NodeKind;
+  path : text;
+  expected_etag : opt text;
+  metadata_json : opt text;
+  database_id : text;
+};
+type CanisterHealth = record { cycles_balance : nat };
+type CanonicalRole = record {
+  name : text;
+  path_pattern : text;
+  purpose : text;
+};
+type ChildNode = record {
+  updated_at : opt int64;
+  etag : opt text;
+  kind : NodeEntryKind;
+  name : text;
+  size_bytes : opt nat64;
+  path : text;
+  has_children : bool;
+  is_virtual : bool;
+};
+type DatabaseArchiveChunk = record { bytes : blob };
+type DatabaseArchiveInfo = record { size_bytes : nat64; database_id : text };
+type DatabaseMember = record {
+  "principal" : text;
+  role : DatabaseRole;
+  created_at_ms : int64;
+  database_id : text;
+};
+type DatabaseRestoreChunkRequest = record {
+  offset : nat64;
+  database_id : text;
+  bytes : blob;
+};
+type DatabaseRole = variant { Reader; Writer; Owner };
+type DatabaseStatus = variant { Hot; Restoring; Archiving; Archived; Deleted };
+type DatabaseSummary = record {
+  status : DatabaseStatus;
+  role : DatabaseRole;
+  logical_size_bytes : nat64;
+  database_id : text;
+  archived_at_ms : opt int64;
+  deleted_at_ms : opt int64;
+};
+type DeleteNodeRequest = record {
+  path : text;
+  expected_etag : opt text;
+  database_id : text;
+};
+type DeleteNodeResult = record { path : text };
+type EditNodeRequest = record {
+  path : text;
+  old_text : text;
+  replace_all : bool;
+  expected_etag : opt text;
+  new_text : text;
+  database_id : text;
+};
+type EditNodeResult = record {
+  node : NodeMutationAck;
+  replacement_count : nat32;
+};
+type ExportSnapshotRequest = record {
+  snapshot_revision : opt text;
+  cursor : opt text;
+  limit : nat32;
+  database_id : text;
+  prefix : opt text;
+  snapshot_session_id : opt text;
+};
+type ExportSnapshotResponse = record {
+  snapshot_revision : text;
+  nodes : vec Node;
+  next_cursor : opt text;
+  snapshot_session_id : opt text;
+};
+type FetchUpdatesRequest = record {
+  known_snapshot_revision : text;
+  cursor : opt text;
+  limit : nat32;
+  database_id : text;
+  prefix : opt text;
+  target_snapshot_revision : opt text;
+};
+type FetchUpdatesResponse = record {
+  removed_paths : vec text;
+  snapshot_revision : text;
+  changed_nodes : vec Node;
+  next_cursor : opt text;
+};
+type GlobNodeHit = record {
+  kind : NodeEntryKind;
+  path : text;
+  has_children : bool;
+};
+type GlobNodeType = variant { Any; File; Directory };
+type GlobNodesRequest = record {
+  node_type : opt GlobNodeType;
+  pattern : text;
+  path : opt text;
+  database_id : text;
+};
+type GraphLinksRequest = record {
+  limit : nat32;
+  database_id : text;
+  prefix : text;
+};
+type GraphNeighborhoodRequest = record {
+  center_path : text;
+  limit : nat32;
+  database_id : text;
+  depth : nat32;
+};
+type IncomingLinksRequest = record {
+  path : text;
+  limit : nat32;
+  database_id : text;
+};
+type OutgoingLinksRequest = record { path : text; limit : nat32; database_id : text };
+type LinkEdge = record {
+  updated_at : int64;
+  link_kind : text;
+  link_text : text;
+  source_path : text;
+  raw_href : text;
+  target_path : text;
+};
+type ListChildrenRequest = record { path : text; database_id : text };
+type ListNodesRequest = record {
+  recursive : bool;
+  database_id : text;
+  prefix : text;
+};
+type MemoryCapability = record { name : text; description : text };
+type MemoryManifest = record {
+  recommended_entrypoint : text;
+  api_version : text;
+  capabilities : vec MemoryCapability;
+  write_policy : text;
+  budget_unit : text;
+  canonical_roles : vec CanonicalRole;
+  max_depth : nat32;
+  max_query_limit : nat32;
+  purpose : text;
+  roots : vec MemoryRoot;
+};
+type MemoryRoot = record { kind : text; path : text };
+type MkdirNodeRequest = record { path : text; database_id : text };
+type MkdirNodeResult = record { created : bool; path : text };
+type MoveNodeRequest = record {
+  from_path : text;
+  to_path : text;
+  expected_etag : opt text;
+  overwrite : bool;
+  database_id : text;
+};
+type MoveNodeResult = record {
+  from_path : text;
+  node : NodeMutationAck;
+  overwrote : bool;
+};
+type MultiEdit = record { old_text : text; new_text : text };
+type MultiEditNodeRequest = record {
+  path : text;
+  edits : vec MultiEdit;
+  expected_etag : opt text;
+  database_id : text;
+};
+type Node = record {
+  updated_at : int64;
+  content : text;
+  etag : text;
+  kind : NodeKind;
+  path : text;
+  created_at : int64;
+  metadata_json : text;
+};
+type NodeContext = record {
+  incoming_links : vec LinkEdge;
+  node : Node;
+  outgoing_links : vec LinkEdge;
+};
+type NodeContextRequest = record {
+  link_limit : nat32;
+  path : text;
+  database_id : text;
+};
+type NodeEntry = record {
+  updated_at : int64;
+  etag : text;
+  kind : NodeEntryKind;
+  path : text;
+  has_children : bool;
+};
+type NodeEntryKind = variant { File; Source; Directory };
+type NodeKind = variant { File; Source };
+type NodeMutationAck = record {
+  updated_at : int64;
+  etag : text;
+  kind : NodeKind;
+  path : text;
+};
+type QueryContext = record {
+  truncated : bool;
+  task : text;
+  evidence : vec SourceEvidence;
+  nodes : vec NodeContext;
+  graph_links : vec LinkEdge;
+  search_hits : vec SearchNodeHit;
+  namespace : text;
+};
+type QueryContextRequest = record {
+  task : text;
+  include_evidence : bool;
+  entities : vec text;
+  budget_tokens : nat32;
+  database_id : text;
+  depth : nat32;
+  namespace : opt text;
+};
+type RecentNodeHit = record {
+  updated_at : int64;
+  etag : text;
+  kind : NodeKind;
+  path : text;
+};
+type RecentNodesRequest = record {
+  path : opt text;
+  limit : nat32;
+  database_id : text;
+};
+type Result = variant { Ok : WriteNodeResult; Err : text };
+type Result_1 = variant { Ok : DatabaseArchiveInfo; Err : text };
+type Result_10 = variant { Ok : vec ChildNode; Err : text };
+type Result_11 = variant { Ok : vec DatabaseMember; Err : text };
+type Result_12 = variant { Ok : vec DatabaseSummary; Err : text };
+type Result_13 = variant { Ok : vec NodeEntry; Err : text };
+type Result_14 = variant { Ok : MkdirNodeResult; Err : text };
+type Result_15 = variant { Ok : MoveNodeResult; Err : text };
+type Result_16 = variant { Ok : QueryContext; Err : text };
+type Result_17 = variant { Ok : DatabaseArchiveChunk; Err : text };
+type Result_18 = variant { Ok : opt Node; Err : text };
+type Result_19 = variant { Ok : opt NodeContext; Err : text };
+type Result_2 = variant { Ok; Err : text };
+type Result_20 = variant { Ok : vec RecentNodeHit; Err : text };
+type Result_21 = variant { Ok : vec SearchNodeHit; Err : text };
+type Result_22 = variant { Ok : SourceEvidence; Err : text };
+type Result_3 = variant { Ok : text; Err : text };
+type Result_4 = variant { Ok : DeleteNodeResult; Err : text };
+type Result_5 = variant { Ok : EditNodeResult; Err : text };
+type Result_6 = variant { Ok : ExportSnapshotResponse; Err : text };
+type Result_7 = variant { Ok : FetchUpdatesResponse; Err : text };
+type Result_8 = variant { Ok : vec GlobNodeHit; Err : text };
+type Result_9 = variant { Ok : vec LinkEdge; Err : text };
+type SearchNodeHit = record {
+  preview : opt SearchPreview;
+  kind : NodeKind;
+  path : text;
+  match_reasons : vec text;
+  snippet : opt text;
+  score : float32;
+};
+type SearchNodePathsRequest = record {
+  top_k : nat32;
+  database_id : text;
+  preview_mode : opt SearchPreviewMode;
+  prefix : opt text;
+  query_text : text;
+};
+type SearchNodesRequest = record {
+  top_k : nat32;
+  database_id : text;
+  preview_mode : opt SearchPreviewMode;
+  prefix : opt text;
+  query_text : text;
+};
+type SearchPreview = record {
+  field : SearchPreviewField;
+  char_offset : nat32;
+  match_reason : text;
+  excerpt : opt text;
+};
+type SearchPreviewField = variant { Path; Content };
+type SearchPreviewMode = variant { Light; ContentStart; None };
+type SourceEvidence = record { node_path : text; refs : vec SourceEvidenceRef };
+type SourceEvidenceRef = record {
+  link_text : text;
+  via_path : text;
+  source_path : text;
+  raw_href : text;
+};
+type SourceEvidenceRequest = record { node_path : text; database_id : text };
+type Status = record { source_count : nat64; file_count : nat64 };
+type WriteNodeRequest = record {
+  content : text;
+  kind : NodeKind;
+  path : text;
+  expected_etag : opt text;
+  metadata_json : text;
+  database_id : text;
+};
+type WriteNodeResult = record { created : bool; node : RecentNodeHit };
+service : () -> {
+  append_node : (AppendNodeRequest) -> (Result);
+  begin_database_archive : (text) -> (Result_1);
+  begin_database_restore : (text, blob, nat64) -> (Result_2);
+  cancel_database_archive : (text) -> (Result_2);
+  canister_health : () -> (CanisterHealth) query;
+  create_database : () -> (Result_3);
+  delete_database : (text) -> (Result_2);
+  delete_node : (DeleteNodeRequest) -> (Result_4);
+  edit_node : (EditNodeRequest) -> (Result_5);
+  export_snapshot : (ExportSnapshotRequest) -> (Result_6) query;
+  fetch_updates : (FetchUpdatesRequest) -> (Result_7) query;
+  finalize_database_archive : (text, blob) -> (Result_2);
+  finalize_database_restore : (text) -> (Result_2);
+  glob_nodes : (GlobNodesRequest) -> (Result_8) query;
+  grant_database_access : (text, text, DatabaseRole) -> (Result_2);
+  graph_links : (GraphLinksRequest) -> (Result_9) query;
+  graph_neighborhood : (GraphNeighborhoodRequest) -> (Result_9) query;
+  incoming_links : (IncomingLinksRequest) -> (Result_9) query;
+  list_children : (ListChildrenRequest) -> (Result_10) query;
+  list_database_members : (text) -> (Result_11) query;
+  list_databases : () -> (Result_12) query;
+  list_nodes : (ListNodesRequest) -> (Result_13) query;
+  memory_manifest : () -> (MemoryManifest) query;
+  mkdir_node : (MkdirNodeRequest) -> (Result_14);
+  move_node : (MoveNodeRequest) -> (Result_15);
+  multi_edit_node : (MultiEditNodeRequest) -> (Result_5);
+  outgoing_links : (OutgoingLinksRequest) -> (Result_9) query;
+  query_context : (QueryContextRequest) -> (Result_16) query;
+  read_database_archive_chunk : (text, nat64, nat32) -> (Result_17) query;
+  read_node : (text, text) -> (Result_18) query;
+  read_node_context : (NodeContextRequest) -> (Result_19) query;
+  recent_nodes : (RecentNodesRequest) -> (Result_20) query;
+  revoke_database_access : (text, text) -> (Result_2);
+  search_node_paths : (SearchNodePathsRequest) -> (Result_21) query;
+  search_nodes : (SearchNodesRequest) -> (Result_21) query;
+  source_evidence : (SourceEvidenceRequest) -> (Result_22) query;
+  status : (text) -> (Status) query;
+  write_database_restore_chunk : (DatabaseRestoreChunkRequest) -> (Result_2);
+  write_node : (WriteNodeRequest) -> (Result);
+}

@@ -7,7 +7,8 @@ use crate::ui::theme::Theme;
 use tui_kit_runtime::{
     AccessControlModalState, ChatScope, CreateCostState, CreateModalFocus, CreateSubmitState,
     InsertFormFocus, InsertMode, MemorySelection, PickerState, RemoveMemoryModalState,
-    RenameMemoryModalState, SearchScope, SettingsSnapshot, TextInputModalState, TransferModalState,
+    RenameMemoryModalState, SearchScope, SettingsSnapshot, TextInputModalState, ThreePaneSnapshot,
+    TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, UiConfig, default_tab_specs};
@@ -22,6 +23,7 @@ pub struct TuiKitUi<'a> {
     pub(super) ui_summaries: &'a [UiItemSummary],
     pub(super) ui_selected_content: Option<&'a UiItemContent>,
     pub(super) ui_context_node: Option<&'a UiContextNode>,
+    pub(super) three_pane: Option<&'a ThreePaneSnapshot>,
     pub(super) ui_total_count: usize,
     pub(super) in_context_items_view: bool,
     pub(super) show_context_panel: bool,
@@ -65,6 +67,8 @@ pub struct TuiKitUi<'a> {
     pub(super) insert_spinner_frame: usize,
     pub(super) insert_error: Option<&'a str>,
     pub(super) insert_focus: InsertFormFocus,
+    pub(super) wiki_editor: tui_kit_runtime::WikiEditorState,
+    pub(super) wiki_editor_cursor: Option<(usize, usize)>,
     pub(super) access_control: AccessControlModalState,
     pub(super) add_memory: TextInputModalState,
     pub(super) remove_memory: RemoveMemoryModalState,
@@ -98,6 +102,7 @@ impl<'a> TuiKitUi<'a> {
             ui_summaries: &[],
             ui_selected_content: None,
             ui_context_node: None,
+            three_pane: None,
             ui_total_count: 0,
             in_context_items_view: false,
             show_context_panel: false,
@@ -141,6 +146,8 @@ impl<'a> TuiKitUi<'a> {
             insert_spinner_frame: 0,
             insert_error: None,
             insert_focus: InsertFormFocus::Mode,
+            wiki_editor: tui_kit_runtime::WikiEditorState::default(),
+            wiki_editor_cursor: None,
             access_control: AccessControlModalState::default(),
             add_memory: TextInputModalState::default(),
             remove_memory: RemoveMemoryModalState::default(),

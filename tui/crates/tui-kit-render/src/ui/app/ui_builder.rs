@@ -6,7 +6,7 @@ use crate::ui::search::CompletionCandidate;
 use tui_kit_runtime::{
     AccessControlModalState, CreateCostState, CreateModalFocus, CreateSubmitState, InsertFormFocus,
     InsertMode, MemorySelection, PickerState, RemoveMemoryModalState, RenameMemoryModalState,
-    SearchScope, SettingsSnapshot, TextInputModalState, TransferModalState,
+    SearchScope, SettingsSnapshot, TextInputModalState, ThreePaneSnapshot, TransferModalState,
 };
 
 use super::{Focus, TabId, TabSpec, TuiKitUi, UiConfig};
@@ -27,6 +27,12 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn ui_context_node(mut self, node: Option<&'a UiContextNode>) -> Self {
         self.ui_context_node = node;
+        self
+    }
+
+    #[must_use]
+    pub fn three_pane_snapshot(mut self, snapshot: &'a ThreePaneSnapshot) -> Self {
+        self.three_pane = Some(snapshot);
         self
     }
 
@@ -316,6 +322,18 @@ impl<'a> TuiKitUi<'a> {
     #[must_use]
     pub fn insert_focus(mut self, value: InsertFormFocus) -> Self {
         self.insert_focus = value;
+        self
+    }
+
+    #[must_use]
+    pub fn wiki_editor(mut self, value: tui_kit_runtime::WikiEditorState) -> Self {
+        self.wiki_editor = value;
+        self
+    }
+
+    #[must_use]
+    pub fn wiki_editor_cursor(mut self, value: Option<(usize, usize)>) -> Self {
+        self.wiki_editor_cursor = value;
         self
     }
 

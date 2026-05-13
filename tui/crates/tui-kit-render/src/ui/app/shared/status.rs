@@ -28,10 +28,7 @@ impl<'a> TuiKitUi<'a> {
 
         let status_line = if matches!(tab_kind(tab_id), TabKind::InsertForm | TabKind::CreateForm) {
             self.form_status_line(tab_id)
-        } else if matches!(
-            tab_kind(tab_id),
-            TabKind::PlaceholderMarket | TabKind::PlaceholderSettings
-        ) {
+        } else if matches!(tab_kind(tab_id), TabKind::PlaceholderSettings) {
             self.placeholder_status_line(tab_id)
         } else if self.show_context_panel && self.in_context_items_view {
             self.context_items_status_line()
@@ -293,6 +290,9 @@ impl<'a> TuiKitUi<'a> {
                 Span::styled(" search ", self.theme.style_muted()),
             ]);
         }
+        if matches!(tab_kind(tab_id), TabKind::Wiki) {
+            return self.wiki_status_line();
+        }
         spans.extend([
             Span::styled("Tab", self.theme.style_accent()),
             Span::styled(" focus ", self.theme.style_muted()),
@@ -339,6 +339,78 @@ impl<'a> TuiKitUi<'a> {
         ]);
 
         Line::from(spans)
+    }
+
+    fn wiki_status_line(&self) -> Line<'_> {
+        if self.wiki_editor.open {
+            if self.wiki_editor.discard_confirm {
+                return Line::from(vec![
+                    Span::styled("Wiki Edit", self.theme.style_accent_bold()),
+                    Span::styled(" │ ", self.theme.style_dim()),
+                    Span::styled("Enter", self.theme.style_warning()),
+                    Span::styled(" discard ", self.theme.style_muted()),
+                    Span::styled("Esc", self.theme.style_accent()),
+                    Span::styled(" continue editing ", self.theme.style_muted()),
+                ]);
+            }
+            return Line::from(vec![
+                Span::styled("Wiki Edit", self.theme.style_accent_bold()),
+                Span::styled(" │ ", self.theme.style_dim()),
+                Span::styled("Ctrl+S", self.theme.style_accent()),
+                Span::styled(" save ", self.theme.style_muted()),
+                Span::styled("Tab", self.theme.style_accent()),
+                Span::styled(" footer ", self.theme.style_muted()),
+                Span::styled("Esc", self.theme.style_accent()),
+                Span::styled(" cancel ", self.theme.style_muted()),
+            ]);
+        }
+        let spans = match self.focus {
+            Focus::Content => vec![
+                Span::styled("Wiki Document", self.theme.style_accent_bold()),
+                Span::styled(" │ ", self.theme.style_dim()),
+                Span::styled("↑/↓", self.theme.style_accent()),
+                Span::styled(" scroll ", self.theme.style_muted()),
+                Span::styled("PgUp/PgDn", self.theme.style_accent()),
+                Span::styled(" page ", self.theme.style_muted()),
+                Span::styled("Home/End", self.theme.style_accent()),
+                Span::styled(" jump ", self.theme.style_muted()),
+                Span::styled("Esc", self.theme.style_accent()),
+                Span::styled(" browser ", self.theme.style_muted()),
+                Span::styled("Tab", self.theme.style_accent()),
+                Span::styled(" tabs ", self.theme.style_muted()),
+            ],
+            Focus::Items => vec![
+                Span::styled("Wiki Browser", self.theme.style_accent_bold()),
+                Span::styled(" │ ", self.theme.style_dim()),
+                Span::styled("↑/↓", self.theme.style_accent()),
+                Span::styled(" choose ", self.theme.style_muted()),
+                Span::styled("Enter", self.theme.style_accent()),
+                Span::styled(" open ", self.theme.style_muted()),
+                Span::styled("e", self.theme.style_accent()),
+                Span::styled(" edit ", self.theme.style_muted()),
+                Span::styled("Tab", self.theme.style_accent()),
+                Span::styled(" document ", self.theme.style_muted()),
+                Span::styled("Esc", self.theme.style_accent()),
+                Span::styled(" back ", self.theme.style_muted()),
+            ],
+            Focus::Tabs => vec![
+                Span::styled("Wiki Tabs", self.theme.style_accent_bold()),
+                Span::styled(" │ ", self.theme.style_dim()),
+                Span::styled("←/→", self.theme.style_accent()),
+                Span::styled(" switch ", self.theme.style_muted()),
+                Span::styled("Enter/Tab", self.theme.style_accent()),
+                Span::styled(" browser ", self.theme.style_muted()),
+                Span::styled("1-5", self.theme.style_accent()),
+                Span::styled(" tabs ", self.theme.style_muted()),
+            ],
+            _ => vec![
+                Span::styled("Wiki", self.theme.style_accent_bold()),
+                Span::styled(" │ ", self.theme.style_dim()),
+                Span::styled("Tab", self.theme.style_accent()),
+                Span::styled(" focus ", self.theme.style_muted()),
+            ],
+        };
+        prepend_status_message(self, spans)
     }
 
     fn focus_indicator(&self) -> (&'static str, &'static str) {
@@ -456,7 +528,7 @@ mod tests {
     use crate::ui::theme::Theme;
     use tui_kit_runtime::InsertFormFocus;
     use tui_kit_runtime::kinic_tabs::{
-        KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_SETTINGS_TAB_ID,
+        KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_SETTINGS_TAB_ID, KINIC_WIKI_TAB_ID,
     };
 
     fn render_status_line(ui: &TuiKitUi<'_>) -> String {
@@ -550,6 +622,40 @@ mod tests {
 
         assert!(rendered.contains("Shift+C"));
         assert!(rendered.contains("hide chat"));
+    }
+
+    #[test]
+    fn wiki_edit_status_switches_to_discard_confirmation_hints() {
+        let theme = Theme::default();
+        let mut editor = tui_kit_runtime::WikiEditorState::default();
+        editor.open(
+            "/Wiki/index.md".to_string(),
+            "# Index".to_string(),
+            "etag".to_string(),
+            "{}".to_string(),
+        );
+        let edit_ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_WIKI_TAB_ID))
+            .focus(Focus::Content)
+            .wiki_editor(editor.clone());
+        let mut discard_editor = editor;
+        discard_editor.dirty = true;
+        discard_editor.discard_confirm = true;
+        let discard_ui = TuiKitUi::new(&theme)
+            .current_tab_id(crate::ui::TabId::new(KINIC_WIKI_TAB_ID))
+            .focus(Focus::Content)
+            .wiki_editor(discard_editor);
+
+        let edit_status = render_status_line(&edit_ui);
+        let discard_status = render_status_line(&discard_ui);
+
+        assert!(edit_status.contains("Ctrl+S"));
+        assert!(edit_status.contains("footer"));
+        assert!(discard_status.contains("Enter"));
+        assert!(discard_status.contains("discard"));
+        assert!(discard_status.contains("Esc"));
+        assert!(discard_status.contains("continue editing"));
+        assert!(!discard_status.contains("Ctrl+S"));
     }
 
     #[test]

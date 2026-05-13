@@ -3,8 +3,8 @@
 pub mod create;
 pub mod insert;
 pub mod memories;
-pub mod placeholder;
 pub mod settings;
+pub mod wiki;
 
 use ratatui::{buffer::Buffer, layout::Rect, text::Line};
 use tui_kit_runtime::CreateSubmitState;
@@ -12,24 +12,6 @@ use tui_kit_runtime::kinic_tabs::{TabKind, tab_kind};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::ui::app::TuiKitUi;
-
-struct PlaceholderScreenSpec<'a> {
-    title: &'a str,
-    lead: &'a str,
-    detail: &'a str,
-}
-
-fn placeholder_screen_spec(kind: TabKind) -> Option<PlaceholderScreenSpec<'static>> {
-    match kind {
-        TabKind::PlaceholderMarket => Some(PlaceholderScreenSpec {
-            title: "Market",
-            lead: "Market tab is reserved for future discovery and purchase flows.",
-            detail: "Use Memories to browse and Create to provision a new memory today.",
-        }),
-        TabKind::PlaceholderSettings => None,
-        _ => None,
-    }
-}
 
 impl<'a> TuiKitUi<'a> {
     pub(crate) fn render_tab_screen(&self, area: Rect, buf: &mut Buffer) -> bool {
@@ -46,13 +28,11 @@ impl<'a> TuiKitUi<'a> {
                 self.render_settings_screen(area, buf);
                 true
             }
-            kind => {
-                let Some(spec) = placeholder_screen_spec(kind) else {
-                    return false;
-                };
-                self.render_placeholder_screen(area, buf, spec.title, spec.lead, spec.detail);
+            TabKind::Wiki => {
+                self.render_wiki_screen(area, buf);
                 true
             }
+            _ => false,
         }
     }
 }
@@ -71,7 +51,7 @@ fn submit_button_text(
     }
 }
 
-fn spinner_frame(frame: usize) -> &'static str {
+pub(crate) fn spinner_frame(frame: usize) -> &'static str {
     const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
     FRAMES[frame % FRAMES.len()]
 }

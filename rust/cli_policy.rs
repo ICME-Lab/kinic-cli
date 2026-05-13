@@ -116,6 +116,17 @@ pub fn command_policy_for_path(path: &str) -> CommandPolicy {
         };
     }
 
+    if path == "wiki" || path.starts_with("wiki.") {
+        return CommandPolicy {
+            auth_sources: &["global_identity", "global_ii"],
+            conditional_auth: &[],
+            output_default: "text",
+            output_supported: &["text", "json"],
+            interactive: false,
+            global_flags_supported: GLOBAL_FLAGS_ALL,
+        };
+    }
+
     CommandPolicy {
         auth_sources: &["global_identity", "global_ii"],
         conditional_auth: &[],

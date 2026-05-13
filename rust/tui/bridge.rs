@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::HashMap};
 
 use super::chat_prompt::ActiveMemoryContext;
 use crate::{
@@ -23,11 +23,14 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
-use ic_agent::{Agent, export::Principal};
+#[cfg(test)]
+use candid::{Decode, Encode};
+use ic_agent::{Agent, export::Principal, identity::AnonymousIdentity};
 use kinic_core::amount::format_e8s_to_kinic_string_nat;
 use tui_kit_runtime::{AccessControlAction, AccessControlRole, ChatScope, SessionAccountOverview};
 
 pub(crate) use crate::shared::memory_metadata::DescriptionUpdate;
+pub use crate::wiki_bridge::{DatabaseRole, DatabaseStatus, DatabaseSummary, NodeEntryKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySummary {
@@ -42,6 +45,50 @@ pub struct MemorySummary {
     pub stable_memory_size: Option<u32>,
     pub cycle_amount: Option<u64>,
     pub users: Option<Vec<MemoryUser>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceSummaries {
+    pub memories: Vec<MemorySummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiDatabases {
+    pub databases: Vec<DatabaseSummary>,
+    pub anonymous_access: HashMap<String, DatabaseRole>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiChildNode {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub has_children: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiNode {
+    pub path: String,
+    pub content: String,
+    pub etag: String,
+    pub metadata_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WikiWriteNodeInput {
+    pub wiki_id: String,
+    pub database_id: String,
+    pub path: String,
+    pub content: String,
+    pub metadata_json: String,
+    pub expected_etag: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WikiSearchHit {
+    pub path: String,
+    pub score: f32,
+    pub snippet: Option<String>,
 }
 
 pub type SearchResultItem = SearchHit;
@@ -89,9 +136,17 @@ pub struct MemoryDetails {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct CreateMemorySuccess {
     pub id: String,
     pub memories: Option<Vec<MemorySummary>>,
+    pub refresh_warning: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateInstanceSuccess {
+    pub id: String,
+    pub instances: Option<InstanceSummaries>,
     pub refresh_warning: Option<String>,
 }
 
@@ -178,6 +233,7 @@ pub async fn build_search_agent(use_mainnet: bool, auth: TuiAuth) -> Result<Agen
     factory.build().await
 }
 
+#[allow(dead_code)]
 pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<MemorySummary>> {
     let factory = resolve_agent_factory(use_mainnet, &auth)?;
     let agent = factory.build().await?;
@@ -186,6 +242,15 @@ pub async fn list_memories(use_mainnet: bool, auth: TuiAuth) -> Result<Vec<Memor
     Ok(states.into_iter().map(memory_summary_from_state).collect())
 }
 
+pub async fn list_instances(use_mainnet: bool, auth: TuiAuth) -> Result<InstanceSummaries> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)?;
+    let agent = factory.build().await?;
+    let client = LauncherClient::new(agent);
+    let states = client.list_memories().await?;
+    Ok(instance_summaries_from_states(states))
+}
+
+#[allow(dead_code)]
 pub async fn create_memory(
     use_mainnet: bool,
     auth: TuiAuth,
@@ -245,6 +310,259 @@ pub async fn create_memory(
         memories,
         refresh_warning,
     })
+}
+
+pub async fn create_instance(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    name: String,
+    description: String,
+) -> Result<CreateInstanceSuccess, CreateMemoryError> {
+    let factory = resolve_agent_factory(use_mainnet, &auth)
+        .map_err(|error| CreateMemoryError::Principal(short_error(&error.to_string())))?;
+    let agent = factory
+        .build()
+        .await
+        .map_err(|error| CreateMemoryError::Principal(short_error(&error.to_string())))?;
+    let client = LauncherClient::new(agent.clone());
+    let (balance, price) = tokio::join!(fetch_balance(&agent), client.fetch_deployment_price());
+    let balance =
+        balance.map_err(|error| CreateMemoryError::Balance(short_error(&error.to_string())))?;
+    let price = price.map_err(|error| CreateMemoryError::Price(short_error(&error.to_string())))?;
+    let fee = fetch_fee(&agent)
+        .await
+        .map_err(|error| CreateMemoryError::Fee(short_error(&error.to_string())))?;
+    match balance_delta(&price, balance, fee) {
+        BalanceDelta::Surplus(_) => {}
+        BalanceDelta::Shortfall(shortfall) => {
+            let required_total = required_balance(&price, fee);
+            return Err(CreateMemoryError::InsufficientBalance {
+                required_total_kinic: format_e8s_to_kinic_string_nat(&required_total),
+                required_total_base_units: required_total.to_string(),
+                shortfall_kinic: format_e8s_to_kinic_string_nat(&shortfall),
+                shortfall_base_units: shortfall.to_string(),
+            });
+        }
+    }
+    client
+        .approve_launcher(&price, fee)
+        .await
+        .map_err(|error| CreateMemoryError::Approve(short_error(&error.to_string())))?;
+    let id = client
+        .deploy_memory(&name, &description)
+        .await
+        .map_err(|error| CreateMemoryError::Deploy(short_error(&error.to_string())))?;
+    let (instances, refresh_warning) = match client.list_memories().await {
+        Ok(states) => (Some(instance_summaries_from_states(states)), None),
+        Err(error) => (
+            None,
+            Some(format!(
+                "Automatic reload failed after create. Press Ctrl-R to refresh. Cause: {}",
+                short_error(&error.to_string())
+            )),
+        ),
+    };
+
+    Ok(CreateInstanceSuccess {
+        id,
+        instances,
+        refresh_warning,
+    })
+}
+
+pub async fn list_wiki_children(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    read_as_anonymous: bool,
+    wiki_id: String,
+    database_id: String,
+    path: String,
+) -> Result<Vec<WikiChildNode>> {
+    let agent = build_wiki_read_agent(use_mainnet, auth, read_as_anonymous).await?;
+    let client = crate::wiki_bridge::WikiClient::new(agent, wiki_id)?;
+    Ok(client
+        .list_children(crate::wiki_bridge::ListChildrenRequest { database_id, path })
+        .await?
+        .into_iter()
+        .map(WikiChildNode::from)
+        .collect())
+}
+
+pub async fn read_wiki_node(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    read_as_anonymous: bool,
+    wiki_id: String,
+    database_id: String,
+    path: String,
+) -> Result<Option<WikiNode>> {
+    let agent = build_wiki_read_agent(use_mainnet, auth, read_as_anonymous).await?;
+    let client = crate::wiki_bridge::WikiClient::new(agent, wiki_id)?;
+    Ok(client
+        .read_node(&database_id, &path)
+        .await?
+        .map(WikiNode::from))
+}
+
+pub async fn write_wiki_node(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    input: WikiWriteNodeInput,
+) -> Result<WikiNode> {
+    let agent = build_search_agent(use_mainnet, auth).await?;
+    let client = crate::wiki_bridge::WikiClient::new(agent, input.wiki_id)?;
+    let content = input.content.clone();
+    let metadata_json = input.metadata_json.clone();
+    let result = client
+        .write_node(crate::wiki_bridge::WriteNodeRequest {
+            database_id: input.database_id.clone(),
+            path: input.path.clone(),
+            kind: crate::wiki_bridge::NodeKind::File,
+            content: input.content,
+            metadata_json: input.metadata_json,
+            expected_etag: Some(input.expected_etag),
+        })
+        .await?;
+    Ok(wiki_node_from_write_result(result, content, metadata_json))
+}
+
+fn wiki_node_from_write_result(
+    result: crate::wiki_bridge::WriteNodeResult,
+    content: String,
+    metadata_json: String,
+) -> WikiNode {
+    WikiNode {
+        path: result.node.path,
+        content,
+        etag: result.node.etag,
+        metadata_json,
+    }
+}
+
+pub async fn search_wiki_nodes(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    read_as_anonymous: bool,
+    wiki_id: String,
+    database_id: String,
+    query: String,
+) -> Result<Vec<WikiSearchHit>> {
+    let agent = build_wiki_read_agent(use_mainnet, auth, read_as_anonymous).await?;
+    let client = crate::wiki_bridge::WikiClient::new(agent, wiki_id)?;
+    Ok(client
+        .search_nodes(crate::wiki_bridge::SearchNodesRequest {
+            database_id,
+            query_text: query,
+            prefix: Some("/Wiki".to_string()),
+            top_k: 20,
+            preview_mode: Some(crate::wiki_bridge::SearchPreviewMode::ContentStart),
+        })
+        .await?
+        .into_iter()
+        .map(WikiSearchHit::from)
+        .collect())
+}
+
+async fn build_wiki_read_agent(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    read_as_anonymous: bool,
+) -> Result<Agent> {
+    if read_as_anonymous {
+        return crate::agent::AgentFactory::new_with_identity(use_mainnet, AnonymousIdentity {})
+            .build()
+            .await;
+    }
+    build_search_agent(use_mainnet, auth).await
+}
+
+pub async fn list_wiki_databases(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    wiki_id: String,
+) -> Result<WikiDatabases> {
+    let agent = build_search_agent(use_mainnet, auth).await?;
+    let wiki_id_for_anonymous = wiki_id.clone();
+    let client = crate::wiki_bridge::WikiClient::new(agent, wiki_id)?;
+    let mut anonymous_access = HashMap::new();
+    let authenticated_databases = client.list_databases().await;
+    let mut databases = authenticated_databases.unwrap_or_default();
+    for database in databases.iter() {
+        apply_database_member_lookup(
+            &mut anonymous_access,
+            database.database_id.as_str(),
+            client
+                .list_database_members(database.database_id.as_str())
+                .await,
+        );
+    }
+    let anonymous_agent =
+        crate::agent::AgentFactory::new_with_identity(use_mainnet, AnonymousIdentity {})
+            .build()
+            .await?;
+    let anonymous_client =
+        crate::wiki_bridge::WikiClient::new(anonymous_agent, wiki_id_for_anonymous)?;
+    merge_anonymous_wiki_databases(
+        &mut databases,
+        &mut anonymous_access,
+        anonymous_client.list_databases().await?,
+    );
+    Ok(WikiDatabases {
+        databases,
+        anonymous_access,
+    })
+}
+
+fn apply_database_member_lookup(
+    anonymous_access: &mut HashMap<String, DatabaseRole>,
+    database_id: &str,
+    members_result: Result<Vec<crate::wiki_bridge::DatabaseMember>>,
+) {
+    if let Ok(members) = members_result {
+        apply_anonymous_member_access(anonymous_access, database_id, members);
+    }
+}
+
+fn apply_anonymous_member_access(
+    anonymous_access: &mut HashMap<String, DatabaseRole>,
+    database_id: &str,
+    members: Vec<crate::wiki_bridge::DatabaseMember>,
+) {
+    if let Some(member) = members
+        .into_iter()
+        .find(|member| matches!(member.principal.as_str(), "anonymous" | "2vxsx-fae"))
+    {
+        anonymous_access.insert(database_id.to_string(), member.role);
+    }
+}
+
+fn merge_anonymous_wiki_databases(
+    databases: &mut Vec<DatabaseSummary>,
+    anonymous_access: &mut HashMap<String, DatabaseRole>,
+    anonymous_databases: Vec<DatabaseSummary>,
+) {
+    for database in anonymous_databases {
+        anonymous_access
+            .entry(database.database_id.clone())
+            .or_insert(database.role);
+        if databases
+            .iter()
+            .all(|candidate| candidate.database_id != database.database_id)
+        {
+            databases.push(database);
+        }
+    }
+}
+
+pub async fn create_wiki_database(
+    use_mainnet: bool,
+    auth: TuiAuth,
+    wiki_id: String,
+) -> Result<String> {
+    let agent = build_search_agent(use_mainnet, auth).await?;
+    crate::wiki_bridge::WikiClient::new(agent, wiki_id)?
+        .create_database()
+        .await
 }
 
 pub async fn load_session_account_overview(
@@ -558,6 +876,12 @@ pub async fn run_insert(
     })
 }
 
+fn instance_summaries_from_states(states: Vec<State>) -> InstanceSummaries {
+    InstanceSummaries {
+        memories: states.into_iter().map(memory_summary_from_state).collect(),
+    }
+}
+
 fn memory_summary_from_state(state: State) -> MemorySummary {
     match state {
         State::Empty(message) => MemorySummary {
@@ -700,6 +1024,46 @@ fn role_code(role: AccessControlRole, principal_id: &str) -> Result<u8> {
     Ok(memory_role.code())
 }
 
+impl From<crate::wiki_bridge::ChildNode> for WikiChildNode {
+    fn from(node: crate::wiki_bridge::ChildNode) -> Self {
+        Self {
+            path: node.path,
+            name: node.name,
+            kind: match node.kind {
+                NodeEntryKind::File => "file",
+                NodeEntryKind::Source => "source",
+                NodeEntryKind::Directory => "directory",
+            }
+            .to_string(),
+            has_children: node.has_children,
+        }
+    }
+}
+
+impl From<crate::wiki_bridge::Node> for WikiNode {
+    fn from(node: crate::wiki_bridge::Node) -> Self {
+        Self {
+            path: node.path,
+            content: node.content,
+            etag: node.etag,
+            metadata_json: node.metadata_json,
+        }
+    }
+}
+
+impl From<crate::wiki_bridge::SearchNodeHit> for WikiSearchHit {
+    fn from(hit: crate::wiki_bridge::SearchNodeHit) -> Self {
+        Self {
+            path: hit.path,
+            score: hit.score,
+            snippet: hit
+                .preview
+                .and_then(|preview| preview.excerpt)
+                .or(hit.snippet),
+        }
+    }
+}
+
 fn short_error(message: &str) -> String {
     message.lines().next().unwrap_or(message).trim().to_string()
 }
@@ -710,6 +1074,10 @@ fn format_insert_execute_error(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wiki_bridge::{
+        ChildNode, DatabaseMember, DatabaseRole, Node, NodeKind, SearchNodeHit, SearchPreview,
+        SearchPreviewField,
+    };
     use candid::Nat;
     use ic_agent::identity::AnonymousIdentity;
     use std::sync::Arc;
@@ -767,6 +1135,159 @@ mod tests {
                 .as_deref()
                 .is_some_and(|message| message.contains("Press Ctrl-R to refresh"))
         );
+    }
+
+    #[test]
+    fn wiki_database_summary_decodes_list_databases_shape() {
+        let bytes = Encode!(&Ok::<_, String>(vec![DatabaseSummary {
+            database_id: "default".to_string(),
+            status: DatabaseStatus::Hot,
+            role: DatabaseRole::Owner,
+            logical_size_bytes: 42,
+            archived_at_ms: None,
+            deleted_at_ms: None,
+        }]))
+        .expect("database list should encode");
+        let decoded = Decode!(&bytes, Result<Vec<DatabaseSummary>, String>)
+            .expect("database list should decode");
+
+        assert_eq!(decoded.unwrap()[0].database_id, "default");
+    }
+
+    #[test]
+    fn merge_anonymous_wiki_databases_adds_public_only_entries() {
+        let mut databases = vec![DatabaseSummary {
+            database_id: "private".to_string(),
+            status: DatabaseStatus::Hot,
+            role: DatabaseRole::Owner,
+            logical_size_bytes: 1,
+            archived_at_ms: None,
+            deleted_at_ms: None,
+        }];
+        let mut anonymous_access = HashMap::new();
+
+        merge_anonymous_wiki_databases(
+            &mut databases,
+            &mut anonymous_access,
+            vec![DatabaseSummary {
+                database_id: "public".to_string(),
+                status: DatabaseStatus::Hot,
+                role: DatabaseRole::Reader,
+                logical_size_bytes: 2,
+                archived_at_ms: None,
+                deleted_at_ms: None,
+            }],
+        );
+
+        assert_eq!(databases.len(), 2);
+        assert_eq!(databases[1].database_id, "public");
+        assert_eq!(anonymous_access.get("public"), Some(&DatabaseRole::Reader));
+    }
+
+    #[test]
+    fn list_wiki_databases_ignores_member_lookup_failure() {
+        let mut anonymous_access = HashMap::new();
+
+        apply_database_member_lookup(
+            &mut anonymous_access,
+            "db-a",
+            Err(anyhow::anyhow!("members denied")),
+        );
+
+        assert!(anonymous_access.is_empty());
+
+        apply_database_member_lookup(
+            &mut anonymous_access,
+            "db-a",
+            Ok(vec![DatabaseMember {
+                database_id: "db-a".to_string(),
+                principal: "anonymous".to_string(),
+                role: DatabaseRole::Reader,
+                created_at_ms: 1,
+            }]),
+        );
+
+        assert_eq!(anonymous_access.get("db-a"), Some(&DatabaseRole::Reader));
+    }
+
+    #[test]
+    fn wiki_child_node_from_canister_types_projects_display_fields() {
+        let child = WikiChildNode::from(ChildNode {
+            path: "/Wiki/index.md".to_string(),
+            name: "index.md".to_string(),
+            kind: NodeEntryKind::File,
+            updated_at: Some(1),
+            etag: Some("abc".to_string()),
+            size_bytes: Some(10),
+            is_virtual: false,
+            has_children: false,
+        });
+
+        assert_eq!(child.path, "/Wiki/index.md");
+        assert_eq!(child.name, "index.md");
+        assert_eq!(child.kind, "file");
+        assert!(!child.has_children);
+    }
+
+    #[test]
+    fn wiki_node_from_canister_types_keeps_render_payload() {
+        let node = WikiNode::from(Node {
+            path: "/Wiki/index.md".to_string(),
+            kind: NodeKind::File,
+            content: "# Index".to_string(),
+            created_at: 1,
+            updated_at: 2,
+            etag: "etag".to_string(),
+            metadata_json: "{}".to_string(),
+        });
+
+        assert_eq!(node.path, "/Wiki/index.md");
+        assert_eq!(node.content, "# Index");
+        assert_eq!(node.etag, "etag");
+        assert_eq!(node.metadata_json, "{}");
+    }
+
+    #[test]
+    fn wiki_node_from_write_result_uses_result_path_etag_and_input_payload() {
+        let node = wiki_node_from_write_result(
+            crate::wiki_bridge::WriteNodeResult {
+                created: false,
+                node: crate::wiki_bridge::RecentNodeHit {
+                    path: "/Wiki/saved.md".to_string(),
+                    kind: NodeKind::File,
+                    etag: "etag-2".to_string(),
+                    updated_at: 3,
+                },
+            },
+            "# Saved".to_string(),
+            "{\"title\":\"Saved\"}".to_string(),
+        );
+
+        assert_eq!(node.path, "/Wiki/saved.md");
+        assert_eq!(node.content, "# Saved");
+        assert_eq!(node.etag, "etag-2");
+        assert_eq!(node.metadata_json, "{\"title\":\"Saved\"}");
+    }
+
+    #[test]
+    fn wiki_search_hit_prefers_preview_excerpt() {
+        let hit = WikiSearchHit::from(SearchNodeHit {
+            path: "/Wiki/index.md".to_string(),
+            kind: NodeKind::File,
+            snippet: Some("fallback".to_string()),
+            preview: Some(SearchPreview {
+                field: SearchPreviewField::Content,
+                match_reason: "content".to_string(),
+                char_offset: 0,
+                excerpt: Some("preview".to_string()),
+            }),
+            score: 0.75,
+            match_reasons: vec!["content".to_string()],
+        });
+
+        assert_eq!(hit.path, "/Wiki/index.md");
+        assert_eq!(hit.score, 0.75);
+        assert_eq!(hit.snippet.as_deref(), Some("preview"));
     }
 
     #[test]

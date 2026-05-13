@@ -80,10 +80,12 @@ The TUI has five tabs.
 - `Memories`: list, search, and details
 - `Insert`: add data
 - `Create`: create a new memory
-- `Market`: reserved for future use and currently not implemented
+- `Wiki`: browse databases from the configured wiki canister; `KINIC_WIKI_CANISTER_ID` can override the default
 - `Settings`: view and change current connection info and saved settings
 
 The `Memories` tab opens first when the TUI starts.
+By default, the Wiki tab uses `xis3j-paaaa-aaaai-axumq-cai`.
+For local deploys, `scripts/setup.sh` deploys the bundled Wiki wasm at that same canister id.
 The local preferences shown in `Settings`, including the default memory, saved tags, and manually tracked memories, can also be managed from the CLI with `kinic-cli prefs ...`.
 
 ## Basic Controls
@@ -91,7 +93,7 @@ The local preferences shown in `Settings`, including the default memory, saved t
 - `1` to `5`: switch tabs
 - `Tab`: move focus forward within the screen
 - `Shift+Tab`: move focus backward
-- `/`: focus the search field
+- `/`: focus the `Memories` search field
 - `↑` `↓`: move through lists and form fields
 - `Enter`: open, confirm, or submit the current item
 - `Esc`: go back one step, return to the list, or close the picker
@@ -103,6 +105,15 @@ The local preferences shown in `Settings`, including the default memory, saved t
 - `Shift+S`: toggle the settings overlay (session info and saved settings)
 
 The status bar at the bottom also shows the keys available in the current context.
+
+In the `Wiki` tab, `Tab` and `Shift+Tab` switch between the Browser pane and the Document pane.
+Wiki databases are grouped under `Private / Shared` and `Public`.
+Database rows show `Public` when `anonymous` has access, `Private` for owned databases without anonymous access, and `Shared` for non-public databases shared with the current identity.
+Public database reads use an anonymous agent so identities without direct membership can still browse anonymous-readable databases.
+Wiki edit opens only for databases where the current identity is `Owner` or `Writer`.
+When Browser is focused, `↑` `↓` moves the selected database or wiki node, `Enter` opens it, and `e` edits a loaded `/Wiki/*.md` file.
+When Document is focused, `↑` `↓`, `PageUp`, `PageDown`, `Home`, and `End` scroll the document.
+In Wiki edit mode, `Ctrl+S` saves, `Tab` moves to the footer `Save` / `Cancel` controls, and `Esc` exits or asks to discard dirty changes.
 
 `?` and `q` are intended for normal list and tab navigation, not while typing in a search field or form, and not while the chat input is focused.
 `Shift+C` (toggle chat on `Memories`) follows the same focus rules.
@@ -307,7 +318,6 @@ The main saved values are:
 
 - `--identity` is required
 - `--ii` is not supported yet
-- The `Market` tab is not implemented yet
 - `pdftotext` is required for PDF insertion
 - There is no dedicated copy shortcut for Principal ID
 - Local use requires a prepared local replica and supporting canisters

@@ -128,8 +128,20 @@ What to understand first:
 - `Memories`: list, search, detail view, and chat
 - `Insert`: add files, text, or manual embeddings
 - `Create`: create a new memory
-- `Market`: reserved and not implemented yet
+- `Wiki`: browse databases from the configured wiki canister; `KINIC_WIKI_CANISTER_ID` can override the default
 - `Settings`: principal, balance, default memory, saved tags, and retrieval settings
+
+For local deploys, `scripts/setup.sh` deploys the bundled Wiki wasm at the default Wiki canister id.
+The TUI groups Wiki databases under `Private / Shared` and `Public`, marks rows based on anonymous access and the current identity's role, reads public databases with an anonymous agent, and opens editing only for `Owner` or `Writer` databases.
+
+Wiki write/delete and database management are available from the CLI:
+
+```bash
+kinic-cli --ic --identity alice wiki database list
+kinic-cli --ic --identity alice wiki read --database-id DATABASE_ID --path /Wiki/index.md
+kinic-cli --ic --identity alice wiki write --database-id DATABASE_ID --path /Wiki/new.md --input ./new.md
+kinic-cli --ic --identity alice wiki delete --database-id DATABASE_ID --path /Wiki/new.md --yes
+```
 
 ### Step 2: Confirm Identity and Balance
 

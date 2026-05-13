@@ -3,11 +3,13 @@ use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use std::path::PathBuf;
 use tui_kit_render::ui::UiConfig;
 use tui_kit_runtime::kinic_tabs::{
-    KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MARKET_TAB_ID, KINIC_MEMORIES_TAB_ID,
+    KINIC_CREATE_TAB_ID, KINIC_INSERT_TAB_ID, KINIC_MEMORIES_TAB_ID, KINIC_SETTINGS_TAB_ID,
+    KINIC_WIKI_TAB_ID,
 };
 use tui_kit_runtime::{
     CoreError, CoreResult, InsertFormFocus, InsertMode, PaneFocus, PickerContext, PickerListMode,
     PickerState, ProviderOutput, ProviderSnapshot, RenameMemoryModalState, TextInputModalState,
+    apply_core_action,
 };
 
 struct TestProvider {
@@ -53,7 +55,7 @@ fn test_runtime_config() -> RuntimeLoopConfig {
             KINIC_MEMORIES_TAB_ID,
             KINIC_CREATE_TAB_ID,
             KINIC_INSERT_TAB_ID,
-            KINIC_MARKET_TAB_ID,
+            KINIC_SETTINGS_TAB_ID,
         ],
         initial_focus: PaneFocus::Form,
         ui_config: test_ui_config,
@@ -74,6 +76,68 @@ fn host_key(
 
 fn host_paste(text: &str) -> HostInputEvent {
     HostInputEvent::Paste(text.to_string())
+}
+
+fn wiki_editor_state() -> CoreState {
+    let mut state = CoreState {
+        current_tab_id: KINIC_WIKI_TAB_ID.to_string(),
+        focus: PaneFocus::Content,
+        ..CoreState::default()
+    };
+    state.wiki_editor.open(
+        "/Wiki/index.md".to_string(),
+        "# Index".to_string(),
+        "etag-1".to_string(),
+        "{}".to_string(),
+    );
+    state
+}
+
+#[test]
+fn wiki_textarea_sync_marks_dirty_and_clears_error() {
+    let mut state = wiki_editor_state();
+    state.wiki_editor.error = Some("old error".to_string());
+    state.wiki_editor.submit_state = tui_kit_runtime::CreateSubmitState::Error;
+    let mut textareas = FormTextareas::default();
+    sync_form_textareas_from_state(&mut textareas, &state);
+
+    textareas.wiki_document = textarea_from_text("# Index\nchanged");
+    sync_state_from_textareas(&mut state, &textareas);
+
+    assert_eq!(state.wiki_editor.draft_content, "# Index\nchanged");
+    assert!(state.wiki_editor.dirty);
+    assert_eq!(state.wiki_editor.error, None);
+    assert_eq!(
+        state.wiki_editor.submit_state,
+        tui_kit_runtime::CreateSubmitState::Idle
+    );
+}
+
+#[test]
+fn wiki_textarea_ctrl_s_dispatches_save_without_text_input() {
+    let state = wiki_editor_state();
+    let input = host_key(
+        crossterm::event::KeyCode::Char('s'),
+        crossterm::event::KeyModifiers::CONTROL,
+    );
+
+    assert_eq!(
+        wiki_editor_textarea_action(&state, &input),
+        Some(CoreAction::SaveWikiEditor)
+    );
+}
+
+#[test]
+fn wiki_editor_escape_on_dirty_does_not_discard_immediately() {
+    let mut state = wiki_editor_state();
+    state.wiki_editor.draft_content.push_str("\nchanged");
+    state.wiki_editor.dirty = true;
+
+    apply_core_action(&mut state, &CoreAction::CancelWikiEditor);
+
+    assert!(state.wiki_editor.open);
+    assert!(state.wiki_editor.discard_confirm);
+    assert_eq!(state.wiki_editor.draft_content, "# Index\nchanged");
 }
 
 #[test]
@@ -122,7 +186,7 @@ fn normalize_focus_resets_insert_tab_to_tabs_and_mode_field() {
 #[test]
 fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
     let mut state = CoreState {
-        current_tab_id: KINIC_MARKET_TAB_ID.to_string(),
+        current_tab_id: KINIC_SETTINGS_TAB_ID.to_string(),
         focus: PaneFocus::Content,
         ..CoreState::default()
     };
@@ -130,6 +194,28 @@ fn normalize_focus_keeps_placeholder_tabs_on_tabs() {
     normalize_focus_after_set_tab(&mut state);
 
     assert_eq!(state.focus, PaneFocus::Tabs);
+}
+
+#[test]
+fn blocked_dirty_wiki_tab_switch_keeps_editor_focus() {
+    let mut state = wiki_editor_state();
+    state.wiki_editor.dirty = true;
+    let mut provider = TestProvider::ok();
+    let mut hooks = NoopRuntimeHooks;
+    let mut provider_render_state = ProviderRenderState::default();
+
+    switch_to_tab(
+        &mut provider,
+        &mut state,
+        &mut hooks,
+        &mut provider_render_state,
+        KINIC_MEMORIES_TAB_ID,
+    )
+    .expect("blocked tab switch should not fail provider dispatch");
+
+    assert_eq!(state.current_tab_id, KINIC_WIKI_TAB_ID);
+    assert_eq!(state.focus, PaneFocus::Content);
+    assert!(state.wiki_editor.discard_confirm);
 }
 
 #[test]
@@ -1833,7 +1919,7 @@ fn switch_to_tab_failure_keeps_existing_focus_when_target_tab_allows_it() {
     let mut provider = TestProvider::err("tab failed");
     let mut hooks = NoopRuntimeHooks;
     let mut state = CoreState {
-        current_tab_id: KINIC_MARKET_TAB_ID.to_string(),
+        current_tab_id: KINIC_SETTINGS_TAB_ID.to_string(),
         focus: PaneFocus::Content,
         ..CoreState::default()
     };
@@ -1947,6 +2033,18 @@ fn dispatch_with_effects_keeps_non_tab_reducer_state_on_failure() {
 #[test]
 fn content_scroll_helper_handles_scroll_end_only() {
     let mut inspector_scroll = 3usize;
+
+    assert!(apply_content_scroll_action(
+        &CoreAction::ScrollContentLineDown,
+        &mut inspector_scroll
+    ));
+    assert_eq!(inspector_scroll, 4);
+
+    assert!(apply_content_scroll_action(
+        &CoreAction::ScrollContentLineUp,
+        &mut inspector_scroll
+    ));
+    assert_eq!(inspector_scroll, 3);
 
     assert!(apply_content_scroll_action(
         &CoreAction::ScrollContentEnd,
