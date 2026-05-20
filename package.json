@@ -1,0 +1,15 @@
+{
+  "name": "kinic-cli-monorepo",
+  "private": true,
+  "packageManager": "pnpm@10.29.2",
+  "scripts": {
+    "build:web": "pnpm --filter @kinic/kinic-portal build:cf",
+    "build:public-api": "pnpm --filter @kinic/public-api build",
+    "build:mcp": "pnpm --filter @kinic/remote-mcp build",
+    "check:web": "pnpm --filter @kinic/kinic-portal typecheck",
+    "check:public-api": "pnpm --filter @kinic/public-api typecheck",
+    "check:mcp": "pnpm --filter @kinic/remote-mcp typecheck",
+    "test:web": "pnpm --filter @kinic/kinic-share test && pnpm --filter @kinic/kinic-portal test && pnpm --filter @kinic/public-api test && pnpm --filter @kinic/remote-mcp test",
+    "test:ts": "pnpm --filter @kinic/kinic-share test && pnpm --filter @kinic/kinic-portal typecheck && pnpm --filter @kinic/public-api typecheck && pnpm --filter @kinic/remote-mcp typecheck"
+  }
+}

@@ -1,0 +1,259 @@
+import { describe, expect, it } from "vitest";
+// @ts-expect-error -- CLI helper stays JS-only so Node can execute it without extra tooling.
+import { formatContractErrors, verifyDeployContract } from "./verify-deploy-contract.mjs";
+
+describe("verifyDeployContract", () => {
+  it("passes when portal and public-api share the expected deploy contract", () => {
+    const result = verifyDeployContract(portalConfig(), publicApiConfig(), remoteMcpConfig());
+
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("passes when portal origin uses a custom domain", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "https://portal.example.com" } }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails when summary cache ids drift", () => {
+    const result = verifyDeployContract(
+      portalConfig({ kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "portal-id", preview_id: "shared-preview" }] }),
+      publicApiConfig({ kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "api-id", preview_id: "shared-preview" }] }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain(
+      'SUMMARY_CACHE.id must match between portal and public-api: portal="portal-id", public-api="api-id"',
+    );
+  });
+
+  it("fails when summary cache preview ids drift", () => {
+    const result = verifyDeployContract(
+      portalConfig({ kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "shared-id", preview_id: "portal-preview" }] }),
+      publicApiConfig({ kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "shared-id", preview_id: "api-preview" }] }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain(
+      'SUMMARY_CACHE.preview_id must match between portal and public-api: portal="portal-preview", public-api="api-preview"',
+    );
+  });
+
+  it("fails when ttl drifts", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz", SUMMARY_CACHE_TTL_SECONDS: "3600" } }),
+      publicApiConfig({ vars: { IC_HOST: "https://ic0.app", SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain(
+      'SUMMARY_CACHE_TTL_SECONDS must match between portal and public-api: portal="3600", public-api="86400"',
+    );
+  });
+
+  it("fails when public-api required secret is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig(),
+      publicApiConfig({ secrets: { required: [] } }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('public-api secrets.required must include "EMBEDDING_API_ENDPOINT"');
+  });
+
+  it("fails when portal required secret is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig({ secrets: { required: [] } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal secrets.required must include "EMBEDDING_API_ENDPOINT"');
+  });
+
+  it("fails when remote-mcp required secret is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig(),
+      publicApiConfig(),
+      remoteMcpConfig({ secrets: { required: [] } }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('remote-mcp secrets.required must include "EMBEDDING_API_ENDPOINT"');
+  });
+
+  it("fails when portal public api origin is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("portal vars.KINIC_PUBLIC_API_ORIGIN must be set to an absolute non-localhost URL");
+    expect(formatContractErrors(result.errors)).toContain("portal vars.KINIC_PUBLIC_API_ORIGIN");
+  });
+
+  it("fails when portal public api origin is not absolute", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PUBLIC_API_ORIGIN: "/api" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PUBLIC_API_ORIGIN must be an absolute URL but got "/api"');
+  });
+
+  it("fails when portal public api origin uses localhost", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PUBLIC_API_ORIGIN: "http://localhost:8788" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PUBLIC_API_ORIGIN must not use a local loopback host but got "http://localhost:8788/"');
+  });
+
+  it("fails when portal remote mcp origin is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig({
+        vars: {
+          KINIC_PORTAL_ORIGIN: "https://memory.kinic.xyz",
+          KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz",
+          SUMMARY_CACHE_TTL_SECONDS: "86400",
+        },
+      }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("portal vars.KINIC_REMOTE_MCP_ORIGIN must be set to an absolute non-localhost URL");
+  });
+
+  it("fails when portal remote mcp origin is not absolute", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_REMOTE_MCP_ORIGIN: "/mcp" } }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_REMOTE_MCP_ORIGIN must be an absolute URL but got "/mcp"');
+  });
+
+  it("fails when portal remote mcp origin uses localhost", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_REMOTE_MCP_ORIGIN: "http://localhost:8787" } }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_REMOTE_MCP_ORIGIN must not use a local loopback host but got "http://localhost:8787/"');
+  });
+
+  it("fails when portal remote mcp origin uses ipv4 loopback", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_REMOTE_MCP_ORIGIN: "http://127.0.0.1:8787" } }),
+      publicApiConfig(),
+      remoteMcpConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_REMOTE_MCP_ORIGIN must not use a local loopback host but got "http://127.0.0.1:8787/"');
+  });
+
+  it("fails when portal origin is missing", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz", SUMMARY_CACHE_TTL_SECONDS: "86400" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("portal vars.KINIC_PORTAL_ORIGIN must be set to an absolute non-localhost URL");
+  });
+
+  it("fails when portal origin is not absolute", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "/portal" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PORTAL_ORIGIN must be an absolute URL but got "/portal"');
+  });
+
+  it("fails when portal origin uses localhost", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "http://localhost:4173" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PORTAL_ORIGIN must not use a local loopback host but got "http://localhost:4173/"');
+  });
+
+  it("fails when portal origin uses ipv4 loopback", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "http://127.0.0.1:4173" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PORTAL_ORIGIN must not use a local loopback host but got "http://127.0.0.1:4173/"');
+  });
+
+  it("fails when portal origin uses ipv6 loopback", () => {
+    const result = verifyDeployContract(
+      portalConfig({ vars: { ...portalConfig().vars, KINIC_PORTAL_ORIGIN: "http://[::1]:4173" } }),
+      publicApiConfig(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('portal vars.KINIC_PORTAL_ORIGIN must not use a local loopback host but got "http://[::1]:4173/"');
+  });
+});
+
+function portalConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "kinic-portal",
+    secrets: { required: ["EMBEDDING_API_ENDPOINT"] },
+    kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "shared-id", preview_id: "shared-preview" }],
+    vars: {
+      KINIC_PORTAL_ORIGIN: "https://memory.kinic.xyz",
+      KINIC_PUBLIC_API_ORIGIN: "https://api.kinic.xyz",
+      KINIC_REMOTE_MCP_ORIGIN: "https://mcp.kinic.xyz",
+      SUMMARY_CACHE_TTL_SECONDS: "86400",
+    },
+    ...overrides,
+  };
+}
+
+function publicApiConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "kinic-portal-public-api",
+    secrets: { required: ["EMBEDDING_API_ENDPOINT"] },
+    kv_namespaces: [{ binding: "SUMMARY_CACHE", id: "shared-id", preview_id: "shared-preview" }],
+    vars: {
+      IC_HOST: "https://ic0.app",
+      SUMMARY_CACHE_TTL_SECONDS: "86400",
+    },
+    ...overrides,
+  };
+}
+
+function remoteMcpConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "kinic-remote-mcp",
+    secrets: { required: ["EMBEDDING_API_ENDPOINT"] },
+    vars: {
+      IC_HOST: "https://ic0.app",
+    },
+    ...overrides,
+  };
+}

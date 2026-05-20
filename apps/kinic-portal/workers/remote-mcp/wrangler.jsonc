@@ -1,0 +1,34 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "kinic-remote-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "secrets": {
+    "required": ["EMBEDDING_API_ENDPOINT"]
+  },
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "routes": [
+    {
+      "pattern": "mcp.kinic.xyz",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "IC_HOST": "https://ic0.app"
+  }
+}

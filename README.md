@@ -7,6 +7,9 @@ Python bindings for the Kinic CLI core, enabling you to build AI agents with ver
 **For the wizards building trustless agents** - no more lobotomized summons that reset on every quest.
 
 Looking for the docs? See `docs/cli.md` for the command-line interface and `docs/tui.md` for the terminal UI.
+Web portal docs: `apps/kinic-portal/docs/kinic-portal.md`.
+
+Web workspace root: `apps/kinic-portal`.
 
 Made with ❤️ by [ICME Labs](https://blog.icme.io/).
 

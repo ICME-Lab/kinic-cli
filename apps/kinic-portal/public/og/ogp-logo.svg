@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 427 500" fill="none" aria-labelledby="title desc" role="img">
+  <title id="title">Kinic OGP logo</title>
+  <desc id="desc">Vector version of the Kinic logo built from simple path shapes.</desc>
+
+  <path d="M0 0L0 498L23 498L22 0Z" fill="#EC1978"/>
+  <path d="M43 0L42 497L64 498L64 0Z" fill="#EC1978"/>
+  <path d="M85 0L85 497L107 498L108 274L94 247L108 220L108 0Z" fill="#EC1978"/>
+  <path d="M151 0L128 0L128 178L130 178L151 137Z" fill="#EC1978"/>
+  <path d="M128 317L128 497L151 498L151 358L130 317Z" fill="#EC1978"/>
+
+  <path d="M257 1L130 252L258 499L280 499L156 253L282 1Z" fill="#FBAF28"/>
+  <path d="M305 1L179 252L304 498L330 498L204 253L330 2Z" fill="#23A8E0"/>
+  <path d="M353 1L227 253L352 497L376 499L252 252L378 2Z" fill="#FBAF28"/>
+  <path d="M401 1L275 252L400 497L426 498L300 252L426 3Z" fill="#F05C22"/>
+</svg>

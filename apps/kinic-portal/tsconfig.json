@@ -1,0 +1,40 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "./worker-configuration.d.ts",
+      "vite/client",
+      "node"
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@kinic/kinic-share": [
+        "./packages/kinic-share/src/index.ts"
+      ],
+      "@kinic/kinic-share/*": [
+        "./packages/kinic-share/src/*"
+      ]
+    },
+    "incremental": true,
+    "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo"
+  },
+  "include": [
+    "index.html",
+    "**/*.ts",
+    "**/*.tsx",
+    "worker-configuration.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "workers/**/*"
+  ]
+}

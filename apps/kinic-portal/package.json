@@ -1,0 +1,48 @@
+{
+  "name": "@kinic/kinic-portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "build:cf": "pnpm run build && node ./scripts/remove-static-index.mjs && wrangler deploy --dry-run --config wrangler.jsonc",
+    "deploy:cf": "pnpm run build && node ./scripts/remove-static-index.mjs && wrangler deploy --config wrangler.jsonc",
+    "dev": "wrangler dev --config wrangler.jsonc --port 4173 --ip 127.0.0.1",
+    "dev:cf": "wrangler dev --config wrangler.jsonc --port 4173 --ip 127.0.0.1",
+    "dev:cf:local-api": "KINIC_PUBLIC_API_ORIGIN=http://127.0.0.1:8788 wrangler dev --config wrangler.jsonc --port 4173 --ip 127.0.0.1",
+    "dev:vite-shell": "vite",
+    "generate:static-assets": "node ./scripts/generate-static-assets.mjs",
+    "preview": "vite preview",
+    "verify:bundle:cf": "pnpm run build && node ./scripts/remove-static-index.mjs && wrangler deploy --dry-run --config wrangler.jsonc",
+    "verify:deploy-contract": "node ./scripts/verify-deploy-contract.mjs",
+    "verify:cf": "pnpm run generate:static-assets && pnpm exec vitest run --config vitest.config.ts 'lib/site-metadata.test.ts' 'lib/ogp-assets.test.ts' 'lib/ogp-image.test.tsx' 'src/ssr.test.tsx' 'src/worker.test.ts' 'components/memory-summary.test.tsx' 'components/public-memory-page.test.tsx' 'components/memory-view.test.tsx' 'scripts/verify-deploy-contract.test.ts' && pnpm run typecheck && pnpm run verify:deploy-contract",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@kinic/kinic-share": "workspace:*",
+    "@tailwindcss/postcss": "^4.2.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.8.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-icons": "^5.6.0",
+    "react-router": "^7.14.1",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260408.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.15.17",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^6.0.1",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.9",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.83.0"
+  }
+}

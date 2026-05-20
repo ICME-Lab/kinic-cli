@@ -1,0 +1,27 @@
+{
+  "name": "@kinic/public-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --config wrangler.jsonc",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --config wrangler.jsonc",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "verify:bundle:cf": "wrangler deploy --dry-run --config wrangler.jsonc",
+    "verify:deploy-contract": "node ../../scripts/verify-deploy-contract.mjs"
+  },
+  "dependencies": {
+    "@cf-wasm/og": "0.3.7",
+    "@kinic/kinic-share": "workspace:*",
+    "hono": "^4.10.1",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260408.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.83.0"
+  }
+}
