@@ -187,10 +187,13 @@ fn ensure_prepared_items_match_memory(
     items: &[PreparedInsertItem],
     expected_dim: u64,
 ) -> Result<()> {
-    let Some(first) = items.first() else {
+    if items.is_empty() {
         bail!("Insert content did not produce any chunks.");
-    };
-    ensure_vector_dim_matches(memory_id, first.embedding.len(), expected_dim)
+    }
+    for item in items {
+        ensure_vector_dim_matches(memory_id, item.embedding.len(), expected_dim)?;
+    }
+    Ok(())
 }
 
 pub fn validate_insert_request_for_submit(request: &InsertRequest) -> Result<()> {
@@ -577,6 +580,27 @@ mod tests {
     }
 
     #[test]
+    fn prepared_items_reject_later_dimension_mismatch() {
+        let error = ensure_prepared_items_match_memory(
+            "aaaaa-aa",
+            &[
+                PreparedInsertItem {
+                    embedding: vec![0.1, 0.2, 0.3],
+                    payload: "{}".to_string(),
+                },
+                PreparedInsertItem {
+                    embedding: vec![0.1, 0.2],
+                    payload: "{}".to_string(),
+                },
+            ],
+            3,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("Embedding dimension mismatch"));
+    }
+
+    #[test]
     fn raw_insert_request_fails_fast_on_dimension_mismatch() {
         let request = ValidatedInsertRequest::Raw {
             memory_id: "aaaaa-aa".to_string(),
@@ -874,8 +898,12 @@ mod tests {
 
     #[test]
     fn validate_insert_request_for_submit_derives_tag_from_file_path() {
-        let path =
-            write_workspace_markdown_file("target/kinic-insert-tests/docs/spec/api.md", "# title");
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let relative_path = format!("target/kinic-insert-tests/{unique_suffix}/docs/spec/api.md");
+        let path = write_workspace_markdown_file(&relative_path, "# title");
         let validated = validate_and_transform_insert_request(&InsertRequest::Normal {
             memory_id: "aaaaa-aa".to_string(),
             tag: String::new(),

@@ -23,6 +23,7 @@ use crate::{
     },
 };
 use icrc_ledger_types::icrc1::account::Account;
+use kinic_core::amount::E8S_PER_KINIC;
 
 pub(crate) async fn create_memory(
     use_mainnet: bool,
@@ -219,7 +220,7 @@ pub(crate) async fn balance(use_mainnet: bool, identity: String) -> Result<(u128
 
     let balance: u128 =
         candid::decode_one(&response).context("Failed to decode balance response")?;
-    let kinic = balance as f64 / 10_000_000f64;
+    let kinic = balance as f64 / E8S_PER_KINIC as f64;
 
     Ok((balance, kinic))
 }

@@ -579,7 +579,6 @@ mod tests {
             document: DocumentSnapshot {
                 title: "/Wiki/index.md".to_string(),
                 lines: vec!["readonly".to_string()],
-                ..DocumentSnapshot::default()
             },
             mode: ThreePaneMode::Browse,
             ..ThreePaneSnapshot::default()

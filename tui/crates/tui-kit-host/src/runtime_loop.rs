@@ -695,9 +695,9 @@ fn ui_focus_from_pane(focus: PaneFocus) -> Focus {
 }
 
 #[cfg(test)]
-fn build_ui<'a>(
+struct BuildUiArgs<'a> {
     theme: &'a Theme,
-    cfg: &RuntimeLoopConfig,
+    cfg: &'a RuntimeLoopConfig,
     state: &'a CoreState,
     provider_render_state: &'a ProviderRenderState,
     textareas: &'a FormTextareas,
@@ -706,7 +706,22 @@ fn build_ui<'a>(
     show_help: bool,
     show_settings: bool,
     animation: &'a AnimationState,
-) -> TuiKitUi<'a> {
+}
+
+#[cfg(test)]
+fn build_ui<'a>(args: BuildUiArgs<'a>) -> TuiKitUi<'a> {
+    let BuildUiArgs {
+        theme,
+        cfg,
+        state,
+        provider_render_state,
+        textareas,
+        list_scroll_offset,
+        inspector_scroll,
+        show_help,
+        show_settings,
+        animation,
+    } = args;
     let focus = ui_focus_from_pane(state.focus);
     TuiKitUi::new(theme)
         .ui_config((cfg.ui_config)())
