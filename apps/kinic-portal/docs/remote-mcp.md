@@ -22,15 +22,21 @@ The Kinic Portal remote MCP is an anonymous read-only surface running on a Cloud
   - input: `{}`
   - Explains how to use the read-only memory tools
   - Clarifies that search reads memory payloads, not MCP server implementation
+  - annotations: `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`, `destructiveHint: false`
+  - Declares an `outputSchema` for the help payload
 - `public_memory_show`
   - input: `{ "memory_id": "<memory-canister-id>" }`
   - Returns a metadata summary for an anonymously readable memory, not MCP server metadata
   - response: `{ "memory_id": "...", "name": "...", "description": "...", "version": "..." }`
+  - annotations: `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`, `destructiveHint: false`
+  - Declares an `outputSchema` for successful metadata summaries
 - `public_memory_search`
   - input: `{ "memory_id": "<memory-canister-id>", "query": "...", "top_k": 10 }`
   - `top_k` is optional, defaults to `10`, and accepts `1` through `50`
   - Generates embeddings on the server, requests canister search results, then truncates them in the Worker
   - Does not inspect the MCP server implementation
+  - annotations: `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`, `destructiveHint: false`
+  - Declares an `outputSchema` for successful search results
 
 ## External Clients
 

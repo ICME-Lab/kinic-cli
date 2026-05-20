@@ -81,6 +81,58 @@ describe("remote MCP tool guidance", () => {
     expect(PUBLIC_MEMORY_SEARCH_DESCRIPTION).toContain("does not inspect the MCP server implementation");
   });
 
+  it("advertises explicit review annotations and output schemas for every tool", async () => {
+    const response = await postMcpJsonRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    });
+
+    const annotations = {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    };
+
+    expect(response).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "public_memory_help",
+            annotations,
+            outputSchema: expect.objectContaining({ type: "object" }),
+          }),
+          expect.objectContaining({
+            name: "public_memory_show",
+            annotations,
+            outputSchema: expect.objectContaining({ type: "object" }),
+          }),
+          expect.objectContaining({
+            name: "public_memory_search",
+            annotations,
+            outputSchema: expect.objectContaining({
+              type: "object",
+              properties: expect.objectContaining({
+                items: expect.objectContaining({
+                  items: expect.objectContaining({
+                    properties: expect.objectContaining({
+                      score: expect.objectContaining({ type: "number" }),
+                      payload: expect.objectContaining({ type: "string" }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        ]),
+      },
+    });
+  });
+
   it("truncates worker-side search results to the requested top_k", async () => {
     mocks.searchMemory.mockResolvedValue([
       { score: 0.9, payload: "alpha" },
@@ -386,3 +438,26 @@ describe("remote MCP tool guidance", () => {
     await expect(response.json()).resolves.toEqual({ error: "bad request" });
   });
 });
+
+async function postMcpJsonRpc(payload: Record<string, unknown>) {
+  const response = await worker.fetch(
+    new Request("https://mcp.kinic.xyz/mcp", {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "mcp-protocol-version": "2025-06-18",
+      },
+      body: JSON.stringify(payload),
+    }),
+    {} as Env,
+  );
+
+  expect(response.status).toBe(200);
+  const text = await response.text();
+  const dataLine = text.split("\n").find((line) => line.startsWith("data: "));
+  if (!dataLine) {
+    throw new Error(`missing MCP SSE data event: ${text}`);
+  }
+  return JSON.parse(dataLine.slice("data: ".length));
+}

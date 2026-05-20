@@ -47,6 +47,49 @@ const REMOTE_MCP_TOOL_NAMES = [
   "public_memory_search",
 ] as const;
 
+const PUBLIC_MEMORY_TOOL_ANNOTATIONS = {
+  readOnlyHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+  destructiveHint: false,
+} as const;
+
+const PUBLIC_MEMORY_HELP_OUTPUT_SCHEMA = {
+  server: z.string(),
+  mode: z.string(),
+  available_tools: z.array(z.enum(REMOTE_MCP_TOOL_NAMES)),
+  rules: z.array(z.string()),
+  examples: z.array(
+    z.object({
+      tool: z.enum(REMOTE_MCP_TOOL_NAMES),
+      input: z.object({
+        memory_id: z.string(),
+        query: z.string(),
+        top_k: z.number().int(),
+      }),
+      meaning: z.string(),
+    }),
+  ),
+};
+
+const PUBLIC_MEMORY_SHOW_OUTPUT_SCHEMA = {
+  memory_id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  version: z.string(),
+};
+
+const PUBLIC_MEMORY_SEARCH_OUTPUT_SCHEMA = {
+  memory_id: z.string(),
+  top_k: z.number().int(),
+  items: z.array(
+    z.object({
+      score: z.number(),
+      payload: z.string(),
+    }),
+  ),
+};
+
 const OPENAI_APPS_CHALLENGE_PATH = "/.well-known/openai-apps-challenge";
 const OPENAI_APPS_CHALLENGE_TOKEN = "UaOm7dXCucOkq9wf-oC9RnuqdbnHJhbrqs4xaTVpd3Q";
 
@@ -107,11 +150,8 @@ function createServer(env: SharedRuntimeEnv): McpServer {
     {
       description: "Explain how to use the Kinic remote MCP tools and avoid confusing memory search with MCP server inspection.",
       inputSchema: {},
-      annotations: {
-        readOnlyHint: true,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
+      outputSchema: PUBLIC_MEMORY_HELP_OUTPUT_SCHEMA,
+      annotations: PUBLIC_MEMORY_TOOL_ANNOTATIONS,
     },
     async () => structured(PUBLIC_MEMORY_HELP_OUTPUT),
   );
@@ -123,10 +163,8 @@ function createServer(env: SharedRuntimeEnv): McpServer {
       inputSchema: {
         memory_id: z.string().min(1),
       },
-      annotations: {
-        readOnlyHint: true,
-        idempotentHint: true,
-      },
+      outputSchema: PUBLIC_MEMORY_SHOW_OUTPUT_SCHEMA,
+      annotations: PUBLIC_MEMORY_TOOL_ANNOTATIONS,
     },
     async ({ memory_id }) => toToolResult(await showMemory(env, memory_id)),
   );
@@ -140,10 +178,8 @@ function createServer(env: SharedRuntimeEnv): McpServer {
         query: z.string().min(1),
         top_k: z.number().int().min(1).max(MAX_REMOTE_MCP_SEARCH_TOP_K).optional(),
       },
-      annotations: {
-        readOnlyHint: true,
-        idempotentHint: true,
-      },
+      outputSchema: PUBLIC_MEMORY_SEARCH_OUTPUT_SCHEMA,
+      annotations: PUBLIC_MEMORY_TOOL_ANNOTATIONS,
     },
     async ({ memory_id, query, top_k }) => toToolResult(await searchOneMemory(env, memory_id, query, top_k)),
   );
