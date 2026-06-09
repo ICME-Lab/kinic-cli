@@ -20,6 +20,9 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@dfinity/agent": "^2.4.1",
+    "@dfinity/auth-client": "^2.4.1",
+    "@dfinity/identity": "^2.4.1",
     "@kinic/kinic-share": "workspace:*",
     "@tailwindcss/postcss": "^4.2.2",
     "class-variance-authority": "^0.7.1",

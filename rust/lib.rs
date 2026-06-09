@@ -6,6 +6,9 @@ pub(crate) mod clients;
 mod commands;
 pub(crate) mod create_domain;
 mod embedding;
+pub(crate) mod icp_cli_identity;
+#[cfg(test)]
+mod icp_cli_identity_tests;
 pub(crate) mod identity_store;
 pub(crate) mod insert_service;
 mod ledger;
@@ -196,6 +199,12 @@ pub(crate) fn build_cli_command_context(
         ))
     } else {
         let identity = resolve_required_identity(global)?;
+        if let Some(identity) = icp_cli_identity::load_icp_cli_internet_identity(&identity)? {
+            return Ok((
+                AgentFactory::new_with_arc_identity(global.ic, identity),
+                None,
+            ));
+        }
         Ok((build_keyring_agent_factory(global.ic, &identity), None))
     }
 }

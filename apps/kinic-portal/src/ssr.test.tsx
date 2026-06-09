@@ -53,7 +53,7 @@ describe("renderPortalDocument", () => {
         stable_memory_size: 10,
         cycle_amount: "20",
       },
-    }, "Cached summary text");
+    }, "Cached summary text", "test-nonce");
 
     expect(document.status).toBe(200);
     expect(document.html).toContain("<title>Skill Store · ywega-gaaaa-aaaak-apg6q-cai | Kinic</title>");
@@ -61,6 +61,8 @@ describe("renderPortalDocument", () => {
     expect(document.html).toContain('meta property="og:image" content="https://api.example.com/api/public/og/memories/ywega-gaaaa-aaaak-apg6q-cai?v=0.2.5"');
     expect(document.html).toContain('link rel="canonical" href="https://portal.example.com/m/ywega-gaaaa-aaaak-apg6q-cai"');
     expect(document.html).toContain("window.__KINIC_PORTAL_CONFIG__");
+    expect(document.html).toContain('<script nonce="test-nonce">window.__KINIC_PORTAL_CONFIG__=');
+    expect(document.html).not.toContain("<script>window.__KINIC_PORTAL_CONFIG__=");
     expect(document.html).toContain("Loading");
   });
 
